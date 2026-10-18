@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+enable_testing()
+
 option(CURVY_GUI_AUTOMATION "Build curvy with newui's automation server" ON)
 
 # newui is a full application framework; only the libraries curvy links are built from it.
@@ -103,3 +105,18 @@ newui_add_reflectgen_output(curvy
     REGISTER_FUNCTION registerCurvyReflection)
 
 newui_add_resources(curvy "${CMAKE_CURRENT_SOURCE_DIR}/Resources")
+# Headless tests of the model layer (color, objects, document, file formats).
+set(CURVY_MODEL_SOURCES
+    sketchcolor sketchobject sketchdocument documentcutting documentpaths documenttransform documentguides
+    documentlayers documentswatches documentselect documentclip documentsymbols documentbrushes brush
+    pathflatten textwarp imagedata documenttextpath documentimages documentexpand pdfexport documentartboards
+    documenttrace imagetrace sketchsvg sketchexport shapetools pathops textoutline gzip numberscrubber
+    sketchbin cursorset newdocumentmodel)
+list(TRANSFORM CURVY_MODEL_SOURCES PREPEND src/)
+list(TRANSFORM CURVY_MODEL_SOURCES APPEND .cpp)
+
+add_executable(curvyTests tests/test_sketch_model.cpp ${CURVY_MODEL_SOURCES})
+target_include_directories(curvyTests PRIVATE include)
+target_link_libraries(curvyTests PRIVATE newui zlib_static windowscodecs ole32 GTest::gtest_main)
+include(GoogleTest)
+gtest_discover_tests(curvyTests)
