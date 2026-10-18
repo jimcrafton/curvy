@@ -1,0 +1,87 @@
+{
+  "select": {
+    "x": 7,
+    "y": 3,
+    "size": 32
+  },
+  "direct-select": {
+    "x": 7,
+    "y": 3,
+    "size": 32
+  },
+  "crosshair": {
+    "x": 16,
+    "y": 16,
+    "size": 32
+  },
+  "pen": {
+    "x": 6,
+    "y": 27,
+    "size": 32
+  },
+  "pencil": {
+    "x": 5,
+    "y": 27,
+    "size": 32
+  },
+  "text": {
+    "x": 16,
+    "y": 16,
+    "size": 32
+  },
+  "hand": {
+    "x": 16,
+    "y": 16,
+    "size": 32
+  },
+  "hand-grab": {
+    "x": 16,
+    "y": 16,
+    "size": 32
+  },
+  "zoom-in": {
+    "x": 13,
+    "y": 13,
+    "size": 32
+  },
+  "zoom-out": {
+    "x": 13,
+    "y": 13,
+    "size": 32
+  },
+  "move": {
+    "x": 16,
+    "y": 16,
+    "size": 32
+  },
+  "resize-ns": {
+    "x": 16,
+    "y": 16,
+    "size": 32
+  },
+  "resize-we": {
+    "x": 16,
+    "y": 16,
+    "size": 32
+  },
+  "resize-nwse": {
+    "x": 16,
+    "y": 16,
+    "size": 32
+  },
+  "resize-nesw": {
+    "x": 16,
+    "y": 16,
+    "size": 32
+  },
+  "gradient": {
+    "x": 6,
+    "y": 26,
+    "size": 32
+  },
+  "rotate": {
+    "x": 16,
+    "y": 16,
+    "size": 32
+  }
+}
