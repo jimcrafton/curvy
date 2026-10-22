@@ -188,7 +188,15 @@
                   { type: "MenuItem", text: "Exclude" }
                 ]
               },
-              { type: "MenuItem", text: "Expand Appearance" }
+              { type: "MenuItem", text: "Expand Appearance" },
+              { type: "MenuItem", text: "", separator: true },
+              {
+                type: "MenuItem",
+                text: "Live Shape",
+                children: [
+                  { type: "MenuItem", text: "New Circle" }
+                ]
+              }
             ]
           },
           {

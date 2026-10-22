@@ -6,6 +6,7 @@
 #include <blend2d/blend2d.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <tuple>
@@ -375,6 +376,10 @@ namespace curvy {
         // Assigned by SketchDocument::add(); 0 means "not in a document".
         void setId(std::size_t id) { id_ = id; }
 
+        // The graph node whose cooked polyline is this object's outline (0 when it is an ordinary object).
+        std::uint32_t graphNode() const { return graphNode_; }
+        void setGraphNode(std::uint32_t node) { graphNode_ = node; }
+
         const std::string& name() const { return name_; }
         void setName(const std::string& name) { name_ = name; }
 
@@ -542,6 +547,7 @@ namespace curvy {
         SketchObjectType type_;
         BLPath path_;
         std::size_t id_ = 0;
+        std::uint32_t graphNode_ = 0;
         std::string name_;
         bool visible_ = true;
         bool locked_ = false;

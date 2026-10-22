@@ -49,6 +49,16 @@ namespace curvy {
         style().markDirty();
     }
 
+    void CanvasView::setShowPages(bool value) {
+        showPages_ = value;
+        style().markDirty();
+    }
+
+    void CanvasView::setPasteboardColor(std::uint32_t argb) {
+        pasteboardColor_ = argb;
+        style().markDirty();
+    }
+
     void CanvasView::setPan(float x, float y) {
         centered_ = false;
         panX_ = x;
@@ -138,6 +148,9 @@ namespace curvy {
     SyncReturn CanvasView::handleMouseDown(View& /*sender*/, const Point& pt, std::uint32_t buttons, std::uint32_t keys) {
         if (RootView* root = rootView()) {
             root->setFocusedSubView(this);
+        }
+        if (onPressFilter && onPressFilter(pt, buttons, keys)) {
+            return SyncReturn::Handled;
         }
         bool wantsPan = (buttons & (mbmMiddleButton | mbmRightButton)) != 0 ||
             ((buttons & mbmLeftButton) != 0 && tool_ == SketchTool::Hand);
@@ -994,6 +1007,9 @@ namespace curvy {
     SyncReturn CanvasView::handleKeyDown(View& /*sender*/, std::uint32_t keyMask, int /*keyChar*/, int /*repeatCount*/, std::uint32_t vkCode) {
         if (document_ == nullptr) {
             return SyncReturn::Ignored;
+        }
+        if (!textEditing_ && onKeyFilter && onKeyFilter(keyMask, vkCode)) {
+            return SyncReturn::Handled;
         }
         if (textEditing_ && textKeyDown(keyMask, vkCode)) {
             return SyncReturn::Handled;   // typing text: no shortcut or Delete reaches the objects
@@ -1954,7 +1970,7 @@ namespace curvy {
             client.width() - rulerSize, client.height() - rulerSize));
 
         // Pasteboard.
-        ctx.set_fill_style(BLRgba32(0xFF7A7A7Au));
+        ctx.set_fill_style(BLRgba32(pasteboardColor_));
         ctx.fill_rect(BLRect(client.left(), client.top(), client.width(), client.height()));
 
         // Until the user pans or wheel-zooms, the artboards stay centered in the drawing area
@@ -1975,7 +1991,8 @@ namespace curvy {
         Font labelFont = FontManager::getSystemFont(SystemUIFont::Status);
         labelFont.setSize(10.0f);
         const std::vector<Artboard> single{Artboard{"", 0.0, 0.0, double(pageWidth_), double(pageHeight_)}};
-        const std::vector<Artboard>& boards = document_ != nullptr ? document_->artboards() : single;
+        const std::vector<Artboard> none;
+        const std::vector<Artboard>& boards = !showPages_ ? none : document_ != nullptr ? document_->artboards() : single;
         for (std::size_t index = 0; index < boards.size(); ++index) {
             const Artboard& board = boards[index];
             double left = pageLeft + board.x * double(zoom_), top = pageTop + board.y * double(zoom_);
@@ -2049,6 +2066,9 @@ namespace curvy {
 
         if (showRulers_) {
             paintRulers(ctx, client);
+        }
+        if (onPaintTop) {
+            onPaintTop(ctx);
         }
     }
 

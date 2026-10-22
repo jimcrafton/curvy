@@ -35,4 +35,16 @@ nothing of sketch types (paths, layers, artboards), so it can be unit tested alo
 - **Phase 2 slice.** A graph-driven "live shape": a `SketchObject` holds a node id; its outline is the cooked polyline of that node
   (circle / star with parameters), drawn on the canvas, undoable. Geometry from jitnodes is polyline-only, so a `bezierPath` node
   with in/out handle attributes is a later addition.
+- **Status (2026-10-18).** Implemented: `GraphDocument` (`graphdocument.h/.cpp`), `SketchDocument` derives from it and the undo stack lives there;
+  live shapes in `documentlive.cpp` (`addLiveShape`, `setLiveShapeParam`; `SketchObject::graphNode()`). The graph is saved as
+  `<metadata><jitnodes:graph data="..."/></metadata>` (the reader skips `metadata`, and the XML parser keeps only attributes, so the text is an
+  attribute), and each live object carries `data-graph-node`. Each document's `Network` has one thread (`Network(1)`), since scratch documents are
+  created freely. A live shape's outline is rebuilt from the node on every graph change, so moving or transforming one directly is overwritten;
+  placement belongs in a transform node (next slice). Duplicating a live shape yields a plain polygon.
+- **Direction change (2026-10-18, not yet implemented).** The graph is the document: every path becomes a node (a `bezierPath`-style node holding
+  its points), and the object list, layers, groups and artboards become views over the graph (layers and groups as subnets). `SketchObject` then
+  becomes a cached view of a node rather than the primary store, and the slice above (live shapes beside plain paths) is the stepping stone. The UI
+  consequences are in `docs/ui-design.md` ("The graph is the document", "Document structure views"). **Decided: path nodes need a `bezierPath` node type, or an
+  extension of the geometry model, and one of them will be added** (jitnodes geometry is polyline-only today). Still needs a plan for the migration
+  and for selection and hit testing by node.
 - **Risks.** Node ids must stay stable across undo (restoreSnapshot preserves them); the Network must not be edited while cooking.

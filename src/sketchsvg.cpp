@@ -1555,6 +1555,9 @@ namespace curvy {
             } else if (const std::string* id = node.attr("id")) {
                 object->setName(*id);
             }
+            if (const std::string* graphNode = node.attr("data-graph-node")) {
+                object->setGraphNode(std::uint32_t(std::strtoul(graphNode->c_str(), nullptr, 10)));
+            }
             if (const std::string* angle = node.attr("data-frame-angle")) {
                 object->setFrameAngle(number(angle, 0.0));
             }
@@ -1993,6 +1996,9 @@ namespace curvy {
             } else if (const std::string* id = node.attr("id")) {
                 object->setName(*id);
             }
+            if (const std::string* graphNode = node.attr("data-graph-node")) {
+                object->setGraphNode(std::uint32_t(std::strtoul(graphNode->c_str(), nullptr, 10)));
+            }
             if (const std::string* angle = node.attr("data-frame-angle")) {
                 object->setFrameAngle(number(angle, 0.0));
             }
@@ -2091,6 +2097,9 @@ namespace curvy {
                     if (!object.name().empty()) {
                         body << " data-name=\"" << escape(object.name()) << "\"";
                     }
+                    if (object.graphNode() != 0) {
+                        body << " data-graph-node=\"" << object.graphNode() << "\"";
+                    }
                     if (object.frameAngle() != 0.0) {
                         body << " data-frame-angle=\"" << num(object.frameAngle()) << "\"";
                     }
@@ -2156,6 +2165,9 @@ namespace curvy {
             body << "<path id=\"" << idText << "\" d=\"" << pathData(object.geometry()) << "\" data-type=\"" << typeName(object.type()) << "\"" << textAttrs(object);
             if (!object.name().empty()) {
                 body << " data-name=\"" << escape(object.name()) << "\"";
+            }
+            if (object.graphNode() != 0) {
+                body << " data-graph-node=\"" << object.graphNode() << "\"";
             }
             if (object.frameAngle() != 0.0) {
                 body << " data-frame-angle=\"" << num(object.frameAngle()) << "\"";
@@ -2291,6 +2303,9 @@ namespace curvy {
         if (!defsText.empty()) {
             out << "<defs>\n" << defsText << "</defs>\n";
         }
+        if (!document.network().nodeIds().empty()) {
+            out << "<metadata><jitnodes:graph xmlns:jitnodes=\"urn:curvy:jitnodes\" data=\"" << escape(document.graphToText()) << "\"/></metadata>\n";
+        }
         if (document.pageBackground()) {
             // A real rectangle per artboard so other viewers show the page color; the reader recognizes them by their ids and skips them.
             for (std::size_t i = 0; i < document.artboards().size(); ++i) {
@@ -2349,6 +2364,17 @@ namespace curvy {
 
         document.clearObjects();
         document.setGraphicStyles(defaultGraphicStyles());   // replaced by the file's own group, when it has one
+        for (const auto& child : root->children) {
+            if (child->name != "metadata") {
+                continue;
+            }
+            for (const auto& entry : child->children) {
+                const std::string* text = entry->name == "graph" ? entry->attr("data") : nullptr;
+                if (text != nullptr) {
+                    document.graphFromText(*text);
+                }
+            }
+        }
         document.setPageSize(float(width), float(height));
         if (!boards.empty()) {
             std::size_t active = 0;

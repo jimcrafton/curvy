@@ -4,6 +4,7 @@
 //   curvy.exe --check           loads the layout, lays it out, prints the view tree (--depth=N, default 4) and exits
 //   curvy.exe --check-newdoc    runs the New Document dialog's self-checks
 //   curvy.exe --automation <pipe>   serves the window to a GUI test driver (only in a build with CURVY_GUI_AUTOMATION)
+//   curvy.exe --check-workspace drives the workspace headlessly (rings, hold keys, scrubbing); the exit code is the number of failures
 //   curvy.exe --check-tools     drives the window headlessly and prints ok / FAIL per expectation; the exit code is the
 //                                number of failures
 //
@@ -28,6 +29,8 @@
 #include "curvy/sketchchecks.h"
 #include "curvy/sketchdocument.h"
 #include "curvy/sketchwindow.h"
+#include "curvy/workspacecontroller.h"
+#include "curvy/workspacechecks.h"
 
 #include <cstdio>
 #include <string>
@@ -45,6 +48,7 @@ namespace {
         bool check = false;
         bool checkNewDocument = false;
         bool checkTools = false;
+        bool checkWorkspace = false;
         std::string automationPipe;
         int checkDepth = 4;
     };
@@ -59,6 +63,8 @@ namespace {
                 options.automationPipe = argv[++i];
             } else if (arg == "--check-tools") {
                 options.checkTools = true;
+            } else if (arg == "--check-workspace") {
+                options.checkWorkspace = true;
             } else if (arg == "--check-newdoc") {
                 options.checkNewDocument = true;
             } else if (arg.rfind("--depth=", 0) == 0) {
@@ -107,15 +113,18 @@ int main(int argc, char** argv) {
     registerCurvyReflection();
     const Options options = parseOptions(argc, argv);
 
+    curvy::WorkspaceController::applyTheme(true);
     newui::Frame frame;
     newui::Application& app = newui::Application::instance();
     app.setName("curvy");
     app.setFrame(&frame);
 
     // Bundle::loadFrame() resolves "Resources/<frame name>.newui" next to the exe; CMake copies demos/curvy/Resources there after each build.
-    frame.setName("curvy");
+    // The checks drive the full menu-and-panel layout; the program itself starts the workspace.
+    const bool workspace = !options.check && !options.checkTools && !options.checkNewDocument;
+    frame.setName(workspace ? "workspace" : "curvy");
     if (!newui::Bundle::instance().loadFrame(frame)) {
-        std::printf("curvy: could not load Resources/curvy.newui\n");
+        std::printf("curvy: could not load Resources/%s.newui\n", workspace ? "workspace" : "curvy");
         return 1;
     }
     if (options.checkNewDocument) {
@@ -127,9 +136,13 @@ int main(int argc, char** argv) {
 
     // The model, then the controller that wires it to the views (it lives as long as the window does).
     curvy::SketchDocument document;
-    curvy::SketchWindowController window(frame, document);
     if (options.checkTools) {
-        return curvy::runToolChecks(window);
+        curvy::SketchWindowController checkedWindow(frame, document);
+        return curvy::runToolChecks(checkedWindow);
+    }
+    curvy::WorkspaceController window(frame, document);
+    if (options.checkWorkspace) {
+        return curvy::runWorkspaceChecks(window);
     }
     window.start(options.startupPath);
 #ifdef CURVY_GUI_AUTOMATION

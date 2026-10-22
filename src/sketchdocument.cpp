@@ -114,6 +114,7 @@ namespace curvy {
 
     void SketchDocument::clearObjects() {
         objects_.clear();
+        clearGraph();
         nextId_ = 1;
         selection_.clear();
         guides_.clear();

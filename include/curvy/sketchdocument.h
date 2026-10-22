@@ -1,6 +1,7 @@
 #pragma once
 
 #include "curvy/brush.h"
+#include "curvy/graphdocument.h"
 #include "curvy/pathops.h"
 #include "curvy/sketchobject.h"
 
@@ -170,7 +171,7 @@ namespace curvy {
     // groups arrive with S3b; undoable commands with S2 - until then the mutators below are called
     // directly and each ends with changed(), which marks the document modified and repaints its views.
     // File I/O is SVG (sketchsvg.h): load()/save() go through readFromFile/writeToFile.
-    class SketchDocument : public newui::Document {
+    class SketchDocument : public GraphDocument {
     public:
         SketchDocument() = default;
 
@@ -410,7 +411,6 @@ namespace curvy {
         SelectionChangedDelegate onSelectionChanged;
 
         // ---- Undoable edits (each pushes one step on undoStack()) ----
-        newui::UndoStack& undoStack() { return undoStack_; }
         // Adds on top and selects it.
         // Adds the objects (new ids) as one undo step and selects them; returns the ids.
         // Their groups come along as new groups carrying the same opacity / blend / clip, taken from `groupsFrom` (the document the objects
@@ -434,6 +434,12 @@ namespace curvy {
         void transformObjects(const std::vector<std::size_t>& ids, const BLMatrix2D& matrix, const std::string& description);
         // Selected objects' ids and current outlines - the `before` for a drag.
         std::vector<GeometryState> snapshotSelection() const;
+        // ---- Live shapes: objects whose outline is the cooked polyline of a graph node ----
+        // Adds a graph node of `nodeType` (a closed polyline generator such as "circle"), cooks it and adds an object that follows it,
+        // as one undo step. Returns the object, or null when the node cooks to nothing.
+        SketchObject* addLiveShape(const std::string& nodeType, const std::map<std::string, float>& params, const std::string& description);
+        // Edits one parameter of a live shape's node (one undo step); the outline follows.
+        bool setLiveShapeParam(std::size_t objectId, const std::string& name, float value);
         // Redraw after an edit made directly on an object (drag preview).
         void touch() { changed(); }
         // While a Batch exists the document does not announce changes (views, panels, layer sorting); when the last one ends it does so
@@ -755,8 +761,13 @@ namespace curvy {
         bool readFromFile(const std::string& path) override;
         bool writeToFile(const std::string& path) override;
 
+    protected:
+        void graphChanged() override;
+
     private:
         void changed();
+        // Rebuilds the outline of every live shape from its cooked node.
+        void refreshLiveShapes();
         // Puts the objects in the stacking order given by ids (all of them, back to front).
         void reorder(const std::vector<std::size_t>& ids);
         // Records a visible/locked change of some objects (already applied) as one undo step.
@@ -839,7 +850,6 @@ namespace curvy {
         std::optional<QuadFrame> quadFrame_;
         double originU_ = 0.5;
         double originV_ = 0.5;
-        newui::UndoStack undoStack_;
     };
 
 }

@@ -104,6 +104,22 @@ namespace curvy {
         if (!NewDocumentDialog::run(frame_, settings)) {
             return false;
         }
+        startDocument(settings);
+        return true;
+    }
+
+    bool SketchDocumentController::newDocument(const std::string& name, double widthPoints, double heightPoints) {
+        if (!confirmDiscardChanges(document_)) {
+            return false;
+        }
+        NewDocumentModel settings;
+        settings.loadSetup(widthPoints, heightPoints, 72.0, ColorSpace::RGB, PageBackground::White);
+        settings.setName(name);
+        startDocument(settings);
+        return true;
+    }
+
+    void SketchDocumentController::startDocument(const NewDocumentModel& settings) {
         document_.clearObjects();
         document_.setPageSize(float(settings.widthPoints()), float(settings.heightPoints()));
         document_.setPpi(float(settings.ppi()));
@@ -124,7 +140,6 @@ namespace curvy {
         onStatus(*this, "New document " + untitledName_);
         onDocumentReplaced(*this);
         onStateChanged(*this);
-        return true;
     }
 
     bool SketchDocumentController::open(const std::string& path) {

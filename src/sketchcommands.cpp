@@ -94,6 +94,10 @@ namespace curvy {
 
     void SketchCommandController::addObjectCommands() {
         add("object.group", [this]() { document_.groupSelection(); });
+        add("liveShape.circle", [this]() {
+            const Artboard& board = document_.activeArtboardRect();
+            document_.addLiveShape("circle", {{"count", 48.0f}, {"radius", 50.0f}, {"cx", float(board.x + board.width * 0.5)}, {"cy", float(board.y + board.height * 0.5)}}, "New Live Circle");
+        });
         add("object.ungroup", [this]() { document_.ungroupSelection(); });
         add("symbol.new", [this]() { document_.makeSymbol(""); });
         add("symbol.place", [this]() { document_.placeActiveSymbol(); });

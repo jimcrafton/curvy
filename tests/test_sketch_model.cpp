@@ -12,6 +12,10 @@
 #include "curvy/gzip.h"
 #include "curvy/sketchexport.h"
 #include "curvy/numberscrubber.h"
+#include "curvy/radialmenu.h"
+#include "curvy/holdscrub.h"
+#include "curvy/workspacemodel.h"
+#include "curvy/theme.h"
 
 #include <newui/keyboard_constants.h>
 #include <newui/mouse_constants.h>
@@ -6122,4 +6126,197 @@ TEST(SketchStrokeDecor, AlignAndArrowsSurviveSavingAndOpening) {
         EXPECT_DOUBLE_EQ(loaded->object(1).strokeOptions().arrowScale, 150.0);
     }
     EXPECT_EQ(pdfFromDocument(doc).compare(0, 8, "%PDF-1.4"), 0);
+}
+
+TEST(GraphDocument, EditsAreUndoableSteps) {
+    GraphDocument doc;
+    const jitnodes::NodeId circle = doc.addGraphNode("circle");
+    doc.setGraphParam(circle, "radius", 5.0f);
+    EXPECT_EQ(doc.network().node(circle).getFloat("radius"), 5.0f);
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.network().node(circle).getFloat("radius"), 1.0f);
+    doc.undoStack().undo();
+    EXPECT_TRUE(doc.network().nodeIds().empty());
+    doc.undoStack().redo();
+    doc.undoStack().redo();
+    EXPECT_EQ(doc.network().node(circle).getFloat("radius"), 5.0f);
+}
+
+TEST(GraphDocument, FailedLoadKeepsTheGraph) {
+    GraphDocument doc;
+    doc.addGraphNode("circle");
+    const std::string text = doc.graphToText();
+    EXPECT_FALSE(doc.graphFromText("not a graph"));
+    EXPECT_EQ(doc.graphToText(), text);
+    GraphDocument other;
+    EXPECT_TRUE(other.graphFromText(text));
+    EXPECT_EQ(other.graphToText(), text);
+}
+
+TEST(LiveShape, OutlineFollowsTheNodeAndUndo) {
+    SketchDocument doc;
+    SketchObject* shape = doc.addLiveShape("circle", {{"count", 16.0f}, {"radius", 10.0f}}, "Circle");
+    ASSERT_NE(shape, nullptr);
+    const std::size_t id = shape->id();
+    EXPECT_NEAR(shape->geometryBounds().x1 - shape->geometryBounds().x0, 20.0, 0.01);
+    EXPECT_TRUE(doc.setLiveShapeParam(id, "radius", 30.0f));
+    EXPECT_NEAR(doc.findById(id)->geometryBounds().x1 - doc.findById(id)->geometryBounds().x0, 60.0, 0.01);
+    doc.undoStack().undo();
+    EXPECT_NEAR(doc.findById(id)->geometryBounds().x1 - doc.findById(id)->geometryBounds().x0, 20.0, 0.01);
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.findById(id), nullptr);
+    EXPECT_TRUE(doc.network().nodeIds().empty());
+    doc.undoStack().redo();
+    ASSERT_NE(doc.findById(id), nullptr);
+    EXPECT_EQ(doc.network().nodeIds().size(), 1u);
+}
+
+TEST(LiveShape, SurvivesSvgRoundTrip) {
+    SketchDocument doc;
+    const std::size_t id = doc.addLiveShape("circle", {{"count", 16.0f}, {"radius", 10.0f}}, "Circle")->id();
+    SketchDocument loaded;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), loaded));
+    ASSERT_EQ(loaded.objectCount(), 1u);
+    const SketchObject& object = loaded.object(0);
+    EXPECT_NE(object.graphNode(), 0u);
+    EXPECT_TRUE(loaded.setLiveShapeParam(object.id(), "radius", 30.0f));
+    EXPECT_NEAR(loaded.findById(object.id())->geometryBounds().x1 - loaded.findById(object.id())->geometryBounds().x0, 60.0, 0.01);
+    (void)id;
+}
+
+TEST(RadialLayout, SlotsRunClockwiseFromTheTop) {
+    const newui::Point top = RadialLayout::slotCenter(0, 8);
+    EXPECT_NEAR(top.x, 0.0, 0.01);
+    EXPECT_LT(top.y, 0.0f);
+    const newui::Point right = RadialLayout::slotCenter(2, 8);
+    EXPECT_GT(right.x, 0.0f);
+    EXPECT_NEAR(right.y, 0.0, 0.01);
+}
+
+TEST(RadialLayout, PointerFindsSlotHubOrOutside) {
+    EXPECT_EQ(RadialLayout::slotAt(0, 0, 8), RadialLayout::hub);
+    EXPECT_EQ(RadialLayout::slotAt(0, -100, 8), 0);
+    EXPECT_EQ(RadialLayout::slotAt(100, 0, 8), 2);
+    EXPECT_EQ(RadialLayout::slotAt(0, 100, 8), 4);
+    EXPECT_EQ(RadialLayout::slotAt(-100, 0, 8), 6);
+    EXPECT_EQ(RadialLayout::slotAt(1, -100, 8), 0);
+    EXPECT_EQ(RadialLayout::slotAt(-1, -100, 8), 0);
+    EXPECT_EQ(RadialLayout::slotAt(0, -500, 8), RadialLayout::outside);
+    EXPECT_EQ(RadialLayout::slotAt(0, 100, 4), 2);
+    EXPECT_EQ(RadialLayout::slotAt(0, 100, 6), 3);
+}
+
+
+// ---- Hold-key scrubbing and the workspace model ----
+
+namespace {
+    curvy::SketchObject& scrubRect(curvy::SketchDocument& doc) {
+        curvy::SketchObject* rect = curvy::SketchObject::makeRect(0, 0, 100, 100);
+        rect->setFill(curvy::SketchPaint::solid(curvy::SketchColor::hsb(0.5f, 0.8f, 0.6f)));
+        rect->setStroke(curvy::SketchPaint::solid(curvy::SketchColor::rgb(0, 0, 0)));
+        rect->setStrokeWidth(2.0);
+        return doc.addUndoable(rect, "Draw");
+    }
+}
+
+TEST(HoldScrub, PartAtTellsOutlineFromFill) {
+    curvy::SketchDocument doc;
+    const curvy::SketchObject& rect = scrubRect(doc);
+    EXPECT_EQ(curvy::HoldScrub::partAt(rect, BLPoint(0, 50), 4.0), curvy::ScrubPart::Stroke);
+    EXPECT_EQ(curvy::HoldScrub::partAt(rect, BLPoint(50, 50), 4.0), curvy::ScrubPart::Fill);
+    EXPECT_EQ(curvy::HoldScrub::partAt(rect, BLPoint(200, 50), 4.0), curvy::ScrubPart::None);
+}
+
+TEST(HoldScrub, WidthFollowsTravelAndIsOneUndoStep) {
+    curvy::SketchDocument doc;
+    const std::size_t id = scrubRect(doc).id();
+    curvy::HoldScrub scrub;
+    ASSERT_TRUE(scrub.begin(doc, id, curvy::ScrubPart::Stroke, 'W', 0.0));
+    scrub.update(doc, 25.0, false);
+    scrub.update(doc, 50.0, false);
+    EXPECT_NEAR(doc.findById(id)->strokeWidth(), 2.0 + 50.0 * 0.08, 1e-9);
+    EXPECT_EQ(doc.undoStack().undoDescription(), "Draw");
+    scrub.finish(doc, true);
+    EXPECT_EQ(doc.undoStack().undoDescription(), "Scrub Width");
+    doc.undoStack().undo();
+    EXPECT_NEAR(doc.findById(id)->strokeWidth(), 2.0, 1e-9);
+}
+
+TEST(HoldScrub, CancelPutsTheValueBackWithoutAStep) {
+    curvy::SketchDocument doc;
+    const std::size_t id = scrubRect(doc).id();
+    curvy::HoldScrub scrub;
+    ASSERT_TRUE(scrub.begin(doc, id, curvy::ScrubPart::Fill, 'O', 0.0));
+    scrub.update(doc, -100.0, false);
+    EXPECT_LT(doc.findById(id)->activeItem(curvy::AppearanceKind::Fill).opacity, 1.0);
+    scrub.finish(doc, false);
+    EXPECT_NEAR(doc.findById(id)->activeItem(curvy::AppearanceKind::Fill).opacity, 1.0, 1e-9);
+    EXPECT_EQ(doc.undoStack().undoDescription(), "Draw");
+}
+
+TEST(HoldScrub, ShiftSnapsAndHueKeepsSaturationAndBrightness) {
+    curvy::SketchDocument doc;
+    const std::size_t id = scrubRect(doc).id();
+    curvy::HoldScrub scrub;
+    ASSERT_TRUE(scrub.begin(doc, id, curvy::ScrubPart::Fill, 'H', 0.0));
+    EXPECT_NEAR(scrub.startValue(), 180.0, 0.5);
+    scrub.update(doc, 47.0, true);
+    EXPECT_DOUBLE_EQ(scrub.value(), 240.0);
+    const curvy::SketchColor hsb = doc.findById(id)->fill().color().convertedTo(curvy::ColorSpace::HSB);
+    EXPECT_NEAR(hsb.component(0) * 360.0, 240.0, 0.5);
+    EXPECT_NEAR(hsb.component(1), 0.8, 0.01);
+    EXPECT_NEAR(hsb.component(2), 0.6, 0.01);
+    scrub.finish(doc, true);
+}
+
+TEST(HoldScrub, ColorKeysNeedASolidPaint) {
+    curvy::SketchDocument doc;
+    curvy::SketchObject& rect = scrubRect(doc);
+    rect.setFill(curvy::SketchPaint::none());
+    EXPECT_EQ(curvy::HoldScrub::propFor(rect, curvy::ScrubPart::Fill, 'H'), nullptr);
+    EXPECT_NE(curvy::HoldScrub::propFor(rect, curvy::ScrubPart::Fill, 'O'), nullptr);
+    EXPECT_EQ(curvy::HoldScrub::propFor(rect, curvy::ScrubPart::Stroke, 'B'), nullptr);
+}
+
+TEST(WorkspaceModel, HintBarFollowsTheState) {
+    curvy::WorkspaceModel model;
+    EXPECT_EQ(model.hintTool(), "Nothing open");
+    EXPECT_EQ(model.hintKeys(), "Tap Space to start");
+    int changes = 0;
+    model.onChanged += [&](newui::Model&) { ++changes; return newui::SyncReturn::Handled; };
+    model.setDocument(true, "Untitled - A4");
+    EXPECT_EQ(model.hintTool(), "Select");
+    EXPECT_NE(model.hintKeys().find("hold R E P S L"), std::string::npos);
+    model.setTool("Star", "S");
+    EXPECT_NE(model.hintKeys().find("release S to stop"), std::string::npos);
+    model.setTool("Select");
+    model.setHover({1, curvy::ScrubPart::Stroke});
+    EXPECT_NE(model.hintKeys().find("Outline: hold W Width"), std::string::npos);
+    const curvy::ScrubProp* width = &curvy::HoldScrub::props(curvy::ScrubPart::Stroke)[0];
+    model.setScrub(true, curvy::ScrubPart::Stroke, width, 4.0, 10, 10);
+    EXPECT_NE(model.hintKeys().find("Outline Width 4.0 pt"), std::string::npos);
+    EXPECT_GE(changes, 4);
+}
+
+TEST(WorkspaceModel, HintsFadeAfterThreeUses) {
+    curvy::WorkspaceModel model;
+    model.setDocument(true, "x");
+    for (int i = 0; i < 3; ++i) { model.used("holdDraw"); model.used("pan"); model.used("ring"); }
+    EXPECT_EQ(model.hintKeys().find("hold R E P S L"), std::string::npos);
+}
+
+TEST(Theme, TokensMeetTheContrastTargetsOfTheDarkModeNotes) {
+    for (const curvy::Theme* theme : {&curvy::Theme::dark(), &curvy::Theme::light()}) {
+        for (std::uint32_t background : {theme->bgApp, theme->bgSurface, theme->bgCanvas}) {
+            EXPECT_GE(curvy::Theme::contrast(theme->textPrimary, background), 4.5);
+            EXPECT_GE(curvy::Theme::contrast(theme->textMuted, background), 4.5);
+            EXPECT_GE(curvy::Theme::contrast(theme->iconNeutral, background), 3.0);
+        }
+        EXPECT_GE(curvy::Theme::contrast(theme->accent, theme->bgApp), 3.0);
+        EXPECT_GE(curvy::Theme::contrast(theme->onAccent, theme->accent), 4.5);
+        EXPECT_GE(curvy::Theme::contrast(theme->highlight, theme->bgSurface), 4.5);
+        EXPECT_GE(curvy::Theme::contrast(theme->textPrimary, theme->slot), 4.5);
+    }
+    EXPECT_NE(curvy::Theme::dark().bgApp, 0x000000u);
+    EXPECT_NE(curvy::Theme::dark().textPrimary, 0xFFFFFFu);
 }

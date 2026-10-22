@@ -87,6 +87,7 @@ namespace curvy {
             {"Object/Path", "Simplify", "path.simplify"},
             {"Object/Path", "Outline Stroke", "path.outlineStroke"},
             {"Object", "Expand Appearance", "object.expandAppearance"},
+            {"Object/Live Shape", "New Circle", "liveShape.circle"},
             {"Object/Pathfinder", "Unite", "pathfinder.unite"},
             {"Object/Pathfinder", "Minus Front", "pathfinder.minusFront"},
             {"Object/Pathfinder", "Intersect", "pathfinder.intersect"},

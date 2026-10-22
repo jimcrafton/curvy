@@ -43,6 +43,13 @@ namespace curvy {
         float zoom() const { return zoom_; }
         void setZoom(float zoom);
 
+        // The colour around the artboards (0xAARRGGBB).
+        std::uint32_t pasteboardColor() const { return pasteboardColor_; }
+        void setPasteboardColor(std::uint32_t argb);
+        // False paints only the pasteboard (the workspace with nothing open).
+        bool showPages() const { return showPages_; }
+        void setShowPages(bool value);
+
         bool showGrid() const { return showGrid_; }
         void setShowGrid(bool value);
 
@@ -152,6 +159,14 @@ namespace curvy {
         // Ctrl+<key> shortcuts the canvas does not own (File menu: N/O/S); return true when handled.
         // @reflect ignore=true
         std::function<bool(std::uint32_t vkCode, bool shift)> onControlKey;
+        // Asked before the canvas looks at a press / a key: true means the workspace (rings, Space-pan, hold-key scrubbing) used it.
+        // @reflect ignore=true
+        std::function<bool(const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys)> onPressFilter;
+        // @reflect ignore=true
+        std::function<bool(std::uint32_t keyMask, std::uint32_t vkCode)> onKeyFilter;
+        // Painted last, over the rulers, in the canvas's own coordinates (the workspace's scrub card and hover chip).
+        // @reflect ignore=true
+        std::function<void(BLContext& ctx)> onPaintTop;
 
         // The Text tool (texttool.cpp): a click starts text there - or edits the text object clicked - and typing fills it in
         // on the canvas; Enter starts a new line, the arrows / Home / End / Backspace / Delete edit, Ctrl+Up / Ctrl+Down change the
@@ -187,6 +202,8 @@ namespace curvy {
         newui::SyncReturn handleMouseDblClick(newui::View& sender, const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys);
         newui::SyncReturn handleMouseWheel(newui::View& sender, const newui::Point& pt, float delta);
 
+        std::uint32_t pasteboardColor_ = 0xFF7A7A7Au;
+        bool showPages_ = true;
         float pageWidth_ = 612.0f;
         float pageHeight_ = 792.0f;
         float zoom_ = 1.0f;

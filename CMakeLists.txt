@@ -54,7 +54,14 @@ add_executable(curvy
     src/numberscrubber.cpp
     src/sketchcolor.cpp
     src/sketchobject.cpp
+    src/graphdocument.cpp
+    src/radialmenu.cpp
+    src/holdscrub.cpp
+    src/workspacemodel.cpp
+    src/workspacecontroller.cpp
+    src/workspacechecks.cpp
     src/sketchdocument.cpp
+    src/documentlive.cpp
     src/documentcutting.cpp
     src/documentpaths.cpp
     src/documenttransform.cpp
@@ -101,7 +108,7 @@ set(NEWUI_REFLECTGEN_BASE_INCLUDE_DIRS
 # curvy.newui can name them as "type"; main() calls it after newui's own registerReflectionData().
 newui_add_reflectgen_output(curvy
     SCAN_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include/curvy
-    INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include
+    INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/jitnodes/include
     REGISTER_FUNCTION registerCurvyReflection)
 
 newui_add_resources(curvy "${CMAKE_CURRENT_SOURCE_DIR}/Resources")
@@ -111,12 +118,26 @@ set(CURVY_MODEL_SOURCES
     documentlayers documentswatches documentselect documentclip documentsymbols documentbrushes brush
     pathflatten textwarp imagedata documenttextpath documentimages documentexpand pdfexport documentartboards
     documenttrace imagetrace sketchsvg sketchexport shapetools pathops textoutline gzip numberscrubber
-    sketchbin cursorset newdocumentmodel)
+    sketchbin cursorset newdocumentmodel graphdocument documentlive radialmenu holdscrub workspacemodel)
 list(TRANSFORM CURVY_MODEL_SOURCES PREPEND src/)
 list(TRANSFORM CURVY_MODEL_SOURCES APPEND .cpp)
 
 add_executable(curvyTests tests/test_sketch_model.cpp ${CURVY_MODEL_SOURCES})
 target_include_directories(curvyTests PRIVATE include)
-target_link_libraries(curvyTests PRIVATE newui zlib_static windowscodecs ole32 GTest::gtest_main)
+target_link_libraries(curvyTests PRIVATE newui jitnodes::jitnodes zlib_static windowscodecs ole32 GTest::gtest_main)
 include(GoogleTest)
 gtest_discover_tests(curvyTests)
+
+# A throwaway app for trying the pen+keyboard interaction (labs/uilab) before it goes into the editor.
+add_executable(curvyUiLab labs/uilab/main.cpp labs/uilab/labcanvas.cpp src/radialmenu.cpp)
+target_include_directories(curvyUiLab PRIVATE include labs/uilab)
+target_link_libraries(curvyUiLab PRIVATE newui)
+newui_add_reflectgen_output(curvyUiLab
+    SCAN_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/labs/uilab
+    INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/labs/uilab
+    REGISTER_FUNCTION registerLabReflection)
+newui_add_resources(curvyUiLab "${CMAKE_CURRENT_SOURCE_DIR}/labs/uilab/Resources")
+if(CURVY_GUI_AUTOMATION)
+    target_link_libraries(curvyUiLab PRIVATE newui_automation)
+    target_compile_definitions(curvyUiLab PRIVATE CURVY_GUI_AUTOMATION)
+endif()

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "curvy/imagetrace.h"
+#include "curvy/newdocumentmodel.h"
 #include "curvy/sketchdocument.h"
 
 #include <newui/controllers.h>
@@ -28,6 +29,8 @@ namespace curvy {
         // New: asks to save changes, then shows the New Document dialog and starts a document with the chosen
         // page size, resolution, color mode and background.
         bool newDocument();
+        // The same without the dialog: a document of this page size (points), 72 ppi, RGB, white. The workspace's New ring uses it.
+        bool newDocument(const std::string& name, double widthPoints, double heightPoints);
         // An empty path asks with the Open dialog.
         bool open(const std::string& path = std::string());
         bool save();
@@ -90,6 +93,7 @@ namespace curvy {
         newui::Frame& frame_;
         std::string untitledName_ = "Untitled";
         std::function<void(const std::string&)> errorReporter_;
+        void startDocument(const NewDocumentModel& settings);
         void remember(const std::string& path);
         void forget(const std::string& path);
         void loadRecent();
