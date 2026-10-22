@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>curvy main screen mockup</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  #topbar { position: absolute; left: 0; right: 0; top: 0; height: 32px; display: flex; align-items: center; gap: 10px; padding: 0 12px;
+            background: #232428; border-bottom: 1px solid var(--line); z-index: 5; }
+  #topbar .logo { width: 20px; height: 20px; }
+  #topbar .name { font-weight: 600; letter-spacing: .02em; }
+  #topbar .doc { color: var(--dim); }
+  #topbar .grow { flex: 1; }
+  #stage { position: absolute; left: 0; right: 0; top: 32px; bottom: 0; }
+  .hub { position: absolute; left: 50%; top: 50%; width: 92px; height: 92px; margin: -46px; border-radius: 50%; background: var(--panel); border: 2px solid var(--accent2);
+         display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; box-shadow: 0 3px 10px rgba(0,0,0,.4); }
+  .hub b { font-size: 12px; line-height: 1.15; }
+  .hub small { color: var(--dim); font-size: 10px; line-height: 1.1; }
+  .hub .more { margin-top: 3px; font-size: 16px; line-height: 10px; letter-spacing: 1px; color: var(--accent2); font-weight: 700; }
+  #doc .slot, #start .slot { width: 116px; margin-left: -58px; }
+  :root {
+    --bg: #1e1f22; --canvas: #2b2d31; --panel: #313338; --panel2: #3a3d43; --line: #4a4d55;
+    --text: #e6e7ea; --dim: #9a9ea8; --accent: #4c8dff; --accent2: #ffb454;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px "Segoe UI", system-ui, sans-serif; }
+  .switcher { display: flex; gap: 8px; padding: 10px 16px; align-items: center; flex-wrap: wrap; }
+  .switcher button { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; font: inherit; }
+  .switcher button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .switcher span { color: var(--dim); margin-left: 8px; }
+
+  #window { position: relative; width: 1280px; height: 792px; margin: 0 16px 16px; background: var(--canvas); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  svg#scene { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  #hint { position: absolute; left: 0; right: 0; bottom: 0; height: 28px; display: flex; align-items: center; gap: 18px; padding: 0 14px;
+          background: rgba(30,31,34,.92); border-top: 1px solid var(--line); color: var(--dim); }
+  #hint b { color: var(--text); font-weight: 600; }
+  #hint .tool { color: var(--accent2); font-weight: 600; }
+  #hint .grow { flex: 1; }
+  kbd { background: var(--panel2); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; font: 11px Consolas, monospace; color: var(--text); }
+
+  #hud { display: none; position: absolute; left: 720px; top: 150px; width: 250px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+         box-shadow: 0 6px 20px rgba(0,0,0,.45); padding: 10px; }
+  #hud h4 { margin: 0 0 8px; font-size: 12px; display: flex; justify-content: space-between; color: var(--dim); font-weight: 600; }
+  #hud h4 b { color: var(--text); }
+  .row { display: flex; gap: 8px; margin-bottom: 6px; align-items: center; }
+  .row label { width: 52px; color: var(--dim); }
+  .field { flex: 1; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; text-align: right; }
+  .field.small { flex: 0 0 64px; }
+  .sep { height: 1px; background: var(--line); margin: 8px 0; }
+  .chip { width: 22px; height: 22px; border-radius: 4px; border: 1px solid var(--line); }
+  .live { color: var(--accent); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; margin-bottom: 6px; }
+
+  #radial { display: none; position: absolute; left: 610px; top: 250px; width: 300px; height: 300px; margin: -150px 0 0 -150px; }
+  #radial .slot { position: absolute; width: 100px; height: 40px; margin: -20px 0 0 -50px; border-radius: 20px; background: rgba(49,51,56,.96); border: 1px solid var(--line);
+                  display: flex; align-items: center; justify-content: center; gap: 6px; font-weight: 600; box-shadow: 0 3px 10px rgba(0,0,0,.4); }
+  #radial .slot.hot { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #radial .slot kbd { font-size: 10px; }
+  #radial .core { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px; border-radius: 50%; border: 2px dashed var(--accent2); }
+  #radial .ctx { position: absolute; left: 50%; top: 100%; transform: translateX(-50%); color: var(--accent2); font-size: 11px; margin-top: 30px; white-space: nowrap; }
+
+  #create { display: none; position: absolute; left: 1080px; top: 520px; width: 300px; height: 300px; margin: -150px 0 0 -150px; }
+  #create .slot { position: absolute; width: 100px; height: 40px; margin: -20px 0 0 -50px; border-radius: 20px; background: rgba(49,51,56,.96); border: 1px solid var(--line);
+                  display: flex; align-items: center; justify-content: center; gap: 6px; font-weight: 600; box-shadow: 0 3px 10px rgba(0,0,0,.4); }
+  #create .slot.hot { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #create .slot kbd { font-size: 10px; }
+  #create .core { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px; border-radius: 50%; border: 2px dashed var(--accent2); }
+  #create .ctx { position: absolute; left: 50%; top: 100%; transform: translateX(-50%); color: var(--accent2); font-size: 11px; margin-top: 30px; white-space: nowrap; }
+
+  #doc { display: none; position: absolute; left: 1100px; top: 330px; width: 300px; height: 300px; margin: -150px 0 0 -150px; }
+  #doc .slot { position: absolute; width: 100px; height: 40px; margin: -20px 0 0 -50px; border-radius: 20px; background: rgba(49,51,56,.96); border: 1px solid var(--line);
+                  display: flex; align-items: center; justify-content: center; gap: 6px; font-weight: 600; box-shadow: 0 3px 10px rgba(0,0,0,.4); }
+  #doc .slot.hot { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #doc .slot kbd { font-size: 10px; }
+  #doc .core { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px; border-radius: 50%; border: 2px dashed var(--accent2); }
+  #doc .ctx { position: absolute; left: 50%; top: 100%; transform: translateX(-50%); color: var(--accent2); font-size: 11px; margin-top: 30px; white-space: nowrap; }
+
+  #start { display: none; position: absolute; left: 640px; top: 330px; width: 300px; height: 300px; margin: -150px 0 0 -150px; }
+  #start .slot { position: absolute; width: 100px; height: 40px; margin: -20px 0 0 -50px; border-radius: 20px; background: rgba(49,51,56,.96); border: 1px solid var(--line);
+</style>
+</head>
+<body>
+<div class="switcher">
+  <button data-s="idle" class="on">1 · Idle (drawing)</button>
+  <button data-s="selected">2 · Live shape selected</button>
+  <button data-s="create">3 · Space on blank paper</button>
+  <button data-s="doc">3b · Space on grey workspace</button>
+  <button data-s="start">3c · Space, no document open</button>
+  <button data-s="radial">4 · Space / pen button over object</button>
+  <button data-s="keys">5 · Holding Ctrl</button>
+  <span>Only the canvas and the hint bar are permanent.</span>
+</div>
+
+<div id="window">
+  <div id="topbar">
+    <svg class="logo" viewBox="0 0 20 20"><path d="M3 15 C 5 4, 14 2, 17 8 S 9 17, 5 12" fill="none" stroke="#4c8dff" stroke-width="2.2" stroke-linecap="round"/><circle cx="3" cy="15" r="1.8" fill="#ffb454"/></svg>
+    <span class="name">curvy</span><span class="doc">Untitled-1</span><span class="grow"></span>
+  </div>
+  <div id="stage">
+  <svg id="scene" viewBox="0 0 1280 760" xmlns="http://www.w3.org/2000/svg">
+    <rect x="190" y="70" width="780" height="580" fill="#fff" rx="2"/>
+    <text x="190" y="62" fill="#9a9ea8" font-size="11" font-family="Segoe UI">Artboard 1</text>
+    <path d="M250 520 C 300 380, 420 330, 520 420 S 640 560, 700 470" fill="none" stroke="#2f6fed" stroke-width="5" stroke-linecap="round"/>
+    <rect x="260" y="150" width="170" height="110" fill="#ffd9a8" stroke="#c46a00" stroke-width="3" rx="10"/>
+    <polygon points="820,180 880,260 800,290 760,230" fill="#c9f0d4" stroke="#1d7a3c" stroke-width="3"/>
+    <circle cx="610" cy="250" r="90" fill="#d9e6ff" stroke="#2f6fed" stroke-width="3"/>
+    <g id="rulers">
+      <rect x="0" y="0" width="1280" height="18" fill="#26272b"/><rect x="0" y="0" width="18" height="732" fill="#26272b"/>
+      <rect x="0" y="0" width="18" height="18" fill="#1e1f22"/>
+      <line x1="180" y1="13" x2="180" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="190" y1="6" x2="190" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <text x="193" y="10" fill="#9a9ea8" font-size="9" font-family="Segoe UI">0</text>
+      <line x1="200" y1="13" x2="200" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="210" y1="13" x2="210" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="220" y1="13" x2="220" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="230" y1="13" x2="230" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="240" y1="13" x2="240" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="250" y1="13" x2="250" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="260" y1="13" x2="260" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="270" y1="13" x2="270" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="280" y1="13" x2="280" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="290" y1="6" x2="290" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <text x="293" y="10" fill="#9a9ea8" font-size="9" font-family="Segoe UI">100</text>
+      <line x1="300" y1="13" x2="300" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="310" y1="13" x2="310" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="320" y1="13" x2="320" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="330" y1="13" x2="330" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="340" y1="13" x2="340" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="350" y1="13" x2="350" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="360" y1="13" x2="360" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="370" y1="13" x2="370" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="380" y1="13" x2="380" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="390" y1="6" x2="390" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <text x="393" y="10" fill="#9a9ea8" font-size="9" font-family="Segoe UI">200</text>
+      <line x1="400" y1="13" x2="400" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="410" y1="13" x2="410" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="420" y1="13" x2="420" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="430" y1="13" x2="430" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="440" y1="13" x2="440" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="450" y1="13" x2="450" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="460" y1="13" x2="460" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="470" y1="13" x2="470" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="480" y1="13" x2="480" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="490" y1="6" x2="490" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <text x="493" y="10" fill="#9a9ea8" font-size="9" font-family="Segoe UI">300</text>
+      <line x1="500" y1="13" x2="500" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="510" y1="13" x2="510" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="520" y1="13" x2="520" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="530" y1="13" x2="530" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="540" y1="13" x2="540" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="550" y1="13" x2="550" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="560" y1="13" x2="560" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="570" y1="13" x2="570" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="580" y1="13" x2="580" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="590" y1="6" x2="590" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <text x="593" y="10" fill="#9a9ea8" font-size="9" font-family="Segoe UI">400</text>
+      <line x1="600" y1="13" x2="600" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="610" y1="13" x2="610" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="620" y1="13" x2="620" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="630" y1="13" x2="630" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="640" y1="13" x2="640" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="650" y1="13" x2="650" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="660" y1="13" x2="660" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="670" y1="13" x2="670" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="680" y1="13" x2="680" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="690" y1="6" x2="690" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <text x="693" y="10" fill="#9a9ea8" font-size="9" font-family="Segoe UI">500</text>
+      <line x1="700" y1="13" x2="700" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="710" y1="13" x2="710" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="720" y1="13" x2="720" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="730" y1="13" x2="730" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="740" y1="13" x2="740" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="750" y1="13" x2="750" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="760" y1="13" x2="760" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="770" y1="13" x2="770" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="780" y1="13" x2="780" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="790" y1="6" x2="790" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <text x="793" y="10" fill="#9a9ea8" font-size="9" font-family="Segoe UI">600</text>
+      <line x1="800" y1="13" x2="800" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="810" y1="13" x2="810" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="820" y1="13" x2="820" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="830" y1="13" x2="830" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="840" y1="13" x2="840" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="850" y1="13" x2="850" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="860" y1="13" x2="860" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="870" y1="13" x2="870" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="880" y1="13" x2="880" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="890" y1="6" x2="890" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <text x="893" y="10" fill="#9a9ea8" font-size="9" font-family="Segoe UI">700</text>
+      <line x1="900" y1="13" x2="900" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="910" y1="13" x2="910" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="920" y1="13" x2="920" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="930" y1="13" x2="930" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="940" y1="13" x2="940" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="950" y1="13" x2="950" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="960" y1="13" x2="960" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="970" y1="13" x2="970" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="980" y1="13" x2="980" y2="18" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="60" x2="18" y2="60" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="6" y1="70" x2="18" y2="70" stroke="#9a9ea8" stroke-width="1"/>
+      <text x="3" y="67" fill="#9a9ea8" font-size="9" font-family="Segoe UI">0</text>
+      <line x1="13" y1="80" x2="18" y2="80" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="90" x2="18" y2="90" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="100" x2="18" y2="100" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="110" x2="18" y2="110" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="120" x2="18" y2="120" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="130" x2="18" y2="130" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="140" x2="18" y2="140" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="150" x2="18" y2="150" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="160" x2="18" y2="160" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="6" y1="170" x2="18" y2="170" stroke="#9a9ea8" stroke-width="1"/>
+      <text x="3" y="167" fill="#9a9ea8" font-size="9" font-family="Segoe UI">100</text>
+      <line x1="13" y1="180" x2="18" y2="180" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="190" x2="18" y2="190" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="200" x2="18" y2="200" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="210" x2="18" y2="210" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="220" x2="18" y2="220" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="230" x2="18" y2="230" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="240" x2="18" y2="240" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="250" x2="18" y2="250" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="260" x2="18" y2="260" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="6" y1="270" x2="18" y2="270" stroke="#9a9ea8" stroke-width="1"/>
+      <text x="3" y="267" fill="#9a9ea8" font-size="9" font-family="Segoe UI">200</text>
+      <line x1="13" y1="280" x2="18" y2="280" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="290" x2="18" y2="290" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="300" x2="18" y2="300" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="310" x2="18" y2="310" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="320" x2="18" y2="320" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="330" x2="18" y2="330" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="340" x2="18" y2="340" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="350" x2="18" y2="350" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="360" x2="18" y2="360" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="6" y1="370" x2="18" y2="370" stroke="#9a9ea8" stroke-width="1"/>
+      <text x="3" y="367" fill="#9a9ea8" font-size="9" font-family="Segoe UI">300</text>
+      <line x1="13" y1="380" x2="18" y2="380" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="390" x2="18" y2="390" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="400" x2="18" y2="400" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="410" x2="18" y2="410" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="420" x2="18" y2="420" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="430" x2="18" y2="430" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="440" x2="18" y2="440" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="450" x2="18" y2="450" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="460" x2="18" y2="460" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="6" y1="470" x2="18" y2="470" stroke="#9a9ea8" stroke-width="1"/>
+      <text x="3" y="467" fill="#9a9ea8" font-size="9" font-family="Segoe UI">400</text>
+      <line x1="13" y1="480" x2="18" y2="480" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="490" x2="18" y2="490" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="500" x2="18" y2="500" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="510" x2="18" y2="510" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="520" x2="18" y2="520" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="530" x2="18" y2="530" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="540" x2="18" y2="540" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="550" x2="18" y2="550" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="560" x2="18" y2="560" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="6" y1="570" x2="18" y2="570" stroke="#9a9ea8" stroke-width="1"/>
+      <text x="3" y="567" fill="#9a9ea8" font-size="9" font-family="Segoe UI">500</text>
+      <line x1="13" y1="580" x2="18" y2="580" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="590" x2="18" y2="590" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="600" x2="18" y2="600" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="610" x2="18" y2="610" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="620" x2="18" y2="620" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="630" x2="18" y2="630" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="640" x2="18" y2="640" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="650" x2="18" y2="650" stroke="#9a9ea8" stroke-width="1"/>
+      <line x1="13" y1="660" x2="18" y2="660" stroke="#9a9ea8" stroke-width="1"/>
+      <path d="M610 18 l-4 -6 h8 z" fill="#ffb454" id="rulerX"/><path d="M18 250 l-6 -4 v8 z" fill="#ffb454" id="rulerY"/>
+      <line x1="610" y1="18" x2="610" y2="732" stroke="#4c8dff" stroke-width="1" stroke-dasharray="3 3" id="guideV" style="display:none"/>
+    </g>
+    <g id="selection" style="display:none">
+      <rect x="520" y="160" width="180" height="180" fill="none" stroke="#4c8dff" stroke-width="1.5" stroke-dasharray="4 3"/>
+      <g fill="#fff" stroke="#4c8dff" stroke-width="1.5">
+        <rect x="514" y="154" width="12" height="12"/><rect x="604" y="154" width="12" height="12"/><rect x="694" y="154" width="12" height="12"/>
+        <rect x="514" y="244" width="12" height="12"/><rect x="694" y="244" width="12" height="12"/>
+        <rect x="514" y="334" width="12" height="12"/><rect x="604" y="334" width="12" height="12"/><rect x="694" y="334" width="12" height="12"/>
+      </g>
+    </g>
+    <g id="pen4" style="display:none"><circle cx="640" cy="330" r="5" fill="#ffb454"/><circle cx="640" cy="330" r="11" fill="none" stroke="#ffb454" stroke-width="1.5"/></g>
+    <g id="pen3" style="display:none"><circle cx="1100" cy="330" r="5" fill="#ffb454"/><circle cx="1100" cy="330" r="11" fill="none" stroke="#ffb454" stroke-width="1.5"/></g>
+    <g id="pen2" style="display:none"><circle cx="1080" cy="560" r="5" fill="#ffb454"/><circle cx="1080" cy="560" r="11" fill="none" stroke="#ffb454" stroke-width="1.5"/></g>
+    <g id="pen" style="display:none"><circle cx="610" cy="250" r="5" fill="#ffb454"/><circle cx="610" cy="250" r="11" fill="none" stroke="#ffb454" stroke-width="1.5"/></g>
+  </svg>
+
+  <div id="hud">
+    <div class="live">Live Circle</div>
+    <h4><b>Shape</b><span><kbd>Tab</kbd> pin · <kbd>Esc</kbd></span></h4>
+    <div class="row"><label>Radius</label><div class="field">90</div></div>
+    <div class="row"><label>Points</label><div class="field">48</div></div>
+    <div class="row"><label>Center</label><div class="field small">610</div><div class="field small">250</div></div>
+    <div class="sep"></div>
+    <div class="row"><label>Fill</label><div class="chip" style="background:#d9e6ff"></div><div class="field">#D9E6FF</div></div>
+    <div class="row"><label>Stroke</label><div class="chip" style="background:#2f6fed"></div><div class="field small">3 pt</div></div>
+    <div class="sep"></div>
+    <div class="row"><label>X / Y</label><div class="field small">520</div><div class="field small">160</div></div>
+    <div class="row"><label>W / H</label><div class="field small">180</div><div class="field small">180</div></div>
+  </div>
+
+  <div id="radial">
+    <div class="hub"><b>Live Circle</b><span class="more">…</span><small>Properties…</small></div>
+    <div class="slot hot" style="left:150px;top:10px">Arrange <kbd>1</kbd></div>
+    <div class="slot" style="left:256px;top:54px">Group <kbd>2</kbd></div>
+    <div class="slot" style="left:290px;top:150px">Fill <kbd>3</kbd></div>
+    <div class="slot" style="left:256px;top:246px">Stroke <kbd>4</kbd></div>
+    <div class="slot" style="left:150px;top:290px">Duplicate <kbd>5</kbd></div>
+    <div class="slot" style="left:44px;top:246px">Delete <kbd>6</kbd></div>
+    <div class="slot" style="left:10px;top:150px">Edit graph <kbd>7</kbd></div>
+    <div class="slot" style="left:44px;top:54px">Lock <kbd>8</kbd></div>
+    <div class="ctx">pen is over: Live Circle</div>
+  </div>
+
+  <div id="create">
+    <div class="hub"><b>Create</b><span class="more">…</span><small>Shape options…</small></div>
+    <div class="slot hot" style="left:150px;top:10px">Rectangle <kbd>R</kbd></div>
+    <div class="slot" style="left:256px;top:54px">Ellipse <kbd>E</kbd></div>
+    <div class="slot" style="left:290px;top:150px">Polygon <kbd>P</kbd></div>
+    <div class="slot" style="left:256px;top:246px">Star <kbd>S</kbd></div>
+    <div class="slot" style="left:150px;top:290px">Line <kbd>L</kbd></div>
+    <div class="slot" style="left:44px;top:246px">Freehand <kbd>B</kbd></div>
+    <div class="slot" style="left:10px;top:150px">File <kbd>F</kbd></div>
+    <div class="slot" style="left:44px;top:54px">Text <kbd>T</kbd></div>
+    <div class="ctx">New shape · pen is over: blank canvas</div>
+  </div>
+
+  <div id="doc">
+    <div class="hub"><b>Document</b><span class="more">…</span><small>Setup…</small></div>
+    <div class="slot hot" style="left:150px;top:10px">New artboard <kbd>A</kbd></div>
+    <div class="slot" style="left:256px;top:54px">New document <kbd>N</kbd></div>
+    <div class="slot" style="left:290px;top:150px">Open <kbd>O</kbd></div>
+    <div class="slot" style="left:256px;top:246px">Save <kbd>S</kbd></div>
+    <div class="slot" style="left:150px;top:290px">Export <kbd>E</kbd></div>
+    <div class="slot" style="left:44px;top:246px">Place image <kbd>I</kbd></div>
+    <div class="slot" style="left:10px;top:150px">Fit <kbd>0</kbd></div>
+    <div class="slot" style="left:44px;top:54px">Rulers · grid</div>
+    <div class="ctx">Document · pen is over: workspace (no artboard)</div>
+  </div>
+
+  <div id="start">
+    <div class="hub"><b>New</b><span class="more">…</span><small>Create…</small></div>
+    <div class="slot hot" style="left:150px;top:10px;height:46px;"><span>Letter<br><small style="color:inherit;opacity:.7;font-size:10px;font-weight:400">8.5 × 11 in</small></span></div>
+    <div class="slot" style="left:272px;top:80px;height:46px;"><span>A4<br><small style="color:inherit;opacity:.7;font-size:10px;font-weight:400">210 × 297 mm</small></span></div>
+    <div class="slot" style="left:272px;top:220px;height:46px;"><span>Full HD<br><small style="color:inherit;opacity:.7;font-size:10px;font-weight:400">1920 × 1080</small></span></div>
+    <div class="slot" style="left:150px;top:290px;height:46px;"><span>Square<br><small style="color:inherit;opacity:.7;font-size:10px;font-weight:400">1080 × 1080</small></span></div>
+    <div class="slot" style="left:28px;top:220px;">Open <kbd>O</kbd></div>
+    <div class="slot" style="left:28px;top:80px;">Recent <kbd>R</kbd></div>
+    <div class="ctx">New · no document is open</div>
+  </div>
+
+  <div id="hint"></div>
+</div>
+  </div>
+
+<script>
+  const hints = {
+    idle:     '<span class="tool">Select</span><span><b>V</b> select · <b>A</b> direct · <b>P</b> pen · <b>B</b> brush · <b>T</b> text</span><span>Tap <kbd>Space</kbd> create · hold + drag pan</span><span><kbd>L</kbd> layers</span><span><kbd>Alt</kbd> menu</span><span class="grow"></span><span>x 610 · y 250 · Artboard 1 · 100% · <kbd>Ctrl</kbd>+<kbd>R</kbd> rulers</span>',
+    selected: '<span class="tool">Select</span><span>Live Circle · radius 90, 48 points</span><span><kbd>R</kbd>+drag radius</span><span><kbd>S</kbd>+drag stroke</span><span><kbd>O</kbd>+drag opacity</span><span><kbd>Del</kbd> delete</span><span class="grow"></span><span>x 610 · y 250 · Artboard 1 · 100% · <kbd>Ctrl</kbd>+<kbd>R</kbd> rulers</span>',
+    create:   '<span class="tool">Create</span><span>Tap <kbd>Space</kbd> on blank canvas · hold the key and drag, or tap a slot with the pen · <kbd>Esc</kbd> cancel</span><span class="grow"></span><span>Hold <kbd>Space</kbd> + drag to pan</span>',
+    doc:      '<span class="tool">Document</span><span>Tap <kbd>Space</kbd> on the workspace: new artboard here, or file and view commands · <kbd>Esc</kbd> cancel</span>',
+    start:    '<span class="tool">New</span><span>Nothing open · pick a size and start drawing · tap the centre for more sizes · <kbd>Esc</kbd> cancel</span>',
+    radial:   '<span class="tool">Select</span><span>Pen menu · flick toward a slot or press <kbd>1</kbd>–<kbd>8</kbd></span><span class="grow"></span><span><kbd>Esc</kbd> cancel</span>',
+    keys:     '<span class="tool">Ctrl</span><span><b>Z</b> undo · <b>Shift+Z</b> redo · <b>C</b> copy · <b>V</b> paste · <b>D</b> duplicate · <b>G</b> group · <b>A</b> select all</span><span>pen drag: <b>marquee</b></span><span class="grow"></span><span>release to hide</span>'
+  };
+  const $ = id => document.getElementById(id);
+  function show(state) {
+    document.querySelectorAll('.switcher button').forEach(b => b.classList.toggle('on', b.dataset.s === state));
+    $('selection').style.display = (state === 'selected' || state === 'radial') ? '' : 'none';
+    $('hud').style.display = state === 'selected' ? 'block' : 'none';
+    $('radial').style.display = state === 'radial' ? 'block' : 'none';
+    $('create').style.display = state === 'create' ? 'block' : 'none';
+    $('doc').style.display = state === 'doc' ? 'block' : 'none';
+    $('start').style.display = state === 'start' ? 'block' : 'none';
+    $('pen4').style.display = state === 'start' ? '' : 'none';
+    $('pen3').style.display = state === 'doc' ? '' : 'none';
+    $('pen').style.display = state === 'radial' ? '' : 'none';
+    $('pen2').style.display = state === 'create' ? '' : 'none';
+    document.querySelectorAll('#scene > rect, #scene > text, #scene > path, #scene > polygon, #scene > circle').forEach(e => e.style.display = state === 'start' ? 'none' : '');
+    $('hint').innerHTML = hints[state];
+  }
+  document.querySelectorAll('.switcher button').forEach(b => b.onclick = () => show(b.dataset.s));
+  show('idle');
+</script>
+</body>
+</html>

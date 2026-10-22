@@ -1,0 +1,905 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curvy rigging</title>
+<style>
+  :root {
+    --bg: #1e1f22; --panel: #26272b; --workspace: #2b2d31; --text: #e6e7ea; --muted: #9a9ea8;
+    --accent: #4c8dff; --amber: #ffb454; --slot: #313338; --slotLine: #4a4d55;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid #000; }
+  header h1 { margin: 0 0 4px; font-size: 15px; }
+  header p { margin: 0; color: var(--muted); max-width: 980px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 18px; padding: 10px 16px; background: #222327; border-bottom: 1px solid #000; align-items: center; }
+  .group { display: flex; align-items: center; gap: 6px; }
+  .group > span { color: var(--muted); margin-right: 4px; }
+  button { background: var(--slot); color: var(--text); border: 1px solid var(--slotLine); border-radius: 14px; padding: 4px 12px; font: inherit; cursor: pointer; }
+  button.on { background: var(--accent); border-color: var(--accent); }
+  label { color: var(--muted); display: flex; align-items: center; gap: 5px; }
+  input[type=number] { width: 50px; background: #2a2c31; color: var(--text); border: 1px solid #4a4d55; border-radius: 6px; padding: 2px 6px; font: inherit; }
+  #stage { position: relative; width: 900px; height: 560px; margin: 16px auto 8px; background: var(--workspace); border: 1px solid #000; overflow: hidden; user-select: none; touch-action: none; }
+  #svg, #over { position: absolute; left: 0; top: 0; }
+  #over { pointer-events: none; }
+  #badge { position: absolute; display: none; padding: 1px 7px; border-radius: 9px; background: #17181bf0; border: 1px solid #5a5d66; color: var(--amber); font-size: 11px; white-space: nowrap; pointer-events: none; z-index: 11; }
+  #hud { position: absolute; right: 12px; top: 12px; width: 244px; max-height: 372px; overflow: auto; padding: 8px 12px 10px; background: #17181bf0; border: 1px solid #5a5d66; border-radius: 10px; box-shadow: 0 3px 10px #0007; z-index: 4; }
+  #hud .tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+  #hud .tabs button { padding: 2px 10px; font-size: 11px; border-radius: 10px; }
+  #hud .node { border: 1px solid #3a3d43; border-radius: 8px; padding: 6px 8px 7px; margin-bottom: 8px; }
+  #hud .node.act { border-color: var(--amber); }
+  #hud .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  #hud .head span { color: var(--muted); font-size: 11px; }
+  #hud .row { display: flex; align-items: center; gap: 6px; margin: 4px 0; color: var(--muted); font-size: 12px; }
+  #hud .row .lab { width: 62px; flex: none; }
+  #hud .row .dia { width: 14px; flex: none; cursor: pointer; color: var(--muted); text-align: center; }
+  #hud .row .dia.on { color: var(--amber); }
+  #hud input[type=range] { width: 80px; }
+  #hud .mono { font-variant-numeric: tabular-nums; color: var(--text); min-width: 38px; text-align: right; }
+  #hud .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+  #hud .chips button, #hud button.small { padding: 2px 8px; font-size: 11px; border-radius: 10px; }
+  #hud .chain { color: var(--muted); font-size: 11px; margin-bottom: 8px; }
+  #hud .chain b { color: var(--amber); font-weight: 600; }
+  #hud .note { color: var(--muted); font-size: 11px; margin: 4px 0; }
+  #hud .part { display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 4px; border-radius: 6px; font-size: 12px; cursor: pointer; }
+  #hud .part:hover { background: #26282d; }
+  #hud .part.sel { background: #3a3320; }
+  #hud .part small { color: var(--muted); margin-left: auto; font-size: 10px; }
+  #hud .part .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  #tl { position: absolute; left: 0; right: 0; bottom: 28px; height: 132px; background: var(--panel); border-top: 1px solid #000; z-index: 5; }
+  #tl .tbar { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-bottom: 1px solid #000; font-size: 12px; color: var(--muted); }
+  #tl .tbar button { padding: 1px 9px; font-size: 12px; }
+  #tl .tbar .grow { flex: 1; }
+  #tlwrap { height: 82px; overflow-y: auto; }
+  #tlruler, #tlsvg { display: block; }
+  #hint { position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: var(--panel); border-top: 1px solid #000; color: var(--muted); padding: 3px 10px; white-space: nowrap; font-size: 12px; display: flex; align-items: center; gap: 12px; z-index: 6; overflow: hidden; }
+  #hint .tool { color: var(--amber); font-weight: 600; }
+  #hint .main { color: var(--text); }
+  .key { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border-radius: 6px; background: #3a3d43; border: 1px solid #5a5d66; color: var(--text); font: 600 11px/18px "Segoe UI"; }
+  .key.lit { background: var(--amber); color: #1b1b1b; border-color: var(--amber); }
+  #scrub { position: absolute; display: none; width: 210px; padding: 8px 12px 12px; background: #17181bf0; border: 1px solid #5a5d66; border-radius: 10px; box-shadow: 0 3px 10px #0007; z-index: 11; }
+  #scrub .head { display: flex; justify-content: space-between; margin-bottom: 10px; }
+  #scrub .head b { color: var(--amber); }
+  #scrub .track { position: relative; height: 6px; border-radius: 3px; background: #3a3d43; }
+  #scrub .fill { height: 100%; border-radius: 3px; background: var(--amber); }
+  #scrub .thumb { position: absolute; top: -5px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: var(--amber); border: 2px solid #17181b; }
+  #scrub .sub { margin-top: 10px; color: var(--muted); font-size: 11px; }
+  #ring { position: absolute; width: 0; height: 0; z-index: 9; }
+  #ring .hub { position: absolute; left: -34px; top: -34px; width: 68px; height: 68px; border-radius: 50%; background: #17181bf0; border: 1px solid #5a5d66; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; color: var(--amber); line-height: 1.2; text-align: center; }
+  #ring .hub small { color: var(--muted); }
+  #ring .slot { position: absolute; transform: translate(-50%, -50%); min-width: 112px; height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 8px; border-radius: 15px; background: #17181bf0; border: 1px solid #5a5d66; color: var(--text); cursor: pointer; font-size: 12px; white-space: nowrap; }
+  #ring .slot:hover { border-color: var(--amber); background: #2b2d33; }
+  #ring .slot small { opacity: .6; font-size: 10px; }
+  #ring .slot .key { height: 18px; min-width: 18px; justify-content: center; }
+  #toast { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); padding: 4px 12px; border-radius: 8px; background: #17181bf0; border: 1px solid #5a5d66; display: none; color: var(--amber); z-index: 12; white-space: nowrap; }
+  #notes { width: 900px; margin: 0 auto 24px; color: var(--muted); }
+  #notes h2 { color: var(--text); font-size: 13px; margin: 14px 0 4px; }
+  #notes li { margin-bottom: 4px; }
+  #notes b { color: var(--text); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Rigging: bones, binding, weight painting, IK and a smart-bone dial</h1>
+  <p>A character built from shapes. <b>Pose</b> tool (<b>1</b>): click a bone, drag its tip to rotate it (FK), drag a wrist or ankle ring to pull the limb with <b>IK</b>, drag the hips, drag the <b>Head turn</b> dial. <b>Bone</b> tool (<b>2</b>): drag from a bone&rsquo;s tip to grow a child bone, or switch to Edit tip to fit the skeleton to the art. <b>Weights</b> tool (<b>3</b>): paint how the left sleeve follows the shoulder, elbow and wrist; pen pressure is the brush strength and the dots show the active bone&rsquo;s weight. The right arm and the legs are <b>rigid</b> cut-out parts, the left sleeve is <b>smooth</b>-skinned: flip it to Rigid in the Skin tab to see the difference. Hold <b>R</b> and move up/down to rotate the selected bone, <b>K</b> keys it, <b>Enter</b> plays, <b>Space</b> opens the ring.</p>
+</header>
+<div class="controls">
+  <div class="group"><span>Tool</span>
+    <button id="tPose" class="on">Pose <span class="key">1</span></button>
+    <button id="tBone">Bone <span class="key">2</span></button>
+    <button id="tWeights">Weights <span class="key">3</span></button>
+  </div>
+  <div class="group">
+    <label><input id="cBones" type="checkbox" checked> bones</label>
+    <label><input id="cXray" type="checkbox"> x-ray art</label>
+    <label><input id="cAuto" type="checkbox" checked> auto-key</label>
+  </div>
+  <div class="group">
+    <button id="bUndo">Undo</button>
+    <button id="bRedo">Redo</button>
+    <button id="bReset">Reset</button>
+  </div>
+</div>
+
+<div id="stage">
+  <svg id="svg" width="900" height="400" viewBox="0 0 900 400"></svg>
+  <svg id="over" width="900" height="400" viewBox="0 0 900 400"></svg>
+  <div id="hud"></div>
+  <div id="tl">
+    <div class="tbar">
+      <button id="bFirst">|&#9664;</button><button id="bPrev">&#9664;</button><button id="bPlay">&#9654; Play</button><button id="bNext">&#9654;</button><button id="bLast">&#9654;|</button>
+      <span>Frame <input id="nFrame" type="number" min="0" max="48" value="0"> / 48 &middot; 24 fps</span>
+      <button id="bKey" title="Key the selected bone or dial (K)">Key</button><button id="bUnkey" title="Remove its keys here (Shift+K)">Unkey</button>
+      <span class="grow"></span><span id="tlStat"></span>
+    </div>
+    <svg id="tlruler" width="900" height="22"></svg>
+    <div id="tlwrap"><svg id="tlsvg" width="900" height="0"></svg></div>
+  </div>
+  <div id="scrub"></div>
+  <div id="badge"></div>
+  <div id="toast"></div>
+  <div id="hint"></div>
+</div>
+
+<div id="notes">
+  <h2>How it works (proposal)</h2>
+  <ul>
+    <li><b>Skeleton = transform nodes.</b> A bone is a transform node with a length, a pivot (its head) and a parent; it attaches at a fraction along the parent bone (shoulders sit near the spine&rsquo;s tip) with an optional sideways offset. The hierarchy is ordinary graph parenting, so every bone&rsquo;s rotation is just another channel: it appears in the timeline and dopesheet, keys, copies and ripples like any parameter. The Bone tab shows the path from the root and the children you can step to.</li>
+    <li><b>Cut-out rig (rigid bind).</b> A part bound to one bone with weight 1 is Toon Boom&rsquo;s peg: it moves rigidly with its pivot. The right arm and the legs are built this way; cracks at the elbow are the price.</li>
+    <li><b>Smooth bind.</b> A <b>Bind</b> node takes points, the bone transforms and a per-point weight for each bone, and gives deformed points (linear blend skinning). The weights are a point attribute, the same system as the Bend and Wave weights in the animation bench. The left sleeve is bound to spine, upper arm, forearm and hand; &ldquo;Auto weights&rdquo; makes a first pass from distance along the chain and you paint the rest.</li>
+    <li><b>Weight painting with the pen.</b> Pen pressure drives brush strength (a mouse reads as half pressure), hold <b>B</b> and move up/down to resize the brush, and the dots on the sleeve are a heat map of the active bone (blue none, red full). Add raises the active bone and the others give way so weights keep summing to 1, Subtract does the reverse, Smooth averages with the neighbours. Strokes are one undo step.</li>
+    <li><b>IK is a solver node.</b> Each limb has an <b>IK</b> amount (keyable, so you can blend FK to IK), a target and a bend direction. Drag a wrist or ankle ring and the limb switches to IK from where it is (no pop); &ldquo;To FK&rdquo; bakes the solved angles back into the bone rotations. The solver is analytic two-bone; a chain solver (FABRIK) would serve tails and spines.</li>
+    <li><b>Smart-bone dial.</b> The <b>Head turn</b> dial is a driver: one control mapped to several things at once. Here it adds rotation to the head and neck and picks one of five face drawings (profile, three-quarter, front, three-quarter, profile) with a stepped switch, so the dial moves bones and swaps drawings together. Each mapping can be turned off or scaled in the Driver tab. This is Moho&rsquo;s smart bone as a graph node; the pose chips from the animation bench are the same idea stored as a snapshot.</li>
+    <li><b>Editing the skeleton.</b> In the Bone tool the art is shown unposed so you can fit bones to it: drag from a tip to add a child, or use Edit tip to move a bone (children keep their orientation). Every edit re-binds, so the art stays where it was drawn and only the bones move. A new bone can be given a part with &ldquo;Bind rigid to bone&rdquo; in the Skin tab.</li>
+  </ul>
+  <h2>What this means for the graph and the code</h2>
+  <ul>
+    <li>Nodes: <b>Bone</b> (transform with length), <b>Skeleton</b> (collects bones and publishes their world transforms as data), <b>Bind</b> (skinning wrangle, JIT), <b>IK</b> (solver writing angles), <b>Driver</b> (control to many targets through ranges or curves, including int/enum for switches). Bone world transforms are the only new data type; weights ride on point attributes.</li>
+    <li>jitnodes is polyline-only: skinning a bezier path deforms the anchors and handles, which needs the planned bezierPath node. A sleeve like this one stays smooth because it is densely sampled.</li>
+    <li>A rig is a <b>group with published controls</b> (the dial, the IK rings, a master move): the reusable character. Posing a rig is keying those controls, so the dopesheet, poses, copy/paste and the EXR output from the animation bench work on it unchanged.</li>
+    <li>Not here: mesh warp (triangulate, pin, solve), constraints (aim, parent-to-world), bone dynamics, mirroring poses, bone-driven drawing swaps beyond the face, and Smart Bones that read several dials.</li>
+  </ul>
+</div>
+
+<script>
+// ==LOGIC START
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const D2R = Math.PI / 180, FRAMES = 48, FPS = 24, WW = 900, WH = 400, GROUND = 382;
+const dir = a => [Math.cos(a * D2R), Math.sin(a * D2R)];
+const norm180 = a => ((a + 540) % 360) - 180;
+const lerpAng = (a, b, k) => a + norm180(b - a) * k;
+const EASE = { linear: [0, 0, 1, 1], inOut: [0.42, 0, 0.58, 1] };
+const mkKey = (f, v, e, hold) => ({ f, v, ease: (e || EASE.inOut).slice(), hold: !!hold });
+function bez(e, t) {
+  const [x1, y1, x2, y2] = e;
+  let lo = 0, hi = 1, u = t;
+  for (let i = 0; i < 28; i++) {
+    u = (lo + hi) / 2;
+    const x = 3 * (1 - u) * (1 - u) * u * x1 + 3 * (1 - u) * u * u * x2 + u * u * u;
+    if (x < t) lo = u; else hi = u;
+  }
+  return 3 * (1 - u) * (1 - u) * u * y1 + 3 * (1 - u) * u * u * y2 + u * u * u;
+}
+function valueAt(p, f) {
+  const ks = p.keys;
+  if (!ks.length) return p.static;
+  if (f <= ks[0].f) return ks[0].v;
+  const last = ks[ks.length - 1];
+  if (f >= last.f) return last.v;
+  let i = 0;
+  while (ks[i + 1].f <= f) i++;
+  const a = ks[i], b = ks[i + 1];
+  if (a.hold) return a.v;
+  return a.v + (b.v - a.v) * bez(a.ease, (f - a.f) / (b.f - a.f));
+}
+const FACES = ['Profile L', '3/4 L', 'Front', '3/4 R', 'Profile R'];
+const FLIPS = ['Bend −', 'Bend +'];
+const BONE_DEF = { label: 'Rotation', min: -180, max: 180, step: 1, def: 0, fmt: v => v.toFixed(0) + '°' };
+const LIMB_DEFS = {
+  ik: { label: 'IK', min: 0, max: 1, step: 0.01, def: 0, fmt: v => Math.round(v * 100) + '%' },
+  ix: { label: 'Target X', min: 0, max: WW, step: 1, def: 0, fmt: v => v.toFixed(0) },
+  iy: { label: 'Target Y', min: 0, max: WH, step: 1, def: 0, fmt: v => v.toFixed(0) },
+  flip: { label: 'Bend', min: 0, max: 1, step: 1, def: 0, fmt: v => FLIPS[Math.round(v)], hold: true, en: FLIPS },
+};
+const ROOT_DEFS = { dx: { label: 'Move X', min: -300, max: 300, step: 1, def: 0, fmt: v => v.toFixed(0) }, dy: { label: 'Move Y', min: -150, max: 150, step: 1, def: 0, fmt: v => v.toFixed(0) } };
+const CTL_DEFS = { turn: { label: 'Head turn', min: -1, max: 1, step: 0.01, def: 0, fmt: v => v.toFixed(2) } };
+function defOf(st, pid) {
+  const i = pid.indexOf('.'), id = pid.slice(0, i), key = pid.slice(i + 1);
+  if (id === 'ctl') return CTL_DEFS[key];
+  if (st.limbs.some(l => l.id === id)) return LIMB_DEFS[key];
+  return key === 'rot' ? BONE_DEF : ROOT_DEFS[key];
+}
+function ownerName(st, pid) {
+  const id = pid.slice(0, pid.indexOf('.'));
+  if (id === 'ctl') return 'Head turn';
+  const l = st.limbs.find(l => l.id === id);
+  return l ? l.name : (st.bones.find(b => b.id === id) || { name: id }).name;
+}
+function boneRa(bones, b) { let a = b.rel, p = b.parent; while (p) { const pb = bones.find(x => x.id === p); a += pb.rel; p = pb.parent; } return a; }
+function ikAngles(H, T, l1, l2, flip) {
+  const dx = T[0] - H[0], dy = T[1] - H[1];
+  const d = clamp(Math.hypot(dx, dy), Math.abs(l1 - l2) + 0.01, l1 + l2 - 0.01);
+  const base = Math.atan2(dy, dx), a = Math.acos(clamp((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d), -1, 1)), a1 = base + flip * a;
+  const e = [H[0] + l1 * Math.cos(a1), H[1] + l1 * Math.sin(a1)];
+  return [a1 / D2R, Math.atan2(T[1] - e[1], T[0] - e[0]) / D2R];
+}
+function driverAdds(st, f) {
+  const turn = valueAt(st.params['ctl.turn'], f), add = {};
+  if (st.drv.head.on) add[st.drv.head.bone] = turn * st.drv.head.amt;
+  if (st.drv.neck.on) add[st.drv.neck.bone] = turn * st.drv.neck.amt;
+  return { add, turn, face: st.drv.face.on ? clamp(Math.round((turn + 1) * 2), 0, 4) : 2 };
+}
+function solveSkeleton(st, f, rest) {
+  const out = {}, v = pid => rest ? 0 : valueAt(st.params[pid], f), drv = rest ? { add: {} } : driverAdds(st, f), limbOf = {}, ik = {};
+  st.limbs.forEach(l => { limbOf[l.upper] = l; limbOf[l.lower] = l; });
+  st.bones.forEach(b => {
+    const par = b.parent ? out[b.parent] : null;
+    let head, pang;
+    if (!par) { head = [b.root[0] + v(b.id + '.dx'), b.root[1] + v(b.id + '.dy')]; pang = 0; }
+    else {
+      const d = dir(par.ang);
+      head = [par.head[0] + d[0] * par.len * b.at, par.head[1] + d[1] * par.len * b.at];
+      if (b.off) { const q = dir(par.ang + 90); head[0] += q[0] * b.off; head[1] += q[1] * b.off; }
+      pang = par.ang;
+    }
+    let ang = pang + b.rel + (rest ? 0 : v(b.id + '.rot') + (drv.add[b.id] || 0));
+    const l = limbOf[b.id];
+    if (l && !rest) {
+      const k = v(l.id + '.ik');
+      if (k > 0) {
+        if (b.id === l.upper) { const lo = st.bones.find(x => x.id === l.lower); ik[l.id] = ikAngles(head, [v(l.id + '.ix'), v(l.id + '.iy')], b.len, lo.len, Math.round(v(l.id + '.flip')) ? 1 : -1); ang = lerpAng(ang, ik[l.id][0], k); }
+        else ang = lerpAng(ang, ik[l.id][1], k);
+      }
+    }
+    const d2 = dir(ang);
+    out[b.id] = { head, ang, len: b.len, tip: [head[0] + d2[0] * b.len, head[1] + d2[1] * b.len], parent: b.parent };
+  });
+  return out;
+}
+function mkBone(list, id, name, parent, at, off, ra, len, extra) {
+  const par = parent ? list.find(b => b.id === parent) : null;
+  const b = Object.assign({ id, name, parent, at, off, rel: ra - (par ? boneRa(list, par) : 0), len }, extra || {});
+  list.push(b);
+  return b;
+}
+const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+function capsule(a, b, r1, r2) {
+  const ang = Math.atan2(b[1] - a[1], b[0] - a[0]), pts = [];
+  for (let i = 0; i <= 8; i++) { const t = ang - Math.PI / 2 - Math.PI * i / 8; pts.push([b[0] + Math.cos(t) * r2, b[1] + Math.sin(t) * r2]); }
+  for (let i = 0; i <= 8; i++) { const t = ang + Math.PI / 2 - Math.PI * i / 8; pts.push([a[0] + Math.cos(t) * r1, a[1] + Math.sin(t) * r1]); }
+  return pts;
+}
+function ellipse(cx, cy, rx, ry, n) { const p = []; for (let i = 0; i < n; i++) { const t = i / n * Math.PI * 2; p.push([cx + Math.cos(t) * rx, cy + Math.sin(t) * ry]); } return p; }
+function autoWeights(part, tEl) {
+  return part.t.map(t => {
+    const sp = 1 - smooth(0, 0.14, t), hw = smooth(0.86, 1, t) * 0.5, s = smooth(tEl - 0.15, tEl + 0.15, t), w = { spine: sp, upL: (1 - s) * (1 - sp), loL: s * (1 - sp) * (1 - hw), handL: s * (1 - sp) * hw };
+    const sum = w.spine + w.upL + w.loL + w.handL;
+    for (const k in w) w[k] /= sum;
+    return w;
+  });
+}
+function buildState() {
+  const bones = [];
+  mkBone(bones, 'spine', 'Spine', null, 0, 0, -90, 88, { root: [330, 232] });
+  mkBone(bones, 'neck', 'Neck', 'spine', 1, 0, -90, 20);
+  mkBone(bones, 'head', 'Head', 'neck', 1, 0, -90, 44);
+  mkBone(bones, 'upL', 'Upper arm L', 'spine', 0.97, -24, 105, 62);
+  mkBone(bones, 'loL', 'Forearm L', 'upL', 1, 0, 98, 56);
+  mkBone(bones, 'handL', 'Hand L', 'loL', 1, 0, 96, 20);
+  mkBone(bones, 'upR', 'Upper arm R', 'spine', 0.97, 24, 75, 62);
+  mkBone(bones, 'loR', 'Forearm R', 'upR', 1, 0, 82, 56);
+  mkBone(bones, 'handR', 'Hand R', 'loR', 1, 0, 84, 20);
+  mkBone(bones, 'thL', 'Thigh L', 'spine', 0, -16, 96, 74);
+  mkBone(bones, 'shL', 'Shin L', 'thL', 1, 0, 88, 72);
+  mkBone(bones, 'thR', 'Thigh R', 'spine', 0, 16, 84, 74);
+  mkBone(bones, 'shR', 'Shin R', 'thR', 1, 0, 92, 72);
+  const limbs = [
+    { id: 'armL', name: 'Arm L', upper: 'upL', lower: 'loL' }, { id: 'armR', name: 'Arm R', upper: 'upR', lower: 'loR' },
+    { id: 'legL', name: 'Leg L', upper: 'thL', lower: 'shL' }, { id: 'legR', name: 'Leg R', upper: 'thR', lower: 'shR' },
+  ];
+  const st = { bones, limbs, parts: [], params: {}, bind: {}, drv: { head: { on: true, bone: 'head', amt: 14 }, neck: { on: true, bone: 'neck', amt: 6 }, face: { on: true } }, faceC: [330, 130], nextBone: 1 };
+  const rest = solveSkeleton(st, 0, true), B = id => rest[id], P = (id, fill, pts, extra) => st.parts.push(Object.assign({ id, name: id, fill, pts }, extra || {}));
+  const cap = (id, name, bone, r1, r2, fill) => P(id, fill, capsule(B(bone).head, B(bone).tip, r1, r2), { name, bone });
+  cap('upR', 'Upper arm R', 'upR', 12, 10, '#3b6fd4'); cap('loR', 'Forearm R', 'loR', 10, 9, '#3b6fd4');
+  P('handR', '#f2c9a0', ellipse((B('handR').head[0] + B('handR').tip[0]) / 2, (B('handR').head[1] + B('handR').tip[1]) / 2, 10, 10, 14), { name: 'Hand R', bone: 'handR' });
+  cap('thL', 'Thigh L', 'thL', 14, 12, '#6b5bb5'); cap('shL', 'Shin L', 'shL', 12, 9, '#6b5bb5');
+  P('footL', '#333', ellipse(B('shL').tip[0] - 6, B('shL').tip[1] + 2, 18, 8, 14), { name: 'Foot L', bone: 'shL' });
+  cap('thR', 'Thigh R', 'thR', 14, 12, '#6b5bb5'); cap('shR', 'Shin R', 'shR', 12, 9, '#6b5bb5');
+  P('footR', '#333', ellipse(B('shR').tip[0] + 6, B('shR').tip[1] + 2, 18, 8, 14), { name: 'Foot R', bone: 'shR' });
+  P('torso', '#4c8dff', [[298, 170], [362, 170], [354, 205], [346, 238], [314, 238], [306, 205]], { name: 'Torso', bone: 'spine' });
+  P('neck', '#f2c9a0', [[323, 150], [337, 150], [337, 176], [323, 176]], { name: 'Neck', bone: 'neck' });
+  P('head', '#f2c9a0', ellipse(330, 130, 29, 32, 36), { name: 'Head', bone: 'head' });
+  P('hair', '#5a3a28', Array.from({ length: 13 }, (_, i) => { const t = Math.PI + Math.PI * i / 12; return [330 + Math.cos(t) * 31, 122 + Math.sin(t) * 30]; }).concat([[361, 130], [299, 130]]), { name: 'Hair', bone: 'head' });
+  const u = B('upL'), l = B('loL'), c = [u.head], pts = [], tt = [];
+  const L1 = u.len, L2 = l.len, sample = (a, b, t0, t1, n) => { for (let i = 0; i < n; i++) { const k = i / n; c.push([a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k]); tt.push(t0 + (t1 - t0) * k); } };
+  c.length = 0; tt.length = 0;
+  sample(u.head, l.head, 0, L1 / (L1 + L2), 12); sample(l.head, l.tip, L1 / (L1 + L2), 1, 11); c.push(l.tip); tt.push(1);
+  const left = [], right = [];
+  c.forEach((p, i) => {
+    const a = c[Math.max(0, i - 1)], b = c[Math.min(c.length - 1, i + 1)];
+    let tx = b[0] - a[0], ty = b[1] - a[1]; const n = Math.hypot(tx, ty) || 1; tx /= n; ty /= n;
+    const r = 13 - 4 * tt[i];
+    left.push([p[0] + ty * r, p[1] - tx * r]); right.push([p[0] - ty * r, p[1] + tx * r]);
+  });
+  const sleeve = { id: 'sleeveL', name: 'Sleeve L', fill: '#3b6fd4', pts: left.concat(right.slice().reverse()), t: tt.concat(tt.slice().reverse()), mode: 'smooth', infl: ['spine', 'upL', 'loL', 'handL'], tEl: L1 / (L1 + L2) };
+  sleeve.w = autoWeights(sleeve, sleeve.tEl);
+  st.parts.push(sleeve);
+  P('handL', '#f2c9a0', ellipse((B('handL').head[0] + B('handL').tip[0]) / 2, (B('handL').head[1] + B('handL').tip[1]) / 2, 10, 10, 14), { name: 'Hand L', bone: 'handL' });
+  st.parts.sort((a, b) => ['upR', 'loR', 'handR', 'thL', 'shL', 'footL', 'thR', 'shR', 'footR', 'torso', 'neck', 'head', 'hair', 'sleeveL', 'handL'].indexOf(a.id) - ['upR', 'loR', 'handR', 'thL', 'shL', 'footL', 'thR', 'shR', 'footR', 'torso', 'neck', 'head', 'hair', 'sleeveL', 'handL'].indexOf(b.id));
+  Object.keys(rest).forEach(id => { st.bind[id] = { head: rest[id].head.slice(), ang: rest[id].ang }; });
+  ensureParams(st, rest);
+  const set = (pid, arr, e, hold) => { st.params[pid].keys = arr.map(a => mkKey(a[0], a[1], e, hold)); };
+  set('upR.rot', [[0, -8], [12, 38], [24, -8], [36, 38], [48, -8]]);
+  set('loR.rot', [[0, 0], [12, 46], [24, 0], [36, 46], [48, 0]]);
+  set('ctl.turn', [[0, 0], [12, -1], [24, 0], [36, 1], [48, 0]]);
+  set('armL.ik', [[0, 0], [8, 1], [40, 1], [48, 0]]);
+  set('armL.ix', [[8, 262], [24, 205], [40, 252]]);
+  set('armL.iy', [[8, 188], [24, 120], [40, 250]]);
+  set('spine.dy', [[0, 0], [12, 6], [24, 0], [36, 6], [48, 0]]);
+  return st;
+}
+function ensureParams(st, rest) {
+  rest = rest || solveSkeleton(st, 0, true);
+  st.bones.forEach(b => {
+    const ks = ['rot'].concat(b.root ? ['dx', 'dy'] : []);
+    ks.forEach(k => { const pid = b.id + '.' + k; if (!st.params[pid]) st.params[pid] = { static: 0, keys: [] }; });
+  });
+  st.limbs.forEach(l => {
+    ['ik', 'ix', 'iy', 'flip'].forEach(k => { const pid = l.id + '.' + k; if (!st.params[pid]) st.params[pid] = { static: 0, keys: [] }; });
+    const w = rest[l.lower].tip;
+    if (!st.params[l.id + '.ix'].keys.length) { st.params[l.id + '.ix'].static = Math.round(w[0]); st.params[l.id + '.iy'].static = Math.round(w[1]); }
+  });
+  if (!st.params['ctl.turn']) st.params['ctl.turn'] = { static: 0, keys: [] };
+}
+function weightsOf(part, i) {
+  if (part.bone) return [[part.bone, 1]];
+  const w = part.w[i];
+  if (part.mode === 'rigid') { let best = null, bw = -1; for (const b in w) if (w[b] > bw) { bw = w[b]; best = b; } return [[best, 1]]; }
+  const e = []; let s = 0;
+  for (const b in w) if (w[b] > 1e-4) { e.push([b, w[b]]); s += w[b]; }
+  return e.length ? e.map(([b, x]) => [b, x / s]) : [[Object.keys(w)[0], 1]];
+}
+function skinPoint(st, sk, p, ws) {
+  let x = 0, y = 0;
+  for (const [b, w] of ws) {
+    const bd = st.bind[b], pb = sk[b], dx = p[0] - bd.head[0], dy = p[1] - bd.head[1], c = Math.cos(-bd.ang * D2R), s = Math.sin(-bd.ang * D2R);
+    const lx = dx * c - dy * s, ly = dx * s + dy * c, c2 = Math.cos(pb.ang * D2R), s2 = Math.sin(pb.ang * D2R);
+    x += w * (pb.head[0] + lx * c2 - ly * s2); y += w * (pb.head[1] + lx * s2 + ly * c2);
+  }
+  return [x, y];
+}
+function faceShapes(idx, c) {
+  const u = (idx - 2) / 2, au = Math.abs(u), sh = [], dark = '#2a1b17', ex = c[0] + u * 12, sep = 11 * (1 - au * 0.55);
+  if (au < 1) { sh.push({ pts: ellipse(ex - sep, c[1] - 4, 3, 3.4, 10), fill: dark }); sh.push({ pts: ellipse(ex + sep, c[1] - 4, 3, 3.4, 10), fill: dark }); }
+  else sh.push({ pts: ellipse(c[0] + u * 17, c[1] - 4, 3, 3.4, 10), fill: dark });
+  const nx = c[0] + u * (au < 1 ? 14 : 24), s = u === 0 ? 1 : Math.sign(u);
+  sh.push({ pts: [[nx, c[1] - 2], [nx + s * (3 + 7 * au), c[1] + 6], [nx - s * 1, c[1] + 7]], fill: '#d9a882' });
+  const mx = c[0] + u * 13, mw = 11 * (1 - au * 0.45);
+  sh.push({ pts: [[mx - mw, c[1] + 14], [mx, c[1] + 18], [mx + mw, c[1] + 14], [mx, c[1] + 16]], fill: dark });
+  return sh;
+}
+function evalScene(st, f, raw) {
+  const sk = solveSkeleton(st, f, false), drv = driverAdds(st, f), items = [];
+  st.parts.forEach(part => {
+    items.push({ part, pts: raw ? part.pts : part.pts.map((p, i) => skinPoint(st, sk, p, weightsOf(part, i))) });
+    if (part.id === 'head') faceShapes(drv.face, st.faceC).forEach(s => items.push({ part: { id: 'face', name: 'Face', fill: s.fill }, pts: raw ? s.pts : s.pts.map(p => skinPoint(st, sk, p, [['head', 1]])) }));
+  });
+  return { sk, items, drv };
+}
+// ==LOGIC END
+
+// ---------- state ----------
+const $ = id => document.getElementById(id);
+const stage = $('stage'), svgEl = $('svg'), overEl = $('over'), hudEl = $('hud'), tlRuler = $('tlruler'), tlSvg = $('tlsvg'), scrubEl = $('scrub'), badgeEl = $('badge'), toastEl = $('toast'), hintEl = $('hint');
+let S = buildState();
+let tool = 'pose', selBone = 'upL', selKind = 'bone', selPart = 'sleeveL', fr = 0, playing = false, hudTab = 'bone', boneMode = 'add';
+let autoKey = true, showBones = true, xray = false, selKey = null;
+let wp = { bone: 'upL', radius: 30, strength: 0.6, mode: 'add' };
+let undo = [], redo = [], editBefore = null, drag = null, ring = null, scrub = null, tHold = null, spaceDown = 0, cursor = [0, 0], hudLock = false, hudSigLast = '', scene = null, rest = null;
+const held = { r: false, b: false };
+const D = pid => defOf(S, pid);
+const val = pid => valueAt(S.params[pid], fr);
+const hasKeyHere = pid => S.params[pid].keys.some(k => k.f === fr);
+const boneById = id => S.bones.find(b => b.id === id);
+const snap = () => JSON.stringify(S);
+function beginEdit() { if (editBefore === null) editBefore = snap(); }
+function endEdit() { if (editBefore !== null && editBefore !== snap()) { undo.push(editBefore); redo = []; } editBefore = null; }
+function restore(json) { S = JSON.parse(json); if (!boneById(selBone)) selBone = 'spine'; selKey = null; }
+function doUndo() { endEdit(); if (!undo.length) return; redo.push(snap()); restore(undo.pop()); refresh(); }
+function doRedo() { endEdit(); if (!redo.length) return; undo.push(snap()); restore(redo.pop()); refresh(); }
+function toast(msg) { toastEl.textContent = msg; toastEl.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(() => { toastEl.style.display = 'none'; }, 2200); }
+function insertKey(pid, f, v) {
+  const p = S.params[pid], d = D(pid), prev = p.keys.filter(k => k.f < f).pop();
+  p.keys.push(mkKey(f, v, prev ? prev.ease : EASE.inOut, d.hold));
+  p.keys.sort((a, b) => a.f - b.f);
+}
+function setParam(pid, v) {
+  const d = D(pid), p = S.params[pid];
+  v = clamp(d.hold ? Math.round(v) : v, d.min, d.max);
+  const k = p.keys.find(k => k.f === fr);
+  if (k) k.v = v;
+  else if (p.keys.length || autoKey) insertKey(pid, fr, v);
+  else p.static = v;
+}
+function toggleKey(pid) {
+  const p = S.params[pid], i = p.keys.findIndex(k => k.f === fr);
+  beginEdit();
+  if (i >= 0) { p.static = p.keys[i].v; p.keys.splice(i, 1); } else insertKey(pid, fr, val(pid));
+  endEdit(); refresh();
+}
+function selPids() {
+  if (selKind === 'dial') return ['ctl.turn'];
+  const b = boneById(selBone), l = S.limbs.find(l => l.upper === selBone || l.lower === selBone), ids = [selBone + '.rot'];
+  if (b && b.root) ids.push(b.id + '.dx', b.id + '.dy');
+  if (l && val(l.id + '.ik') > 0) ids.push(l.id + '.ik', l.id + '.ix', l.id + '.iy', l.id + '.flip');
+  return ids;
+}
+function keySel(remove) {
+  beginEdit();
+  selPids().forEach(pid => {
+    const p = S.params[pid], i = p.keys.findIndex(k => k.f === fr);
+    if (remove) { if (i >= 0) { p.static = p.keys[i].v; p.keys.splice(i, 1); } } else if (i < 0) insertKey(pid, fr, val(pid));
+  });
+  endEdit(); refresh(); toast((remove ? 'Removed keys on ' : 'Keyed ') + (selKind === 'dial' ? 'Head turn' : boneById(selBone).name) + ' at frame ' + fr);
+}
+function restPose() {
+  beginEdit();
+  S.bones.forEach(b => setParam(b.id + '.rot', 0));
+  S.limbs.forEach(l => { if (val(l.id + '.ik') > 0) setParam(l.id + '.ik', 0); });
+  setParam('ctl.turn', 0); setParam('spine.dx', 0); setParam('spine.dy', 0);
+  endEdit(); refresh(); toast('Rest pose at frame ' + fr);
+}
+function limbOf(id) { return S.limbs.find(l => l.upper === id || l.lower === id); }
+function toIK(l) {
+  const tip = scene.sk[l.lower].tip;
+  setParam(l.id + '.ix', tip[0]); setParam(l.id + '.iy', tip[1]); setParam(l.id + '.ik', 1);
+}
+function toFK(l) {
+  const sk = scene.sk, up = boneById(l.upper), lo = boneById(l.lower), drv = driverAdds(S, fr).add;
+  const pu = sk[up.parent].ang;
+  beginEdit();
+  setParam(up.id + '.rot', norm180(sk[up.id].ang - pu - up.rel - (drv[up.id] || 0)));
+  setParam(lo.id + '.rot', norm180(sk[lo.id].ang - sk[up.id].ang - lo.rel - (drv[lo.id] || 0)));
+  setParam(l.id + '.ik', 0);
+  endEdit(); refresh(); toast(l.name + ': IK baked to FK at frame ' + fr);
+}
+function rebind() {
+  rest = solveSkeleton(S, 0, true);
+  Object.keys(rest).forEach(id => { S.bind[id] = { head: rest[id].head.slice(), ang: rest[id].ang }; });
+}
+
+// ---------- world ----------
+const polyStr = pts => pts.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
+function renderWorld() {
+  scene = evalScene(S, fr, tool === 'bone');
+  rest = solveSkeleton(S, 0, true);
+  let s = '<rect width="900" height="400" fill="#f1eee6"/><rect y="' + GROUND + '" width="900" height="' + (WH - GROUND) + '" fill="#bdb6a6"/>';
+  const op = xray ? 0.35 : 1;
+  scene.items.forEach(it => { s += '<polygon points="' + polyStr(it.pts) + '" fill="' + it.part.fill + '" fill-opacity="' + op + '" stroke="#00000033"' + (selPart === it.part.id && hudTab === 'skin' ? ' stroke-width="2" stroke="#ffb454"' : '') + '/>'; });
+  svgEl.innerHTML = s;
+}
+function boneShape(h, t, w) {
+  const a = Math.atan2(t[1] - h[1], t[0] - h[0]), L = Math.hypot(t[0] - h[0], t[1] - h[1]), m = [h[0] + Math.cos(a) * L * 0.2, h[1] + Math.sin(a) * L * 0.2], nx = -Math.sin(a) * w, ny = Math.cos(a) * w;
+  return [h, [m[0] + nx, m[1] + ny], t, [m[0] - nx, m[1] - ny]];
+}
+function dialGeom() { return { x0: 480, x1: 620, y: 70, k: 480 + (valueAt(S.params['ctl.turn'], fr) + 1) / 2 * 140 }; }
+function drawOverlay() {
+  let s = '';
+  const sk = tool === 'bone' ? rest : scene.sk;
+  if (showBones) {
+    S.bones.forEach(b => {
+      const k = sk[b.id], sel = selKind === 'bone' && selBone === b.id, lm = limbOf(b.id), ikOn = lm && val(lm.id + '.ik') > 0.01 && tool !== 'bone';
+      s += '<polygon points="' + polyStr(boneShape(k.head, k.tip, 5)) + '" fill="' + (sel ? '#ffb454' : ikOn ? '#58d68d' : '#4c8dff') + '" fill-opacity="' + (sel ? 0.9 : 0.55) + '" stroke="' + (sel ? '#fff' : '#17181b') + '"/>';
+      s += '<circle cx="' + k.tip[0] + '" cy="' + k.tip[1] + '" r="' + (tool === 'pose' || tool === 'bone' ? 4 : 2.5) + '" fill="#fff" stroke="#17181b"/>';
+    });
+    if (tool !== 'bone') {
+      S.limbs.forEach(l => {
+        const on = val(l.id + '.ik') > 0.01, tip = on ? [val(l.id + '.ix'), val(l.id + '.iy')] : sk[l.lower].tip;
+        s += '<circle cx="' + tip[0] + '" cy="' + tip[1] + '" r="9" fill="' + (on ? '#58d68d55' : 'none') + '" stroke="' + (on ? '#58d68d' : '#58d68d99') + '" stroke-width="2" stroke-dasharray="' + (on ? '0' : '3 2') + '"/>';
+        if (on) s += '<line x1="' + tip[0] + '" y1="' + tip[1] + '" x2="' + sk[l.lower].tip[0] + '" y2="' + sk[l.lower].tip[1] + '" stroke="#58d68d" stroke-dasharray="2 3"/>';
+      });
+      const hp = sk.spine.head;
+      s += '<rect x="' + (hp[0] - 7) + '" y="' + (hp[1] - 7) + '" width="14" height="14" rx="3" fill="#ffb454" fill-opacity="0.35" stroke="#ffb454"/>';
+    }
+  }
+  const g = dialGeom(), turn = valueAt(S.params['ctl.turn'], fr);
+  s += '<rect x="' + (g.x0 - 14) + '" y="' + (g.y - 26) + '" width="' + (g.x1 - g.x0 + 28) + '" height="52" rx="10" fill="#17181bd0" stroke="' + (selKind === 'dial' ? '#ffb454' : '#5a5d66') + '"/>';
+  s += '<text x="' + (g.x0 - 6) + '" y="' + (g.y - 10) + '" fill="#9a9ea8" font-size="10">Head turn · ' + FACES[driverAdds(S, fr).face] + '</text>';
+  s += '<line x1="' + g.x0 + '" y1="' + g.y + '" x2="' + g.x1 + '" y2="' + g.y + '" stroke="#4a4d55" stroke-width="4" stroke-linecap="round"/>';
+  for (let i = 0; i < 5; i++) s += '<circle cx="' + (g.x0 + i * 35) + '" cy="' + g.y + '" r="3" fill="#6a6d76"/>';
+  s += '<circle cx="' + g.k + '" cy="' + g.y + '" r="9" fill="#ffb454" stroke="#17181b" stroke-width="2"/>';
+  if (tool === 'weights') {
+    const it = scene.items.find(i => i.part.id === selPart);
+    if (it && it.part.w) it.pts.forEach((p, i) => { const w = it.part.w[i][wp.bone] || 0; s += '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="3.6" fill="hsl(' + Math.round((1 - w) * 240) + ',90%,50%)" stroke="#000" stroke-opacity="0.5"/>'; });
+    s += '<circle cx="' + cursor[0] + '" cy="' + cursor[1] + '" r="' + wp.radius + '" fill="none" stroke="#fff" stroke-opacity="0.8" stroke-dasharray="3 3"/>';
+  }
+  if (drag && drag.type === 'newbone') s += '<line x1="' + drag.from[0] + '" y1="' + drag.from[1] + '" x2="' + cursor[0] + '" y2="' + cursor[1] + '" stroke="#ffb454" stroke-width="3" stroke-dasharray="4 3"/>';
+  overEl.innerHTML = s;
+}
+
+// ---------- interaction ----------
+function posOf(ev) { const r = stage.getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; }
+function segDist(p, a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], t = clamp(((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy || 1), 0, 1);
+  return Math.hypot(p[0] - a[0] - dx * t, p[1] - a[1] - dy * t);
+}
+function boneHit(p, sk) {
+  let best = null;
+  S.bones.forEach(b => {
+    const k = sk[b.id], dt = Math.hypot(p[0] - k.tip[0], p[1] - k.tip[1]), db = segDist(p, k.head, k.tip);
+    if (dt < 11 && (!best || dt < best.d)) best = { id: b.id, part: 'tip', d: dt };
+    else if (db < 8 && (!best || (best.part !== 'tip' && db < best.d))) best = { id: b.id, part: 'body', d: db };
+  });
+  return best;
+}
+function partsAt(p) {
+  for (let i = scene.items.length - 1; i >= 0; i--) { const it = scene.items[i]; if (it.part.id !== 'face' && pointInPoly(p, it.pts)) return it.part.id; }
+  return null;
+}
+function pointInPoly(p, pts) {
+  let c = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const a = pts[i], b = pts[j];
+    if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]) c = !c;
+  }
+  return c;
+}
+function rotateBoneTo(id, p) {
+  const b = boneById(id), k = scene.sk[id], pang = b.parent ? scene.sk[b.parent].ang : 0, drv = driverAdds(S, fr).add;
+  const lm = limbOf(id);
+  if (lm && val(lm.id + '.ik') > 0.5) { toast(lm.name + ' is IK: drag the ring, or press To FK'); return; }
+  setParam(id + '.rot', norm180(Math.atan2(p[1] - k.head[1], p[0] - k.head[0]) / D2R - pang - b.rel - (drv[id] || 0)));
+}
+function selectBone(id) { selBone = id; selKind = 'bone'; if (wp.bone && S.parts.find(p => p.id === selPart && p.infl) && S.parts.find(p => p.id === selPart).infl.includes(id)) wp.bone = id; selKey = null; }
+stage.addEventListener('pointerdown', ev => {
+  if (ev.target.closest('#hud,#tl,#ring,#hint')) return;
+  if (ring) { closeRing(); refresh(); return; }
+  const p = posOf(ev);
+  if (p[1] > WH) return;
+  cursor = p;
+  if (tool === 'weights') {
+    const part = S.parts.find(x => x.id === selPart);
+    if (!part || !part.w) { toast('Pick a smooth part in the Skin tab (Sleeve L)'); return; }
+    beginEdit(); drag = { type: 'paint' }; paintAt(p, ev.pressure || 0.5); refresh(); return;
+  }
+  const g = dialGeom();
+  if (tool === 'pose' && Math.abs(p[1] - g.y) < 16 && p[0] > g.x0 - 14 && p[0] < g.x1 + 14) { selKind = 'dial'; hudTab = 'driver'; beginEdit(); drag = { type: 'dial' }; setDial(p[0]); refresh(); return; }
+  const hit = boneHit(p, tool === 'bone' ? rest : scene.sk);
+  if (tool === 'pose') {
+    if (showBones) {
+      for (const l of S.limbs) {
+        const on = val(l.id + '.ik') > 0.01, tip = on ? [val(l.id + '.ix'), val(l.id + '.iy')] : scene.sk[l.lower].tip;
+        if (Math.hypot(p[0] - tip[0], p[1] - tip[1]) < 11) { selectBone(l.lower); beginEdit(); if (!on) toIK(l); drag = { type: 'ik', l }; refresh(); return; }
+      }
+      const hp = scene.sk.spine.head;
+      if (Math.abs(p[0] - hp[0]) < 9 && Math.abs(p[1] - hp[1]) < 9) { selectBone('spine'); beginEdit(); drag = { type: 'root', ox: val('spine.dx') - p[0], oy: val('spine.dy') - p[1] }; refresh(); return; }
+    }
+    if (hit) { selectBone(hit.id); hudTab = 'bone'; if (hit.part === 'tip') { beginEdit(); drag = { type: 'rot', id: hit.id }; } refresh(); return; }
+    const pid = partsAt(p); if (pid) { selPart = pid; refresh(); }
+    return;
+  }
+  if (tool === 'bone') {
+    if (hit && hit.part === 'tip') {
+      selectBone(hit.id);
+      if (boneMode === 'add') { drag = { type: 'newbone', from: rest[hit.id].tip.slice(), parent: hit.id }; }
+      else { beginEdit(); drag = { type: 'tipedit', id: hit.id }; }
+      refresh(); return;
+    }
+    if (hit) { selectBone(hit.id); refresh(); }
+  }
+});
+function setDial(x) { const g = dialGeom(); setParam('ctl.turn', clamp((x - g.x0) / 140 * 2 - 1, -1, 1)); }
+window.addEventListener('pointermove', ev => {
+  const p = posOf(ev);
+  cursor = p;
+  if (tHold && tHold.active) { fr = clamp(Math.round(tHold.f + (p[0] - tHold.x) / 5), 0, FRAMES); badge('Frame ' + fr, p); refresh(); return; }
+  if (scrub) { updateScrub(p); return; }
+  if (!drag) { if (tool === 'weights') drawOverlay(); return; }
+  if (drag.type === 'time') { fr = clamp(Math.round((tlPos(ev)[0] - TL.X0) / TL.XW * FRAMES), 0, FRAMES); refresh(); }
+  else if (drag.type === 'key') {
+    const nf = clamp(Math.round((tlPos(ev)[0] - TL.X0) / TL.XW * FRAMES), 0, FRAMES), ks = S.params[drag.pid].keys;
+    if (nf !== drag.key.f) { const ex = ks.find(k => k.f === nf); if (ex) ks.splice(ks.indexOf(ex), 1); drag.key.f = nf; ks.sort((a, b) => a.f - b.f); refresh(); }
+  } else if (drag.type === 'rot') { rotateBoneTo(drag.id, p); refresh(); }
+  else if (drag.type === 'ik') { setParam(drag.l.id + '.ix', p[0]); setParam(drag.l.id + '.iy', p[1]); refresh(); }
+  else if (drag.type === 'root') { setParam('spine.dx', p[0] + drag.ox); setParam('spine.dy', p[1] + drag.oy); refresh(); }
+  else if (drag.type === 'dial') { setDial(p[0]); refresh(); }
+  else if (drag.type === 'paint') { paintAt(p, ev.pressure || 0.5); refresh(); }
+  else if (drag.type === 'newbone') drawOverlay();
+  else if (drag.type === 'tipedit') { editTip(drag.id, p); refresh(); }
+});
+window.addEventListener('pointerup', ev => {
+  if (hudLock) { hudLock = false; endEdit(); refresh(); }
+  if (!drag) return;
+  const t = drag.type;
+  if (t === 'newbone') {
+    const p = cursor, par = boneById(drag.parent), len = Math.hypot(p[0] - drag.from[0], p[1] - drag.from[1]);
+    if (len > 12) {
+      beginEdit();
+      const ra = Math.atan2(p[1] - drag.from[1], p[0] - drag.from[0]) / D2R, id = 'bone' + S.nextBone++;
+      mkBone(S.bones, id, 'Bone ' + (S.nextBone - 1), par.id, 1, 0, ra, Math.round(len));
+      ensureParams(S); rebind(); selBone = id; endEdit();
+      toast('Added ' + boneById(id).name + ' under ' + par.name);
+    }
+  }
+  if (t === 'tipedit') { rebind(); }
+  drag = null;
+  if (t !== 'time') endEdit();
+  refresh();
+});
+function editTip(id, p) {
+  const b = boneById(id), k = rest[id], oldRa = boneRa(S.bones, b), ra = Math.atan2(p[1] - k.head[1], p[0] - k.head[0]) / D2R, len = Math.max(10, Math.hypot(p[0] - k.head[0], p[1] - k.head[1]));
+  const d = norm180(ra - oldRa);
+  b.rel += d; b.len = Math.round(len);
+  S.bones.filter(c => c.parent === id).forEach(c => { c.rel -= d; });
+}
+function badge(text, p) { badgeEl.textContent = text; badgeEl.style.display = 'block'; badgeEl.style.left = clamp(p[0] + 14, 4, 820) + 'px'; badgeEl.style.top = clamp(p[1] - 26, 4, 380) + 'px'; }
+
+// ---------- weight painting ----------
+function setWeight(w, bone, v) {
+  v = clamp(v, 0, 1);
+  const others = Object.keys(w).filter(b => b !== bone), sum = others.reduce((a, b) => a + w[b], 0);
+  w[bone] = v;
+  if (sum > 1e-6) others.forEach(b => { w[b] = w[b] * (1 - v) / sum; }); else if (others.length) w[others[0]] = 1 - v;
+}
+function paintAt(p, pressure) {
+  const part = S.parts.find(x => x.id === selPart), it = scene.items.find(i => i.part.id === selPart);
+  if (!part || !it || !part.w) return;
+  const s = wp.strength * clamp(pressure * 2, 0.1, 1.6), n = part.pts.length, half = n / 2;
+  const touched = [];
+  it.pts.forEach((q, i) => { const d = Math.hypot(q[0] - p[0], q[1] - p[1]); if (d < wp.radius) touched.push([i, 1 - d / wp.radius]); });
+  const snapW = part.w.map(w => Object.assign({}, w));
+  touched.forEach(([i, fo]) => {
+    const w = part.w[i], dl = 0.25 * s * fo;
+    if (wp.mode === 'add') setWeight(w, wp.bone, w[wp.bone] + dl);
+    else if (wp.mode === 'sub') setWeight(w, wp.bone, w[wp.bone] - dl);
+    else {
+      const nb = [(i + n - 1) % n, (i + 1) % n, n - 1 - i].map(j => snapW[j]);
+      part.infl.forEach(b => { w[b] = w[b] + ((nb[0][b] + nb[1][b] + nb[2][b]) / 3 - w[b]) * Math.min(1, 0.6 * s * fo); });
+      const sum = part.infl.reduce((a, b) => a + w[b], 0) || 1; part.infl.forEach(b => { w[b] /= sum; });
+    }
+  });
+}
+
+// ---------- HUD ----------
+function paramRow(pid) {
+  const d = D(pid), p = S.params[pid], v = val(pid), here = hasKeyHere(pid);
+  const dia = '<span class="dia' + (p.keys.length ? ' on' : '') + '" data-dia="' + pid + '">' + (here ? '◆' : p.keys.length ? '◈' : '◇') + '</span>';
+  return '<div class="row" data-p="' + pid + '">' + dia + '<span class="lab">' + d.label + '</span><input type="range" min="' + d.min + '" max="' + d.max + '" step="' + d.step + '" value="' + v + '"><span class="mono val">' + d.fmt(v) + '</span></div>';
+}
+function card(title, sub, body) { return '<div class="node"><div class="head"><b>' + title + '</b><span>' + sub + '</span></div>' + body + '</div>'; }
+function chain(id) { const out = []; let b = boneById(id); while (b) { out.unshift(b); b = b.parent ? boneById(b.parent) : null; } return out; }
+function hudHtml() {
+  const tab = (id, name) => '<button data-tab="' + id + '" class="' + (hudTab === id ? 'on' : '') + '">' + name + '</button>';
+  let s = '<div class="tabs">' + tab('bone', 'Bone') + tab('skin', 'Skin') + tab('driver', 'Driver') + '</div>';
+  if (hudTab === 'driver') {
+    const dr = S.drv, ck = (k, t) => '<label style="display:flex;gap:6px;color:var(--text);font-size:12px"><input type="checkbox" data-drv="' + k + '"' + (dr[k].on ? ' checked' : '') + '> ' + t + '</label>';
+    s += '<div class="chain"><b>Head turn</b> dial &rsaquo; Driver &rsaquo; targets</div>';
+    s += card('Dial', 'control', paramRow('ctl.turn') + '<div class="note">Drag the dial on the canvas, or key it here.</div>');
+    s += card('Driver', 'one control, three targets',
+      ck('head', 'Head rotation') + '<div class="row"><span class="lab">± amount</span><input type="range" min="0" max="30" step="1" value="' + dr.head.amt + '" data-amt="head"><span class="mono">' + dr.head.amt + '°</span></div>' +
+      ck('neck', 'Neck rotation') + '<div class="row"><span class="lab">± amount</span><input type="range" min="0" max="20" step="1" value="' + dr.neck.amt + '" data-amt="neck"><span class="mono">' + dr.neck.amt + '°</span></div>' +
+      ck('face', 'Face drawing (switch)') + '<div class="chips">' + FACES.map((n, i) => '<button class="' + (driverAdds(S, fr).face === i ? 'on' : '') + '" disabled>' + n + '</button>').join('') + '</div><div class="note">The face switch is stepped: it picks a drawing from the dial, no tween.</div>');
+    return s;
+  }
+  if (hudTab === 'skin') {
+    s += '<div class="chain"><b>Skin</b>: parts bound to bones</div>';
+    s += '<div class="node">' + S.parts.map(pt => '<div class="part' + (pt.id === selPart ? ' sel' : '') + '" data-part="' + pt.id + '"><span class="dot" style="background:' + pt.fill + '"></span>' + pt.name + '<small>' + (pt.w ? (pt.mode === 'smooth' ? 'smooth · ' + pt.infl.length : 'rigid (by weights)') : 'rigid · ' + boneById(pt.bone).name) + '</small></div>').join('') + '</div>';
+    const pt = S.parts.find(p => p.id === selPart);
+    if (pt && pt.w) {
+      s += card(pt.name, 'weights', '<div class="chips"><button data-bind="smooth" class="' + (pt.mode === 'smooth' ? 'on' : '') + '">Smooth</button><button data-bind="rigid" class="' + (pt.mode === 'rigid' ? 'on' : '') + '">Rigid</button></div>' +
+        '<div class="note">Active bone</div><div class="chips">' + pt.infl.map(b => '<button data-wbone="' + b + '" class="' + (wp.bone === b ? 'on' : '') + '">' + boneById(b).name.replace(' arm', '').replace('Upper', 'Up') + '</button>').join('') + '</div>' +
+        '<div class="chips">' + [['add', 'Add'], ['sub', 'Subtract'], ['smooth', 'Smooth']].map(m => '<button data-wmode="' + m[0] + '" class="' + (wp.mode === m[0] ? 'on' : '') + '">' + m[1] + '</button>').join('') + '</div>' +
+        '<div class="row"><span class="lab">Radius</span><input type="range" min="8" max="80" step="1" value="' + wp.radius + '" data-wp="radius"><span class="mono">' + wp.radius + '</span></div>' +
+        '<div class="row"><span class="lab">Strength</span><input type="range" min="0.1" max="1" step="0.05" value="' + wp.strength + '" data-wp="strength"><span class="mono">' + wp.strength.toFixed(2) + '</span></div>' +
+        '<div class="chips"><button class="small" data-act="auto">Auto weights</button><button class="small" data-act="flood">Flood bone</button><button class="small" data-act="paint">Paint (3)</button></div>' +
+        '<div class="note">Pressure scales the brush. Dots: blue 0 → red 1 for the active bone.</div>');
+    } else if (pt) {
+      s += card(pt.name, 'rigid', '<div class="note">Bound 100% to <b>' + boneById(pt.bone).name + '</b>, a cut-out part.</div><div class="chips"><button class="small" data-act="bindsel">Bind rigid to ' + boneById(selBone).name + '</button></div>');
+    }
+    return s;
+  }
+  const b = boneById(selBone), l = limbOf(selBone), path = chain(selBone), kids = S.bones.filter(c => c.parent === selBone);
+  if (selKind === 'dial') return s + '<div class="note">The dial is selected: see the Driver tab.</div>';
+  s += '<div class="chain">' + path.map(x => x.id === selBone ? '<b>' + x.name + '</b>' : x.name).join(' › ') + '</div>';
+  s += card(b.name, 'length ' + b.len, paramRow(b.id + '.rot') + (b.root ? paramRow(b.id + '.dx') + paramRow(b.id + '.dy') : '') +
+    '<div class="chips">' + (b.parent ? '<button class="small" data-pick="' + b.parent + '">↑ ' + boneById(b.parent).name + '</button>' : '') + kids.map(c => '<button class="small" data-pick="' + c.id + '">↓ ' + c.name + '</button>').join('') + '</div>');
+  if (l) {
+    const on = val(l.id + '.ik') > 0.01;
+    s += card(l.name, on ? 'IK' : 'FK', paramRow(l.id + '.ik') + '<div class="chips"><button class="small" data-act="ik">To IK</button><button class="small" data-act="fk">To FK</button><button class="small" data-act="flip">Flip bend</button></div>' + (on ? paramRow(l.id + '.ix') + paramRow(l.id + '.iy') : '<div class="note">Drag the dashed ring at the end of the limb to start IK.</div>'));
+  }
+  if (tool === 'bone') s += card('Bone tool', boneMode === 'add' ? 'add child' : 'edit tip', '<div class="chips"><button data-bmode="add" class="' + (boneMode === 'add' ? 'on' : '') + '">Add child</button><button data-bmode="edit" class="' + (boneMode === 'edit' ? 'on' : '') + '">Edit tip</button>' + (!kids.length && !S.parts.some(p => p.bone === b.id || (p.w && p.infl.includes(b.id))) ? '<button data-act="delbone">Delete</button>' : '') + '</div><div class="note">Drag from a tip. Art is shown unposed; every edit re-binds.</div>');
+  return s;
+}
+function updateHud() {
+  const sig = [hudTab, selBone, selKind, selPart, tool, boneMode, fr, JSON.stringify(wp), S.bones.length, JSON.stringify(S.drv), S.parts.map(p => p.mode || '').join(''), selPids().map(pid => S.params[pid].keys.length + ':' + hasKeyHere(pid)).join(',')].join('|');
+  if (hudLock) { hudEl.querySelectorAll('[data-p]').forEach(r => { r.querySelector('.val').textContent = D(r.dataset.p).fmt(val(r.dataset.p)); }); return; }
+  if (sig !== hudSigLast) { hudSigLast = sig; hudEl.innerHTML = hudHtml(); return; }
+  hudEl.querySelectorAll('[data-p]').forEach(r => { const inp = r.querySelector('input'); if (inp !== document.activeElement) inp.value = val(r.dataset.p); r.querySelector('.val').textContent = D(r.dataset.p).fmt(val(r.dataset.p)); });
+}
+hudEl.addEventListener('pointerdown', ev => { if (ev.target.matches('input[type=range]')) { hudLock = true; beginEdit(); } });
+hudEl.addEventListener('input', ev => {
+  const t = ev.target;
+  if (!t.matches('input[type=range]')) return;
+  if (t.dataset.p || t.closest('[data-p]')) { setParam(t.closest('[data-p]').dataset.p, +t.value); refreshLight(); }
+  else if (t.dataset.amt) { S.drv[t.dataset.amt].amt = +t.value; t.nextElementSibling.textContent = t.value + '°'; refreshLight(); }
+  else if (t.dataset.wp) { wp[t.dataset.wp] = +t.value; t.nextElementSibling.textContent = t.dataset.wp === 'radius' ? t.value : (+t.value).toFixed(2); drawOverlay(); }
+});
+hudEl.addEventListener('change', ev => { const t = ev.target; if (t.dataset.drv) { beginEdit(); S.drv[t.dataset.drv].on = t.checked; endEdit(); refresh(); } });
+hudEl.addEventListener('click', ev => {
+  const t = ev.target, partEl = t.closest('[data-part]');
+  if (t.dataset.tab) { hudTab = t.dataset.tab; refresh(); return; }
+  if (t.dataset.dia) { toggleKey(t.dataset.dia); return; }
+  if (t.dataset.pick) { selectBone(t.dataset.pick); refresh(); return; }
+  if (t.dataset.bmode) { boneMode = t.dataset.bmode; refresh(); return; }
+  if (t.dataset.wbone) { wp.bone = t.dataset.wbone; selBone = t.dataset.wbone; selKind = 'bone'; refresh(); return; }
+  if (t.dataset.wmode) { wp.mode = t.dataset.wmode; refresh(); return; }
+  if (t.dataset.bind) { beginEdit(); S.parts.find(p => p.id === selPart).mode = t.dataset.bind; endEdit(); refresh(); return; }
+  const a = t.dataset.act, pt = S.parts.find(p => p.id === selPart);
+  if (a === 'auto' && pt && pt.w) { beginEdit(); pt.w = autoWeights(pt, pt.tEl); endEdit(); refresh(); toast('Auto weights from distance along the chain'); return; }
+  if (a === 'flood' && pt && pt.w) { beginEdit(); pt.w.forEach(w => { pt.infl.forEach(b => { w[b] = b === wp.bone ? 1 : 0; }); }); endEdit(); refresh(); return; }
+  if (a === 'paint') { setTool('weights'); return; }
+  if (a === 'bindsel') { beginEdit(); pt.bone = selBone; endEdit(); refresh(); toast(pt.name + ' bound to ' + boneById(selBone).name); return; }
+  const l = limbOf(selBone);
+  if (a === 'ik' && l) { beginEdit(); toIK(l); endEdit(); refresh(); return; }
+  if (a === 'fk' && l) { toFK(l); return; }
+  if (a === 'flip' && l) { beginEdit(); setParam(l.id + '.flip', 1 - Math.round(val(l.id + '.flip'))); endEdit(); refresh(); return; }
+  if (a === 'delbone') { beginEdit(); S.bones = S.bones.filter(b => b.id !== selBone); delete S.params[selBone + '.rot']; selBone = 'spine'; endEdit(); refresh(); return; }
+  if (partEl) { selPart = partEl.dataset.part; refresh(); }
+});
+
+// ---------- timeline strip ----------
+const TL = { X0: 190, XW: 690, RULER: 22, ROWH: 20 };
+const fx = f => TL.X0 + f * TL.XW / FRAMES;
+function tlPids() {
+  const ids = [];
+  S.bones.forEach(b => ['rot', 'dx', 'dy'].forEach(k => { const pid = b.id + '.' + k; if (S.params[pid] && S.params[pid].keys.length) ids.push(pid); }));
+  S.limbs.forEach(l => ['ik', 'ix', 'iy', 'flip'].forEach(k => { const pid = l.id + '.' + k; if (S.params[pid].keys.length) ids.push(pid); }));
+  if (S.params['ctl.turn'].keys.length) ids.push('ctl.turn');
+  return ids;
+}
+let tlRows = [];
+function updateTl() {
+  tlRows = tlPids();
+  const H = tlRows.length * TL.ROWH, px = fx(fr);
+  let r = '<rect width="900" height="22" fill="#2a2c31"/>';
+  for (let f = 0; f <= FRAMES; f++) { const x = fx(f), big = f % 6 === 0; r += '<line x1="' + x + '" y1="' + (22 - (big ? 9 : 4)) + '" x2="' + x + '" y2="22" stroke="#6a6d76"/>'; if (big) r += '<text x="' + (x + 3) + '" y="11" fill="#9a9ea8" font-size="10">' + f + '</text>'; }
+  r += '<text x="8" y="14" fill="#9a9ea8" font-size="10">Keyed channels</text><line x1="' + px + '" y1="0" x2="' + px + '" y2="22" stroke="#ffb454"/><polygon points="' + (px - 6) + ',0 ' + (px + 6) + ',0 ' + px + ',10" fill="#ffb454"/>';
+  tlRuler.innerHTML = r;
+  let s = '<rect width="900" height="' + H + '" fill="#202125"/>';
+  tlRows.forEach((pid, i) => {
+    const y = i * TL.ROWH, cy = y + TL.ROWH / 2, ks = S.params[pid].keys, d = D(pid), idp = pid.slice(0, pid.indexOf('.')), on = selKind === 'bone' && (idp === selBone || (limbOf(selBone) && limbOf(selBone).id === idp));
+    s += '<rect width="900" height="' + TL.ROWH + '" y="' + y + '" fill="' + (on ? '#2c2a1e' : 'none') + '"/><text x="8" y="' + (cy + 4) + '" fill="' + (on ? '#e6e7ea' : '#9a9ea8') + '" font-size="11">' + ownerName(S, pid) + ' · ' + d.label + '</text><line x1="' + TL.X0 + '" y1="' + (y + TL.ROWH) + '" x2="880" y2="' + (y + TL.ROWH) + '" stroke="#2c2e33"/>';
+    for (let k = 0; k < ks.length - 1; k++) s += '<line x1="' + fx(ks[k].f) + '" y1="' + cy + '" x2="' + fx(ks[k + 1].f) + '" y2="' + cy + '" stroke="#6a6d76"/>';
+    ks.forEach(k => { const x = fx(k.f), sel = selKey && selKey.k === k; s += (d.hold ? '<rect x="' + (x - 4.5) + '" y="' + (cy - 4.5) + '" width="9" height="9"' : '<polygon points="' + x + ',' + (cy - 5.5) + ' ' + (x + 5.5) + ',' + cy + ' ' + x + ',' + (cy + 5.5) + ' ' + (x - 5.5) + ',' + cy + '"') + ' fill="' + (sel ? '#ffe0a8' : '#ffb454') + '" stroke="' + (sel ? '#fff' : '#1b1b1b') + '" stroke-width="' + (sel ? 2 : 1) + '"/>'; });
+  });
+  s += '<line x1="' + px + '" y1="0" x2="' + px + '" y2="' + H + '" stroke="#ffb454"/>';
+  tlSvg.setAttribute('height', H); tlSvg.setAttribute('viewBox', '0 0 900 ' + Math.max(H, 1)); tlSvg.innerHTML = s;
+  $('bPlay').innerHTML = playing ? '&#10074;&#10074; Pause' : '&#9654; Play';
+  const nf = $('nFrame'); if (document.activeElement !== nf) nf.value = fr;
+  $('tlStat').textContent = tlRows.length + ' keyed channels';
+}
+const tlPos = ev => { const r = tlSvg.getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; };
+tlRuler.addEventListener('pointerdown', ev => { drag = { type: 'time' }; const r = tlRuler.getBoundingClientRect(); fr = clamp(Math.round((ev.clientX - r.left - TL.X0) / TL.XW * FRAMES), 0, FRAMES); refresh(); });
+tlSvg.addEventListener('pointerdown', ev => {
+  const [x, y] = tlPos(ev), pid = tlRows[Math.floor(y / TL.ROWH)];
+  if (!pid) return;
+  const idp = pid.slice(0, pid.indexOf('.'));
+  if (x < TL.X0) { if (idp === 'ctl') { selKind = 'dial'; hudTab = 'driver'; } else { const l = S.limbs.find(l => l.id === idp); selectBone(l ? l.lower : idp); selKind = 'bone'; hudTab = 'bone'; } refresh(); return; }
+  const k = S.params[pid].keys.find(k => Math.abs(fx(k.f) - x) < 8);
+  if (k) { selKey = { pid, k }; drag = { type: 'key', pid, key: k }; beginEdit(); } else selKey = null;
+  refresh();
+});
+
+// ---------- tools, ring, scrub, playback ----------
+function setTool(t) {
+  tool = t; if (t === 'weights') hudTab = 'skin';
+  ['pose', 'bone', 'weights'].forEach(n => $('t' + n[0].toUpperCase() + n.slice(1)).classList.toggle('on', n === t));
+  stage.style.cursor = t === 'weights' ? 'crosshair' : 'default';
+  refresh();
+}
+function showRing(pos, title, slots, sub) {
+  closeRing();
+  const R = 90, cx = clamp(pos[0], R + 66, 900 - R - 66), cy = clamp(pos[1], R + 30, WH - R - 10);
+  ring = { el: document.createElement('div'), slots };
+  ring.el.id = 'ring'; ring.el.style.left = cx + 'px'; ring.el.style.top = cy + 'px';
+  ring.el.innerHTML = '<div class="hub">' + title + '<small>' + (sub || '') + '</small></div>';
+  slots.forEach((sl, i) => {
+    const an = (-90 + i * 45) * Math.PI / 180, el = document.createElement('div');
+    el.className = 'slot'; el.style.left = Math.cos(an) * R + 'px'; el.style.top = Math.sin(an) * R + 'px';
+    el.innerHTML = '<span class="key">' + sl.key + '</span>' + sl.label;
+    el.onpointerdown = e => e.stopPropagation();
+    el.onclick = e => { e.stopPropagation(); closeRing(); sl.fn(); };
+    ring.el.appendChild(el);
+  });
+  stage.appendChild(ring.el);
+}
+function closeRing() { if (ring) { ring.el.remove(); ring = null; } }
+function openRing(pos) {
+  const l = limbOf(selBone), on = l && val(l.id + '.ik') > 0.01;
+  showRing(pos, 'Rig', [
+    { key: '1', label: 'Pose tool', fn: () => setTool('pose') },
+    { key: '2', label: 'Bone tool', fn: () => setTool('bone') },
+    { key: '3', label: 'Weights', fn: () => setTool('weights') },
+    { key: 'K', label: 'Key<small>' + (selKind === 'dial' ? 'dial' : boneById(selBone).name) + '</small>', fn: () => keySel(false) },
+    { key: 'I', label: l ? (on ? 'To FK' : 'To IK') + '<small>' + l.name + '</small>' : 'IK / FK<small>pick a limb</small>', fn: () => { if (!l) return toast('Select a limb bone first'); if (on) toFK(l); else { beginEdit(); toIK(l); endEdit(); refresh(); } } },
+    { key: 'R', label: 'Rest pose', fn: restPose },
+    { key: 'P', label: playing ? 'Pause' : 'Play', fn: togglePlay },
+    { key: 'H', label: 'Bones<small>' + (showBones ? 'shown' : 'hidden') + '</small>', fn: () => { showBones = !showBones; $('cBones').checked = showBones; refresh(); } },
+  ], 'frame ' + fr);
+}
+function startScrub(kind) {
+  beginEdit();
+  if (kind === 'rot') {
+    if (selKind !== 'bone') { endEdit(); return; }
+    scrub = { kind, pid: selBone + '.rot', y0: cursor[1], v0: val(selBone + '.rot') };
+  } else scrub = { kind, y0: cursor[1], v0: wp.radius };
+  scrub.x = clamp(cursor[0] + 24, 6, 600); scrub.y = clamp(cursor[1] - 40, 6, 330);
+  showScrub(); refresh();
+}
+function updateScrub(p) {
+  if (scrub.kind === 'rot') setParam(scrub.pid, scrub.v0 + (scrub.y0 - p[1]) * 360 / 300);
+  else wp.radius = Math.round(clamp(scrub.v0 + (scrub.y0 - p[1]) * 0.3, 8, 80));
+  showScrub(); refresh();
+}
+function showScrub() {
+  const rot = scrub.kind === 'rot', v = rot ? val(scrub.pid) : wp.radius, t = rot ? (v + 180) / 360 : (v - 8) / 72;
+  scrubEl.style.display = 'block'; scrubEl.style.left = scrub.x + 'px'; scrubEl.style.top = scrub.y + 'px';
+  scrubEl.innerHTML = '<div class="head"><span>' + (rot ? boneById(selBone).name + ' · Rotation' : 'Brush radius') + '</span><b>' + (rot ? v.toFixed(0) + '°' : v) + '</b></div><div class="track"><div class="fill" style="width:' + t * 100 + '%"></div><div class="thumb" style="left:' + t * 100 + '%"></div></div><div class="sub">' + (rot ? (S.params[scrub.pid].keys.length || autoKey ? 'writes a key at frame ' + fr : 'sets the unkeyed value') : 'move up for a bigger brush') + '</div>';
+}
+function endScrub() { scrub = null; scrubEl.style.display = 'none'; endEdit(); refresh(); }
+let lastTs = 0, acc = 0;
+function togglePlay() { playing = !playing; if (playing) { lastTs = performance.now(); acc = 0; requestAnimationFrame(tick); } refresh(); }
+function tick(ts) {
+  if (!playing) return;
+  acc += ts - lastTs; lastTs = ts;
+  const steps = Math.floor(acc / (1000 / FPS));
+  if (steps) { acc -= steps * 1000 / FPS; fr = (fr + steps) % (FRAMES + 1); refresh(); }
+  requestAnimationFrame(tick);
+}
+const isTyping = t => t && (t.tagName === 'INPUT' && t.type !== 'checkbox' && t.type !== 'range' || t.tagName === 'SELECT');
+window.addEventListener('keydown', e => {
+  const key = e.key.toLowerCase();
+  if (ring) {
+    if (e.key === 'Escape') { closeRing(); refresh(); return; }
+    const sl = ring.slots.find(x => x.key.toLowerCase() === key);
+    if (sl) { e.preventDefault(); closeRing(); sl.fn(); }
+    return;
+  }
+  if (isTyping(e.target)) { if (e.key === 'Enter' || e.key === 'Escape') e.target.blur(); return; }
+  if ((e.ctrlKey || e.metaKey) && key === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
+  if ((e.ctrlKey || e.metaKey) && key === 'y') { e.preventDefault(); doRedo(); return; }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === 'ArrowLeft') { e.preventDefault(); fr = clamp(fr - (e.shiftKey ? 5 : 1), 0, FRAMES); refresh(); return; }
+  if (e.key === 'ArrowRight') { e.preventDefault(); fr = clamp(fr + (e.shiftKey ? 5 : 1), 0, FRAMES); refresh(); return; }
+  if (e.key === 'Delete' || e.key === 'Backspace') { if (selKey) { e.preventDefault(); beginEdit(); const p = S.params[selKey.pid]; p.static = selKey.k.v; p.keys.splice(p.keys.indexOf(selKey.k), 1); selKey = null; endEdit(); refresh(); } return; }
+  if (e.repeat) return;
+  if (e.key === 'Enter') { e.preventDefault(); togglePlay(); return; }
+  if (e.key === '1') { setTool('pose'); return; }
+  if (e.key === '2') { setTool('bone'); return; }
+  if (e.key === '3') { setTool('weights'); return; }
+  if (key === 'k') { keySel(e.shiftKey); return; }
+  if (key === 'h') { showBones = !showBones; $('cBones').checked = showBones; refresh(); return; }
+  if (key === 'r' && !scrub && !drag) { held.r = true; startScrub('rot'); return; }
+  if (key === 'b' && tool === 'weights' && !scrub && !drag) { held.b = true; startScrub('brush'); return; }
+  if (key === 't' && !tHold) {
+    tHold = { x: cursor[0], f: fr, active: false };
+    tHold.timer = setTimeout(() => { if (tHold) { tHold.active = true; tHold.x = cursor[0]; tHold.f = fr; badge('Frame ' + fr, cursor); } }, 250);
+    return;
+  }
+  if (e.key === ' ') { e.preventDefault(); if (!spaceDown) spaceDown = Date.now(); }
+});
+window.addEventListener('keyup', e => {
+  const key = e.key.toLowerCase();
+  if (held[key] !== undefined) held[key] = false;
+  if (scrub && ((key === 'r' && scrub.kind === 'rot') || (key === 'b' && scrub.kind === 'brush'))) { endScrub(); return; }
+  if (key === 't' && tHold) { clearTimeout(tHold.timer); tHold = null; badgeEl.style.display = 'none'; refresh(); return; }
+  if (e.key === ' ') {
+    const had = spaceDown, dt = Date.now() - spaceDown; spaceDown = 0;
+    if (had && dt < 250 && !scrub && !drag && !ring && !isTyping(e.target)) openRing(cursor);
+    return;
+  }
+  updateHint();
+});
+$('tPose').onclick = () => setTool('pose'); $('tBone').onclick = () => setTool('bone'); $('tWeights').onclick = () => setTool('weights');
+$('cBones').onchange = ev => { showBones = ev.target.checked; refresh(); };
+$('cXray').onchange = ev => { xray = ev.target.checked; refresh(); };
+$('cAuto').onchange = ev => { autoKey = ev.target.checked; refresh(); };
+$('bUndo').onclick = doUndo; $('bRedo').onclick = doRedo;
+$('bReset').onclick = () => { S = buildState(); undo = []; redo = []; fr = 0; playing = false; selBone = 'upL'; selKind = 'bone'; selPart = 'sleeveL'; selKey = null; wp.bone = 'upL'; refresh(); };
+$('bFirst').onclick = () => { fr = 0; refresh(); }; $('bLast').onclick = () => { fr = FRAMES; refresh(); };
+$('bPrev').onclick = () => { fr = clamp(fr - 1, 0, FRAMES); refresh(); }; $('bNext').onclick = () => { fr = clamp(fr + 1, 0, FRAMES); refresh(); };
+$('bPlay').onclick = togglePlay; $('bKey').onclick = () => keySel(false); $('bUnkey').onclick = () => keySel(true);
+$('nFrame').onchange = ev => { fr = clamp(Math.round(+ev.target.value || 0), 0, FRAMES); refresh(); };
+function updateHint() {
+  const k = (t, on) => '<span class="key' + (on ? ' lit' : '') + '">' + t + '</span>';
+  hintEl.innerHTML = '<span class="tool">' + { pose: 'Pose', bone: 'Bone', weights: 'Weights' }[tool] + '</span><span class="main">' + (selKind === 'dial' ? 'Head turn dial' : boneById(selBone).name) + ' · frame ' + fr + '</span>' +
+    '<span>' + k('1') + k('2') + k('3') + ' tools</span><span>' + k('R', held.r) + ' hold: rotate bone ' + k('B', held.b) + ' hold: brush size</span><span>' + k('K') + ' key ' + k('Enter') + ' play ' + k('Space') + ' ring</span>';
+}
+function refreshLight() { renderWorld(); drawOverlay(); updateTl(); }
+function refresh() { renderWorld(); drawOverlay(); updateTl(); updateHud(); updateHint(); }
+refresh();
+</script>
+</body>
+</html>

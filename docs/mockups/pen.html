@@ -1,0 +1,1290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curvy pen path drawing and editing</title>
+<style>
+  :root {
+    --bg: #1e1f22; --panel: #26272b; --workspace: #2b2d31; --paper: #f4f4f2; --text: #e6e7ea; --muted: #9a9ea8;
+    --accent: #4c8dff; --amber: #ffb454; --slot: #313338; --slotLine: #4a4d55;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid #000; }
+  header h1 { margin: 0 0 4px; font-size: 15px; }
+  header p { margin: 0; color: var(--muted); max-width: 980px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 18px; padding: 10px 16px; background: #222327; border-bottom: 1px solid #000; align-items: center; }
+  .group { display: flex; align-items: center; gap: 6px; }
+  .group > span { color: var(--muted); margin-right: 4px; }
+  button { background: var(--slot); color: var(--text); border: 1px solid var(--slotLine); border-radius: 14px; padding: 4px 12px; font: inherit; cursor: pointer; }
+  button.on { background: var(--accent); border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: default; }
+  input[type=range] { width: 110px; }
+  label { color: var(--muted); display: flex; align-items: center; gap: 5px; }
+  #stage { position: relative; width: 900px; height: 540px; margin: 16px auto 8px; background: var(--workspace); border: 1px solid #000; overflow: hidden; cursor: crosshair; user-select: none; touch-action: none; }
+  #svg { position: absolute; left: 0; top: 0; }
+  #badge { position: absolute; display: none; padding: 1px 7px; border-radius: 9px; background: #17181bf0; border: 1px solid #5a5d66; color: var(--amber); font-size: 11px; white-space: nowrap; pointer-events: none; }
+  #chip { position: absolute; display: none; padding: 2px 8px; border-radius: 6px; background: #17181bf0; border: 1px solid #5a5d66; font-size: 11px; white-space: nowrap; pointer-events: none; color: var(--muted); }
+  #chip b { color: var(--text); font-weight: 600; }
+  #chip i { font-style: normal; color: var(--accent); }
+  #hud { position: absolute; right: 12px; top: 12px; width: 236px; padding: 8px 12px 10px; background: #17181bf0; border: 1px solid #5a5d66; border-radius: 10px; box-shadow: 0 3px 10px #0007; display: none; }
+  #hud .head { display: flex; justify-content: space-between; margin-bottom: 8px; }
+  #hud .head b { color: var(--amber); }
+  #hud .row { display: flex; align-items: center; gap: 6px; margin: 4px 0; color: var(--muted); font-size: 12px; }
+  #hud .row label { width: 16px; }
+  #hud input { width: 70px; background: #2a2c31; color: var(--text); border: 1px solid #4a4d55; border-radius: 4px; padding: 2px 4px; font: inherit; }
+  #hud .chips { display: flex; gap: 4px; margin: 6px 0 8px; }
+  #hud .chips button { padding: 2px 8px; font-size: 11px; border-radius: 10px; }
+  #hud { max-height: 504px; overflow: auto; }
+  #hud .node { border: 1px solid #3a3d43; border-radius: 8px; padding: 6px 8px 7px; }
+  #hud .node .head { margin-bottom: 4px; }
+  #hud .node .head b { color: var(--text); }
+  #hud .node .head span { color: var(--muted); font-size: 11px; }
+  #hud .link { text-align: center; color: var(--accent); font-size: 11px; line-height: 1.1; }
+  #hud .note { color: var(--amber); font-size: 11px; margin: 4px 0; }
+  #hud .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid #5a5d66; }
+  #hud input[type=range] { width: 84px; }
+  #hud .plot { display: block; margin: 2px 0 4px 66px; }
+  #hud .sep { border-top: 1px solid #3a3d43; margin: 8px 0 6px; }
+  #hud .mono { font-variant-numeric: tabular-nums; color: var(--text); }
+  #hint { position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: var(--panel); border-top: 1px solid #000; color: var(--muted); padding: 3px 10px; white-space: nowrap; font-size: 12px; display: flex; align-items: center; gap: 12px; }
+  #hint .tool { color: var(--amber); font-weight: 600; }
+  #hint .main { color: var(--text); }
+  #hint .grow { flex: 1; }
+  .key { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border-radius: 6px; background: #3a3d43; border: 1px solid #5a5d66; color: var(--text); font: 600 11px/18px "Segoe UI"; }
+  .key.lit { background: var(--amber); color: #1b1b1b; border-color: var(--amber); }
+  .mod { display: inline-flex; align-items: center; gap: 4px; }
+  #ring { position: absolute; width: 0; height: 0; z-index: 5; }
+  #ring .hub { position: absolute; left: -34px; top: -34px; width: 68px; height: 68px; border-radius: 50%; background: #17181bf0; border: 1px solid #5a5d66; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; color: var(--amber); line-height: 1.2; }
+  #ring .hub small { color: var(--muted); }
+  #ring .slot { position: absolute; transform: translate(-50%, -50%); width: 92px; height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 8px; border-radius: 15px; background: #17181bf0; border: 1px solid #5a5d66; color: var(--text); cursor: pointer; font-size: 12px; white-space: nowrap; }
+  #ring .slot:hover { border-color: var(--amber); background: #2b2d33; }
+  #ring .slot.off { opacity: .35; cursor: default; }
+  #ring .slot .key { height: 18px; min-width: 18px; justify-content: center; }
+  #scrub { position: absolute; display: none; width: 190px; padding: 8px 12px 14px; background: #17181bf0; border: 1px solid #5a5d66; border-radius: 10px; box-shadow: 0 3px 10px #0007; }
+  #scrub .head { display: flex; justify-content: space-between; margin-bottom: 10px; }
+  #scrub .head b { color: var(--amber); }
+  #scrub .track { position: relative; height: 6px; border-radius: 3px; background: #3a3d43; }
+  #scrub .fill { height: 100%; border-radius: 3px; background: var(--amber); }
+  #scrub .thumb { position: absolute; top: -5px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: var(--amber); border: 2px solid #17181b; }
+  #toast { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); padding: 4px 12px; border-radius: 8px; background: #17181bf0; border: 1px solid #5a5d66; display: none; color: var(--amber); }
+  #notes { width: 900px; margin: 0 auto 24px; color: var(--muted); }
+  #notes h2 { color: var(--text); font-size: 13px; margin: 14px 0 4px; }
+  #notes li { margin-bottom: 4px; }
+  #notes b { color: var(--text); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Pen path drawing and editing</h1>
+  <p>Working test bench for the bezier path interaction that the <code>bezierPath</code> node will need. Everything runs on pointer events, so a pen shows hover badges before it touches
+  the surface and reports pressure; the mouse works too (right button stands in for the barrel button). Try it: draw with the pen tool, edit the sample shapes with the direct tool,
+  scribble with freehand and then hold F to re-fit.</p>
+</header>
+<div class="controls">
+  <div class="group"><span>Tool</span>
+    <button id="tPen" class="on">Pen <span class="key">P</span></button>
+    <button id="tDirect">Direct <span class="key">A</span></button>
+    <button id="tFree">Freehand <span class="key">B</span></button>
+  </div>
+  <div class="group"><span>Freehand fit (defaults for new strokes)</span>
+    <label>smooth <input id="sTol" type="range" min="0.5" max="20" step="0.5" value="3.5"></label>
+    <label>corner angle <input id="sCorner" type="range" min="20" max="120" step="5" value="55"></label>
+  </div>
+  <div class="group"><span>Pen width (pressure)</span>
+    <label>min <input id="sWmin" type="range" min="0.5" max="10" step="0.5" value="1"></label>
+    <label>max <input id="sWmax" type="range" min="2" max="40" step="0.5" value="14"></label>
+  </div>
+  <div class="group">
+    <button id="bSample">Sample shapes</button>
+    <button id="bClear">Clear</button>
+    <button id="bUndo">Undo</button>
+    <button id="bRedo">Redo</button>
+  </div>
+  <div class="group"><label><input id="cChip" type="checkbox" checked> graph chip</label></div>
+</div>
+
+<div id="stage">
+  <svg id="svg" width="900" height="540" viewBox="0 0 900 540">
+    <rect x="40" y="20" width="820" height="460" fill="#f4f4f2"/>
+    <g id="shapes"></g>
+    <g id="over"></g>
+  </svg>
+  <div id="chip"></div>
+  <div id="hud"></div>
+  <div id="scrub"></div>
+  <div id="badge"></div>
+  <div id="toast"></div>
+  <div id="hint"></div>
+</div>
+
+<div id="notes">
+  <h2>How it works (proposal)</h2>
+  <ul>
+    <li><b>Pen tool (P).</b> Click = corner point, drag = smooth point (the drag pulls the outgoing handle, the incoming one mirrors it). Hover the first point of an open path to close it,
+      the last point to continue it. With a path already there, the same tool adds a point on a segment and deletes a point, so you rarely switch tools. A badge at the tip names what a
+      touch will do, which a hovering pen can show before it lands. A dashed rubber band previews the next segment.</li>
+    <li><b>Keyboard hand while placing a point:</b> hold Shift to constrain to 45 degrees, hold Alt to break the handle (a cusp point), hold Space to move the anchor instead of pulling its
+      handle. Enter or Esc finishes an open path (a double touch does too), Backspace removes the last point.</li>
+    <li><b>Direct tool (A).</b> Drag a point or a handle; drag a segment to bend it (the curve follows the pen, the handles adapt); drag on empty canvas to marquee-select points; double-tap a
+      point to flip corner/smooth. Smooth points keep their handles collinear, symmetric points keep them equal too, and Alt-dragging a handle turns the point into a corner.</li>
+    <li><b>Point ring</b> (barrel button, or tap Space over a point): Smooth S, Corner C, Symmetric Y, Delete, Add (midpoint after), Cut, Close, Reverse. The eraser end of the pen deletes the point it touches.</li>
+    <li><b>Freehand (B)</b> keeps the raw samples and fits curves through them (corner angle decides where it breaks). <b>Hold F</b> and move the pen vertically to re-fit: up simplifies, down follows
+      the stroke more closely, and the point count is live in the fixed card. Release to keep it (one undo step). Editing the anchors needs a bake first (a button on the fitCurve box), which drops the raw samples.</li>
+    <li><b>fitCurve node:</b> a fresh freehand stroke is a fitCurve node feeding the bezierPath. Its Smooth and Corner sliders in the HUD are the node's parameters (the header sliders only set the defaults for new strokes), and the F scrub drags the Smooth one. The HUD shows them whenever the path still has its samples.</li>
+    <li><b>Pressure and tilt (pen only):</b> freehand records pressure and tilt with every sample. The fitCurve node averages them into a <code>pressure</code> and a <code>tilt</code> attribute on each anchor; it does not decide a width. The <b>Stroke</b> node maps pressure to width (Min/Max width, a Response curve drawn as a small plot, Width smooth), and the header sliders only set its defaults for new strokes. In the pen tool the pressure while you place a point (the peak while you drag) is stored as that point's pressure. Hold <b>W</b> over a point and move up/down to set an explicit <code>width</code> override on it; the HUD shows it and a button returns it to the pressure-driven width. Pressure and tilt survive Bake, so the response can still be changed afterwards. A mouse gives an even width and no tilt.</li>
+    <li><b>Nib preview:</b> a hovering or touching pen shows a nib at its tip: size follows pressure (dashed minimum size while hovering), the ellipse stretches and turns with the lean, and a tail shows where the pen body points. Anchors that recorded a tilt show a small dashed nib, and a selected anchor shows its width as an amber tick. Tilt is only shown here; it will drive calligraphic and star brush angles in the Brushes tab, and it does not change the path.</li>
+    <li><b>Context HUD</b> (top right) appears with a selection: X/Y, the point type, handle lengths, and the path size. The grey chip next to the path is the graph view's peek of the same object.</li>
+  </ul>
+  <h2>What this means for the graph and the code</h2>
+  <ul>
+    <li>A path is one <code>bezierPath</code> node whose parameters are the anchors: position, in/out handle (relative), and a type tag (corner, smooth, symmetric), plus a closed flag. The type tag is
+      stored so smooth points stay smooth when edited; the curve itself is just anchors and handles.</li>
+    <li>One drag, one undo step: every interaction here takes a snapshot on touch-down and pushes it on release only if something changed, which is how the shared <code>UndoStack</code> closures should work.</li>
+    <li>Freehand stores its samples next to the node while it is fresh (as the node's input), so the fit can be re-run with a different tolerance. Editing points is blocked with a hint until the user bakes the stroke (a button on the fitCurve box); baking drops the samples and the
+      anchors become the source of truth.</li>
+    <li>Cutting an open path in the middle splits the node into two <code>bezierPath</code> nodes; joining two end points merges two nodes. The sample implements the first (Cut) but not joins across paths.</li>
+  </ul>
+  <h2>Not in this mockup</h2>
+  <ul>
+    <li>Downstream attribute nodes (taper, noise, remapping pressure), the curvature pen (drawing without handles), pan and zoom (Space drag and the wheel), snapping to other paths, and joining two open paths by their ends.</li>
+  </ul>
+</div>
+
+<script>
+// ==GEOM START
+const add = (a, b) => [a[0] + b[0], a[1] + b[1]];
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1]];
+const mul = (a, s) => [a[0] * s, a[1] * s];
+const len = a => Math.hypot(a[0], a[1]);
+const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+const xy = p => [p.x, p.y];
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+function newPoint(x, y) { return { x, y, i: null, o: null, t: 'c' }; }
+function ctrl(p, w) { return p[w] ? [p.x + p[w][0], p.y + p[w][1]] : [p.x, p.y]; }
+function segCount(path) { const n = path.pts.length; return path.closed ? n : Math.max(0, n - 1); }
+function segPts(path, k) {
+  const a = path.pts[k], b = path.pts[(k + 1) % path.pts.length];
+  return [xy(a), ctrl(a, 'o'), ctrl(b, 'i'), xy(b)];
+}
+function bezAt(P, t) {
+  const a = lerp(P[0], P[1], t), b = lerp(P[1], P[2], t), c = lerp(P[2], P[3], t);
+  return lerp(lerp(a, b, t), lerp(b, c, t), t);
+}
+function pathD(path) {
+  const pts = path.pts;
+  if (!pts.length) return '';
+  let d = 'M' + pts[0].x.toFixed(1) + ' ' + pts[0].y.toFixed(1);
+  for (let k = 0; k < segCount(path); k++) {
+    const P = segPts(path, k);
+    d += 'C' + P[1][0].toFixed(1) + ' ' + P[1][1].toFixed(1) + ' ' + P[2][0].toFixed(1) + ' ' + P[2][1].toFixed(1) + ' ' + P[3][0].toFixed(1) + ' ' + P[3][1].toFixed(1);
+  }
+  return d + (path.closed ? 'Z' : '');
+}
+function tidy(p) {
+  if (p.i && len(p.i) < 0.01) p.i = null;
+  if (p.o && len(p.o) < 0.01) p.o = null;
+}
+function neighbors(path, k) {
+  const n = path.pts.length, c = path.closed && n > 2;
+  return [k > 0 ? path.pts[k - 1] : (c ? path.pts[n - 1] : null), k < n - 1 ? path.pts[k + 1] : (c ? path.pts[0] : null)];
+}
+function toSmooth(path, k) {
+  const pt = path.pts[k], [pr, nx] = neighbors(path, k);
+  const a = pr || pt, b = nx || pt, tan = [b.x - a.x, b.y - a.y], tl = len(tan);
+  if (tl < 1e-6) return;
+  const u = mul(tan, 1 / tl);
+  pt.o = nx ? mul(u, dist(xy(pt), xy(nx)) / 3) : null;
+  pt.i = pr ? mul(u, -dist(xy(pt), xy(pr)) / 3) : null;
+  pt.t = 's';
+}
+function toCorner(path, k) { const p = path.pts[k]; p.i = null; p.o = null; p.t = 'c'; }
+function toSym(path, k) {
+  const p = path.pts[k];
+  if (!p.i && !p.o) toSmooth(path, k);
+  if (!p.i && !p.o) return;
+  const ls = [p.i, p.o].filter(Boolean).map(len);
+  const l = ls.reduce((s, v) => s + v, 0) / ls.length;
+  const dir = p.o ? p.o : mul(p.i, -1), dl = len(dir);
+  const u = mul(dir, 1 / dl);
+  p.o = mul(u, l); p.i = mul(u, -l); p.t = 'y';
+}
+function enforce(p, changed) {
+  const other = changed === 'o' ? 'i' : 'o';
+  if (p.t === 'c' || !p[other]) return;
+  const c = p[changed], cl = len(c);
+  if (cl < 1e-6) return;
+  const ol = p.t === 'y' ? cl : len(p[other]);
+  p[other] = mul(c, -ol / cl);
+}
+function splitSeg(path, k, t) {
+  const n = path.pts.length, a = path.pts[k], b = path.pts[(k + 1) % n];
+  const P = segPts(path, k);
+  const q0 = lerp(P[0], P[1], t), q1 = lerp(P[1], P[2], t), q2 = lerp(P[2], P[3], t);
+  const r0 = lerp(q0, q1, t), r1 = lerp(q1, q2, t), s = lerp(r0, r1, t);
+  const np = { x: s[0], y: s[1], i: sub(r0, s), o: sub(r1, s), t: 's' };
+  for (const f of ['w', 'pr']) {
+    const v0 = a[f] ?? b[f];
+    if (v0 != null) np[f] = +((a[f] != null && b[f] != null) ? a[f] + (b[f] - a[f]) * t : v0).toFixed(3);
+  }
+  if (a.tilt || b.tilt) np.tilt = a.tilt || b.tilt;
+  a.o = sub(q0, P[0]); b.i = sub(q2, P[3]);
+  tidy(a); tidy(b); tidy(np);
+  path.pts.splice(k + 1, 0, np);
+  return k + 1;
+}
+function reversePath(path) {
+  path.pts.reverse();
+  path.pts.forEach(p => { const i = p.i; p.i = p.o; p.o = i; });
+}
+function segDist(p, a, b) {
+  const ab = sub(b, a), l2 = ab[0] * ab[0] + ab[1] * ab[1];
+  if (l2 < 1e-9) return dist(p, a);
+  const t = clamp(((p[0] - a[0]) * ab[0] + (p[1] - a[1]) * ab[1]) / l2, 0, 1);
+  return dist(p, [a[0] + ab[0] * t, a[1] + ab[1] * t]);
+}
+function rdp(pts, eps) {
+  if (pts.length < 3) return pts.slice();
+  let dmax = 0, idx = 0;
+  const a = pts[0], b = pts[pts.length - 1];
+  for (let i = 1; i < pts.length - 1; i++) { const d = segDist(pts[i], a, b); if (d > dmax) { dmax = d; idx = i; } }
+  if (dmax > eps) return rdp(pts.slice(0, idx + 1), eps).slice(0, -1).concat(rdp(pts.slice(idx), eps));
+  return [a, b];
+}
+function widthFor(p, o) { return o.wmin + (o.wmax - o.wmin) * Math.pow(clamp(p, 0, 1), o.gamma); }
+function blurWidths(w, passes, closed) {
+  for (let r = 0; r < passes; r++) {
+    const c = w.slice(), n = w.length;
+    for (let k = 0; k < n; k++) {
+      const a = k > 0 ? c[k - 1] : (closed ? c[n - 1] : c[k]), b = k < n - 1 ? c[k + 1] : (closed ? c[0] : c[k]);
+      w[k] = (a + 2 * c[k] + b) / 4;
+    }
+  }
+  return w;
+}
+function fitPath(samples, tol, cornerDeg, opts) {
+  opts = opts || {};
+  let closed = false, s = samples;
+  if (s.length > 8 && dist(s[0], s[s.length - 1]) < 14) closed = true;
+  const simp = rdp(closed ? s.concat([s[0]]) : s, tol);
+  if (closed) simp.pop();
+  const raw = { samples, tol, corner: cornerDeg, pen: !!opts.pen };
+  const path = { pts: simp.map(p => newPoint(p[0], p[1])), closed: closed && simp.length > 2, raw };
+  path.pts.forEach((pt, k) => {
+    const [pr, nx] = neighbors(path, k);
+    if (!pr || !nx) return;
+    const v1 = sub(xy(pt), xy(pr)), v2 = sub(xy(nx), xy(pt));
+    const cosA = (v1[0] * v2[0] + v1[1] * v2[1]) / (len(v1) * len(v2) || 1);
+    if (Math.acos(clamp(cosA, -1, 1)) * 180 / Math.PI > cornerDeg) return;
+    toSmooth(path, k);
+  });
+  path.stroke = null;
+  if (raw.pen && samples[0].length >= 5) {
+    const idx = simp.map(p => samples.indexOf(p)), n = idx.length;
+    path.pts.forEach((pt, k) => {
+      const lo = k > 0 ? Math.floor((idx[k - 1] + idx[k]) / 2) : idx[k], hi = k < n - 1 ? Math.ceil((idx[k] + idx[k + 1]) / 2) : idx[k];
+      let sp = 0, sx = 0, sy = 0, c = 0;
+      for (let i = lo; i <= Math.max(lo, hi); i++) { sp += samples[i][2]; sx += samples[i][3]; sy += samples[i][4]; c++; }
+      pt.pr = +(sp / c).toFixed(3);
+      if (Math.abs(sx) + Math.abs(sy) > 0.5) pt.tilt = [Math.round(sx / c), Math.round(sy / c)];
+    });
+    path.stroke = { wmin: opts.wmin ?? 1, wmax: opts.wmax ?? 14, gamma: opts.gamma ?? 1, wsmooth: opts.wsmooth ?? 0.5 };
+  }
+  return path;
+}
+function widthsOf(path) {
+  if (!path.pts.some(q => q.pr != null || q.w != null)) return null;
+  const st = path.stroke;
+  const ws = path.pts.map(q => q.pr != null && st ? widthFor(q.pr, st) : 2.5);
+  if (st) blurWidths(ws, Math.round(st.wsmooth * 6), path.closed);
+  return path.pts.map((q, k) => q.w != null ? q.w : ws[k]);
+}
+function outlineD(path, ws) {
+  const n = path.pts.length;
+  if (n < 2) return '';
+  const left = [], right = [];
+  for (let k = 0; k < segCount(path); k++) {
+    const P = segPts(path, k), wa = ws[k], wb = ws[(k + 1) % n];
+    for (let j = k === 0 ? 0 : 1; j <= 16; j++) {
+      const t = j / 16, q = bezAt(P, t), d = sub(bezAt(P, Math.min(1, t + 0.01)), bezAt(P, Math.max(0, t - 0.01))), dl = len(d) || 1;
+      const hw = (wa + (wb - wa) * t) / 2, nx = -d[1] / dl * hw, ny = d[0] / dl * hw;
+      left.push([q[0] + nx, q[1] + ny]); right.push([q[0] - nx, q[1] - ny]);
+    }
+  }
+  const f = pts => 'M' + pts.map(p => p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join('L');
+  if (path.closed) return f(left) + 'Z' + f(right) + 'Z';
+  return f(left.concat(right.reverse())) + 'Z';
+}
+function tiltInfo(tx, ty) {
+  const r = Math.PI / 180, tt = Math.atan(Math.hypot(Math.tan(tx * r), Math.tan(ty * r))) / r;
+  return { deg: tt, lean: clamp(tt / 70, 0, 1), az: Math.atan2(ty, tx) / r };
+}
+function constrain(from, to) {
+  const d = sub(to, from), a = Math.round(Math.atan2(d[1], d[0]) / (Math.PI / 4)) * Math.PI / 4, l = len(d);
+  return [from[0] + Math.cos(a) * l, from[1] + Math.sin(a) * l];
+}
+function nearestOnPath(path, pos, tol) {
+  let best = null;
+  for (let k = 0; k < segCount(path); k++) {
+    const P = segPts(path, k);
+    for (let j = 0; j <= 40; j++) {
+      const t = j / 40, q = bezAt(P, t), d = dist(pos, q);
+      if (d <= tol && (!best || d < best.d)) best = { k, t, d, pt: q };
+    }
+  }
+  return best;
+}
+// ==GEOM END
+
+const stage = document.getElementById('stage'), shapesG = document.getElementById('shapes'), overG = document.getElementById('over');
+const hud = document.getElementById('hud'), hintEl = document.getElementById('hint'), badge = document.getElementById('badge');
+const chip = document.getElementById('chip'), scrubEl = document.getElementById('scrub'), toastEl = document.getElementById('toast');
+const NS = 'http://www.w3.org/2000/svg';
+
+let paths = [];
+let sel = new Set();
+let tool = 'pen';
+let drawing = null;
+let activePath = null;
+let hover = null;
+let drag = null;
+let freeDraw = null;
+let lastFree = null;
+let scrub = null;
+let ring = null;
+let lastPos = [450, 250];
+let pressure = 0, pointerType = 'mouse';
+const held = { shift: false, alt: false, space: false };
+let spaceDown = 0, spaceMoved = false;
+let undo = [], redo = [], editBefore = null;
+let penState = null;
+const sample5 = (pos, e) => [pos[0], pos[1], +(e.pressure || 0).toFixed(3), Math.round(e.tiltX || 0), Math.round(e.tiltY || 0)];
+const widthOpts = () => ({ wmin: +document.getElementById('sWmin').value, wmax: +document.getElementById('sWmax').value, gamma: 1, wsmooth: 0.5 });
+function penAttrs(path, pt, e) {
+  if (e.pointerType !== 'pen') return;
+  pt.pr = +clamp(e.pressure, 0, 1).toFixed(3);
+  pt.tilt = [Math.round(e.tiltX || 0), Math.round(e.tiltY || 0)];
+  if (!path.stroke) path.stroke = widthOpts();
+}
+function refitPath(p, patch) {
+  const old = paths[p], raw = Object.assign({}, old.raw, patch), np = fitPath(raw.samples, raw.tol, raw.corner, raw);
+  np.stroke = old.stroke;
+  paths[p] = np;
+  return np;
+}
+
+const snap = () => JSON.stringify(paths);
+function beginEdit() { if (editBefore === null) editBefore = snap(); }
+function endEdit() {
+  if (editBefore === null) return;
+  if (snap() !== editBefore) { undo.push(editBefore); redo.length = 0; }
+  editBefore = null;
+}
+function restore(json) { paths = JSON.parse(json); sel.clear(); drawing = null; activePath = null; hover = null; }
+function doUndo() { endEdit(); if (!undo.length) return; redo.push(snap()); restore(undo.pop()); refresh(); }
+function doRedo() { endEdit(); if (!redo.length) return; undo.push(snap()); restore(redo.pop()); refresh(); }
+
+const sk = (p, k) => p + ':' + k;
+const selList = () => [...sel].map(s => { const [p, k] = s.split(':').map(Number); return { p, k }; }).sort((a, b) => a.p - b.p || a.k - b.k);
+const localPos = e => { const r = stage.getBoundingClientRect(); return [e.clientX - r.left - stage.clientLeft, e.clientY - r.top - stage.clientTop]; };
+
+function editable(ps) {
+  for (const p of ps) if (paths[p] && paths[p].raw) { toast('fitCurve drives this path: bake it to edit the anchors'); return false; }
+  return true;
+}
+function bake(p) {
+  beginEdit(); paths[p].raw = null; endEdit();
+  toast('Baked: the anchors are now stored in bezierPath');
+  refresh();
+}
+
+function toast(msg) {
+  toastEl.textContent = msg; toastEl.style.display = 'block';
+  clearTimeout(toast.t); toast.t = setTimeout(() => { toastEl.style.display = 'none'; }, 1800);
+}
+
+function visibleHandles() {
+  const out = [], seen = new Set();
+  const push = (p, k, w) => {
+    const pt = paths[p] && paths[p].pts[k];
+    if (!pt || !pt[w]) return;
+    const key = p + ':' + k + w;
+    if (!seen.has(key)) { seen.add(key); out.push({ p, k, w }); }
+  };
+  for (const { p, k } of selList()) {
+    const path = paths[p], n = path.pts.length;
+    push(p, k, 'i'); push(p, k, 'o');
+    if (k + 1 < n || path.closed) push(p, (k + 1) % n, 'i');
+    if (k > 0 || path.closed) push(p, (k - 1 + n) % n, 'o');
+  }
+  if (tool === 'pen' && drawing !== null && paths[drawing]) {
+    const last = paths[drawing].pts.length - 1;
+    push(drawing, last, 'i'); push(drawing, last, 'o');
+  }
+  return out;
+}
+
+function hitTest(pos, skipHandles) {
+  if (!skipHandles) {
+    for (const h of visibleHandles()) {
+      const pt = paths[h.p].pts[h.k];
+      if (dist(pos, ctrl(pt, h.w)) <= 7) return { kind: 'handle', p: h.p, k: h.k, w: h.w };
+    }
+  }
+  for (let p = paths.length - 1; p >= 0; p--) {
+    const pts = paths[p].pts;
+    for (let k = pts.length - 1; k >= 0; k--) if (dist(pos, xy(pts[k])) <= 8) return { kind: 'anchor', p, k };
+  }
+  let best = null;
+  for (let p = paths.length - 1; p >= 0; p--) {
+    const h = nearestOnPath(paths[p], pos, 7);
+    if (h && (!best || h.d < best.d)) best = { kind: 'seg', p, k: h.k, t: h.t, d: h.d, pt: h.pt };
+  }
+  return best;
+}
+
+function mk(name, attrs, parent) {
+  const e = document.createElementNS(NS, name);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  (parent || overG).appendChild(e);
+  return e;
+}
+
+function render() {
+  shapesG.textContent = ''; overG.textContent = '';
+  paths.forEach((path, p) => {
+    if (path.pts.length < 2) return;
+    const ws = widthsOf(path);
+    if (ws) {
+      if (path.closed) mk('path', { d: pathD(path), fill: '#cfe0ff', 'fill-opacity': .85 }, shapesG);
+      mk('path', { d: outlineD(path, ws), fill: '#1d2a44', 'fill-rule': 'evenodd' }, shapesG);
+      if (!path.closed) [0, path.pts.length - 1].forEach(k => mk('circle', { cx: path.pts[k].x, cy: path.pts[k].y, r: ws[k] / 2, fill: '#1d2a44' }, shapesG));
+    } else mk('path', { d: pathD(path), fill: path.closed ? '#cfe0ff' : 'none', 'fill-opacity': .85, stroke: '#1d2a44', 'stroke-width': 2.5, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, shapesG);
+  });
+  if (freeDraw) {
+    const fs = freeDraw.samples;
+    if (freeDraw.pen) {
+      const wo = widthOpts();
+      for (let i = 1; i < fs.length; i++) mk('line', { x1: fs[i - 1][0], y1: fs[i - 1][1], x2: fs[i][0], y2: fs[i][1], stroke: '#1d2a44', 'stroke-width': widthFor(fs[i][2], wo), 'stroke-linecap': 'round' });
+    } else mk('polyline', { points: fs.map(q => q[0] + ',' + q[1]).join(' '), fill: 'none', stroke: '#1d2a44', 'stroke-width': 2, 'stroke-linejoin': 'round' });
+  }
+  if (tool !== 'free') {
+    if (drawing !== null && paths[drawing] && paths[drawing].pts.length && !drag) {
+      const path = paths[drawing], last = path.pts[path.pts.length - 1];
+      const target = held.shift ? constrain(xy(last), lastPos) : lastPos;
+      mk('path', { d: 'M' + last.x + ' ' + last.y + 'C' + ctrl(last, 'o').join(' ') + ' ' + target.join(' ') + ' ' + target.join(' '), fill: 'none', stroke: '#4c8dff', 'stroke-width': 1.5, 'stroke-dasharray': '5 4' });
+    }
+    if (hover && hover.kind === 'seg') {
+      mk('circle', { cx: hover.pt[0], cy: hover.pt[1], r: 5, fill: '#17181b', stroke: '#ffb454', 'stroke-width': 2 });
+    }
+    for (const h of visibleHandles()) {
+      const pt = paths[h.p].pts[h.k], c = ctrl(pt, h.w), hot = hover && hover.kind === 'handle' && hover.p === h.p && hover.k === h.k && hover.w === h.w;
+      mk('line', { x1: pt.x, y1: pt.y, x2: c[0], y2: c[1], stroke: '#4c8dff', 'stroke-width': 1 });
+      mk('circle', { cx: c[0], cy: c[1], r: hot ? 5 : 3.5, fill: hot ? '#ffb454' : '#fff', stroke: '#4c8dff', 'stroke-width': 1.5 });
+    }
+    paths.forEach((path, p) => path.pts.forEach((pt, k) => {
+      const on = sel.has(sk(p, k)), hot = hover && hover.kind === 'anchor' && hover.p === p && hover.k === k;
+      const isLast = tool === 'pen' && drawing === p && k === path.pts.length - 1;
+      const fill = on ? '#4c8dff' : (isLast ? '#ffb454' : '#fff'), stroke = hot ? '#ffb454' : '#4c8dff', sw = hot ? 2.5 : 1.5, r = hot ? 6 : 4.5;
+      if (pt.t === 'c') mk('rect', { x: pt.x - r, y: pt.y - r, width: r * 2, height: r * 2, fill, stroke, 'stroke-width': sw });
+      else mk('circle', { cx: pt.x, cy: pt.y, r: r + (pt.t === 'y' ? 0.5 : 0), fill, stroke, 'stroke-width': sw });
+      if (pt.t === 'y') mk('circle', { cx: pt.x, cy: pt.y, r: 1.4, fill: on ? '#fff' : '#4c8dff' });
+    }));
+    if (drawing !== null && hover && hover.kind === 'anchor' && hover.p !== drawing && !paths[hover.p].closed && (hover.k === 0 || hover.k === paths[hover.p].pts.length - 1)) {
+      const f = paths[hover.p].pts[hover.k];
+      mk('circle', { cx: f.x, cy: f.y, r: 11, fill: 'none', stroke: '#ffb454', 'stroke-width': 2 });
+    }
+    if (drawing !== null && hover && hover.kind === 'anchor' && hover.p === drawing && hover.k === 0 && paths[drawing].pts.length >= 3) {
+      const f = paths[drawing].pts[0];
+      mk('circle', { cx: f.x, cy: f.y, r: 11, fill: 'none', stroke: '#ffb454', 'stroke-width': 2 });
+    }
+  }
+  if (drag && drag.closeTo) {
+    const o = paths[drag.closeTo.p].pts[drag.closeTo.other];
+    mk('circle', { cx: o.x, cy: o.y, r: 11, fill: 'none', stroke: '#ffb454', 'stroke-width': 2 });
+  }
+  if (drag && drag.joinTo) {
+    const o = paths[drag.joinTo.p2].pts[drag.joinTo.k2];
+    mk('circle', { cx: o.x, cy: o.y, r: 11, fill: 'none', stroke: '#ffb454', 'stroke-width': 2 });
+  }
+  if (drag && drag.type === 'marquee') {
+    const a = drag.start, b = lastPos;
+    mk('rect', { x: Math.min(a[0], b[0]), y: Math.min(a[1], b[1]), width: Math.abs(a[0] - b[0]), height: Math.abs(a[1] - b[1]), fill: '#4c8dff22', stroke: '#4c8dff', 'stroke-dasharray': '4 3' });
+  }
+  drawPenExtras();
+}
+
+function anchorTangent(path, k) {
+  const pt = path.pts[k], [pr, nx] = neighbors(path, k);
+  let d = pt.o ? pt.o : (pt.i ? mul(pt.i, -1) : (nx ? sub(xy(nx), xy(pt)) : (pr ? sub(xy(pt), xy(pr)) : [1, 0])));
+  const l = len(d) || 1;
+  return [d[0] / l, d[1] / l];
+}
+function drawPenExtras() {
+  if (tool !== 'free') {
+    for (const { p, k } of selList()) {
+      const path = paths[p], pt = path.pts[k], ws = widthsOf(path);
+      if (ws) {
+        const t = anchorTangent(path, k), h = ws[k] / 2 + 3;
+        mk('line', { x1: pt.x - t[1] * h, y1: pt.y + t[0] * h, x2: pt.x + t[1] * h, y2: pt.y - t[0] * h, stroke: '#ffb454', 'stroke-width': 2, 'stroke-linecap': 'round' });
+      }
+      if (pt.tilt) {
+        const ti = tiltInfo(pt.tilt[0], pt.tilt[1]), r = Math.max(ws ? ws[k] : 6, 6) / 2;
+        mk('ellipse', { cx: pt.x, cy: pt.y, rx: r * (1 + ti.lean * 1.6) + 4, ry: r + 4, transform: 'rotate(' + ti.az.toFixed(1) + ' ' + pt.x + ' ' + pt.y + ')', fill: 'none', stroke: '#ffb454', 'stroke-width': 1, 'stroke-dasharray': '3 2', opacity: .8 });
+      }
+    }
+  }
+  if (penState && penState.type === 'pen' && !ring) {
+    const o = widthOpts(), ti = tiltInfo(penState.tx, penState.ty);
+    const w = penState.down ? widthFor(penState.p, o) : o.wmin, r = Math.max(w / 2, 2);
+    const g = mk('g', { transform: 'translate(' + penState.x + ' ' + penState.y + ')' });
+    if (ti.lean > 0.04) mk('line', { x1: 0, y1: 0, x2: Math.cos(ti.az * Math.PI / 180) * (12 + 36 * ti.lean), y2: Math.sin(ti.az * Math.PI / 180) * (12 + 36 * ti.lean), stroke: '#ffb454', 'stroke-width': 2, 'stroke-linecap': 'round', opacity: .6 }, g);
+    mk('ellipse', { cx: 0, cy: 0, rx: r * (1 + ti.lean * 1.6), ry: r, transform: 'rotate(' + ti.az.toFixed(1) + ')', fill: penState.down ? '#ffb45466' : 'none', stroke: '#ffb454', 'stroke-width': 1.5, 'stroke-dasharray': penState.down ? '' : '3 2' }, g);
+  }
+}
+
+function updateBadge() {
+  let text = '';
+  const h = hover;
+  if (tool === 'pen') {
+    if (h && h.kind === 'anchor') {
+      const path = paths[h.p], end = h.k === 0 || h.k === path.pts.length - 1;
+      if (drawing === h.p && h.k === 0 && path.pts.length >= 3) text = 'close';
+      else if (drawing !== null && drawing !== h.p && !path.closed && end) text = 'join';
+      else if (drawing === null && !path.closed && end) text = 'continue';
+      else text = 'delete point';
+    } else if (h && h.kind === 'seg') text = 'add point';
+  } else if (tool === 'direct') {
+    if (h && h.kind === 'anchor') text = 'move point';
+    else if (h && h.kind === 'handle') text = held.alt ? 'break handle' : 'handle';
+    else if (h && h.kind === 'seg') text = 'bend';
+  }
+  if (drag && drag.closeTo) text = 'close';
+  if (drag && drag.joinTo) text = 'join';
+  if (!text || (drag && !drag.closeTo && !drag.joinTo) || ring) { badge.style.display = 'none'; return; }
+  badge.textContent = text; badge.style.display = 'block';
+  badge.style.left = Math.min(lastPos[0] + 16, 800) + 'px'; badge.style.top = (lastPos[1] + 14) + 'px';
+}
+
+function updateChip() {
+  const p = sel.size ? selList()[0].p : (drawing !== null ? drawing : activePath);
+  const path = paths[p];
+  if (!document.getElementById('cChip').checked || !path || path.pts.length < 2) { chip.style.display = 'none'; return; }
+  let x0 = 1e9, y0 = 1e9;
+  path.pts.forEach(q => { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); });
+  chip.innerHTML = (path.raw ? '<b>fitCurve</b> <i>&rsaquo;</i> ' : '') + '<b>bezierPath</b> ' + path.pts.length + (path.closed ? ' pts, closed' : ' pts, open') + ' <i>&rsaquo;</i> Fill <i>&rsaquo;</i> Stroke';
+  chip.style.display = 'block';
+  chip.style.left = clamp(x0 - 6, 6, 640) + 'px'; chip.style.top = clamp(y0 - 34, 6, 500) + 'px';
+}
+
+function plotPts(r) {
+  const out = [];
+  for (let i = 0; i <= 20; i++) { const p = i / 20; out.push((p * 84).toFixed(1) + ',' + (35 - (widthFor(p, r) - r.wmin) / ((r.wmax - r.wmin) || 1) * 34).toFixed(1)); }
+  return out.join(' ');
+}
+function updateHud() {
+  if (hud.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return;
+  const list = selList();
+  const fp = list.length ? list[0].p : activePath;
+  const path = paths[fp];
+  const raw = path && path.raw;
+  const showSel = list.length && tool !== 'free';
+  if (!path || path.pts.length < 2 || (!showSel && !raw)) { hud.style.display = 'none'; return; }
+  hud.style.display = 'block';
+  const nodes = [];
+  if (raw) {
+    nodes.push('<div class="node"><div class="head"><b>fitCurve</b><span>path ' + (fp + 1) + '</span></div>' +
+      '<div class="row">Smooth <input id="fTol" type="range" min="0.5" max="30" step="0.5" value="' + raw.tol + '"><span class="mono" id="fTolV">' + raw.tol + '</span></div>' +
+      '<div class="row">Corner <input id="fCorner" type="range" min="20" max="120" step="5" value="' + raw.corner + '"><span class="mono" id="fCornerV">' + raw.corner + '&deg;</span></div>' +
+      '<div class="row">input <span class="mono">' + raw.samples.length + ' samples' + (raw.pen ? ' + pressure, tilt' : '') + '</span></div>' +
+      '<div class="row"><button id="bake">Bake to anchors</button></div></div>');
+  }
+  let bez = '<div class="node"><div class="head"><b>bezierPath</b><span>' + path.pts.length + ' anchors, ' + (path.closed ? 'closed' : 'open') + (raw ? ', output' : '') + '</span></div>';
+  if (showSel) {
+    const first = paths[list[0].p].pts[list[0].k], one = list.length === 1, off = raw ? ' disabled' : '', wsA = widthsOf(paths[list[0].p]);
+    const types = new Set(list.map(s => paths[s.p].pts[s.k].t));
+    const chips = [['c', 'Corner'], ['s', 'Smooth'], ['y', 'Symmetric']].map(([t, n]) => '<button data-t="' + t + '"' + off + (types.size === 1 && types.has(t) ? ' class="on"' : '') + '>' + n + '</button>').join('');
+    const hl = w => first[w] ? len(first[w]).toFixed(1) + ' px, ' + (Math.atan2(first[w][1], first[w][0]) * 180 / Math.PI).toFixed(0) + '&deg;' : 'none';
+    const xin = (id, v) => '<input id="' + id + '" type="number" step="0.5" ' + (one ? 'value="' + v.toFixed(1) + '"' : '') + (one && !raw ? '' : ' disabled') + '>';
+    bez += '<div class="row"><span class="mono">' + (one ? 'anchor ' + (list[0].k + 1) : list.length + ' anchors') + '</span></div>' +
+      '<div class="row"><label>X</label>' + xin('hx', first.x) + '<label>Y</label>' + xin('hy', first.y) + '</div>' +
+      '<div class="chips">' + chips + '</div>' +
+      (one ? '<div class="row">in <span class="mono">' + hl('i') + '</span></div><div class="row">out <span class="mono">' + hl('o') + '</span></div>' +
+        '<div class="row">pressure <span class="mono">' + (first.pr != null ? first.pr.toFixed(2) : 'none') + '</span></div>' +
+        '<div class="row">width <span class="mono">' + (wsA ? wsA[list[0].k].toFixed(1) + ' px' + (first.w != null ? ' (override)' : '') : 'even') + '</span>' + (first.w != null ? '<button id="wreset">Use pressure</button>' : '') + '</div>' +
+        '<div class="row">tilt <span class="mono">' + (first.tilt ? (ti => ti.deg.toFixed(0) + '&deg; toward ' + ti.az.toFixed(0) + '&deg;')(tiltInfo(first.tilt[0], first.tilt[1])) : 'none') + '</span></div>' : '');
+  } else bez += '<div class="row">select an anchor to see its values</div>';
+  if (raw) bez += '<div class="note">Read-only while fitCurve feeds it.</div>';
+  bez += '</div>';
+  nodes.push(bez);
+  nodes.push('<div class="node"><div class="head"><b>Fill</b><span>' + (path.closed ? '85%' : 'none (open path)') + '</span></div>' +
+    (path.closed ? '<div class="row"><span class="swatch" style="background:#cfe0ff"></span><span class="mono">#cfe0ff</span></div>' : '') + '</div>');
+  const st = path.stroke;
+  nodes.push('<div class="node"><div class="head"><b>Stroke</b><span>' + (st ? 'pressure &rarr; width' : '2.5 px') + '</span></div>' +
+    (st ?
+      '<div class="row">Min width <input id="stWmin" type="range" min="0.5" max="10" step="0.5" value="' + st.wmin + '"><span class="mono" id="stWminV">' + st.wmin + '</span></div>' +
+      '<div class="row">Max width <input id="stWmax" type="range" min="2" max="40" step="0.5" value="' + st.wmax + '"><span class="mono" id="stWmaxV">' + st.wmax + '</span></div>' +
+      '<div class="row">Response <input id="stGamma" type="range" min="0.3" max="3" step="0.1" value="' + st.gamma + '"><span class="mono" id="stGammaV">' + st.gamma + '</span></div>' +
+      '<svg class="plot" id="stPlot" width="84" height="36" viewBox="0 0 84 36"><rect x="0.5" y="0.5" width="83" height="35" fill="none" stroke="#3a3d43"/><polyline fill="none" stroke="#ffb454" stroke-width="1.5" points="' + plotPts(st) + '"/></svg>' +
+      '<div class="row">Width smooth <input id="stWs" type="range" min="0" max="1" step="0.05" value="' + st.wsmooth + '"><span class="mono" id="stWsV">' + st.wsmooth + '</span></div>'
+      : '') +
+    '<div class="row"><span class="swatch" style="background:#1d2a44"></span><span class="mono">#1d2a44, round</span></div></div>');
+  hud.innerHTML = nodes.join('<div class="link">&darr;</div>');
+  hud.querySelectorAll('button[data-t]').forEach(b => b.onclick = () => applyType(b.dataset.t));
+  const bk = hud.querySelector('#bake');
+  if (bk) bk.onclick = () => bake(fp);
+  const hx = hud.querySelector('#hx'), hy = hud.querySelector('#hy');
+  if (hx && !raw && list.length === 1) {
+    const first = paths[list[0].p].pts[list[0].k];
+    const apply = () => {
+      beginEdit(); first.x = parseFloat(hx.value) || 0; first.y = parseFloat(hy.value) || 0; endEdit(); render(); updateChip();
+    };
+    hx.onchange = apply; hy.onchange = apply;
+  }
+  const g = id => hud.querySelector('#' + id);
+  if (raw) {
+    const refit = () => {
+      beginEdit();
+      refitPath(fp, { tol: +g('fTol').value, corner: +g('fCorner').value });
+      sel.clear(); lastFree = fp;
+      g('fTolV').textContent = g('fTol').value; g('fCornerV').innerHTML = g('fCorner').value + '&deg;';
+      render(); updateChip();
+    };
+    ['fTol', 'fCorner'].forEach(id => {
+      g(id).oninput = refit;
+      g(id).onchange = () => { endEdit(); g(id).blur(); refresh(); };
+    });
+  }
+  if (path.stroke) {
+    const stk = path.stroke;
+    const upd = () => {
+      beginEdit();
+      stk.wmin = +g('stWmin').value; stk.wmax = +g('stWmax').value; stk.gamma = +g('stGamma').value; stk.wsmooth = +g('stWs').value;
+      g('stWminV').textContent = stk.wmin; g('stWmaxV').textContent = stk.wmax; g('stGammaV').textContent = stk.gamma; g('stWsV').textContent = stk.wsmooth;
+      g('stPlot').querySelector('polyline').setAttribute('points', plotPts(stk));
+      render(); updateChip();
+    };
+    ['stWmin', 'stWmax', 'stGamma', 'stWs'].forEach(id => {
+      g(id).oninput = upd;
+      g(id).onchange = () => { endEdit(); g(id).blur(); refresh(); };
+    });
+  }
+  const wr = g('wreset');
+  if (wr) wr.onclick = () => {
+    if (!editable([list[0].p])) return;
+    beginEdit(); paths[list[0].p].pts[list[0].k].w = null; endEdit(); refresh();
+  };
+}
+
+function hintItems() {
+  const m = (k, t, lit) => ({ k, t, lit });
+  let main = '', mods = [];
+  if (tool === 'pen') {
+    const h = hover;
+    if (drag && drag.type === 'newAnchor') { main = 'drag to pull the handle, release to place'; mods = [m('Shift', '45°', held.shift), m('Alt', 'break handle', held.alt), m('Space', 'move anchor', held.space)]; }
+    else if (drawing !== null) { main = 'click corner · drag smooth · first point closes · Enter finish · Backspace undoes a point'; mods = [m('Shift', '45°', held.shift), m('Alt', 'cusp', held.alt)]; }
+    else if (h && h.kind === 'anchor') main = 'end point: continue the path · other points: delete';
+    else if (h && h.kind === 'seg') main = 'add a point here';
+    else { main = 'click corner point · drag smooth point · pen pressure sets the point width'; mods = [m('Shift', '45°', held.shift)]; }
+  } else if (tool === 'direct') {
+    main = drag ? 'release to keep' : 'drag a point, handle or segment (an end onto another end joins or closes) · drag empty to select · double-tap flips corner/smooth · barrel or Space tap on a point or segment = ring';
+    mods = [m('Shift', 'add to selection / constrain', held.shift), m('Alt', 'break handle / no join', held.alt), m('W', 'hold + move: point width', false), m('Space', 'tap: ring', held.space)];
+  } else {
+    main = 'draw a stroke; pressure sets the width, it is fitted to curves when you lift';
+    mods = [m('F', 'hold, then move up/down to re-fit', false)];
+  }
+  return { tool: { pen: 'Pen', direct: 'Direct select', free: 'Freehand' }[tool], main, mods };
+}
+function updateHint() {
+  const h = hintItems();
+  hintEl.innerHTML = '<span class="tool">' + h.tool + '</span><span class="main">' + h.main + '</span><span class="grow"></span>' +
+    h.mods.map(x => '<span class="mod"><span class="key' + (x.lit ? ' lit' : '') + '">' + x.k + '</span>' + x.t + '</span>').join('') +
+    '<span>' + pointerType + ' ' + pressure.toFixed(2) + '</span><span>' + Math.round(lastPos[0]) + ', ' + Math.round(lastPos[1]) + '</span>';
+}
+
+function refresh() { render(); updateBadge(); updateChip(); updateHud(); updateHint(); document.getElementById('bUndo').disabled = !undo.length; document.getElementById('bRedo').disabled = !redo.length; }
+
+function applyType(t) {
+  if (!editable(selList().map(s => s.p))) return;
+  beginEdit();
+  for (const { p, k } of selList()) {
+    paths[p].raw = null;
+    if (t === 'c') toCorner(paths[p], k);
+    else if (t === 's') toSmooth(paths[p], k);
+    else toSym(paths[p], k);
+  }
+  endEdit(); refresh();
+}
+
+function deleteSelected() {
+  if (!editable(selList().map(s => s.p))) return;
+  beginEdit();
+  const by = {};
+  selList().forEach(s => (by[s.p] = by[s.p] || []).push(s.k));
+  Object.keys(by).forEach(p => by[p].sort((a, b) => b - a).forEach(k => { paths[p].pts.splice(k, 1); paths[p].raw = null; }));
+  paths = paths.filter(path => path.pts.length > 0);
+  sel.clear(); drawing = null; activePath = null; hover = null;
+  endEdit(); refresh();
+}
+
+function addMidpoints() {
+  if (!editable(selList().map(s => s.p))) return;
+  beginEdit();
+  const list = selList().reverse(), added = [];
+  for (const { p, k } of list) {
+    const path = paths[p];
+    if (k < path.pts.length - 1 || path.closed) { splitSeg(path, k, 0.5); path.raw = null; added.push({ p, k: k + 1 }); }
+  }
+  sel.clear();
+  added.forEach(a => sel.add(sk(a.p, a.k)));
+  endEdit(); refresh();
+}
+
+function cutAtSelected() {
+  const s = selList()[0];
+  if (!s) return;
+  if (!editable([s.p])) return;
+  const path = paths[s.p], n = path.pts.length;
+  beginEdit();
+  path.raw = null;
+  if (path.closed) {
+    const rot = path.pts.slice(s.k).concat(path.pts.slice(0, s.k));
+    const a = rot[0], endCopy = JSON.parse(JSON.stringify(a));
+    endCopy.o = null; endCopy.t = 'c';
+    a.i = null; a.t = 'c';
+    rot[0] = a; rot.push(endCopy);
+    path.pts = rot; path.closed = false;
+    sel.clear(); sel.add(sk(s.p, 0)); sel.add(sk(s.p, rot.length - 1));
+  } else if (s.k > 0 && s.k < n - 1) {
+    const tail = path.pts.slice(s.k).map(q => JSON.parse(JSON.stringify(q)));
+    const head = path.pts.slice(0, s.k + 1);
+    head[head.length - 1].o = null; head[head.length - 1].t = 'c';
+    tail[0].i = null; tail[0].t = 'c';
+    path.pts = head;
+    paths.splice(s.p + 1, 0, { pts: tail, closed: false, raw: null, stroke: path.stroke ? Object.assign({}, path.stroke) : null });
+    sel.clear(); sel.add(sk(s.p, head.length - 1)); sel.add(sk(s.p + 1, 0));
+  } else toast('Nothing to cut at an end point');
+  endEdit(); refresh();
+}
+
+function closeSelected() {
+  const s = selList()[0];
+  if (!s) return;
+  if (!editable([s.p])) return;
+  const path = paths[s.p], n = path.pts.length;
+  if (path.closed || n < 3 || (s.k !== 0 && s.k !== n - 1)) { toast('Close needs an end point of an open path'); return; }
+  beginEdit(); path.closed = true; path.raw = null; endEdit(); refresh();
+}
+
+function reverseSelected() {
+  if (!editable(selList().map(s => s.p))) return;
+  beginEdit();
+  const ps = new Set(selList().map(s => s.p));
+  const old = selList();
+  ps.forEach(p => { reversePath(paths[p]); paths[p].raw = null; });
+  sel.clear();
+  old.forEach(s => sel.add(sk(s.p, paths[s.p].pts.length - 1 - s.k)));
+  endEdit(); refresh();
+}
+
+function openRing(pos) {
+  closeRing();
+  const hasSel = sel.size > 0, one = sel.size === 1;
+  const closedSel = hasSel && paths[selList()[0].p].closed;
+  const slots = [
+    { key: 'S', label: 'Smooth', on: hasSel, fn: () => applyType('s') },
+    { key: 'C', label: 'Corner', on: hasSel, fn: () => applyType('c') },
+    { key: 'Y', label: 'Symmetric', on: hasSel, fn: () => applyType('y') },
+    { key: 'Del', label: 'Delete', on: hasSel, fn: deleteSelected },
+    { key: 'A', label: 'Add mid', on: hasSel, fn: addMidpoints },
+    { key: 'X', label: 'Cut', on: one, fn: cutAtSelected },
+    { key: 'J', label: 'Close', on: one && !closedSel, fn: closeSelected },
+    { key: 'R', label: 'Reverse', on: hasSel, fn: reverseSelected },
+  ];
+  showRing(pos, 'Point', slots);
+}
+
+function showRing(pos, title, slots) {
+  const R = 86, cx = clamp(pos[0], R + 60, 900 - R - 60), cy = clamp(pos[1], R + 30, 540 - R - 50);
+  ring = { el: document.createElement('div'), slots };
+  ring.el.id = 'ring'; ring.el.style.left = cx + 'px'; ring.el.style.top = cy + 'px';
+  ring.el.innerHTML = '<div class="hub">' + title + '<small>...</small></div>';
+  slots.forEach((s, i) => {
+    const a = -Math.PI / 2 + i * Math.PI / 4, el = document.createElement('div');
+    el.className = 'slot' + (s.on ? '' : ' off');
+    el.style.left = Math.cos(a) * R + 'px'; el.style.top = Math.sin(a) * R + 'px';
+    el.innerHTML = '<span class="key">' + s.key + '</span>' + s.label;
+    el.onpointerdown = e => { e.stopPropagation(); };
+    el.onclick = e => { e.stopPropagation(); runSlot(s); };
+    ring.el.appendChild(el);
+  });
+  stage.appendChild(ring.el);
+  refresh();
+}
+function segSplitAt(h, t) {
+  const path = paths[h.p], k = splitSeg(path, h.k, t);
+  path.raw = null;
+  return k;
+}
+function openSegRing(pos, h) {
+  closeRing();
+  const g = fn => () => { if (editable([h.p])) fn(); };
+  const slots = [
+    { key: 'A', label: 'Add point', on: true, fn: g(() => { beginEdit(); const k = segSplitAt(h, h.t); sel.clear(); sel.add(sk(h.p, k)); activePath = h.p; endEdit(); refresh(); }) },
+    { key: 'M', label: 'Midpoint', on: true, fn: g(() => { beginEdit(); const k = segSplitAt(h, 0.5); sel.clear(); sel.add(sk(h.p, k)); activePath = h.p; endEdit(); refresh(); }) },
+    { key: 'X', label: 'Delete seg', on: true, fn: g(() => segDelete(h)) },
+    { key: 'S', label: 'Straighten', on: true, fn: g(() => segStraighten(h)) },
+    { key: 'H', label: 'Add handles', on: true, fn: g(() => segHandles(h)) },
+    { key: 'K', label: 'Cut here', on: true, fn: g(() => { beginEdit(); const k = segSplitAt(h, h.t); sel.clear(); sel.add(sk(h.p, k)); cutAtSelected(); }) },
+    { key: 'E', label: 'Select ends', on: true, fn: () => { const n = paths[h.p].pts.length; sel.clear(); sel.add(sk(h.p, h.k)); sel.add(sk(h.p, (h.k + 1) % n)); activePath = h.p; refresh(); } },
+    { key: 'D', label: 'Divide x3', on: true, fn: g(() => {
+      beginEdit();
+      const path = paths[h.p], added = [];
+      let k = h.k;
+      for (let i = 0; i < 2; i++) { const nk = splitSeg(path, k, 1 / (3 - i)); added.push(nk); k = nk; }
+      path.raw = null; sel.clear(); added.forEach(a => sel.add(sk(h.p, a))); activePath = h.p;
+      endEdit(); refresh();
+    }) },
+  ];
+  showRing(pos, 'Segment', slots);
+}
+function segDelete(h) {
+  const path = paths[h.p], n = path.pts.length;
+  beginEdit(); path.raw = null;
+  if (path.closed) {
+    const start = (h.k + 1) % n;
+    path.pts = path.pts.slice(start).concat(path.pts.slice(0, start));
+    path.closed = false;
+    const last = path.pts[path.pts.length - 1], first = path.pts[0];
+    last.o = null; last.t = 'c'; first.i = null; first.t = 'c';
+  } else {
+    const head = path.pts.slice(0, h.k + 1), tail = path.pts.slice(h.k + 1), keep = [];
+    head[head.length - 1].o = null; head[head.length - 1].t = 'c';
+    tail[0].i = null; tail[0].t = 'c';
+    if (head.length > 1) keep.push({ pts: head, closed: false, raw: null, stroke: path.stroke });
+    if (tail.length > 1) keep.push({ pts: tail, closed: false, raw: null, stroke: path.stroke ? Object.assign({}, path.stroke) : null });
+    paths.splice(h.p, 1, ...keep);
+  }
+  sel.clear(); drawing = null; activePath = null; hover = null;
+  endEdit(); refresh();
+}
+function segStraighten(h) {
+  const path = paths[h.p], a = path.pts[h.k], b = path.pts[(h.k + 1) % path.pts.length];
+  beginEdit(); path.raw = null;
+  a.o = null; b.i = null; a.t = 'c'; b.t = 'c';
+  endEdit(); refresh();
+}
+function segHandles(h) {
+  const path = paths[h.p], a = path.pts[h.k], b = path.pts[(h.k + 1) % path.pts.length];
+  beginEdit(); path.raw = null;
+  if (!a.o) a.o = mul(sub(xy(b), xy(a)), 1 / 3);
+  if (!b.i) b.i = mul(sub(xy(a), xy(b)), 1 / 3);
+  a.t = 'c'; b.t = 'c';
+  sel.clear(); sel.add(sk(h.p, h.k)); sel.add(sk(h.p, (h.k + 1) % path.pts.length)); activePath = h.p;
+  endEdit(); refresh();
+}
+
+function runSlot(s) { if (!s.on) return; closeRing(); s.fn(); }
+function closeRing() { if (ring) { ring.el.remove(); ring = null; } }
+
+function finishDrawing() {
+  if (drawing === null) return;
+  if (paths[drawing] && paths[drawing].pts.length < 2) { paths.splice(drawing, 1); sel.clear(); activePath = null; hover = null; }
+  drawing = null; refresh();
+}
+
+function joinPaths(p, k, p2, k2) {
+  const A = paths[p], B = paths[p2];
+  if (k === 0 && A.pts.length > 1) reversePath(A);
+  if (k2 !== 0) reversePath(B);
+  const j = A.pts[A.pts.length - 1], b0 = B.pts[0], idx = A.pts.length - 1;
+  j.o = b0.o;
+  for (const f of ['pr', 'w']) {
+    if (j[f] != null && b0[f] != null) j[f] = +((j[f] + b0[f]) / 2).toFixed(3);
+    else if (j[f] == null && b0[f] != null) j[f] = b0[f];
+  }
+  if (!j.tilt && b0.tilt) j.tilt = b0.tilt;
+  j.t = (j.i && j.o && j.t !== 'c' && b0.t !== 'c') ? j.t : 'c';
+  A.pts = A.pts.concat(B.pts.slice(1));
+  A.raw = null;
+  if (!A.stroke) A.stroke = B.stroke;
+  paths.splice(p2, 1);
+  const np = p2 < p ? p - 1 : p;
+  sel.clear(); sel.add(sk(np, idx)); activePath = np; drawing = null; hover = null;
+  return np;
+}
+
+function mergeClose(ct) {
+  const path = paths[ct.p], dragged = path.pts[ct.k], target = path.pts[ct.other];
+  if (ct.k === 0) target.o = dragged.o; else target.i = dragged.i;
+  if (target.i && target.o && target.t === 'c' && dragged.t !== 'c') target.t = dragged.t;
+  path.pts.splice(ct.k, 1);
+  path.closed = true; path.raw = null;
+  sel.clear(); sel.add(sk(ct.p, ct.k === 0 ? path.pts.length - 1 : ct.other));
+}
+
+function startMove(pos) {
+  drag = { type: 'move', start: pos, orig: {} };
+  selList().forEach(s => { const q = paths[s.p].pts[s.k]; drag.orig[sk(s.p, s.k)] = [q.x, q.y]; paths[s.p].raw = null; });
+}
+
+stage.addEventListener('pointerleave', () => { penState = null; render(); });
+stage.addEventListener('contextmenu', e => e.preventDefault());
+
+stage.addEventListener('pointerdown', e => {
+  if (e.target.closest('#hud')) return;
+  stage.setPointerCapture(e.pointerId);
+  const pos = localPos(e); lastPos = pos; pointerType = e.pointerType; pressure = e.pressure;
+  if (ring) { closeRing(); refresh(); return; }
+  const erase = e.button === 5 || (e.buttons & 32);
+  const barrel = e.button === 2;
+  if (tool === 'free' && !erase && !barrel) {
+    sel.clear(); freeDraw = { samples: [sample5(pos, e)], pen: e.pointerType === 'pen' }; refresh(); return;
+  }
+  const hit = hitTest(pos, tool === 'pen');
+  hover = hit;
+  if (erase) {
+    if (hit && hit.kind === 'anchor') { sel.clear(); sel.add(sk(hit.p, hit.k)); deleteSelected(); }
+    return;
+  }
+  if (barrel) {
+    if (hit && hit.kind === 'anchor' && !sel.has(sk(hit.p, hit.k))) { sel.clear(); sel.add(sk(hit.p, hit.k)); }
+    if (hit && hit.kind === 'seg') openSegRing(pos, hit);
+    else if (sel.size) openRing(pos); else toast('Barrel button over a point or segment opens a ring');
+    return;
+  }
+  if (tool === 'pen') penDown(pos, hit, e);
+  else if (tool === 'direct') directDown(pos, hit, e);
+  refresh();
+});
+
+function penDown(pos, hit, e) {
+  if (drawing !== null) {
+    const path = paths[drawing], last = path.pts[path.pts.length - 1];
+    if (hit && hit.kind === 'anchor' && hit.p === drawing && hit.k === 0 && path.pts.length >= 3) {
+      beginEdit(); path.closed = true; drawing = null; sel.clear(); sel.add(sk(hit.p, 0)); activePath = hit.p;
+      drag = { type: 'newAnchor', p: hit.p, k: 0, last: pos, at: xy(path.pts[0]) };
+      return;
+    }
+    if (hit && hit.kind === 'anchor' && hit.p !== drawing) {
+      const B = paths[hit.p];
+      if (!B.closed && (hit.k === 0 || hit.k === B.pts.length - 1) && editable([hit.p])) {
+        beginEdit();
+        const tgt = B.pts[hit.k];
+        path.pts.push(newPoint(tgt.x, tgt.y));
+        joinPaths(drawing, path.pts.length - 1, hit.p, hit.k);
+        endEdit();
+        return;
+      }
+    }
+    if (dist(pos, xy(last)) < 4 || e.detail >= 2) { finishDrawing(); endEdit(); return; }
+    if (hit && hit.kind === 'anchor' && hit.p === drawing) {
+      beginEdit(); path.pts.splice(hit.k, 1); endEdit(); return;
+    }
+    beginEdit();
+    const at = held.shift ? constrain(xy(last), pos) : pos;
+    path.pts.push(newPoint(at[0], at[1]));
+    penAttrs(path, path.pts[path.pts.length - 1], e);
+    sel.clear(); sel.add(sk(drawing, path.pts.length - 1)); activePath = drawing;
+    drag = { type: 'newAnchor', p: drawing, k: path.pts.length - 1, last: pos, at };
+    return;
+  }
+  if (hit && hit.kind === 'anchor') {
+    const path = paths[hit.p], end = hit.k === 0 || hit.k === path.pts.length - 1;
+    if (!editable([hit.p])) return;
+    if (!path.closed && end && path.pts.length) {
+      if (hit.k === 0 && path.pts.length > 1) { beginEdit(); reversePath(path); endEdit(); }
+      drawing = hit.p; activePath = hit.p; sel.clear(); sel.add(sk(hit.p, path.pts.length - 1)); path.raw = null;
+      return;
+    }
+    beginEdit(); path.pts.splice(hit.k, 1); path.raw = null;
+    if (!path.pts.length) paths.splice(hit.p, 1);
+    sel.clear(); hover = null; endEdit();
+    return;
+  }
+  if (hit && hit.kind === 'seg') {
+    if (!editable([hit.p])) return;
+    beginEdit();
+    const k = splitSeg(paths[hit.p], hit.k, hit.t); paths[hit.p].raw = null;
+    sel.clear(); sel.add(sk(hit.p, k)); activePath = hit.p;
+    startMove(pos);
+    return;
+  }
+  beginEdit();
+  paths.push({ pts: [newPoint(pos[0], pos[1])], closed: false, raw: null });
+  penAttrs(paths[paths.length - 1], paths[paths.length - 1].pts[0], e);
+  drawing = paths.length - 1; activePath = drawing;
+  sel.clear(); sel.add(sk(drawing, 0));
+  drag = { type: 'newAnchor', p: drawing, k: 0, last: pos, at: pos };
+}
+
+function directDown(pos, hit, e) {
+  if (hit && hit.kind === 'handle') {
+    if (!editable([hit.p])) return;
+    beginEdit();
+    const pt = paths[hit.p].pts[hit.k];
+    if (held.alt) pt.t = 'c';
+    paths[hit.p].raw = null;
+    drag = { type: 'handle', p: hit.p, k: hit.k, w: hit.w };
+    return;
+  }
+  if (hit && hit.kind === 'anchor') {
+    const key = sk(hit.p, hit.k);
+    activePath = hit.p;
+    if (e.detail >= 2) {
+      if (!editable([hit.p])) return;
+      beginEdit(); sel.clear(); sel.add(key);
+      const pt = paths[hit.p].pts[hit.k];
+      if (pt.t === 'c') toSmooth(paths[hit.p], hit.k); else toCorner(paths[hit.p], hit.k);
+      paths[hit.p].raw = null; endEdit();
+      return;
+    }
+    if (e.shiftKey) { if (sel.has(key)) sel.delete(key); else sel.add(key); }
+    else if (!sel.has(key)) { sel.clear(); sel.add(key); }
+    if (!editable([hit.p])) return;
+    beginEdit(); startMove(pos);
+    return;
+  }
+  if (hit && hit.kind === 'seg') {
+    const path = paths[hit.p], n = path.pts.length;
+    activePath = hit.p;
+    sel.clear(); sel.add(sk(hit.p, hit.k)); sel.add(sk(hit.p, (hit.k + 1) % n));
+    if (!editable([hit.p])) return;
+    beginEdit(); path.raw = null;
+    const P = segPts(path, hit.k);
+    drag = { type: 'bend', p: hit.p, k: hit.k, t: clamp(hit.t, 0.12, 0.88), start: pos, P };
+    return;
+  }
+  if (!e.shiftKey) sel.clear();
+  drag = { type: 'marquee', start: pos, add: e.shiftKey };
+}
+
+stage.addEventListener('pointermove', e => {
+  const pos = localPos(e), prev = lastPos; lastPos = pos; pointerType = e.pointerType; pressure = e.buttons ? e.pressure : 0;
+  penState = { x: pos[0], y: pos[1], tx: e.tiltX || 0, ty: e.tiltY || 0, p: e.pressure, type: e.pointerType, down: e.buttons > 0 };
+  if (scrub) { updateScrub(pos); refresh(); return; }
+  if (freeDraw) {
+    if (dist(pos, freeDraw.samples[freeDraw.samples.length - 1]) > 2) freeDraw.samples.push(sample5(pos, e));
+    render(); updateHint(); return;
+  }
+  if (drag) {
+    if (spaceDown) spaceMoved = true;
+    dragMove(pos, prev);
+    refresh(); return;
+  }
+  hover = ring ? null : hitTest(pos, tool === 'pen');
+  if (tool === 'free') hover = null;
+  refresh();
+});
+
+function dragMove(pos, prev) {
+  if (drag.type === 'newAnchor') {
+    const path = paths[drag.p], pt = path.pts[drag.k];
+    if (pointerType === 'pen') { drag.pmax = Math.max(drag.pmax || 0, pressure); pt.pr = +drag.pmax.toFixed(3); }
+    if (held.space) {
+      const d = sub(pos, prev);
+      pt.x += d[0]; pt.y += d[1]; drag.at = xy(pt);
+      return;
+    }
+    let to = pos;
+    if (held.shift) to = constrain(drag.at, pos);
+    const h = sub(to, drag.at);
+    if (len(h) < 3) return;
+    pt.o = h; pt.i = held.alt ? pt.i : mul(h, -1); pt.t = held.alt ? 'c' : 's';
+    if (drag.k === 0 && path.closed) { pt.i = mul(h, -1); pt.t = 's'; }
+  } else if (drag.type === 'move') {
+    let d = sub(pos, drag.start);
+    if (held.shift) d = sub(constrain(drag.start, pos), drag.start);
+    for (const key in drag.orig) {
+      const [p, k] = key.split(':').map(Number), q = paths[p].pts[k], o = drag.orig[key];
+      q.x = o[0] + d[0]; q.y = o[1] + d[1];
+    }
+    drag.closeTo = null; drag.joinTo = null;
+    const one = selList();
+    if (one.length === 1) {
+      const { p, k } = one[0], path = paths[p], n = path.pts.length;
+      if (!path.closed && n >= 3 && (k === 0 || k === n - 1)) {
+        const other = k === 0 ? n - 1 : 0, o = path.pts[other], q = path.pts[k];
+        if (!held.alt && dist(xy(q), xy(o)) < 10) { q.x = o.x; q.y = o.y; drag.closeTo = { p, k, other }; }
+      }
+    }
+    if (!drag.closeTo && !held.alt && one.length === 1) {
+      const { p, k } = one[0], path = paths[p], q = path.pts[k];
+      if (!path.closed && (k === 0 || k === path.pts.length - 1)) {
+        for (let p2 = 0; p2 < paths.length; p2++) {
+          const B = paths[p2];
+          if (p2 === p || B.closed || B.raw) continue;
+          for (const k2 of [0, B.pts.length - 1]) {
+            if (dist(xy(q), xy(B.pts[k2])) < 10) { q.x = B.pts[k2].x; q.y = B.pts[k2].y; drag.joinTo = { p, k, p2, k2 }; }
+          }
+        }
+      }
+    }
+  } else if (drag.type === 'handle') {
+    const pt = paths[drag.p].pts[drag.k];
+    let to = pos;
+    if (held.shift) to = constrain(xy(pt), pos);
+    pt[drag.w] = sub(to, xy(pt));
+    enforce(pt, drag.w);
+  } else if (drag.type === 'bend') {
+    const path = paths[drag.p], n = path.pts.length, a = path.pts[drag.k], b = path.pts[(drag.k + 1) % n];
+    const d = sub(pos, drag.start), w = 1 / (3 * drag.t * (1 - drag.t));
+    const p1 = add(drag.P[1], mul(d, w)), p2 = add(drag.P[2], mul(d, w));
+    a.o = sub(p1, xy(a)); b.i = sub(p2, xy(b));
+    enforce(a, 'o'); enforce(b, 'i');
+  }
+}
+
+stage.addEventListener('pointerup', e => {
+  const pos = localPos(e); lastPos = pos;
+  if (freeDraw) {
+    const samples = freeDraw.samples, wasPen = freeDraw.pen; freeDraw = null;
+    if (samples.length > 3) {
+      beginEdit();
+      paths.push(fitPath(samples, +document.getElementById('sTol').value, +document.getElementById('sCorner').value, Object.assign(widthOpts(), { pen: wasPen })));
+      lastFree = paths.length - 1; activePath = lastFree;
+      endEdit();
+    }
+    refresh(); return;
+  }
+  if (drag && drag.type === 'marquee') {
+    const a = drag.start, x0 = Math.min(a[0], pos[0]), x1 = Math.max(a[0], pos[0]), y0 = Math.min(a[1], pos[1]), y1 = Math.max(a[1], pos[1]);
+    paths.forEach((path, p) => path.pts.forEach((q, k) => { if (q.x >= x0 && q.x <= x1 && q.y >= y0 && q.y <= y1) sel.add(sk(p, k)); }));
+  }
+  if (drag && drag.type === 'move' && drag.closeTo) mergeClose(drag.closeTo);
+  else if (drag && drag.type === 'move' && drag.joinTo) joinPaths(drag.joinTo.p, drag.joinTo.k, drag.joinTo.p2, drag.joinTo.k2);
+  drag = null; endEdit();
+  hover = hitTest(pos, tool === 'pen');
+  refresh();
+});
+
+function updateScrub(pos) {
+  if (!scrub) return;
+  if (scrub.kind === 'width') {
+    const d = (scrub.y0 - pos[1]) * 0.08;
+    scrub.items.forEach(i => { paths[i.p].pts[i.k].w = +clamp(i.w0 + d, 0.5, 40).toFixed(1); });
+    showScrub();
+    return;
+  }
+  const path = paths[lastFree];
+  if (!path) return;
+  refitPath(lastFree, { tol: clamp(scrub.tol0 + (scrub.y0 - pos[1]) * 0.06, 0.5, 30) });
+  sel.clear();
+  showScrub();
+}
+function showScrub() {
+  scrubEl.style.display = 'block'; scrubEl.style.left = scrub.x + 'px'; scrubEl.style.top = scrub.y + 'px';
+  if (scrub.kind === 'width') {
+    const w = paths[scrub.items[0].p].pts[scrub.items[0].k].w;
+    scrubEl.innerHTML = '<div class="head"><span>Width <span class="key">W</span></span><b>' + w.toFixed(1) + ' px</b></div>' +
+      '<div class="track"><div class="fill" style="width:' + (w / 40 * 100) + '%"></div><div class="thumb" style="left:' + (w / 40 * 100) + '%"></div></div>' +
+      '<div style="margin-top:10px;color:#9a9ea8;font-size:11px">' + scrub.items.length + ' point' + (scrub.items.length > 1 ? 's' : '') + ' &middot; move up to widen</div>';
+    return;
+  }
+  const path = paths[lastFree], tol = path.raw.tol;
+  scrubEl.innerHTML = '<div class="head"><span>Re-fit <span class="key">F</span></span><b>' + path.pts.length + ' points</b></div>' +
+    '<div class="track"><div class="fill" style="width:' + (tol / 30 * 100) + '%"></div><div class="thumb" style="left:' + (tol / 30 * 100) + '%"></div></div>' +
+    '<div style="margin-top:10px;color:#9a9ea8;font-size:11px">tolerance ' + tol.toFixed(1) + ' px &middot; move up to simplify</div>';
+}
+
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' && e.target.type === 'number') { if (e.key === 'Enter' || e.key === 'Escape') e.target.blur(); return; }
+  if (e.key === 'Shift') held.shift = true;
+  if (e.key === 'Alt') { held.alt = true; e.preventDefault(); }
+  if (e.key === ' ') {
+    e.preventDefault();
+    if (!held.space) { held.space = true; spaceDown = Date.now(); spaceMoved = false; }
+  }
+  const key = e.key.toLowerCase();
+  if (ring) {
+    if (e.key === 'Escape') { closeRing(); refresh(); return; }
+    const s = ring.slots.find(x => x.key.toLowerCase() === key || (x.key === 'Del' && (key === 'delete' || key === 'backspace')));
+    if (s) { runSlot(s); e.preventDefault(); }
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && key === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
+  if ((e.ctrlKey || e.metaKey) && key === 'y') { e.preventDefault(); doRedo(); return; }
+  if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat) {
+    if (key === 'p') setTool('pen');
+    else if (key === 'a') setTool('direct');
+    else if (key === 'b') setTool('free');
+    else if (key === 'f' && lastFree !== null && paths[lastFree] && paths[lastFree].raw && !drag && !scrub) {
+      beginEdit();
+      scrub = { kind: 'fit', y0: lastPos[1], tol0: paths[lastFree].raw.tol, x: clamp(lastPos[0] - 95, 6, 704), y: clamp(lastPos[1] - 20, 6, 440) };
+      showScrub();
+    }
+    else if (key === 'w' && !drag && !scrub && tool !== 'free') {
+      if (!sel.size) { const hit = hitTest(lastPos, true); if (hit && hit.kind === 'anchor') { sel.clear(); sel.add(sk(hit.p, hit.k)); } }
+      const items = selList();
+      if (items.length && editable(items.map(i => i.p))) {
+        beginEdit();
+        scrub = { kind: 'width', y0: lastPos[1], items: items.map(i => ({ p: i.p, k: i.k, w0: +((widthsOf(paths[i.p]) || [])[i.k] ?? 2.5).toFixed(1) })), x: clamp(lastPos[0] - 95, 6, 704), y: clamp(lastPos[1] - 20, 6, 440) };
+        scrub.items.forEach(i => { paths[i.p].pts[i.k].w = i.w0; });
+        showScrub();
+      }
+    }
+  }
+  if (e.key === 'Enter' || e.key === 'Escape') {
+    if (drawing !== null) { endEdit(); finishDrawing(); }
+    else if (e.key === 'Escape') { sel.clear(); refresh(); }
+  }
+  if (e.key === 'Backspace' || e.key === 'Delete') {
+    e.preventDefault();
+    if (drawing !== null && tool === 'pen' && e.key === 'Backspace') {
+      const path = paths[drawing];
+      beginEdit(); path.pts.pop();
+      if (!path.pts.length) { paths.splice(drawing, 1); drawing = null; sel.clear(); }
+      else { sel.clear(); sel.add(sk(drawing, path.pts.length - 1)); }
+      endEdit();
+    } else if (sel.size) deleteSelected();
+  }
+  refresh();
+});
+window.addEventListener('keyup', e => {
+  if (e.key === 'Shift') held.shift = false;
+  if (e.key === 'Alt') { held.alt = false; e.preventDefault(); }
+  if (e.key === ' ') {
+    held.space = false;
+    if (Date.now() - spaceDown < 250 && !spaceMoved && !drag && !ring && !scrub) {
+      const hit = tool === 'free' ? null : hitTest(lastPos, tool === 'pen');
+      if (hit && hit.kind === 'anchor' && !sel.has(sk(hit.p, hit.k))) { sel.clear(); sel.add(sk(hit.p, hit.k)); }
+      if (hit && hit.kind === 'seg') openSegRing(lastPos, hit);
+      else if (sel.size) openRing(lastPos); else toast('Tap Space over a point or segment to open a ring');
+    }
+  }
+  if (scrub && ((e.key.toLowerCase() === 'f' && scrub.kind === 'fit') || (e.key.toLowerCase() === 'w' && scrub.kind === 'width'))) { scrub = null; scrubEl.style.display = 'none'; endEdit(); }
+  refresh();
+});
+
+function setTool(t) {
+  endEdit();
+  if (drawing !== null) finishDrawing();
+  tool = t; hover = null; drag = null;
+  ['Pen', 'Direct', 'Free'].forEach(n => document.getElementById('t' + n).classList.toggle('on', n.toLowerCase() === t));
+  refresh();
+}
+document.getElementById('tPen').onclick = () => setTool('pen');
+document.getElementById('tDirect').onclick = () => setTool('direct');
+document.getElementById('tFree').onclick = () => setTool('free');
+document.getElementById('bUndo').onclick = doUndo;
+document.getElementById('bRedo').onclick = doRedo;
+document.getElementById('cChip').onchange = refresh;
+document.getElementById('bClear').onclick = () => { endEdit(); if (paths.length) { undo.push(snap()); redo.length = 0; } paths = []; sel.clear(); drawing = null; activePath = null; lastFree = null; refresh(); };
+
+function sample() {
+  const blob = { pts: [[250, 120], [370, 200], [340, 330], [250, 380], [150, 300], [140, 190]].map(q => newPoint(q[0], q[1])), closed: true, raw: null };
+  blob.pts.forEach((_, k) => { if (k !== 3) toSmooth(blob, k); });
+  const wave = { pts: [[520, 300], [590, 160], [660, 300], [730, 160], [790, 300]].map(q => newPoint(q[0], q[1])), closed: false, raw: null };
+  wave.pts.forEach((_, k) => toSmooth(wave, k));
+  return [blob, wave];
+}
+document.getElementById('bSample').onclick = () => { endEdit(); undo.push(snap()); redo.length = 0; paths = sample(); sel.clear(); drawing = null; lastFree = null; refresh(); };
+
+paths = sample();
+refresh();
+</script>
+</body>
+</html>

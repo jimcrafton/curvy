@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curvy hints at the pen</title>
+<style>
+  :root {
+    --bg: #1e1f22; --panel: #26272b; --workspace: #2b2d31; --paper: #f4f4f2; --text: #e6e7ea; --muted: #9a9ea8;
+    --accent: #4c8dff; --amber: #ffb454; --slot: #313338; --slotLine: #4a4d55;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid #000; }
+  header h1 { margin: 0 0 4px; font-size: 15px; }
+  header p { margin: 0; color: var(--muted); max-width: 900px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 18px; padding: 10px 16px; background: #222327; border-bottom: 1px solid #000; }
+  .group { display: flex; align-items: center; gap: 6px; }
+  .group span { color: var(--muted); margin-right: 4px; }
+  button { background: var(--slot); color: var(--text); border: 1px solid var(--slotLine); border-radius: 14px; padding: 4px 12px; font: inherit; cursor: pointer; }
+  button.on { background: var(--accent); border-color: var(--accent); }
+  #stage { position: relative; width: 900px; height: 520px; margin: 16px auto; background: var(--workspace); border: 1px solid #000; overflow: hidden; }
+  #paper { position: absolute; left: 150px; top: 60px; width: 600px; height: 400px; background: var(--paper); box-shadow: 0 2px 12px #0008; }
+  #shape { position: absolute; left: 520px; top: 130px; width: 150px; height: 100px; border-radius: 50%; background: #d9e6ff; border: 2px solid #3a6fd8; }
+  #hand { position: absolute; width: 260px; height: 120px; border-radius: 60px; background: #ff5a5a22; border: 1px dashed #ff5a5a88; transform-origin: 0 50%; display: none; }
+  #handLabel { position: absolute; color: #ff9a9a; font-size: 11px; display: none; }
+  #cursor { position: absolute; width: 0; height: 0; }
+  #cursor::before { content: ""; position: absolute; left: -9px; top: -1px; width: 18px; height: 2px; background: #111; }
+  #cursor::after { content: ""; position: absolute; top: -9px; left: -1px; height: 18px; width: 2px; background: #111; }
+  #chip { position: absolute; background: #17181bf0; color: var(--text); border: 1px solid #5a5d66; border-radius: 8px; padding: 6px 10px; white-space: nowrap; font-size: 12px; box-shadow: 0 3px 10px #0007; }
+  #chip small { display: block; color: var(--muted); font-size: 11px; }
+  #chip kbd { background: #3a3d43; border-radius: 4px; padding: 0 5px; font: 11px "Segoe UI"; border: 1px solid #55585f; }
+  .bar { display: inline-block; width: 120px; height: 6px; background: #3a3d43; border-radius: 3px; vertical-align: middle; margin-left: 8px; }
+  .bar i { display: block; height: 100%; width: 38%; background: var(--amber); border-radius: 3px; }
+  #extras { position: absolute; left: 0; top: 0; pointer-events: none; }
+  #extras > * { position: absolute; }
+  .key { min-width: 22px; height: 22px; padding: 0 5px; border-radius: 6px; background: #3a3d43; border: 1px solid #5a5d66; color: var(--text); font: 600 11px/20px "Segoe UI"; text-align: center; }
+  .key.lit { background: var(--amber); color: #1b1b1b; border-color: var(--amber); }
+  .key.dim { opacity: .4; }
+  .tag { color: var(--text); background: #17181bf0; border-radius: 6px; padding: 2px 8px; font-size: 11px; white-space: nowrap; border: 1px solid #5a5d66; }
+  .ghost { border: 1.5px dashed #3a6fd8aa; border-radius: 50%; background: #3a6fd814; }
+  .coach { color: #55585f; font-size: 13px; line-height: 1.7; }
+  .coach .key { display: inline-block; background: #dcdcd8; color: #333; border-color: #b8b8b2; }
+  .coach .key.lit { background: var(--amber); color: #1b1b1b; }
+  #ring { position: absolute; left: 0; top: 0; display: none; }
+  .slot { position: absolute; width: 108px; height: 38px; border-radius: 19px; background: var(--slot); border: 1px solid var(--slotLine); display: flex; align-items: center; justify-content: center; gap: 6px; font-weight: 600; font-size: 12px; }
+  .slot small { color: var(--muted); font-weight: 400; font-size: 10px; }
+  .slot.covered { opacity: .35; border-style: dashed; }
+  #hub { position: absolute; width: 92px; height: 92px; border-radius: 50%; background: var(--slot); border: 2px solid var(--amber); text-align: center; padding-top: 22px; font-weight: 600; font-size: 12px; }
+  #hub b { color: var(--amber); display: block; line-height: 8px; margin-top: 6px; }
+  #hub small { display: block; margin-top: 8px; color: var(--muted); font-weight: 400; font-size: 9px; padding: 0 6px; }
+  #bar { position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: var(--panel); border-top: 1px solid #000; color: var(--muted); padding: 5px 10px; white-space: nowrap; font-size: 12px; }
+  #bar b { color: var(--text); margin-right: 10px; }
+  #notes { width: 900px; margin: 0 auto 24px; color: var(--muted); }
+  #notes li { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Hints at the pen</h1>
+  <p>The cursor is where attention is, on a pen display (hand over the screen) and on a separate tablet (hand off-screen). Switch hardware and handedness to see where the chip and the ring need to sit. The bottom bar stays as an expert reference.</p>
+</header>
+<div class="controls">
+  <div class="group"><span>State</span>
+    <button data-state="rest" class="on">Pen resting</button>
+    <button data-state="hold">Holding E</button>
+    <button data-state="scrub">Scrubbing width</button>
+    <button data-state="ring">Ring open</button>
+  </div>
+  <div class="group"><span>Variation</span>
+    <button data-variant="A" class="on">A Chip</button>
+    <button data-variant="B">B Keycaps</button>
+    <button data-variant="C">C Ghost preview</button>
+    <button data-variant="D">D Key arc</button>
+    <button data-variant="E">E On the paper</button>
+  </div>
+  <div class="group"><span>Hardware</span>
+    <button data-hw="display" class="on">Pen display</button>
+    <button data-hw="tablet">Separate tablet</button>
+  </div>
+  <div class="group"><span>Hand</span>
+    <button data-hand="right" class="on">Right</button>
+    <button data-hand="left">Left</button>
+  </div>
+</div>
+
+<div id="stage">
+  <div id="paper"></div>
+  <div id="shape"></div>
+  <div id="hand"></div><div id="handLabel">hand</div>
+  <div id="ring"></div>
+  <div id="cursor"></div>
+  <div id="extras"></div>
+  <div id="chip"></div>
+  <div id="bar"></div>
+</div>
+
+<ul id="notes">
+  <li><b>Variations:</b> A a text chip; B keycaps only (the key is the hint); C a ghost of what the gesture would make, with its measurement; D a small arc of keys round the cursor that becomes a dial when scrubbing; E a coaching card on the paper, away from the pen.</li>
+  <li><b>Pen resting:</b> after about a second over paper, a chip appears and fades when the pen moves. It retires with the same use counters as the bar.</li>
+  <li><b>Holding E:</b> the chip names the gesture while the key is down, and the bar repeats it.</li>
+  <li><b>Scrubbing:</b> the value follows the pen, so the gesture teaches itself.</li>
+  <li><b>Pen display:</b> the dashed shape is roughly where the hand covers the screen. The chip goes on the other side of the tip, and ring slots under the hand are dimmed. They should hold the least-used commands, or the ring mirrors with handedness.</li>
+  <li><b>Separate tablet:</b> nothing covers the screen, so the chip sits below and right of the cursor as usual.</li>
+</ul>
+
+<script>
+  const stage = document.getElementById('stage');
+  const cursorPos = { x: 430, y: 300 };
+  const st = { state: 'rest', hw: 'display', hand: 'right', variant: 'A' };
+  const $ = id => document.getElementById(id);
+
+  const chipText = {
+    rest:  '<kbd>E</kbd> hold and drag to draw<small>Space: menu</small>',
+    hold:  'drag to draw<small><kbd>Shift</kbd> square · <kbd>Alt</kbd> from centre</small>',
+    scrub: 'Width 4.5 px<span class="bar"><i></i></span><small>drag sideways · release to keep</small>',
+    ring:  ''
+  };
+  const barText = {
+    rest:  ['Select', 'hold R E P S L and drag to draw - hold Space and drag to pan - tap Space for the menu'],
+    hold:  ['Ellipse', 'drag to draw - Shift square - Alt from center - release E to stop'],
+    scrub: ['Select', 'Width 4.5 px - drag sideways'],
+    ring:  ['Select', 'Ring: Create']
+  };
+  const ringSlots = [['Rectangle','R'],['Ellipse','E'],['Polygon','P'],['Star','S'],['Line','L'],['Freehand','B'],['Text','T'],['File','F']];
+
+  function occludedDirection() {
+    return st.hand === 'right' ? 45 : 135; // degrees, clockwise from +x on screen: down-right or down-left
+  }
+
+  function angleDiff(a, b) {
+    let d = Math.abs(a - b) % 360;
+    return d > 180 ? 360 - d : d;
+  }
+
+  // The side away from the hand on a pen display (left/up for a right-hander), otherwise below and right.
+  function sideX() { return st.hw === 'display' ? (st.hand === 'right' ? -1 : 1) : 1; }
+  function sideY() { return st.hw === 'display' ? -1 : 1; }
+
+  function at(x, y, html, cls, style) {
+    return '<div class="' + (cls || '') + '" style="left:' + x + 'px;top:' + y + 'px;' + (style || '') + '">' + html + '</div>';
+  }
+
+  function extras(covering) {
+    const cx = cursorPos.x, cy = cursorPos.y, sx = sideX(), sy = sideY();
+    const state = st.state;
+    let out = '';
+    if (st.variant === 'B') {
+      // Keycaps beside the cursor: the key itself is the hint.
+      const keys = state === 'rest' ? ['R', 'E', 'P', 'S', 'L'] : state === 'hold' ? ['E'] : ['W'];
+      const width = keys.length * 26;
+      const x = sx < 0 ? cx - 18 - width : cx + 18;
+      const y = sy < 0 ? cy - 18 - 22 : cy + 18;
+      keys.forEach((k, i) => { out += at(x + i * 26, y, k, 'key' + (state !== 'rest' ? ' lit' : '')); });
+      const label = state === 'rest' ? 'hold + drag' : state === 'hold' ? 'Ellipse' : 'Width 4.5 px';
+      out += at(x, y + (sy < 0 ? -22 : 26), label, 'tag');
+    } else if (st.variant === 'C') {
+      // Ghost of what the gesture would make, with the measurement beside it.
+      if (state === 'rest') {
+        out += at(cx - 45, cy - 30, '', 'ghost', 'width:90px;height:60px');
+        out += at(sx < 0 ? cx - 150 : cx + 56, cy - 10, 'hold E and drag', 'tag');
+      } else if (state === 'hold') {
+        out += at(cx - 90, cy - 60, '', 'ghost', 'width:180px;height:120px;border-style:solid');
+        out += at(cx + 94, cy + 40, '180 x 120', 'tag');
+      } else {
+        out += at(cx + (sx < 0 ? -190 : 40), cy + (sy < 0 ? -40 : 24), '', '', 'width:150px;height:4.5px;background:#3a6fd8;border-radius:3px');
+        out += at(cx + (sx < 0 ? -190 : 40), cy + (sy < 0 ? -70 : 40), 'Width 4.5 px', 'tag');
+      }
+    } else if (st.variant === 'D') {
+      // A small arc of keys around the cursor on the side away from the hand; a dial while scrubbing.
+      const base = sx < 0 ? 225 : -45;
+      const keys = ['R', 'E', 'P', 'S', 'L'];
+      if (state === 'scrub') {
+        out += '<svg style="left:' + (cx - 60) + 'px;top:' + (cy - 60) + 'px;position:absolute" width="120" height="120"><circle cx="60" cy="60" r="46" fill="none" stroke="#3a3d43" stroke-width="7"/>' +
+               '<circle cx="60" cy="60" r="46" fill="none" stroke="#ffb454" stroke-width="7" stroke-dasharray="110 289" transform="rotate(-90 60 60)"/></svg>';
+        out += at(cx + 52, cy - 10, '4.5 px', 'tag');
+      } else {
+        keys.forEach((k, i) => {
+          const a = (base - 10 + i * 24) * Math.PI / 180 + (sy < 0 ? 0 : 0);
+          const x = cx + 52 * Math.cos(a) - 11, y = cy + 52 * Math.sin(a) - 11;
+          const cls = 'key' + (state === 'hold' ? (k === 'E' ? ' lit' : ' dim') : '');
+          out += at(x, y, k, cls);
+        });
+        out += at(sx < 0 ? cx - 128 : cx + 70, cy - 40, state === 'rest' ? 'hold a key, drag' : 'drag to draw', 'tag');
+      }
+    } else if (st.variant === 'E') {
+      // Not at the pen at all: a coaching card on the paper that retires once the gestures are used.
+      const card = state === 'rest'
+        ? 'Draw: hold <span class="key">R</span> <span class="key lit">E</span> <span class="key">P</span> <span class="key">S</span> <span class="key">L</span> and drag<br>Pan: hold <span class="key">Space</span> and drag<br>Menu: tap <span class="key">Space</span>'
+        : state === 'hold'
+        ? 'Ellipse: drag to draw<br><span class="key">Shift</span> square <span class="key">Alt</span> from centre'
+        : 'Width 4.5 px<br>drag sideways, release to keep';
+      out += at(170, 372, card, 'coach');
+    }
+    return out;
+  }
+
+  function render() {
+    const hand = $('hand'), handLabel = $('handLabel'), chip = $('chip'), ring = $('ring');
+    $('cursor').style.left = cursorPos.x + 'px';
+    $('cursor').style.top = cursorPos.y + 'px';
+
+    const covering = st.hw === 'display';
+    const dir = occludedDirection();
+    hand.style.display = handLabel.style.display = covering ? 'block' : 'none';
+    if (covering) {
+      hand.style.left = cursorPos.x + 'px';
+      hand.style.top = (cursorPos.y - 60) + 'px';
+      hand.style.transform = 'rotate(' + dir + 'deg)';
+      const rad = dir * Math.PI / 180;
+      handLabel.style.left = (cursorPos.x + Math.cos(rad) * 120 - 10) + 'px';
+      handLabel.style.top = (cursorPos.y + Math.sin(rad) * 120 - 8) + 'px';
+    }
+
+    ring.style.display = st.state === 'ring' ? 'block' : 'none';
+    const useChip = st.variant === 'A' && st.state !== 'ring';
+    chip.style.display = useChip ? 'block' : 'none';
+    $('extras').innerHTML = st.state === 'ring' ? '' : extras(covering);
+    if (st.state === 'ring') {
+      ring.innerHTML = '';
+      ringSlots.forEach((slot, i) => {
+        const a = -90 + 360 * i / ringSlots.length;
+        const x = cursorPos.x + 118 * Math.cos(a * Math.PI / 180) - 54;
+        const y = cursorPos.y + 118 * Math.sin(a * Math.PI / 180) - 19;
+        const el = document.createElement('div');
+        el.className = 'slot' + (covering && angleDiff(a, dir) < 62 ? ' covered' : '');
+        el.style.left = x + 'px'; el.style.top = y + 'px';
+        el.innerHTML = slot[0] + ' <small>' + slot[1] + '</small>';
+        ring.appendChild(el);
+      });
+      const hub = document.createElement('div');
+      hub.id = 'hub';
+      hub.style.left = (cursorPos.x - 46) + 'px'; hub.style.top = (cursorPos.y - 46) + 'px';
+      hub.innerHTML = 'Create<b>...</b><small>tip: hold E and drag</small>';
+      ring.appendChild(hub);
+    } else if (useChip) {
+      chip.innerHTML = chipText[st.state];
+      const w = chip.offsetWidth, h = chip.offsetHeight;
+      let x, y;
+      if (covering) {
+        x = st.hand === 'right' ? cursorPos.x - 18 - w : cursorPos.x + 18;
+        y = cursorPos.y - 18 - h;
+      } else {
+        x = cursorPos.x + 20; y = cursorPos.y + 20;
+      }
+      chip.style.left = x + 'px'; chip.style.top = y + 'px';
+    }
+    $('bar').innerHTML = '<b>' + barText[st.state][0] + '</b>' + barText[st.state][1];
+  }
+
+  document.querySelectorAll('button').forEach(btn => btn.addEventListener('click', () => {
+    const key = btn.dataset.state ? 'state' : btn.dataset.variant ? 'variant' : btn.dataset.hw ? 'hw' : 'hand';
+    st[key] = btn.dataset[key];
+    document.querySelectorAll('button[data-' + key + ']').forEach(b => b.classList.toggle('on', b === btn));
+    render();
+  }));
+  render();
+</script>
+</body>
+</html>

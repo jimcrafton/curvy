@@ -1,0 +1,745 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curvy document structure views</title>
+<style>
+  :root { --bg: #1e1f22; --panel: #26272b; --workspace: #2b2d31; --text: #e6e7ea; --muted: #9a9ea8; --accent: #4c8dff; --amber: #ffb454; --slot: #313338; --slotLine: #4a4d55; --glass: #17181b99; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid #000; }
+  header h1 { margin: 0 0 4px; font-size: 15px; }
+  header p { margin: 0; color: var(--muted); max-width: 980px; }
+  .controls { display: flex; gap: 8px; align-items: center; padding: 10px 16px; background: #222327; border-bottom: 1px solid #000; flex-wrap: wrap; }
+  button { background: var(--slot); color: var(--text); border: 1px solid var(--slotLine); border-radius: 14px; padding: 3px 11px; font: inherit; cursor: pointer; }
+  button.on { background: var(--accent); border-color: var(--accent); }
+  #stage { position: relative; width: 1100px; height: 660px; margin: 16px auto 8px; background: var(--workspace); border: 1px solid #000; overflow: hidden; user-select: none; }
+  .glass { background: var(--glass); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); border: 1px solid #ffffff2a; }
+  .view { display: none; position: absolute; inset: 0 0 28px 0; }
+  .view.on { display: block; }
+  #art { position: absolute; left: 270px; top: 40px; width: 580px; height: 580px; background: #EFDAC4; box-shadow: 0 2px 14px #0008; }
+  #title { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); z-index: 7; padding: 3px 12px; border-radius: 12px; font-size: 12px; white-space: nowrap; }
+  #bpad { position: absolute; left: 270px; top: 40px; width: 580px; height: 580px; z-index: 3; display: none; cursor: crosshair; touch-action: none; }
+  .brs canvas { width: 150px; height: 34px; background: #EFDAC4; border-radius: 5px; flex: none; }
+  .ab.brs.sel { border-color: var(--amber); }
+  #bar { position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: var(--panel); border-top: 1px solid #000; color: var(--muted); padding: 4px 10px; white-space: nowrap; font-size: 12px; z-index: 8; }
+  .muted { color: var(--muted); }
+  .key { display: inline-flex; align-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 6px; background: #3a3d43; border: 1px solid #5a5d66; font: 600 11px/18px "Segoe UI"; }
+  input[type=text], input[type=number], select { background: #00000055; border: 1px solid #ffffff2a; border-radius: 6px; color: var(--text); padding: 3px 8px; font: inherit; width: 100%; outline: none; }
+  .chip { padding: 1px 9px; border-radius: 10px; border: 1px solid var(--slotLine); background: var(--slot); font-size: 12px; cursor: pointer; }
+  .chip.on { background: var(--amber); border-color: var(--amber); color: #1b1b1b; }
+
+  /* outline */
+  #outline { position: absolute; left: 0; top: 0; bottom: 0; width: 300px; border-width: 0 1px 0 0; display: flex; flex-direction: column; z-index: 4; }
+  #outline .hd { padding: 8px 10px; display: flex; gap: 6px; align-items: center; border-bottom: 1px solid #ffffff1f; }
+  #rows { flex: 1; overflow: auto; padding: 4px 0; }
+  .row { display: flex; align-items: center; gap: 4px; height: 27px; padding-right: 8px; cursor: pointer; font-size: 12px; white-space: nowrap; }
+  .row:hover { background: #ffffff14; }
+  .row.sel { background: #ffb45438; }
+  .row.dim { opacity: .35; }
+  .row .caret { width: 14px; text-align: center; color: var(--muted); font-size: 10px; }
+  .row .tg { width: 16px; text-align: center; font-size: 12px; opacity: .85; }
+  .row .tg.off { opacity: .25; }
+  .row .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  .row .ct { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 11px; }
+  .row .dot { width: 8px; height: 8px; border-radius: 2px; }
+  .row .badge { font-size: 9px; padding: 0 4px; border-radius: 4px; background: #4c8dff55; color: #cfe0ff; }
+  .thumb { width: 22px; height: 22px; border-radius: 4px; background: #7a7e87; flex: none; }
+  #outline .ft { padding: 6px 10px; border-top: 1px solid #ffffff1f; color: var(--muted); font-size: 11px; }
+
+  /* layer strip, scrub card, ring */
+  #strip { position: absolute; left: 0; top: 0; bottom: 0; width: 46px; padding: 8px 5px; display: flex; flex-direction: column; gap: 6px; align-items: center; z-index: 4; border-width: 0 1px 0 0; }
+  .lchip { position: relative; width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; font-weight: 700; color: #111; cursor: pointer; border: 2px solid transparent; }
+  .lchip.act { border-color: #fff; box-shadow: 0 0 0 2px #17181b; }
+  .lchip.off { opacity: .3; }
+  .lchip .eye { position: absolute; right: -3px; bottom: -3px; width: 13px; height: 13px; border-radius: 50%; background: #17181b; font-size: 8px; display: grid; place-items: center; color: #fff; }
+  #fly { position: absolute; left: 54px; top: 8px; width: 210px; padding: 8px 10px; border-radius: 10px; z-index: 4; font-size: 12px; }
+  #fly .li { display: flex; align-items: center; gap: 8px; height: 24px; }
+  #scrubCard { position: absolute; display: none; z-index: 6; padding: 8px 12px; border-radius: 10px; min-width: 190px; background: #17181bf0; border: 1px solid #5a5d66; box-shadow: 0 3px 10px #0007; }
+  #scrubCard .li { display: flex; align-items: center; gap: 8px; height: 26px; color: var(--muted); }
+  #scrubCard .li.cur { color: var(--text); font-weight: 600; }
+  #ring { position: absolute; left: 470px; top: 190px; width: 260px; height: 260px; display: none; z-index: 5; }
+  #ring.on { display: block; }
+  #ring .disc { position: absolute; inset: 0; border-radius: 50%; background: #17181bcc; border: 1px solid #ffffff33; }
+  #ring .hub { position: absolute; left: 90px; top: 90px; width: 80px; height: 80px; border-radius: 50%; background: #26272b; border: 1px solid #5a5d66; display: grid; place-items: center; text-align: center; font-size: 11px; line-height: 1.2; }
+  #ring .slot { position: absolute; width: 76px; height: 38px; margin: -19px 0 0 -38px; border-radius: 10px; background: var(--slot); border: 1px solid var(--slotLine); display: grid; place-items: center; font-size: 12px; line-height: 1.1; text-align: center; cursor: pointer; }
+  #ring .slot.act { outline: 2px solid var(--amber); }
+  #ring .slot i { position: absolute; left: 6px; top: 50%; width: 8px; height: 8px; margin-top: -4px; border-radius: 2px; }
+
+  /* document card */
+  #doc { position: absolute; right: 0; top: 0; bottom: 0; width: 330px; padding: 10px 12px; overflow: auto; border-width: 0 0 0 1px; z-index: 4; font-size: 12px; }
+  #doc h4 { margin: 12px 0 5px; font-size: 10px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  #doc h4:first-child { margin-top: 0; }
+  .f2 { display: grid; grid-template-columns: 70px 1fr; gap: 6px 8px; align-items: center; }
+  .f2 label { color: var(--muted); }
+  .chips { display: flex; gap: 5px; flex-wrap: wrap; }
+  .ab { display: flex; align-items: center; gap: 8px; padding: 5px; border-radius: 8px; border: 1px solid #ffffff1f; margin-bottom: 5px; background: #26272b66; cursor: pointer; }
+  .ab.sel { border-color: var(--amber); }
+  .ab svg { width: 54px; height: 40px; background: #EFDAC4; border-radius: 3px; flex: none; }
+  .stat { display: flex; justify-content: space-between; color: var(--muted); }
+  .stat span:last-child { color: var(--text); font-variant-numeric: tabular-nums; }
+  #ws { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .abLabel { fill: #e6e7ea; font: 600 1000px "Segoe UI"; }
+  .abSub { fill: #9a9ea8; font: 800px "Segoe UI"; }
+  .swg { display: flex; flex-wrap: wrap; gap: 4px; }
+  .sw { width: 22px; height: 22px; border-radius: 5px; border: 1px solid #0008; cursor: pointer; }
+  .sw.sel { outline: 2px solid var(--amber); outline-offset: 1px; }
+  .gtile { width: 40px; height: 28px; border-radius: 5px; overflow: hidden; background: #7a7e87; cursor: pointer; display: grid; place-items: center; }
+  .gth { width: 28px; height: 26px; }
+  .box { background: #26272b80; border: 1px solid #ffffff1f; border-radius: 8px; padding: 8px; margin-top: 8px; }
+  .big { width: 40px; height: 40px; border-radius: 8px; border: 1px solid #0008; flex: none; }
+  .ptile { width: 92px; height: 56px; border-radius: 6px; background-color: #EFDAC4; border: 1px solid #0008; position: relative; }
+  .ptile span { position: absolute; left: 4px; bottom: 2px; font-size: 10px; background: #17181bcc; padding: 0 4px; border-radius: 4px; }
+  .stile { width: 54px; height: 34px; border-radius: 6px; background: #EFDAC4; border: 3px solid #233244; box-shadow: 0 3px 6px #0006; flex: none; }
+  .badge2 { font-size: 10px; padding: 1px 6px; border-radius: 6px; }
+  .badge2.ok { background: #2e7d5a66; color: #bff0d6; } .badge2.bad { background: #b0402e88; color: #ffd5cc; }
+  .notes .mono { font-family: Consolas, monospace; }
+  .prow { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+  .prow label { width: 82px; color: var(--muted); flex: none; }
+  .prow input[type=text] { width: 100px; }
+  .track { position: relative; flex: 1; height: 6px; border-radius: 3px; background: #3a3d43; cursor: ew-resize; }
+  .track .f { height: 100%; border-radius: 3px; background: var(--amber); pointer-events: none; }
+  .track .t { position: absolute; top: -5px; width: 15px; height: 15px; margin-left: -7px; border-radius: 50%; background: var(--amber); border: 2px solid #17181b; pointer-events: none; }
+  .prow .val { width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+  .ptile.sel, .stl.sel { outline: 2px solid var(--amber); outline-offset: 1px; }
+  .ptile { overflow: hidden; cursor: pointer; }
+  .ptile.add, .stl.add { display: grid; place-items: center; color: var(--muted); border: 1px dashed #5a5d66; background: none; }
+  .stl { width: 60px; height: 40px; border-radius: 6px; background: #EFDAC4; border: 1px solid #0008; display: grid; place-items: center; cursor: pointer; }
+  .notes { width: 1100px; margin: 0 auto 28px; color: var(--muted); }
+  .notes h3 { color: var(--text); margin: 14px 0 4px; font-size: 13px; }
+  .notes ul { margin: 0; padding-left: 18px; }
+  .notes li { margin: 2px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Document structure: outline, layers, document properties, artboards</h1>
+  <p>If the graph is the document, these are the other views of it that people expect from a drawing program. Same 341-shape illustration as the node
+  mockup, so the trees are a realistic size. Four views: an outline (layers, groups, shapes), a minimal layer strip with a scrub and a ring, a document card
+  (metadata, page, artboards, stats), and the artboards on the canvas. Everything is translucent and docked or floating like the earlier panels.</p>
+</header>
+<div class="controls" id="tabs">
+  <button data-v="outline" class="on">1 Outline overlay</button>
+  <button data-v="layers">2 Layer strip, scrub and ring</button>
+  <button data-v="doc">3 Document card</button>
+  <button data-v="boards">4 Artboards on the canvas</button>
+</div>
+
+<div id="stage">
+  <svg width="0" height="0" style="position:absolute"><defs id="defs"><g id="artAll"></g><g id="dyn"></g></defs></svg>
+  <div id="title" class="glass"></div>
+
+  <div class="view on" id="outlineV">
+    <div id="outline" class="glass"><div class="hd"><input type="text" id="q" placeholder="Filter shapes: name, #hex, group"><span class="key">L</span></div><div id="rows"></div><div class="ft" id="oft"></div></div>
+  </div>
+  <div class="view" id="layersV">
+    <div id="strip" class="glass"></div>
+    <div id="fly" class="glass"></div>
+    <div id="scrubCard"></div>
+    <div id="ring"><div class="disc"></div><div class="hub"><div>Layers<br><span class="muted">...</span></div></div></div>
+    <div style="position:absolute;right:14px;top:34px;width:230px" class="glass"><div style="padding:8px 10px;font-size:12px"><b>Try</b><div class="muted" style="margin-top:4px">Click a chip to make that layer active.<br>Hold <span class="key">L</span> and move the pen up or down to scrub the active layer.<br><button id="ringBtn" style="margin-top:6px">Layer ring (barrel button)</button><label style="display:block;margin-top:8px"><input type="checkbox" id="dimO" checked> Dim the other layers</label></div></div></div>
+  </div>
+  <div class="view" id="docV">
+    <div id="doc" class="glass"></div>
+  </div>
+  <div class="view" id="boardsV">
+    <svg id="ws" viewBox="-2500 -4500 67500 40000" preserveAspectRatio="xMidYMid meet"></svg>
+  </div>
+
+  <svg id="art" viewBox="0 0 30038 30038"></svg>
+  <canvas id="bpad" width="580" height="580"></canvas>
+  <div id="bar"></div>
+</div>
+
+<div class="notes">
+  <h3>How these relate</h3>
+  <ul>
+    <li><b>Outline:</b> layers, groups and shapes as one tree, each row with a thumbnail, visibility and lock, and a count. It is a view of the same structure the node graph shows as subnets: a layer or group is a subnet, a shape row is a node. Click a row to select, click the artwork to find the row, type to filter. Opens with <span class="key">L</span>, as a translucent dock like the property boxes.</li>
+    <li><b>Layer strip:</b> for pen work the full outline is too much, so a narrow strip of coloured chips shows only the layers: the active one, visibility, and a flyout of names. Hold <span class="key">L</span> and move up or down to change the active layer without leaving the drawing (the same hold-key scrub as properties), or pick from a layer ring on the barrel button. New shapes go to the active layer, so this is the one structural control you need while drawing.</li>
+    <li><b>Document card:</b> everything about the document as a whole: name, description, author, page size and units, resolution, colour mode, background, the artboard list, and counts (shapes, nodes, points, fonts, linked images). It opens from the "..." hub of the document ring, and is the place metadata lives so the canvas stays clear.</li>
+    <li><b>Artboards on the canvas:</b> artboards are shown where they are, with their name and size above them, and selected by clicking, so there is no separate list to maintain; the document card lists them for reordering and bulk changes. A "fit artboard" key and an artboard ring would jump between them.</li>
+  </ul>
+  <h3>Open questions</h3>
+  <ul>
+    <li>Does a shape row show its node chain (e.g. Star &gt; Transform &gt; Copy) inline, or only when selected? Inline costs width.</li>
+    <li>Layers and groups both become subnets; should the outline show a different icon for "layer" (a place to draw) and "group" (a unit that moves together)?</li>
+    <li>With hundreds of rows the outline wants the same filter, thumbnails and virtual scrolling as the node view.</li>
+  </ul>
+</div>
+
+<script src="nodes-girl-data.js"></script>
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const NS = 'http://www.w3.org/2000/svg';
+const S = GIRL.shapes;
+const fillOf = c => GIRL.fills[c] || '#888';
+const hexOf = c => { const f = fillOf(c); return f === 'white' ? '#FFFFFF' : f.startsWith('#') ? f.toUpperCase() : 'gradient'; };
+const el = (tag, a, parent) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, a[k]); parent && parent.appendChild(e); return e; };
+$('#defs').insertAdjacentHTML('afterbegin', GIRL.grads.join(''));
+
+/* art: one set of paths used by the views, plus a shared defs group for the artboard thumbnails */
+const art = $('#art'), artEls = S.map(s => el('path', { d: s.d, fill: fillOf(s.c) }, art));
+S.forEach(s => el('path', { d: s.d, fill: fillOf(s.c) }, $('#artAll')));
+
+/* tree: layers > (sub)layers > groups > shapes */
+const grp = name => { const sh = S.map((s, i) => s.g === name ? i : -1).filter(i => i >= 0); return { key: 'G:' + name, type: 'group', name, shapes: sh, children: sh.map(i => ({ key: 'S:' + i, type: 'shape', name: 'Path ' + i, shapes: [i], shape: i })) }; };
+const layer = (id, name, color, kids) => ({ key: 'L' + id, type: 'layer', name, color, children: kids });
+const TREE = [
+  layer(1, 'Background', '#4F80FF', [grp('Background')]),
+  layer(2, 'Sky', '#FF4F4F', [grp('Night sky'), grp('Cloud wash'), grp('Hair')]),
+  layer(3, 'Birds and stars', '#4FC24F', [grp('Birds'), grp('Stars')]),
+  layer(4, 'Figure', '#E5C200', [grp('Face'), grp('Hand'), grp('Shirt'), layer(5, 'Line work', '#E0309B', [grp('Line art')])])
+];
+const parent = new Map(), nodes = new Map();
+(function walk(list, p) { list.forEach(n => { nodes.set(n.key, n); parent.set(n.key, p); if (n.children) { walk(n.children, n); n.shapes = n.type === 'layer' ? n.children.flatMap(c => c.shapes) : n.shapes; } }); })(TREE, null);
+const anc = i => { const out = []; let n = nodes.get('S:' + i); while (n) { out.push(n); n = parent.get(n.key); } return out; };
+const layerOf = i => anc(i).filter(n => n.type === 'layer')[0];
+
+const st = { hidden: new Set(), locked: new Set(), expanded: new Set(['L1', 'L2', 'L3', 'L4', 'L5']), sel: null, q: '', active: 'L2', dim: true, hover: null, hl: null, sw: null };
+const hiddenShape = i => anc(i).some(n => st.hidden.has(n.key));
+function paintArt() {
+  const q = st.q.trim().toLowerCase();
+  let set = null;
+  if (st.hl && tab === 'doc') set = new Set(st.hl);
+  else if (st.hover) set = new Set(st.hover);
+  else if (st.sel) set = new Set(nodes.get(st.sel).shapes);
+  else if (q) set = new Set(S.map((s, i) => (s.g + ' ' + s.c + ' ' + hexOf(s.c)).toLowerCase().includes(q) ? i : -1).filter(i => i >= 0));
+  else if (tab === 'layers' && st.dim) { const L = nodes.get(st.active); set = new Set(L.shapes); }
+  artEls.forEach((e, i) => { e.setAttribute('display', hiddenShape(i) ? 'none' : ''); e.setAttribute('opacity', !set || set.has(i) ? 1 : (tab === 'layers' ? .25 : .08)); });
+}
+
+/* 1 outline */
+function thumbFor(n) {
+  const sv = document.createElementNS(NS, 'svg'); sv.setAttribute('class', 'thumb');
+  const ids = n.shapes.length > 60 ? n.shapes.slice(0, 60) : n.shapes;
+  const bb = ids.map(i => S[i].b), b = [Math.min(...bb.map(x => x[0])), Math.min(...bb.map(x => x[1])), Math.max(...bb.map(x => x[2])), Math.max(...bb.map(x => x[3]))];
+  const w = Math.max(1, b[2] - b[0]), h = Math.max(1, b[3] - b[1]), s = Math.max(w, h);
+  sv.setAttribute('viewBox', `${b[0] - (s - w) / 2} ${b[1] - (s - h) / 2} ${s} ${s}`);
+  ids.forEach(i => el('path', { d: S[i].d, fill: fillOf(S[i].c) }, sv));
+  return sv;
+}
+function visibleRows() {
+  const q = st.q.trim().toLowerCase(), out = [];
+  const match = n => !q || (n.name + ' ' + (n.shape !== undefined ? S[n.shape].g + ' ' + S[n.shape].c + ' ' + hexOf(S[n.shape].c) : '')).toLowerCase().includes(q) || (n.children || []).some(match);
+  (function walk(list, depth) { list.forEach(n => { if (!match(n)) return; out.push({ n, depth }); if (n.children && (st.expanded.has(n.key) || (q && n.type !== 'shape'))) walk(n.children, depth + 1); }); })(TREE, 0);
+  return out;
+}
+function paintRows() {
+  const box = $('#rows'), keep = box.scrollTop; box.innerHTML = '';
+  const rows = visibleRows();
+  rows.forEach(({ n, depth }) => {
+    const r = document.createElement('div'); r.className = 'row' + (st.sel === n.key ? ' sel' : '') + (st.hidden.has(n.key) ? ' dim' : ''); r.dataset.key = n.key; r.style.paddingLeft = 6 + depth * 14 + 'px';
+    const caret = document.createElement('span'); caret.className = 'caret'; caret.textContent = n.children ? (st.expanded.has(n.key) ? '▾' : '▸') : ''; r.appendChild(caret);
+    const eye = document.createElement('span'); eye.className = 'tg' + (st.hidden.has(n.key) ? ' off' : ''); eye.textContent = '👁'; eye.title = 'Show or hide'; r.appendChild(eye);
+    const lock = document.createElement('span'); lock.className = 'tg' + (st.locked.has(n.key) ? '' : ' off'); lock.textContent = st.locked.has(n.key) ? '🔒' : '🔓'; lock.title = 'Lock'; r.appendChild(lock);
+    if (n.type === 'layer') { const d = document.createElement('span'); d.className = 'dot'; d.style.background = n.color; r.appendChild(d); }
+    r.appendChild(thumbFor(n));
+    const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = n.name; r.appendChild(nm);
+    if (n.type !== 'shape') { const b = document.createElement('span'); b.className = 'badge'; b.textContent = n.type === 'layer' ? 'layer' : 'subnet'; r.appendChild(b); }
+    const ct = document.createElement('span'); ct.className = 'ct'; ct.textContent = n.type === 'shape' ? S[n.shape].n + ' pts' : n.shapes.length; r.appendChild(ct);
+    eye.onclick = e => { e.stopPropagation(); st.hidden.has(n.key) ? st.hidden.delete(n.key) : st.hidden.add(n.key); paintRows(); paintArt(); };
+    lock.onclick = e => { e.stopPropagation(); st.locked.has(n.key) ? st.locked.delete(n.key) : st.locked.add(n.key); paintRows(); };
+    caret.onclick = e => { e.stopPropagation(); st.expanded.has(n.key) ? st.expanded.delete(n.key) : st.expanded.add(n.key); paintRows(); };
+    r.onclick = () => { st.sel = n.key; paintRows(); paintArt(); status(); };
+    r.onpointerenter = () => { st.hover = n.shapes; paintArt(); }; r.onpointerleave = () => { st.hover = null; paintArt(); };
+    box.appendChild(r);
+  });
+  box.scrollTop = keep;
+  $('#oft').textContent = rows.length + ' rows shown · ' + S.length + ' shapes in ' + TREE.length + ' layers';
+}
+$('#q').addEventListener('input', e => { st.q = e.target.value; paintRows(); paintArt(); });
+art.addEventListener('pointerdown', e => {
+  if (tab !== 'outline') return;
+  const i = artEls.indexOf(e.target); if (i < 0) return;
+  anc(i).slice(1).forEach(n => st.expanded.add(n.key)); st.sel = 'S:' + i; st.q = ''; $('#q').value = ''; paintRows(); paintArt(); status();
+  const r = $('#rows .row.sel'); if (r) r.scrollIntoView({ block: 'center' });
+});
+
+/* 2 layer strip */
+const LAY = ['L1', 'L2', 'L3', 'L4'].map(k => nodes.get(k));
+function paintStrip() {
+  const s = $('#strip'); s.innerHTML = '';
+  LAY.forEach(L => {
+    const c = document.createElement('div'); c.className = 'lchip' + (st.active === L.key ? ' act' : '') + (st.hidden.has(L.key) ? ' off' : ''); c.style.background = L.color; c.textContent = L.name[0]; c.title = L.name;
+    const e = document.createElement('span'); e.className = 'eye'; e.textContent = st.hidden.has(L.key) ? '–' : '●'; c.appendChild(e);
+    e.onclick = ev => { ev.stopPropagation(); st.hidden.has(L.key) ? st.hidden.delete(L.key) : st.hidden.add(L.key); paintStrip(); paintArt(); };
+    c.onclick = () => { st.active = L.key; paintStrip(); paintArt(); status(); };
+    s.appendChild(c);
+  });
+  const p = document.createElement('div'); p.className = 'lchip'; p.style.background = '#3a3d43'; p.style.color = '#e6e7ea'; p.textContent = '+'; p.title = 'New layer'; s.appendChild(p);
+  $('#fly').innerHTML = '<div class="muted" style="font-size:10px;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px">Layers · active gets new shapes</div>' + LAY.map(L => `<div class="li"><span style="width:10px;height:10px;border-radius:3px;background:${L.color}"></span><span style="flex:1;${st.active === L.key ? 'font-weight:700' : ''}">${L.name}</span><span class="muted">${L.shapes.length}</span></div>`).join('');
+}
+function placeRing() {
+  const r = $('#ring'); $$('.slot', r).forEach(s => s.remove());
+  const items = LAY.map(L => ({ t: L.name, k: L.key, c: L.color })).concat([{ t: 'New layer' }, { t: 'Hide others', act: 'hide' }, { t: 'Lock layer' }, { t: 'Merge down' }]);
+  items.forEach((it, i) => {
+    const a = (i * 360 / items.length - 90) * Math.PI / 180, s = document.createElement('div'); s.className = 'slot' + (it.k === st.active ? ' act' : '');
+    s.style.left = 130 + Math.cos(a) * 100 + 'px'; s.style.top = 130 + Math.sin(a) * 100 + 'px'; s.textContent = it.t;
+    if (it.c) { const d = document.createElement('i'); d.style.background = it.c; s.appendChild(d); }
+    s.onclick = () => { if (it.k) { st.active = it.k; paintStrip(); paintArt(); placeRing(); status(); } if (it.act === 'hide') { LAY.forEach(L => L.key !== st.active ? st.hidden.add(L.key) : st.hidden.delete(L.key)); paintStrip(); paintArt(); } };
+    r.appendChild(s);
+  });
+}
+$('#ringBtn').onclick = () => { $('#ring').classList.toggle('on'); placeRing(); };
+$('#dimO').onchange = e => { st.dim = e.target.checked; paintArt(); };
+let scrub = null;
+window.addEventListener('keydown', e => {
+  if (tab !== 'layers' || e.repeat || e.key.toLowerCase() !== 'l' || document.activeElement.tagName === 'INPUT') return;
+  scrub = { y: null, i: LAY.indexOf(nodes.get(st.active)) }; showScrub();
+});
+window.addEventListener('keyup', e => { if (e.key.toLowerCase() === 'l') { scrub = null; $('#scrubCard').style.display = 'none'; } });
+$('#layersV').addEventListener('pointermove', e => {
+  if (!scrub) return; if (scrub.y === null) { scrub.y = e.clientY; scrub.y0 = e.clientY; const r = $('#stage').getBoundingClientRect(); scrub.cx = e.clientX - r.left; scrub.cy = e.clientY - r.top; }
+  const i = Math.max(0, Math.min(LAY.length - 1, scrub.i + Math.round((scrub.y0 - e.clientY) / 40)));
+  if (LAY[i].key !== st.active) { st.active = LAY[i].key; paintStrip(); paintArt(); status(); }
+  showScrub();
+});
+function showScrub() {
+  const c = $('#scrubCard'); c.style.display = 'block';
+  if (scrub && scrub.cx) { c.style.left = scrub.cx + 24 + 'px'; c.style.top = scrub.cy - 60 + 'px'; } else { c.style.left = '300px'; c.style.top = '200px'; }
+  c.innerHTML = '<div class="muted" style="font-size:11px;margin-bottom:4px">Active layer - move up or down</div>' + LAY.slice().reverse().map(L => `<div class="li ${L.key === st.active ? 'cur' : ''}"><span style="width:10px;height:10px;border-radius:3px;background:${L.color}"></span>${L.name}</div>`).join('');
+}
+
+/* 3b swatches, library, fonts (sub-tabs of the document card) */
+let docTab = 'doc', libTab = 'Symbols';
+const fillOv = {}, artAllEls = $$('#artAll path');
+const curFill = c => fillOv[c] || fillOf(c);
+const hexOfFill = c => { const f = curFill(c); return f === 'white' ? '#FFFFFF' : f.startsWith('#') ? f.toUpperCase() : null; };
+function hueKey(hex) {
+  const r = parseInt(hex.slice(1, 3), 16) / 255, g = parseInt(hex.slice(3, 5), 16) / 255, b = parseInt(hex.slice(5, 7), 16) / 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn, l = (mx + mn) / 2;
+  const h = d === 0 ? 0 : mx === r ? ((g - b) / d + 6) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return d < .08 ? [0, l] : [1 + Math.floor(h * 60 / 30), l];
+}
+const swatches = (() => {
+  const m = new Map(); S.forEach((s, i) => { if (!m.has(s.c)) m.set(s.c, []); m.get(s.c).push(i); });
+  return [...m.entries()].filter(([c]) => hexOfFill(c)).map(([c, ids]) => ({ c, ids, orig: hexOfFill(c), name: '' }))
+    .sort((a, b) => { const A = hueKey(a.orig), B = hueKey(b.orig); return A[0] - B[0] || A[1] - B[1]; });
+})();
+swatches.forEach((w, i) => w.name = 'Colour ' + (i + 1));
+const gradShapes = S.map((s, i) => fillOf(s.c).startsWith('url') ? i : -1).filter(i => i >= 0);
+function thumbSvg(ids, cls) {
+  const bb = ids.map(i => S[i].b), b = [Math.min(...bb.map(x => x[0])), Math.min(...bb.map(x => x[1])), Math.max(...bb.map(x => x[2])), Math.max(...bb.map(x => x[3]))];
+  const w = Math.max(1, b[2] - b[0]), h = Math.max(1, b[3] - b[1]), s = Math.max(w, h);
+  return `<svg class="${cls || 'thumb'}" viewBox="${b[0] - (s - w) / 2} ${b[1] - (s - h) / 2} ${s} ${s}">${ids.map(i => `<path d="${S[i].d}" fill="${curFill(S[i].c)}"/>`).join('')}</svg>`;
+}
+function swHtml() {
+  const w = swatches.find(x => x.c === st.sw);
+  let h = `<h4>Swatches <span style="float:right;text-transform:none;letter-spacing:0" class="chip">+ New</span></h4><div class="swg">` +
+    swatches.map(x => `<div class="sw ${x.c === st.sw ? 'sel' : ''}" data-c="${x.c}" style="background:${hexOfFill(x.c)}" title="${x.name} ${hexOfFill(x.c)} · ${x.ids.length} shapes"></div>`).join('') + '</div>';
+  if (w) {
+    const groups = new Set(w.ids.map(i => S[i].g)).size;
+    h += `<div class="box"><div style="display:flex;gap:10px;align-items:center"><div class="big" style="background:${hexOfFill(w.c)}"></div><div style="flex:1"><input type="text" id="swName" value="${w.name}" style="margin-bottom:5px"><input type="text" id="swHex" value="${hexOfFill(w.c)}"></div></div>` +
+      `<div class="stat" style="margin-top:8px"><span>Used by</span><span>${w.ids.length} shapes in ${groups} group${groups > 1 ? 's' : ''}</span></div>` +
+      `<div class="chips" style="margin-top:6px"><span class="chip" id="swSel">Select them</span><span class="chip" id="swReset">Reset colour</span></div>` +
+      `<div class="muted" style="margin-top:8px;font-size:11px">A swatch is a colour node. Fill nodes reference it, so editing it recolours every shape that uses it at once. Type a hex value to see it.</div></div>`;
+  } else h += '<div class="muted" style="margin-top:8px">Click a swatch to see what uses it.</div>';
+  h += `<h4>Gradients <span class="muted" style="text-transform:none;letter-spacing:0">· ${gradShapes.length}</span></h4><div class="swg">` +
+    gradShapes.map(i => `<div class="gtile" data-i="${i}" title="Used by Path ${i}">${thumbSvg([i], 'gth')}</div>`).join('') + '</div>' +
+    `<h4>Used by selection</h4><div class="muted">${st.sel ? nodes.get(st.sel).name + ' uses ' + new Set(nodes.get(st.sel).shapes.map(i => S[i].c)).size + ' colours' : 'Select something in the outline to see its colours here.'}</div>`;
+  return h;
+}
+const LIB = {
+  Symbols: [['Bird', 'Birds', 'fil2'], ['Sparkle', 'Stars', 'fil55'], ['Bubble', 'Cloud wash', 'fil35']],
+  Patterns: null, Styles: null,
+  Brushes: [['Round', 6, ''], ['Dry ink', 10, '1 5'], ['Calligraphic', 12, '']]
+};
+const bestShape = (g, c) => { const ids = S.map((x, i) => x.g === g && x.c === c ? i : -1).filter(i => i >= 0), area = i => (S[i].b[2] - S[i].b[0]) * (S[i].b[3] - S[i].b[1]); return ids.reduce((a, i) => area(i) > area(a) ? i : a, ids[0]); };
+const TILE_SHAPE = { Sparkle: bestShape('Stars', 'fil55'), Bird: bestShape('Birds', 'fil2') };
+const PATS = [
+  { name: 'Sparkles', tile: 'Sparkle', layout: 'Brick', size: 2600, gap: 80, angle: 0, op: 100 },
+  { name: 'Flock', tile: 'Bird', layout: 'Grid', size: 3600, gap: 70, angle: 20, op: 100 },
+  { name: 'Dots', tile: 'Dot', layout: 'Brick', size: 1200, gap: 100, angle: 0, op: 100 },
+  { name: 'Waves', tile: 'Wave', layout: 'Grid', size: 2800, gap: 40, angle: 0, op: 100 }
+];
+const STYLES = [
+  { name: 'Navy line', fill: '#EFDAC4', fo: 1, stroke: '#233244', sw: 2, dash: '', sh: null },
+  { name: 'Soft shadow', fill: '#FFFFFF', fo: 1, stroke: '', sw: 0, dash: '', sh: { x: 0, y: 4, b: 8, c: '#000000', o: .35 } },
+  { name: 'Glow', fill: '#4CD9A0', fo: 1, stroke: '', sw: 0, dash: '', sh: { x: 0, y: 0, b: 12, c: '#4CD9A0', o: .9 } },
+  { name: 'Sticker', fill: '#FFCC00', fo: 1, stroke: '#FFFFFF', sw: 5, dash: '', sh: { x: 2, y: 3, b: 6, c: '#000000', o: .4 } },
+  { name: 'Dashed', fill: '#B8D1F4', fo: .6, stroke: '#234182', sw: 2, dash: '6 4', sh: null }
+];
+const LS = { pat: 0, sty: 0, look: null };
+function patternMarkup(id, P) {
+  const cell = P.size * (1 + P.gap / 100), s = P.size;
+  const one = (cx, cy) => {
+    const mx = cx + cell / 2, my = cy + cell / 2;
+    if (P.tile === 'Dot') return `<circle cx="${mx}" cy="${my}" r="${s / 2}" fill="#4375C6"/>`;
+    if (P.tile === 'Wave') return `<path d="M${mx - s / 2} ${my} q ${s / 4} ${-s / 2} ${s / 2} 0 t ${s / 2} 0" fill="none" stroke="#2B8EBF" stroke-width="${s / 8}" stroke-linecap="round"/>`;
+    const i = TILE_SHAPE[P.tile], b = S[i].b, w = b[2] - b[0], h = b[3] - b[1], k = s / Math.max(w, h);
+    return `<path d="${S[i].d}" fill="${fillOf(S[i].c)}" transform="translate(${mx - (b[0] + w / 2) * k} ${my - (b[1] + h / 2) * k}) scale(${k})"/>`;
+  };
+  const body = P.layout === 'Brick' ? one(0, 0) + one(cell / 2, cell) + one(-cell / 2, cell) : one(0, 0);
+  return `<pattern id="${id}" patternUnits="userSpaceOnUse" width="${cell}" height="${P.layout === 'Brick' ? cell * 2 : cell}" patternTransform="rotate(${P.angle})"><g opacity="${P.op / 100}">${body}</g></pattern>`;
+}
+function styleMarkup(s, id, k) {
+  const f = s.sh ? `<filter id="${id}f" x="-60%" y="-60%" width="220%" height="220%"><feDropShadow dx="${s.sh.x * k}" dy="${s.sh.y * k}" stdDeviation="${s.sh.b * k / 2}" flood-color="${s.sh.c}" flood-opacity="${s.sh.o}"/></filter>` : '';
+  const attrs = `fill="${s.fill}" fill-opacity="${s.fo}" ${s.stroke ? `stroke="${s.stroke}" stroke-width="${s.sw * k}"` : ''} ${s.dash ? `stroke-dasharray="${s.dash.split(' ').map(x => x * k).join(' ')}"` : ''} ${s.sh ? `filter="url(#${id}f)"` : ''}`;
+  return { defs: f, attrs };
+}
+const ROW = (id, label, v, min, max, fmt) => `<div class="prow"><label>${label}</label><div class="track" id="${id}" data-min="${min}" data-max="${max}"><div class="f" style="width:${(v - min) / (max - min) * 100}%"></div><div class="t" style="left:${(v - min) / (max - min) * 100}%"></div></div><span class="val" id="${id}V">${fmt(v)}</span></div>`;
+const chipRow = (id, items, cur) => `<div class="chips" id="${id}">${items.map(x => `<span class="chip ${x === cur ? 'on' : ''}">${x}</span>`).join('')}</div>`;
+
+function patHtml() {
+  const P = PATS[LS.pat];
+  let h = `<div class="swg">${PATS.map((p, i) => `<div class="ptile ${i === LS.pat ? 'sel' : ''}" data-i="${i}"><svg viewBox="0 0 12000 7200" preserveAspectRatio="none" style="width:100%;height:100%"><defs>${patternMarkup('pt' + i, p)}</defs><rect width="12000" height="7200" fill="#EFDAC4"/><rect width="12000" height="7200" fill="url(#pt${i})"/></svg><span>${p.name}</span></div>`).join('')}<div class="ptile add">+ New</div></div>`;
+  h += `<div class="box"><div class="chips" style="margin-bottom:6px"><span class="chip">Tile</span><span class="muted">›</span><span class="chip">Repeat: ${P.layout}</span><span class="muted">›</span><span class="chip">Transform</span><span class="muted" style="font-size:11px;margin-left:4px">subnet</span></div>` +
+    `<svg viewBox="0 0 12000 7200" style="width:100%;aspect-ratio:12/7.2;border-radius:6px;border:1px solid #0008"><defs>${patternMarkup('pv', P)}</defs><rect width="12000" height="7200" fill="#EFDAC4"/><rect width="12000" height="7200" fill="url(#pv)"/></svg>` +
+    `<div class="prow" style="margin-top:8px"><label>Tile</label>${chipRow('pTile', ['Sparkle', 'Bird', 'Dot', 'Wave'], P.tile)}</div>` +
+    `<div class="prow"><label>Layout</label>${chipRow('pLay', ['Grid', 'Brick'], P.layout)}</div>` +
+    ROW('pSize', 'Size', P.size, 600, 6000, v => Math.round(v)) + ROW('pGap', 'Spacing', P.gap, 0, 150, v => Math.round(v) + '%') + ROW('pAng', 'Angle', P.angle, 0, 90, v => Math.round(v) + '°') + ROW('pOp', 'Opacity', P.op, 10, 100, v => Math.round(v) + '%') +
+    `<div class="chips" style="margin-top:8px"><span class="chip" id="pApply">Fill demo shape</span><span class="chip" id="pClear">Clear</span><span class="chip">New from selection</span></div></div>` +
+    `<div class="muted" style="margin-top:6px;font-size:11px">A pattern is a subnet: a tile (any shapes), a repeat, a transform. Its size, spacing and angle are parameters, so a pattern can be animated or driven by an expression like any other node. Edits update every shape filled with it.</div>`;
+  return h;
+}
+function styHtml() {
+  const s = STYLES[LS.sty], m = styleMarkup(s, 'sv', 1);
+  let h = `<div class="swg">${STYLES.map((x, i) => { const mm = styleMarkup(x, 'st' + i, 1); return `<div class="stl ${i === LS.sty ? 'sel' : ''}" data-i="${i}" title="${x.name}"><svg viewBox="0 0 54 34" width="54" height="34"><defs>${mm.defs}</defs><rect x="9" y="7" width="36" height="20" rx="5" ${mm.attrs}/></svg></div>`; }).join('')}<div class="stl add">+</div></div>`;
+  h += `<div class="box"><div style="font-weight:600;margin-bottom:6px">${s.name}</div><div class="chips" style="margin-bottom:6px"><span class="chip">Fill</span><span class="muted">›</span><span class="chip">Stroke${s.stroke ? '' : ' (none)'}</span><span class="muted">›</span><span class="chip">Shadow${s.sh ? '' : ' (none)'}</span><span class="muted" style="font-size:11px;margin-left:4px">saved chain</span></div>` +
+    `<svg viewBox="0 0 150 80" style="width:100%;height:100px;background:#EFDAC4;border-radius:6px;border:1px solid #0008"><defs>${m.defs}</defs><rect x="25" y="16" width="100" height="48" rx="10" ${m.attrs}/></svg>` +
+    `<div class="prow" style="margin-top:8px"><label>Fill</label><input type="text" id="sFill" value="${s.fill}" style="width:86px"></div>` + ROW('sFo', 'Fill opacity', s.fo * 100, 0, 100, v => Math.round(v) + '%') +
+    `<div class="prow"><label>Stroke</label><input type="text" id="sStroke" value="${s.stroke || ''}" placeholder="none" style="width:86px"></div>` + ROW('sSw', 'Width', s.sw, 0, 12, v => (Math.round(v * 2) / 2) + ' px') +
+    `<div class="prow"><label>Dash</label>${chipRow('sDash', ['Solid', 'Dash', 'Dots'], s.dash === '' ? 'Solid' : s.dash === '6 4' ? 'Dash' : 'Dots')}</div>` +
+    ROW('sShB', 'Shadow blur', s.sh ? s.sh.b : 0, 0, 24, v => Math.round(v)) + ROW('sShY', 'Shadow drop', s.sh ? s.sh.y : 0, 0, 16, v => Math.round(v)) + ROW('sShO', 'Shadow opacity', s.sh ? s.sh.o * 100 : 0, 0, 100, v => Math.round(v) + '%') +
+    `<div class="chips" style="margin-top:8px"><span class="chip" id="sApply">Apply to demo shape</span><span class="chip" id="sClear">Clear</span><span class="chip">New from selection</span></div></div>` +
+    `<div class="muted" style="margin-top:6px;font-size:11px">A graphic style is a saved chain of fill, stroke and effect nodes. A shape using a style stays linked to it: edit the style here and every shape using it follows; Break link makes the chain the shape's own.</div>`;
+  return h;
+}
+function libHtml() {
+  let h = `<div class="chips" id="lTabs" style="margin-bottom:8px">${Object.keys(LIB).map(k => `<span class="chip ${libTab === k ? 'on' : ''}" data-k="${k}">${k}</span>`).join('')}</div>`;
+  if (libTab === 'Symbols') {
+    h += LIB.Symbols.map(([n, g, c]) => {
+      const ids = S.map((x, i) => x.g === g && x.c === c ? i : -1).filter(i => i >= 0), best = bestShape(g, c);
+      return `<div class="ab" data-g="${g}">${thumbSvg([best])}<div style="flex:1"><b>${n}</b><div class="muted">Placed ${ids.length}× · subnet</div></div></div>`;
+    }).join('');
+    h += `<div class="chips" style="margin-top:6px"><span class="chip">New from selection</span><span class="chip">Place</span><span class="chip">Redefine</span><span class="chip">Break link</span></div>` +
+      `<div class="muted" style="margin-top:8px;font-size:11px">A symbol is a subnet. Each placed copy is an instance node that points at it, so Redefine updates every copy and Break link turns one back into ordinary nodes.</div>`;
+  } else if (libTab === 'Patterns') h += patHtml();
+  else if (libTab === 'Styles') h += styHtml();
+  else h += brushHtml();
+  return h;
+}
+/* brushes: stamps repeated along a path, with pressure mapped to size */
+const BRUSHES = [
+  { name: 'Round', type: 'Round', size: 14, spacing: 12, op: 100, angle: 0, round: 100, scatter: 0, jitter: 0, amt: 70, gamma: 1, tilt: 0, tapS: 0, tapE: 50, tapMin: 10 },
+  { name: 'Calligraphic', type: 'Calligraphic', size: 22, spacing: 8, op: 100, angle: 40, round: 25, scatter: 0, jitter: 0, amt: 30, gamma: 1, tilt: 70, tapS: 25, tapE: 60, tapMin: 15 },
+  { name: 'Dry ink', type: 'Dry', size: 18, spacing: 16, op: 90, angle: 0, round: 100, scatter: 25, jitter: 30, amt: 60, gamma: 1.4, tilt: 0, tapS: 0, tapE: 0, tapMin: 10 },
+  { name: 'Stars', type: 'Stars', size: 20, spacing: 120, op: 100, angle: 0, round: 100, scatter: 60, jitter: 50, amt: 50, gamma: 1, tilt: 50, tapS: 0, tapE: 0, tapMin: 10 },
+  { name: 'Beads', type: 'Dots', size: 16, spacing: 140, op: 100, angle: 0, round: 100, scatter: 10, jitter: 0, amt: 40, gamma: 1, tilt: 0, tapS: 0, tapE: 0, tapMin: 10 },
+  { name: 'Leaf', type: 'Skeletal', art: 'Leaf', mode: 'Stretch', size: 26, spacing: 100, op: 100, angle: 0, round: 100, scatter: 0, jitter: 0, amt: 40, gamma: 1, tilt: 0, tapS: 0, tapE: 0, tapMin: 10 },
+  { name: 'Arrow', type: 'Skeletal', art: 'Arrow', mode: 'Stretch', size: 22, spacing: 100, op: 100, angle: 0, round: 100, scatter: 0, jitter: 0, amt: 0, gamma: 1, tilt: 0, tapS: 0, tapE: 0, tapMin: 10 },
+  { name: 'Wave band', type: 'Skeletal', art: 'Wave', mode: 'Repeat', size: 24, spacing: 100, op: 100, angle: 0, round: 100, scatter: 0, jitter: 0, amt: 30, gamma: 1, tilt: 0, tapS: 0, tapE: 0, tapMin: 10 }
+];
+const BRUSH_TYPES = ['Round', 'Calligraphic', 'Dry', 'Stars', 'Dots', 'Skeletal'];
+const SKEL_ART = ['Leaf', 'Arrow', 'Wave'], SKEL_MODE = ['Stretch', 'Repeat'];
+let brushColor = '#233244';
+const BCOLORS = ['#233244', '#E8572A', '#FFCC00', '#4375C6', '#32BBDB', '#FFFFFF'];
+function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const sizeAt = (B, p) => B.size * ((1 - B.amt / 100) + B.amt / 100 * Math.pow(Math.max(0, Math.min(1, p)), B.gamma));
+function taperAt(B, s, total) {
+  const m = B.tapMin / 100; let f = 1;
+  if (B.tapS > 0) f = Math.min(f, m + (1 - m) * Math.min(1, s / B.tapS));
+  if (B.tapE > 0 && total != null) f = Math.min(f, m + (1 - m) * Math.min(1, (total - s) / B.tapE));
+  return f;
+}
+function stamp(ctx, B, x, y, p, rnd, color, f, az) {
+  const sz = sizeAt(B, p) * f * (1 + (rnd() - .5) * B.jitter / 50);
+  const sc = B.scatter / 100 * sz * 1.2, dx = (rnd() - .5) * 2 * sc, dy = (rnd() - .5) * 2 * sc;
+  const ang = B.angle + az * B.tilt / 100;
+  ctx.save(); ctx.translate(x + dx, y + dy); ctx.fillStyle = color; ctx.globalAlpha = B.op / 100;
+  if (B.type === 'Calligraphic') { ctx.rotate(-ang * Math.PI / 180); ctx.beginPath(); ctx.ellipse(0, 0, Math.max(.4, sz / 2), Math.max(.4, sz / 2 * B.round / 100), 0, 0, 6.2832); ctx.fill(); }
+  else if (B.type === 'Dry') { ctx.globalAlpha = B.op / 100 * (.25 + rnd() * .75); for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc((rnd() - .5) * sz * .6, (rnd() - .5) * sz * .6, Math.max(.4, sz * (.12 + rnd() * .22)), 0, 6.2832); ctx.fill(); } }
+  else if (B.type === 'Stars') { ctx.rotate((1 - B.tilt / 100) * rnd() * 6.28 - az * B.tilt / 100 * Math.PI / 180); ctx.beginPath(); for (let i = 0; i < 8; i++) { const r = i % 2 ? sz * .18 : sz * .55, a = i * Math.PI / 4; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); } ctx.closePath(); ctx.fill(); }
+  else { ctx.beginPath(); ctx.arc(0, 0, Math.max(.4, sz / 2), 0, 6.2832); ctx.fill(); }
+  ctx.restore();
+}
+function skelHalfWidth(B, u, L) {
+  if (B.art === 'Arrow') { const head = Math.min(.45, B.size * 2.2 / L); return u < 1 - head ? .3 : Math.max(0, (1 - u) / head); }
+  if (B.art === 'Wave') return .5 + .35 * Math.sin(u * L / (B.size * 1.6) * 6.2832);
+  return Math.pow(Math.sin(Math.PI * u), .8);
+}
+function resample(pts, step) {
+  const out = [], L = pathLength(pts); if (L < 2) return { pts: [], L: 0 };
+  let acc = 0, i = 1, a = pts[0];
+  for (let s = 0; s <= L; s += step) {
+    while (i < pts.length - 1 && acc + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y) < s) { acc += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y); i++; }
+    const A = pts[i - 1], Bp = pts[i], d = Math.hypot(Bp.x - A.x, Bp.y - A.y) || 1, t = Math.min(1, Math.max(0, (s - acc) / d));
+    out.push({ x: A.x + (Bp.x - A.x) * t, y: A.y + (Bp.y - A.y) * t, p: A.p + (Bp.p - A.p) * t, s });
+  }
+  for (let pass = 0; pass < 3; pass++) for (let k = 1; k < out.length - 1; k++) { out[k].x = (out[k - 1].x + out[k].x + out[k + 1].x) / 3; out[k].y = (out[k - 1].y + out[k].y + out[k + 1].y) / 3; }
+  return { pts: out, L };
+}
+function skeletalStroke(ctx, B, pts, color) {
+  const R = resample(pts, 3), q = R.pts, L = R.L; if (q.length < 3) return;
+  const nrm = k => { const a = q[Math.max(0, k - 1)], b = q[Math.min(q.length - 1, k + 1)], dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1; return [-dy / d, dx / d]; };
+  const reps = B.mode === 'Repeat' ? Math.max(1, Math.round(L / (B.size * 4))) : 1, segLen = L / reps;
+  ctx.save(); ctx.fillStyle = color; ctx.globalAlpha = B.op / 100;
+  for (let r = 0; r < reps; r++) {
+    const top = [], bot = [];
+    q.forEach((c, k) => {
+      if (c.s < r * segLen - 1e-6 || c.s > (r + 1) * segLen + 1e-6) return;
+      const u = (c.s - r * segLen) / segLen, hw = skelHalfWidth(B, u, segLen) * sizeAt(B, c.p) / 2 * taperAt(B, c.s, L), n = nrm(k);
+      top.push([c.x + n[0] * hw, c.y + n[1] * hw]); bot.push([c.x - n[0] * hw, c.y - n[1] * hw]);
+    });
+    if (top.length < 2) continue;
+    ctx.beginPath(); top.forEach((t, i) => i ? ctx.lineTo(t[0], t[1]) : ctx.moveTo(t[0], t[1])); bot.reverse().forEach(t => ctx.lineTo(t[0], t[1])); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+function strokeAlong(ctx, B, pts, color, rnd, state, total) {
+  if (B.type === 'Skeletal') { if (total != null) skeletalStroke(ctx, B, pts, color); return state || { carry: 0, s: 0 }; }
+  const st = state || { carry: 0, s: 0 }, step = Math.max(1, B.size * B.spacing / 100);
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], d = Math.hypot(b.x - a.x, b.y - a.y); if (!d) continue;
+    let pos = step - st.carry;
+    while (pos <= d) {
+      const t = pos / d;
+      stamp(ctx, B, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.p + (b.p - a.p) * t, rnd, color, taperAt(B, st.s + pos, total), (a.az || 0) + ((b.az || 0) - (a.az || 0)) * t);
+      pos += step;
+    }
+    st.carry = d - (pos - step); st.s += d;
+  }
+  return st;
+}
+const pathLength = pts => pts.reduce((a, q, i) => i ? a + Math.hypot(q.x - pts[i - 1].x, q.y - pts[i - 1].y) : 0, 0);
+function sPoints(w, h, n) {
+  const pts = []; for (let i = 0; i <= n; i++) { const t = i / n; pts.push({ x: 12 + t * (w - 24), y: h / 2 + Math.sin(t * 6.2832) * h * .26, p: .62 + .25 * Math.sin(t * 9.4), az: Math.sin(t * 6.2832) * 70 }); } return pts;
+}
+function paintBrushPreview(cv, B, color) {
+  const ctx = cv.getContext('2d'), w = cv.width, h = cv.height; ctx.clearRect(0, 0, w, h);
+  const pts = sPoints(w, h, 80); strokeAlong(ctx, B, pts, color, mulberry(7), null, pathLength(pts));
+}
+function brushHtml() {
+  const B = BRUSHES[LS.br || 0];
+  let h = BRUSHES.map((b, i) => `<div class="ab brs ${i === (LS.br || 0) ? 'sel' : ''}" data-i="${i}"><canvas width="150" height="34" data-i="${i}"></canvas><div style="flex:1"><b>${b.name}</b><div class="muted">${b.type === 'Dry' ? 'Dry' : b.type} · ${Math.round(b.size)} px</div></div></div>`).join('');
+  h += `<div class="box"><div class="chips" style="margin-bottom:6px"><span class="chip">Path</span><span class="muted">›</span>${B.type === 'Skeletal' ? `<span class="chip">Skeleton art: ${B.art}</span><span class="muted">›</span><span class="chip">Bend along path</span>` : `<span class="chip">Stamp: ${B.type}</span><span class="muted">›</span><span class="chip">Repeat along path</span>`}<span class="muted">›</span><span class="chip">Pressure map</span></div>` +
+    `<canvas id="bBig" width="268" height="72" style="width:100%;height:72px;background:#EFDAC4;border-radius:6px;border:1px solid #0008"></canvas>` +
+    `<div class="prow" style="margin-top:8px"><label>Type</label>${chipRow('bType', BRUSH_TYPES.map(t => t), B.type)}</div>` +
+    (B.type === 'Skeletal' ? `<div class="prow"><label>Art</label>${chipRow('bArt', SKEL_ART, B.art)}</div><div class="prow"><label>Fit</label>${chipRow('bMode', SKEL_MODE, B.mode)}</div>` : '') +
+    ROW('bSize', B.type === 'Skeletal' ? 'Width' : 'Size', B.size, 2, 60, v => Math.round(v) + ' px') + (B.type === 'Skeletal' ? '' : ROW('bSp', 'Spacing', B.spacing, 4, 200, v => Math.round(v) + '%')) + ROW('bOp', 'Opacity', B.op, 10, 100, v => Math.round(v) + '%') +
+    (B.type === 'Calligraphic' ? ROW('bAng', 'Angle', B.angle, 0, 90, v => Math.round(v) + '°') + ROW('bRound', 'Roundness', B.round, 5, 100, v => Math.round(v) + '%') : '') +
+    (B.type === 'Dry' || B.type === 'Stars' || B.type === 'Dots' ? ROW('bScat', 'Scatter', B.scatter, 0, 100, v => Math.round(v) + '%') + ROW('bJit', 'Size jitter', B.jitter, 0, 100, v => Math.round(v) + '%') : '') +
+    `<div class="muted" style="margin:8px 0 2px;font-size:10px;letter-spacing:.05em;text-transform:uppercase">Pen pressure</div>` +
+    ROW('bAmt', 'To size', B.amt, 0, 100, v => Math.round(v) + '%') + ROW('bGam', 'Response', B.gamma, .4, 2.5, v => v.toFixed(1)) +
+    ((B.type === 'Calligraphic' || B.type === 'Stars') ? ROW('bTilt', 'Tilt to angle', B.tilt, 0, 100, v => Math.round(v) + '%') + `<div class="muted" style="font-size:11px;margin:-2px 0 4px 88px">the stamp turns with the direction the pen leans (the preview rocks it from -70° to 70°)</div>` : '') +
+    `<svg id="bCurve" viewBox="0 0 100 40" style="width:100%;height:46px;background:#00000040;border-radius:6px"></svg>` +
+    `<div class="muted" style="margin:8px 0 2px;font-size:10px;letter-spacing:.05em;text-transform:uppercase">Taper</div>` + ROW('bTapS', 'Start', B.tapS, 0, 200, v => Math.round(v) + ' px') + ROW('bTapE', 'End', B.tapE, 0, 200, v => Math.round(v) + ' px') + ROW('bTapM', 'Tip size', B.tapMin, 0, 60, v => Math.round(v) + '%') +
+    `<div class="prow" style="margin-top:8px"><label>Colour</label><div class="swg">${BCOLORS.map(c => `<div class="sw ${c === brushColor ? 'sel' : ''}" data-bc="${c}" style="background:${c}"></div>`).join('')}</div></div>` +
+    `<div class="chips" style="margin-top:8px"><span class="chip" id="bClear">Clear the canvas</span><span class="chip">New from selection</span></div></div>` +
+    `<div class="muted" style="margin-top:6px;font-size:11px"><b>Draw on the artwork</b> with the pen (or mouse) to try it: pressure changes size by the curve above, and the mouse counts as half pressure. A brush is a subnet: a stamp shape repeated along a stroke path, so size, spacing and the pressure map are parameters like any other, and a brushed stroke stays linked to its brush.</div>`;
+  return h;
+}
+function drawBrushCurve() {
+  const B = BRUSHES[LS.br || 0], c = $('#bCurve'); if (!c) return;
+  let d = ''; for (let i = 0; i <= 20; i++) { const p = i / 20, v = (1 - B.amt / 100) + B.amt / 100 * Math.pow(p, B.gamma); d += (i ? 'L' : 'M') + (4 + p * 92).toFixed(1) + ' ' + (36 - v * 30).toFixed(1); }
+  c.innerHTML = `<path d="M4 36 H96 M4 36 V6" stroke="#ffffff33" fill="none"/><path d="${d}" stroke="#ffb454" stroke-width="2" fill="none"/><text x="6" y="10" fill="#9a9ea8" font-size="6">size</text><text x="80" y="35" fill="#9a9ea8" font-size="6">pressure</text>`;
+}
+function redrawBrush() {
+  const B = BRUSHES[LS.br || 0], big = $('#bBig'); if (big) paintBrushPreview(big, B, brushColor);
+  $$('.brs canvas').forEach(cv => paintBrushPreview(cv, BRUSHES[Number(cv.dataset.i)], brushColor));
+  drawBrushCurve();
+}
+function bindBrush() {
+  const B = BRUSHES[LS.br || 0];
+  $$('.brs').forEach(r => r.onclick = () => { LS.br = Number(r.dataset.i); refreshLibPreview(); });
+  $$('#bType .chip').forEach(c => c.onclick = () => { B.type = c.textContent; if (B.type === 'Stars') { B.spacing = Math.max(B.spacing, 100); } refreshLibPreview(); });
+  const t = (id, key, fmt) => bindTrack(id, v => { B[key] = v; $('#' + id + 'V').textContent = fmt(v); redrawBrush(); });
+  t('bSize', 'size', v => Math.round(v) + ' px'); if ($('#bSp')) t('bSp', 'spacing', v => Math.round(v) + '%'); t('bOp', 'op', v => Math.round(v) + '%');
+  t('bAng', 'angle', v => Math.round(v) + '°'); t('bRound', 'round', v => Math.round(v) + '%'); t('bScat', 'scatter', v => Math.round(v) + '%'); t('bJit', 'jitter', v => Math.round(v) + '%');
+  t('bTilt', 'tilt', v => Math.round(v) + '%'); t('bTapS', 'tapS', v => Math.round(v) + ' px'); t('bTapE', 'tapE', v => Math.round(v) + ' px'); t('bTapM', 'tapMin', v => Math.round(v) + '%');
+  t('bAmt', 'amt', v => Math.round(v) + '%'); t('bGam', 'gamma', v => v.toFixed(1));
+  $$('#bArt .chip').forEach(c => c.onclick = () => { B.art = c.textContent; refreshLibPreview(); });
+  $$('#bMode .chip').forEach(c => c.onclick = () => { B.mode = c.textContent; refreshLibPreview(); });
+  $$('[data-bc]').forEach(s => s.onclick = () => { brushColor = s.dataset.bc; refreshLibPreview(); });
+  $('#bClear').onclick = () => { const cv = $('#bpad'); cv.getContext('2d').clearRect(0, 0, cv.width, cv.height); };
+  redrawBrush();
+}
+/* the drawing pad over the artwork: the end taper needs the stroke length, so the stroke is drawn live and redrawn when the pen lifts */
+const bpad = $('#bpad'), bctx = bpad.getContext('2d');
+let bdraw = null;
+const padPt = (e, ev) => { const r = bpad.getBoundingClientRect(), pen = e.pointerType === 'pen'; return { x: (ev.clientX - r.left) * bpad.width / r.width, y: (ev.clientY - r.top) * bpad.height / r.height, p: pen ? ev.pressure : .5, az: pen && (ev.tiltX || ev.tiltY) ? Math.atan2(ev.tiltY, ev.tiltX) * 180 / Math.PI : 0 }; };
+bpad.addEventListener('pointerdown', e => {
+  bpad.setPointerCapture(e.pointerId); const pt = padPt(e, e);
+  bdraw = { pts: [pt], seed: Math.floor(Math.random() * 1e9), base: bctx.getImageData(0, 0, bpad.width, bpad.height), brush: BRUSHES[LS.br || 0], color: brushColor };
+  bdraw.rnd = mulberry(bdraw.seed); bdraw.state = strokeAlong(bctx, bdraw.brush, [pt, pt], bdraw.color, bdraw.rnd, null, null);
+});
+bpad.addEventListener('pointermove', e => {
+  if (!bdraw) return;
+  (e.getCoalescedEvents ? e.getCoalescedEvents() : [e]).forEach(ev => { const pt = padPt(e, ev), last = bdraw.pts[bdraw.pts.length - 1]; if (bdraw.brush.type === 'Skeletal') { bctx.save(); bctx.strokeStyle = bdraw.color; bctx.globalAlpha = .45; bctx.lineWidth = 1.5; bctx.beginPath(); bctx.moveTo(last.x, last.y); bctx.lineTo(pt.x, pt.y); bctx.stroke(); bctx.restore(); } else strokeAlong(bctx, bdraw.brush, [last, pt], bdraw.color, bdraw.rnd, bdraw.state, null); bdraw.pts.push(pt); });
+});
+bpad.addEventListener('pointerup', () => {
+  if (!bdraw) return;
+  if (bdraw.brush.type === 'Skeletal' && bdraw.pts.length > 2) { bctx.putImageData(bdraw.base, 0, 0); skeletalStroke(bctx, bdraw.brush, bdraw.pts, bdraw.color); }
+  else if (bdraw.brush.tapE > 0 && bdraw.pts.length > 1) { bctx.putImageData(bdraw.base, 0, 0); strokeAlong(bctx, bdraw.brush, bdraw.pts, bdraw.color, mulberry(bdraw.seed), null, pathLength(bdraw.pts)); }
+  bdraw = null;
+});
+function bindTrack(id, fn) {
+  const t = $('#' + id); if (!t) return;
+  const set = e => { const r = t.getBoundingClientRect(), mn = Number(t.dataset.min), mx = Number(t.dataset.max), v = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); fn(mn + v * (mx - mn)); paintDemo();
+    $('.f', t).style.width = $('.t', t).style.left = v * 100 + '%'; };
+  t.addEventListener('pointerdown', e => { t.setPointerCapture(e.pointerId); set(e); const mv = set, up = () => { t.removeEventListener('pointermove', mv); t.removeEventListener('pointerup', up); }; t.addEventListener('pointermove', mv); t.addEventListener('pointerup', up); });
+}
+function refreshLibPreview() { const sc = $('#doc').scrollTop; paintDoc(); $('#doc').scrollTop = sc; }
+function bindLib() {
+  if (docTab !== 'lib') return;
+  if (libTab === 'Brushes') { bindBrush(); return; }
+  if (libTab === 'Patterns') {
+    const P = PATS[LS.pat];
+    $$('.ptile[data-i]').forEach(t => t.onclick = () => { LS.pat = Number(t.dataset.i); refreshLibPreview(); });
+    $$('#pTile .chip').forEach(c => c.onclick = () => { P.tile = c.textContent; refreshLibPreview(); paintDemo(); });
+    $$('#pLay .chip').forEach(c => c.onclick = () => { P.layout = c.textContent; refreshLibPreview(); paintDemo(); });
+    const upd = (key, fmt) => v => { P[key] = v; $('#' + { size: 'pSize', gap: 'pGap', angle: 'pAng', op: 'pOp' }[key] + 'V').textContent = fmt(v); const pv = $('#pv'); if (pv) pv.outerHTML = patternMarkup('pv', P); };
+    bindTrack('pSize', upd('size', v => Math.round(v))); bindTrack('pGap', upd('gap', v => Math.round(v) + '%')); bindTrack('pAng', upd('angle', v => Math.round(v) + '°')); bindTrack('pOp', upd('op', v => Math.round(v) + '%'));
+    $('#pApply').onclick = () => { LS.look = { kind: 'pat' }; paintDemo(); }; $('#pClear').onclick = () => { LS.look = null; paintDemo(); };
+  } else if (libTab === 'Styles') {
+    const s = STYLES[LS.sty];
+    $$('.stl[data-i]').forEach(t => t.onclick = () => { LS.sty = Number(t.dataset.i); refreshLibPreview(); });
+    const hex = (id, key) => { const e = $('#' + id); e.oninput = ev => { const v = ev.target.value.trim(); if (/^#[0-9a-f]{6}$/i.test(v)) s[key] = v.toUpperCase(); else if (v === '' && key === 'stroke') s.stroke = ''; else return; refreshLibPreview(); paintDemo(); }; };
+    hex('sFill', 'fill'); hex('sStroke', 'stroke');
+    const shadow = () => { if (!s.sh) s.sh = { x: 0, y: 4, b: 8, c: '#000000', o: .4 }; return s.sh; };
+    bindTrack('sFo', v => { s.fo = v / 100; $('#sFoV').textContent = Math.round(v) + '%'; });
+    bindTrack('sSw', v => { s.sw = v; $('#sSwV').textContent = (Math.round(v * 2) / 2) + ' px'; });
+    bindTrack('sShB', v => { shadow().b = v; $('#sShBV').textContent = Math.round(v); });
+    bindTrack('sShY', v => { shadow().y = v; $('#sShYV').textContent = Math.round(v); });
+    bindTrack('sShO', v => { shadow().o = v / 100; $('#sShOV').textContent = Math.round(v) + '%'; });
+    $$('#sDash .chip').forEach(c => c.onclick = () => { s.dash = c.textContent === 'Solid' ? '' : c.textContent === 'Dash' ? '6 4' : '1 4'; refreshLibPreview(); paintDemo(); });
+    $('#sApply').onclick = () => { LS.look = { kind: 'sty' }; paintDemo(); }; $('#sClear').onclick = () => { LS.look = null; paintDemo(); };
+  }
+}
+/* a demo shape on the artwork that patterns and styles are applied to */
+const demo = el('rect', { id: 'demo', x: 22800, y: 22600, width: 6400, height: 5200, rx: 1000, fill: '#cfd3da', 'fill-opacity': .0, display: 'none' }, art);
+const demoLabel = el('text', { x: 22800, y: 22300, fill: '#233244', 'font-size': 700, display: 'none' }, art); demoLabel.textContent = 'Demo shape (selected)';
+function paintDemo() {
+  const on = tab === 'doc' && docTab === 'lib' && (libTab === 'Patterns' || libTab === 'Styles');
+  demo.setAttribute('display', on ? '' : 'none'); demoLabel.setAttribute('display', on ? '' : 'none');
+  const padOn = tab === 'doc' && docTab === 'lib' && libTab === 'Brushes'; bpad.style.display = padOn ? 'block' : 'none'; bpad.style.left = art.style.left || '270px';
+  const dyn = $('#dyn'); if (!dyn) return;
+  dyn.innerHTML = patternMarkup('demoPat', PATS[LS.pat]);
+  const look = LS.look; let attrs = 'fill="#cfd3da" fill-opacity=".0" stroke="#4c8dff" stroke-width="40" stroke-dasharray="160 120"';
+  if (look && look.kind === 'pat') attrs = 'fill="url(#demoPat)" stroke="#233244" stroke-width="40"';
+  if (look && look.kind === 'sty') { const k = 30038 / 580, m = styleMarkup(STYLES[LS.sty], 'demoSty', k); dyn.insertAdjacentHTML('beforeend', m.defs); attrs = m.attrs; }
+  [...demo.attributes].filter(a => !['id', 'x', 'y', 'width', 'height', 'rx', 'display'].includes(a.name)).forEach(a => demo.removeAttribute(a.name));
+  attrs.replace(/([\w-]+)="([^"]*)"/g, (_, k, v) => { demo.setAttribute(k, v); return ''; });
+  if (!on) return;
+}
+const FONTS = [['Segoe UI', 'Segoe UI Semibold', 2, 'ok'], ['Georgia', 'Georgia', 1, 'ok'], ['Caveat', 'Caveat', 1, 'missing']];
+function fontHtml() {
+  let h = '<h4>Fonts in this document</h4>' + FONTS.map(([fam, name, n, stt]) => `<div class="ab" style="cursor:default"><div style="flex:1"><div style="font:20px '${fam}', sans-serif">Night sky</div><div class="muted">${name} · ${n} text object${n > 1 ? 's' : ''}</div></div>` +
+    (stt === 'ok' ? '<span class="badge2 ok">Embedded</span>' : '<span class="badge2 bad">Missing</span><span class="chip">Replace...</span>') + '</div>').join('');
+  h += `<h4>When saving</h4><div class="chips"><span class="chip on">Embed fonts</span><span class="chip">Convert text to outlines</span></div>` +
+    `<div class="muted" style="margin-top:6px;font-size:11px">Text is a node (Text, then Outline, then Transform...), so "convert to outlines" is adding a node, and can be undone. A missing font keeps its name and shows a substitute until it is replaced.</div>` +
+    `<h4>Installed</h4><div class="chips">${['Segoe UI', 'Georgia', 'Consolas', 'Arial', 'Times New Roman', 'Verdana'].map(f => `<span class="chip" style="font-family:'${f}'">${f}</span>`).join('')}</div>`;
+  return h;
+}
+function bindOther() {
+  bindLib();
+  $$('#swatches .sw, .swg .sw').forEach(s => s.onclick = () => { st.sw = s.dataset.c; st.hl = null; paintDoc(); });
+  const w = swatches.find(x => x.c === st.sw);
+  const sel = $('#swSel'); if (sel) sel.onclick = () => { st.hl = w.ids; paintArt(); };
+  const rs = $('#swReset'); if (rs) rs.onclick = () => { setSwatchColor(w, w.orig); paintDoc(); };
+  const hx = $('#swHex'); if (hx) hx.oninput = e => { if (/^#[0-9a-f]{6}$/i.test(e.target.value)) setSwatchColor(w, e.target.value.toUpperCase(), true); };
+  const nm = $('#swName'); if (nm) nm.oninput = e => { w.name = e.target.value; };
+  $$('#lTabs .chip').forEach(c => c.onclick = () => { libTab = c.dataset.k; paintDoc(); });
+  $$('.gtile').forEach(g => { g.onpointerenter = () => { st.hl = [Number(g.dataset.i)]; paintArt(); }; g.onpointerleave = () => { st.hl = null; paintArt(); }; });
+  $$('#doc .ab[data-g]').forEach(a => { a.onpointerenter = () => { st.hl = S.map((s, i) => s.g === a.dataset.g ? i : -1).filter(i => i >= 0); paintArt(); }; a.onpointerleave = () => { st.hl = null; paintArt(); }; });
+}
+function setSwatchColor(w, hex, keepFocus) {
+  fillOv[w.c] = hex; w.ids.forEach(i => { artEls[i].setAttribute('fill', hex); artAllEls[i].setAttribute('fill', hex); });
+  $$('.swg .sw').forEach(s => { if (s.dataset.c === w.c) s.style.background = hex; });
+  const big = $('#doc .big'); if (big) big.style.background = hex;
+  if (!keepFocus) { const hx = $('#swHex'); if (hx) hx.value = hex; }
+}
+
+/* 3 document card */
+const DOC = { name: 'girl-sky', desc: 'Cover illustration, night sky from the hair', author: 'Jim', w: 3000, h: 3000, units: 'px', ppi: 300, mode: 'RGB', bg: 'Transparent', selBoard: 0 };
+const BOARDS = [
+  { name: 'Cover', x: 0, y: 0, w: 30038, h: 30038, crop: [0, 0, 30038, 30038], size: '3000 × 3000' },
+  { name: 'Square 1080', x: 34000, y: 0, w: 18000, h: 18000, crop: [8000, 9000, 26000, 27000], size: '1080 × 1080' },
+  { name: 'Banner', x: 34000, y: 21000, w: 30038, h: 10000, crop: [0, 3000, 30038, 13000], size: '1920 × 640' }
+];
+function paintTitle() { $('#title').innerHTML = `<b>${DOC.name}.curvy</b> <span class="muted">· ${DOC.w} × ${DOC.h} ${DOC.units} · ${DOC.mode} · ${BOARDS.length} artboards</span>`; }
+function thumbBoard(b) { return `<svg viewBox="${b.crop.join(' ')}" preserveAspectRatio="xMidYMid slice"><use href="#artAll"/></svg>`; }
+function paintDoc() {
+  const nPts = S.reduce((a, s) => a + s.n, 0);
+  const docHtml = `
+    <h4>Document</h4>
+    <div class="f2"><label>Name</label><input type="text" id="dName" value="${DOC.name}"><label>About</label><input type="text" id="dDesc" value="${DOC.desc}"><label>Author</label><input type="text" id="dAuth" value="${DOC.author}"></div>
+    <h4>Page</h4>
+    <div class="f2"><label>Size</label><div style="display:flex;gap:6px"><input type="number" id="dW" value="${DOC.w}"><input type="number" id="dH" value="${DOC.h}"></div>
+      <label>Units</label><div class="chips" id="dU">${['px', 'pt', 'mm', 'in'].map(u => `<span class="chip ${DOC.units === u ? 'on' : ''}">${u}</span>`).join('')}</div>
+      <label>Resolution</label><div style="display:flex;align-items:center;gap:6px"><input type="number" id="dPpi" value="${DOC.ppi}" style="width:80px"><span class="muted">ppi</span></div>
+      <label>Colour</label><div class="chips" id="dM">${['RGB', 'CMYK'].map(u => `<span class="chip ${DOC.mode === u ? 'on' : ''}">${u}</span>`).join('')}</div>
+      <label>Background</label><div class="chips" id="dB">${['Transparent', 'White', 'Colour'].map(u => `<span class="chip ${DOC.bg === u ? 'on' : ''}">${u}</span>`).join('')}</div></div>
+    <h4>Artboards <span class="chip" style="float:right;text-transform:none;letter-spacing:0">+ Add</span></h4>
+    <div id="dBoards">${BOARDS.map((b, i) => `<div class="ab ${DOC.selBoard === i ? 'sel' : ''}" data-i="${i}">${thumbBoard(b)}<div style="flex:1"><b>${b.name}</b><div class="muted">${b.size} px</div></div><span class="muted">⋮</span></div>`).join('')}</div>
+    <h4>Contents</h4>
+    <div class="stat"><span>Layers</span><span>5</span></div><div class="stat"><span>Groups (subnets)</span><span>10</span></div><div class="stat"><span>Shapes (path nodes)</span><span>${S.length}</span></div>
+    <div class="stat"><span>Nodes in total</span><span>416</span></div><div class="stat"><span>Points</span><span>${nPts}</span></div><div class="stat"><span>Fonts / linked images</span><span>0 / 0</span></div>
+    <div class="stat"><span>Guides</span><span>4</span></div>
+    <h4>Export</h4><div class="chips"><span class="chip">PNG</span><span class="chip">SVG</span><span class="chip">PDF</span><span class="chip">Presets...</span></div>`;
+
+  const tabsHtml = `<div class="chips" id="dTabs" style="margin-bottom:10px">${[['doc', 'Document'], ['sw', 'Swatches'], ['lib', 'Library'], ['fonts', 'Fonts']].map(([k, n]) => `<span class="chip ${docTab === k ? 'on' : ''}" data-k="${k}">${n}</span>`).join('')}</div>`;
+  $('#doc').innerHTML = tabsHtml + (docTab === 'doc' ? docHtml : docTab === 'sw' ? swHtml() : docTab === 'lib' ? libHtml() : fontHtml());
+  $$('#dTabs .chip').forEach(c => c.onclick = () => { docTab = c.dataset.k; st.hl = null; paintDoc(); paintArt(); });
+  paintDemo();
+  if (docTab !== 'doc') { bindOther(); return; }
+  const bind = (id, k, num) => $(id).addEventListener('input', e => { DOC[k] = num ? Number(e.target.value) : e.target.value; paintTitle(); });
+  bind('#dName', 'name'); bind('#dDesc', 'desc'); bind('#dAuth', 'author'); bind('#dW', 'w', 1); bind('#dH', 'h', 1); bind('#dPpi', 'ppi', 1);
+  [['#dU', 'units'], ['#dM', 'mode'], ['#dB', 'bg']].forEach(([id, k]) => $$(id + ' .chip').forEach(c => c.onclick = () => { DOC[k] = c.textContent; paintTitle(); paintDoc(); }));
+  $$('#dBoards .ab').forEach(a => a.onclick = () => { DOC.selBoard = Number(a.dataset.i); paintDoc(); paintBoards(); status(); });
+}
+
+/* 4 artboards on the canvas */
+function paintBoards() {
+  const ws = $('#ws'); ws.innerHTML = '';
+  el('rect', { x: -2500, y: -4500, width: 67500, height: 40000, fill: '#2b2d31' }, ws);
+  BOARDS.forEach((b, i) => {
+    const g = el('g', { style: 'cursor:pointer' }, ws);
+    el('rect', { x: b.x, y: b.y, width: b.w, height: b.h, fill: '#EFDAC4', stroke: DOC.selBoard === i ? '#ffb454' : '#00000066', 'stroke-width': DOC.selBoard === i ? 260 : 100 }, g);
+    const sv = el('svg', { x: b.x, y: b.y, width: b.w, height: b.h, viewBox: b.crop.join(' '), preserveAspectRatio: 'xMidYMid slice' }, g);
+    const u = document.createElementNS(NS, 'use'); u.setAttribute('href', '#artAll'); sv.appendChild(u);
+    el('text', { class: 'abLabel', x: b.x, y: b.y - 700 }, g).textContent = b.name;
+    el('text', { class: 'abSub', x: b.x + b.name.length * 620 + 600, y: b.y - 700 }, g).textContent = b.size + ' px';
+    g.addEventListener('pointerdown', () => { DOC.selBoard = i; paintBoards(); paintDoc(); status(); });
+  });
+}
+
+/* tabs */
+let tab = 'outline';
+const hints = {
+  outline: 'Outline - click a row to select, click the artwork to find its row, eye hides, lock locks, type to filter - L toggles it',
+  layers: 'Layers - click a chip, or hold L and move up/down to change the active layer; the layer ring is on the barrel button',
+  doc: 'Document - the "..." under the document ring opens this; edits show in the title chip',
+  boards: 'Artboards - click one to select it; the document card lists the same artboards'
+};
+function status() {
+  const b = $('#bar');
+  if (tab === 'outline' && st.sel) b.textContent = nodes.get(st.sel).name + ' - ' + nodes.get(st.sel).shapes.length + ' shape(s) selected';
+  else if (tab === 'layers') b.textContent = 'Active layer: ' + nodes.get(st.active).name + ' - new shapes go here';
+  else if (tab === 'boards') b.textContent = 'Artboard: ' + BOARDS[DOC.selBoard].name + ' ' + BOARDS[DOC.selBoard].size + ' px';
+  else b.textContent = hints[tab];
+}
+function setTab(t) {
+  tab = t;
+  $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.v === t));
+  $$('.view').forEach(v => v.classList.toggle('on', v.id === t + 'V'));
+  $('#art').style.display = t === 'boards' ? 'none' : 'block';
+  $('#art').style.left = t === 'doc' ? '120px' : t === 'layers' ? '110px' : '320px';
+  $('#scrubCard').style.display = 'none'; st.hl = null;
+  if (t === 'layers') { paintStrip(); placeRing(); }
+  if (t === 'boards') paintBoards();
+  paintArt(); status(); paintDemo();
+  if (t !== 'outline' && t !== 'layers') st.sel = null;
+}
+$$('#tabs button').forEach(b => b.onclick = () => setTab(b.dataset.v));
+
+paintTitle(); paintRows(); paintStrip(); paintDoc(); paintBoards();
+const hp = location.hash.slice(1).split('-'), h = hp[0];
+if (hp[1]) { docTab = hp[1]; if (hp[2] === 'sel') st.sw = swatches[Math.floor(swatches.length / 2)].c; if (hp[1] === 'lib' && hp[2]) libTab = hp[2]; if (hp[1] === 'lib' && hp[2] === 'Brushes' && hp[3] && /^\d+$/.test(hp[3])) LS.br = Number(hp[3]);
+if (hp[3] === 'apply') LS.look = { kind: libTab === 'Styles' ? 'sty' : 'pat' }; }
+paintDoc(); setTab(['outline', 'layers', 'doc', 'boards'].includes(h) ? h : 'outline');
+</script>
+</body>
+</html>

@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curvy node graph experiments</title>
+<style>
+  :root { --bg: #1e1f22; --panel: #26272b; --workspace: #2b2d31; --paper: #f4f4f2; --text: #e6e7ea; --muted: #9a9ea8; --accent: #4c8dff; --amber: #ffb454; --slot: #313338; --slotLine: #4a4d55; --glass: #17181b99; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid #000; }
+  header h1 { margin: 0 0 4px; font-size: 15px; }
+  header p { margin: 0; color: var(--muted); max-width: 940px; }
+  .controls { display: flex; gap: 8px; align-items: center; padding: 10px 16px; background: #222327; border-bottom: 1px solid #000; flex-wrap: wrap; }
+  button { background: var(--slot); color: var(--text); border: 1px solid var(--slotLine); border-radius: 14px; padding: 4px 12px; font: inherit; cursor: pointer; }
+  button.on { background: var(--accent); border-color: var(--accent); }
+  .stage { position: relative; display: none; width: 900px; height: 520px; margin: 16px auto 8px; background: var(--workspace); border: 1px solid #000; overflow: hidden; user-select: none; }
+  .stage.on { display: block; }
+  .paper { position: absolute; left: 60px; top: 30px; width: 600px; height: 460px; background: var(--paper); box-shadow: 0 2px 12px #0008; }
+  svg.fill { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+  .bar { position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: var(--panel); border-top: 1px solid #000; color: var(--muted); padding: 4px 10px; white-space: nowrap; font-size: 12px; z-index: 9; }
+  .glass { background: var(--glass); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); border: 1px solid #ffffff2a; }
+  .key { display: inline-flex; align-items: center; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 6px; background: #3a3d43; border: 1px solid #5a5d66; color: var(--text); font: 600 11px/20px "Segoe UI"; }
+  .key.lit { background: var(--amber); color: #1b1b1b; border-color: var(--amber); }
+  .muted { color: var(--muted); }
+  .track { position: relative; flex: 1; height: 6px; border-radius: 3px; background: #3a3d43; cursor: ew-resize; }
+  .track .f { height: 100%; border-radius: 3px; background: var(--amber); pointer-events: none; }
+  .track .t { position: absolute; top: -5px; width: 14px; height: 14px; margin-left: -7px; border-radius: 50%; background: var(--amber); border: 2px solid #17181b; pointer-events: none; }
+  .win { position: absolute; left: 90px; top: 250px; width: 440px; height: 210px; border-radius: 10px; resize: both; overflow: hidden; min-width: 260px; min-height: 120px; box-shadow: 0 4px 14px #0008; z-index: 3; }
+  .win .title { height: 24px; padding: 3px 10px; background: #00000055; cursor: move; display: flex; justify-content: space-between; font-size: 12px; }
+  .win svg { position: absolute; left: 0; top: 24px; width: 100%; height: calc(100% - 24px); }
+  .lens { position: absolute; inset: 0 0 28px 0; background: #0b0c0e8c; display: none; z-index: 4; }
+  .lens.on { display: block; }
+  .card { position: absolute; width: 150px; border-radius: 10px; padding: 6px 8px 8px; box-shadow: 0 3px 10px #0007; z-index: 3; cursor: grab; font-size: 12px; }
+  .card.sel { border-color: var(--amber); }
+  .card b { display: block; margin-bottom: 4px; }
+  .card .r { display: flex; align-items: center; gap: 6px; margin: 5px 0; cursor: default; }
+  .card .r span { width: 38px; color: var(--muted); font-size: 11px; }
+  .card .r em { width: 30px; text-align: right; font-style: normal; font-variant-numeric: tabular-nums; font-size: 11px; }
+  .holdbtn { padding: 8px 18px; border-radius: 10px; }
+  .notes { width: 900px; margin: 0 auto 28px; color: var(--muted); }
+  .notes h3 { color: var(--text); margin: 14px 0 4px; font-size: 13px; }
+  .notes ul { margin: 0; padding-left: 18px; }
+  .notes li { margin: 2px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Node graph experiments</h1>
+  <p>Four ways to show the same graph (Star, Transform, Copy, Output) in the minimal UI. All four share one set of values, so scrub a
+  parameter in any of them and the artwork updates; nodes drag. They differ in where the graph lives and how much of the canvas it costs.
+  The bottom-drawer version is in <code>nodes.html</code>.</p>
+</header>
+<div class="controls" id="tabs">
+  <button data-s="float" class="on">A Floating window</button>
+  <button data-s="lens">B Hold-key lens</button>
+  <button data-s="inline">C Cards on the canvas</button>
+  <button data-s="zoom">D Zoom into the shape</button>
+</div>
+
+<div class="stage on" id="float"><div class="paper"></div><svg class="fill art"></svg>
+  <div class="win glass" id="win"><div class="title"><span>Graph - <b>Star</b></span><span class="muted">drag the title, resize the corner</span></div><svg id="winSvg" viewBox="0 0 640 150" preserveAspectRatio="xMidYMid meet"></svg></div>
+  <div class="bar">A - the graph in a movable, resizable translucent window over the artwork - N shows/hides it - it remembers its place</div>
+</div>
+
+<div class="stage" id="lens"><div class="paper"></div><svg class="fill art"></svg>
+  <div class="lens" id="lensLayer"><svg class="fill" id="lensSvg" viewBox="0 0 900 492" preserveAspectRatio="xMidYMid meet"></svg></div>
+  <div style="position:absolute;left:670px;top:20px;z-index:5;text-align:right"><button class="holdbtn" id="holdBtn">Hold here, or hold <span class="key">N</span></button><div class="muted" style="margin-top:6px;font-size:12px">release to hide the graph</div></div>
+  <div class="bar">B - hold N: the graph appears over the whole canvas on a dimmed artwork; edit nodes with the pen while the key is down, release to go back to drawing</div>
+</div>
+
+<div class="stage" id="inline"><div class="paper"></div><svg class="fill art"></svg><svg class="fill" id="inWires"></svg><div id="inCards"></div>
+  <div class="bar">C - each node is a small card on the canvas with its sliders inline, wires between them; no separate graph view, scrub right on the card</div>
+</div>
+
+<div class="stage" id="zoom"><div class="paper"></div><svg class="fill art" id="zArt"></svg><svg class="fill" id="zWires"></svg><div id="zCards"></div>
+  <div style="position:absolute;left:670px;top:20px;z-index:5"><button id="zBtn">Zoom into shape <span class="key">N</span></button></div>
+  <div class="bar" id="zBar">D - the shape's own pipeline sits around it; "zoom in" flies into it so the nodes grow and the artwork becomes the display node's thumbnail</div>
+</div>
+
+<div class="notes">
+  <h3>What to look for</h3>
+  <ul>
+    <li><b>A Floating window</b> - familiar and flexible, and it keeps the whole canvas. Cost: another thing to place and a pen has to move/resize it; best on a big display.</li>
+    <li><b>B Hold-key lens</b> - fits the hold-key habit already used for scrubbing: the graph exists only while you ask for it and takes the whole canvas, so nodes can be large and pen-friendly. Cost: not for long edits, and you cannot see the unobscured artwork while editing (the dimming is a compromise).</li>
+    <li><b>C Cards on the canvas</b> - nothing to open, since each node's sliders are right there; suits small graphs (the common live-shape case of 2 to 5 nodes). Cost: large graphs clutter the drawing, so it should fall back to A or B past a handful of nodes.</li>
+    <li><b>D Zoom into the shape</b> - treats the graph as the inside of the object: select a shape, zoom in, and you are in its node graph (like entering a subnet, which jitnodes already supports); zoom out to return. Cost: a transition to learn; benefit is the same gesture works for groups and nested graphs.</li>
+  </ul>
+  <p class="muted">A combination is plausible: C for small graphs and the Peek chip, A or the drawer for medium ones, B as the quick look, D as the way into subnets.</p>
+</div>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const NS = 'http://www.w3.org/2000/svg';
+const N = {
+  star: { title: 'Star', x: 30, y: 30, p: { Points: { v: 5, min: 3, max: 12, u: '' }, Inner: { v: 45, min: 20, max: 90, u: '%' }, Radius: { v: 90, min: 40, max: 130, u: '' } } },
+  xf: { title: 'Transform', x: 190, y: 70, p: { Rotate: { v: 0, min: 0, max: 360, u: '°' }, Scale: { v: 100, min: 50, max: 140, u: '%' } } },
+  copy: { title: 'Copy', x: 350, y: 30, p: { Count: { v: 3, min: 1, max: 8, u: '' }, Step: { v: 24, min: 0, max: 90, u: '°' } } },
+  out: { title: 'Output', x: 510, y: 70, p: {} }
+};
+const E = [['star', 'xf'], ['xf', 'copy'], ['copy', 'out']];
+let sel = 'star';
+const views = [];
+const refreshAll = () => views.forEach(v => v());
+const mk = (tag, a, parent) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, a[k]); parent && parent.appendChild(e); return e; };
+
+function paintArt(svg, cx, cy, k = 1) {
+  svg.innerHTML = '';
+  const s = N.star.p, x = N.xf.p, c = N.copy.p, pts = Math.round(s.Points.v), out = s.Radius.v * x.Scale.v / 100 * k, inn = out * s.Inner.v / 100;
+  for (let i = 0; i < Math.round(c.Count.v); i++) {
+    let d = '';
+    for (let q = 0; q < pts * 2; q++) { const r = q % 2 ? inn : out, a = (x.Rotate.v + i * c.Step.v - 90) * Math.PI / 180 + q * Math.PI / pts; d += (q ? 'L' : 'M') + (cx + Math.cos(a) * r).toFixed(1) + ' ' + (cy + Math.sin(a) * r).toFixed(1); }
+    mk('path', { d: d + 'Z', fill: `hsl(${14 + i * 18} 80% 55%)`, 'fill-opacity': 1 - i * .1, stroke: '#1f3a8a', 'stroke-width': 2 }, svg);
+  }
+}
+function slider(track, q, after) {
+  const set = e => {
+    const r = track.getBoundingClientRect(), v = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    q.v = q.min + v * (q.max - q.min); if (q.max - q.min <= 12) q.v = Math.round(q.v); after();
+  };
+  track.addEventListener('pointerdown', e => { e.stopPropagation(); track.setPointerCapture(e.pointerId); set(e); const mv = set, up = () => { track.removeEventListener('pointermove', mv); track.removeEventListener('pointerup', up); }; track.addEventListener('pointermove', mv); track.addEventListener('pointerup', up); });
+}
+
+/* svg graph used by A and B */
+function drawGraph(svg, scale) {
+  svg.innerHTML = '';
+  const NW = 120 * scale, NH = 54 * scale, f = scale;
+  E.forEach(([a, b]) => {
+    const A = N[a], B = N[b], x1 = A.x * f + NW, y1 = A.y * f + NH / 2, x2 = B.x * f, y2 = B.y * f + NH / 2, dx = Math.max(40, (x2 - x1) / 2);
+    mk('path', { d: `M${x1} ${y1} C${x1 + dx} ${y1} ${x2 - dx} ${y2} ${x2} ${y2}`, fill: 'none', stroke: '#c9ccd3', 'stroke-width': 2 * f }, svg);
+  });
+  Object.keys(N).forEach(k => {
+    const n = N[k], g = mk('g', { transform: `translate(${n.x * f} ${n.y * f})`, style: 'cursor:grab' }, svg);
+    mk('rect', { width: NW, height: NH, rx: 8 * f, fill: '#26272bee', stroke: k === sel ? '#ffb454' : '#5a5d66', 'stroke-width': k === sel ? 2.5 : 1 }, g);
+    mk('rect', { width: NW, height: 20 * f, rx: 8 * f, fill: k === 'out' ? '#4c8dff' : '#3a3d43' }, g);
+    mk('text', { x: 10 * f, y: 14 * f, fill: '#e6e7ea', 'font-size': 12 * f, 'font-weight': 600 }, g).textContent = n.title;
+    mk('text', { x: 10 * f, y: 38 * f, fill: '#9a9ea8', 'font-size': 10 * f }, g).textContent = Object.keys(n.p).slice(0, 2).map(q => q + ' ' + Math.round(n.p[q].v) + n.p[q].u).join('  ');
+    if (k !== 'star') mk('circle', { cx: 0, cy: NH / 2, r: 6 * f, fill: '#17181b', stroke: '#fff', 'stroke-width': 2 }, g);
+    if (k !== 'out') mk('circle', { cx: NW, cy: NH / 2, r: 6 * f, fill: '#17181b', stroke: '#fff', 'stroke-width': 2 }, g);
+    g.addEventListener('pointerdown', e => {
+      e.preventDefault(); sel = k; const m = svg.getScreenCTM(), sx = e.clientX, sy = e.clientY, ox = n.x, oy = n.y;
+      const mv = ev => { n.x = ox + (ev.clientX - sx) / m.a / f; n.y = oy + (ev.clientY - sy) / m.d / f; refreshAll(); };
+      const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); };
+      window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up); refreshAll();
+    });
+  });
+}
+
+/* A floating window */
+{
+  const st = $('#float'), art = $('.art', st), win = $('#win'), svg = $('#winSvg');
+  views.push(() => { paintArt(art, 360, 150); drawGraph(svg, 1); });
+  const title = $('.title', win);
+  title.addEventListener('pointerdown', e => {
+    e.preventDefault(); const sx = e.clientX, sy = e.clientY, ox = win.offsetLeft, oy = win.offsetTop;
+    const mv = ev => { win.style.left = ox + ev.clientX - sx + 'px'; win.style.top = oy + ev.clientY - sy + 'px'; };
+    const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+  });
+}
+
+/* B lens */
+{
+  const st = $('#lens'), art = $('.art', st), layer = $('#lensLayer'), svg = $('#lensSvg');
+  views.push(() => { paintArt(art, 360, 200); drawGraph(svg, 1.35); });
+  const show = on => layer.classList.toggle('on', on);
+  const b = $('#holdBtn');
+  b.addEventListener('pointerdown', () => show(true));
+  window.addEventListener('pointerup', () => show(false));
+  window.addEventListener('keydown', e => { if (e.key.toLowerCase() === 'n' && !e.repeat && st.classList.contains('on')) show(true); });
+  window.addEventListener('keyup', e => { if (e.key.toLowerCase() === 'n') show(false); });
+}
+
+/* C cards on canvas, D zoom into shape (both use html cards) */
+function cardsView(root, wires, cards, layoutFn) {
+  views.push(() => {
+    cards.innerHTML = ''; wires.innerHTML = '';
+    const pos = layoutFn();
+    E.forEach(([a, b]) => {
+      const A = pos[a], B = pos[b]; if (!A || !B) return;
+      const x1 = A.x + A.w, y1 = A.y + 24, x2 = B.x, y2 = B.y + 24, dx = Math.max(30, Math.abs(x2 - x1) / 2);
+      mk('path', { d: `M${x1} ${y1} C${x1 + dx} ${y1} ${x2 - dx} ${y2} ${x2} ${y2}`, fill: 'none', stroke: '#c9ccd3', 'stroke-width': 2, 'stroke-opacity': .85 }, wires);
+    });
+    Object.keys(N).forEach(k => {
+      const n = N[k], P = pos[k]; if (!P) return;
+      const c = document.createElement('div'); c.className = 'card glass' + (k === sel ? ' sel' : '');
+      c.style.left = P.x + 'px'; c.style.top = P.y + 'px'; c.style.width = P.w + 'px'; c.style.fontSize = (P.fs || 12) + 'px';
+      c.innerHTML = `<b>${n.title}</b>`;
+      Object.keys(n.p).forEach(q => {
+        const qq = n.p[q], r = document.createElement('div'), pct = (qq.v - qq.min) / (qq.max - qq.min) * 100; r.className = 'r';
+        r.innerHTML = `<span>${q}</span><div class="track"><div class="f" style="width:${pct}%"></div><div class="t" style="left:${pct}%"></div></div><em>${Math.round(qq.v)}${qq.u}</em>`;
+        slider($('.track', r), qq, refreshAll); c.appendChild(r);
+      });
+      if (!Object.keys(n.p).length) c.insertAdjacentHTML('beforeend', '<div class="muted" style="font-size:11px">shown on canvas</div>');
+      c.addEventListener('pointerdown', e => {
+        if (e.target.closest('.track')) return;
+        sel = k; const sx = e.clientX, sy = e.clientY, ox = n.x, oy = n.y;
+        const mv = ev => { n.x = ox + ev.clientX - sx; n.y = oy + ev.clientY - sy; refreshAll(); };
+        const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); };
+        window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+      });
+      cards.appendChild(c);
+    });
+  });
+}
+{
+  const st = $('#inline'), art = $('.art', st);
+  views.push(() => paintArt(art, 360, 150, .85));
+  cardsView(st, $('#inWires'), $('#inCards'), () => ({
+    star: { x: 20 + N.star.x * .3, y: 300 + N.star.y * .2, w: 150 }, xf: { x: 190 + N.xf.x * .3, y: 330 + N.xf.y * .2, w: 150 },
+    copy: { x: 360 + N.copy.x * .3, y: 300 + N.copy.y * .2, w: 150 }, out: { x: 530 + N.out.x * .2, y: 345 + N.out.y * .2, w: 110 }
+  }));
+}
+{
+  const st = $('#zoom'), art = $('#zArt'), btn = $('#zBtn');
+  let inside = false;
+  const set = on => { inside = on; btn.firstChild.textContent = on ? 'Zoom out ' : 'Zoom into shape '; refreshAll(); };
+  btn.onclick = () => set(!inside);
+  window.addEventListener('keydown', e => { if (e.key.toLowerCase() === 'n' && !e.repeat && st.classList.contains('on')) set(!inside); });
+  views.push(() => {
+    if (inside) { paintArt(art, 780, 80, .22); } else { paintArt(art, 360, 230, 1.2); }
+    art.style.opacity = inside ? 1 : 1;
+  });
+  cardsView(st, $('#zWires'), $('#zCards'), () => inside ? ({
+    star: { x: 40 + N.star.x, y: 120 + N.star.y, w: 180, fs: 13 }, xf: { x: 40 + N.xf.x + 90, y: 120 + N.xf.y + 60, w: 180, fs: 13 },
+    copy: { x: 40 + N.copy.x + 150, y: 120 + N.copy.y, w: 180, fs: 13 }, out: { x: 40 + N.out.x + 160, y: 120 + N.out.y + 60, w: 130, fs: 13 }
+  }) : {});
+}
+
+$$('#tabs button').forEach(b => b.onclick = () => {
+  $$('#tabs button').forEach(x => x.classList.toggle('on', x === b));
+  $$('.stage').forEach(s => s.classList.toggle('on', s.id === b.dataset.s));
+  refreshAll();
+});
+refreshAll();
+</script>
+</body>
+</html>

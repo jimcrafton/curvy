@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curvy skeletal stroke editor</title>
+<style>
+  :root { --bg: #1e1f22; --panel: #26272b; --text: #e6e7ea; --muted: #9a9ea8; --accent: #4c8dff; --amber: #ffb454; --slot: #313338; --slotLine: #4a4d55; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid #000; }
+  header h1 { margin: 0 0 4px; font-size: 15px; }
+  header p { margin: 0; color: var(--muted); max-width: 980px; }
+  .controls { display: flex; gap: 8px; align-items: center; padding: 10px 16px; background: #222327; border-bottom: 1px solid #000; }
+  button, .chip { background: var(--slot); color: var(--text); border: 1px solid var(--slotLine); border-radius: 14px; padding: 3px 11px; font: inherit; cursor: pointer; }
+  button.on, .chip.on { background: var(--amber); border-color: var(--amber); color: #1b1b1b; }
+  #tabs button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .chip { padding: 1px 9px; font-size: 12px; display: inline-block; }
+  #stage { position: relative; width: 1100px; height: 700px; margin: 16px auto 8px; background: #2b2d31; border: 1px solid #000; overflow: hidden; user-select: none; }
+  .view { display: none; position: absolute; inset: 0; }
+  .view.on { display: block; }
+  .glass { background: #17181b99; border: 1px solid #ffffff2a; border-radius: 10px; }
+  .pane { position: absolute; padding: 10px 12px; }
+  h4 { margin: 0 0 6px; font-size: 10px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  .muted { color: var(--muted); font-size: 12px; }
+  canvas { display: block; background: #EFDAC4; border-radius: 6px; border: 1px solid #0008; touch-action: none; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  .row label { width: 78px; color: var(--muted); flex: none; }
+  .chips { display: flex; gap: 5px; flex-wrap: wrap; }
+  .track { position: relative; flex: 1; height: 6px; border-radius: 3px; background: #3a3d43; cursor: ew-resize; }
+  .track .f { height: 100%; border-radius: 3px; background: var(--amber); pointer-events: none; }
+  .track .t { position: absolute; top: -5px; width: 15px; height: 15px; margin-left: -7px; border-radius: 50%; background: var(--amber); border: 2px solid #17181b; pointer-events: none; }
+  .val { width: 48px; text-align: right; font-variant-numeric: tabular-nums; }
+  .art { display: flex; align-items: center; gap: 8px; padding: 5px; border-radius: 8px; border: 1px solid #ffffff1f; margin-bottom: 4px; cursor: pointer; background: #26272b66; }
+  .art.sel { border-color: var(--amber); }
+  .art canvas { width: 70px; height: 38px; flex: none; }
+  .sw { width: 20px; height: 20px; border-radius: 5px; border: 1px solid #0008; cursor: pointer; display: inline-block; }
+  .sw.sel { outline: 2px solid var(--amber); outline-offset: 1px; }
+  .lbl { position: absolute; font-size: 12px; font-weight: 600; }
+  .notes { width: 1100px; margin: 0 auto 28px; color: var(--muted); }
+  .notes h3 { color: var(--text); margin: 14px 0 4px; font-size: 13px; }
+  .notes ul { margin: 0; padding-left: 18px; }
+  .notes li { margin: 2px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Skeletal strokes: art, guides and corners</h1>
+  <p>The three open questions from the brush mockup, settled on a test bench. <b>Art and guides</b>: pick the artwork from the document, mark which part
+  stretches and which stays rigid, and watch it fit a path you can reshape. <b>Corners</b>: the same art and path under four ways of handling a
+  sharp bend. Drag the path handles and the guides; everything updates live.</p>
+</header>
+<div class="controls" id="tabs"><button data-v="art" class="on">1 Art and guides</button><button data-v="corners">2 Corners</button></div>
+
+<div id="stage">
+  <div class="view on" id="artV">
+    <div class="pane glass" style="left:10px;top:10px;width:290px;bottom:10px;overflow:auto">
+      <h4>Choose the art</h4>
+      <div class="muted" style="margin-bottom:6px">From the document</div><div id="docArt"></div>
+      <div class="muted" style="margin:8px 0 6px">Built in</div><div id="builtArt"></div>
+      <div class="muted" style="margin:8px 0 6px">Along the path</div>
+      <div class="chips" id="dirChips"><span class="chip on" data-d="x">Left → right</span><span class="chip" data-d="y">Top → bottom</span><span class="chip" id="flipChip">Flip</span></div>
+      <div class="muted" style="margin:10px 0 6px">Colour</div><div id="colors"></div>
+      <div class="muted" style="margin-top:10px;font-size:11px">A document shape or symbol becomes the art. Its outline is carried onto the stroke, so the art can be any shape or subnet, and editing the source updates every stroke that uses it.</div>
+    </div>
+    <div class="pane glass" style="left:310px;top:10px;width:780px;height:230px">
+      <h4>Guides: what stretches and what stays rigid</h4>
+      <canvas id="gcv" width="756" height="150"></canvas>
+      <div class="row" style="margin-top:8px"><label>Fit</label><div class="chips" id="modeChips"><span class="chip" data-m="stretch">Stretch to length</span><span class="chip on" data-m="between">Stretch between guides</span><span class="chip" data-m="repeat">Repeat</span></div>
+        <span class="muted" style="margin-left:12px" id="modeNote"></span></div>
+    </div>
+    <div class="pane glass" style="left:310px;top:250px;width:780px;height:440px">
+      <h4>Result: drag the handles to reshape the path</h4>
+      <canvas id="rcv" width="756" height="350"></canvas>
+      <div style="display:flex;gap:24px;margin-top:6px"><div class="row" style="flex:1"><label>Width</label><div class="track" id="wTr" data-min="8" data-max="90"><div class="f"></div><div class="t"></div></div><span class="val" id="wV"></span></div>
+        <label class="muted" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="gridChk" checked> Show how the art is stretched</label></div>
+    </div>
+  </div>
+
+  <div class="view" id="cornersV">
+    <div class="pane glass" style="left:10px;top:10px;width:1080px;height:84px">
+      <div class="row" style="margin:0"><label style="width:auto">Corner handling</label><span class="muted">The same art and path under four policies. Drag the corner points in any panel.</span>
+        <span style="flex:1"></span><span class="muted">Brush default:</span><div class="chips" id="polChips"></div></div>
+      <div style="display:flex;gap:28px;margin-top:6px">
+        <div class="row" style="flex:1;margin:0"><label style="width:92px">Smooth radius</label><div class="track" id="rTr" data-min="0" data-max="80"><div class="f"></div><div class="t"></div></div><span class="val" id="rV"></span></div>
+        <div class="row" style="flex:1;margin:0"><label style="width:92px">Miter limit</label><div class="track" id="mTr" data-min="1" data-max="6"><div class="f"></div><div class="t"></div></div><span class="val" id="mV"></span></div>
+        <div class="row" style="flex:1;margin:0"><label style="width:92px">Break above</label><div class="track" id="bTr" data-min="15" data-max="150"><div class="f"></div><div class="t"></div></div><span class="val" id="bV"></span></div>
+      </div>
+    </div>
+    <div id="panels"></div>
+  </div>
+</div>
+
+<div class="notes" id="notes"></div>
+
+<script src="nodes-girl-data.js"></script>
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const S = GIRL.shapes;
+
+/* flatten an SVG path into polylines */
+function flatten(d) {
+  const subs = []; let cur = null, cx = 0, cy = 0, sx = 0, sy = 0, lcx = 0, lcy = 0, prev = '';
+  const re = /([MmLlHhVvCcSsQqZz])([^MmLlHhVvCcSsQqZz]*)/g; let m;
+  const start = (x, y) => { if (cur && cur.length > 1) subs.push(cur); cur = [[x, y]]; sx = x; sy = y; };
+  const add = (x, y) => { if (!cur) cur = [[cx, cy]]; cur.push([x, y]); cx = x; cy = y; };
+  while ((m = re.exec(d))) {
+    const c = m[1], a = (m[2].match(/-?\d*\.?\d+(?:e-?\d+)?/gi) || []).map(Number), rel = c === c.toLowerCase(), C = c.toUpperCase();
+    if (C === 'Z') { if (cur && cur.length > 1) subs.push(cur); cur = null; cx = sx; cy = sy; prev = 'Z'; continue; }
+    if (C === 'M') for (let i = 0; i + 1 < a.length; i += 2) { const x = a[i] + (rel ? cx : 0), y = a[i + 1] + (rel ? cy : 0); if (i === 0) { start(x, y); cx = x; cy = y; } else add(x, y); }
+    else if (C === 'L') for (let i = 0; i + 1 < a.length; i += 2) add(a[i] + (rel ? cx : 0), a[i + 1] + (rel ? cy : 0));
+    else if (C === 'H') a.forEach(v => add(rel ? cx + v : v, cy));
+    else if (C === 'V') a.forEach(v => add(cx, rel ? cy + v : v));
+    else if (C === 'C' || C === 'S') {
+      const step = C === 'C' ? 6 : 4;
+      for (let i = 0; i + step <= a.length; i += step) {
+        const ox = rel ? cx : 0, oy = rel ? cy : 0, x0 = cx, y0 = cy;
+        let x1, y1, x2, y2, x3, y3;
+        if (C === 'C') { x1 = a[i] + ox; y1 = a[i + 1] + oy; x2 = a[i + 2] + ox; y2 = a[i + 3] + oy; x3 = a[i + 4] + ox; y3 = a[i + 5] + oy; }
+        else { x1 = prev === 'C' || prev === 'S' ? 2 * cx - lcx : cx; y1 = prev === 'C' || prev === 'S' ? 2 * cy - lcy : cy; x2 = a[i] + ox; y2 = a[i + 1] + oy; x3 = a[i + 2] + ox; y3 = a[i + 3] + oy; }
+        for (let t = 1; t <= 8; t++) { const u = t / 8, v = 1 - u; add(v * v * v * x0 + 3 * v * v * u * x1 + 3 * v * u * u * x2 + u * u * u * x3, v * v * v * y0 + 3 * v * v * u * y1 + 3 * v * u * u * y2 + u * u * u * y3); }
+        lcx = x2; lcy = y2; prev = C;
+      }
+      prev = C; continue;
+    } else if (C === 'Q') {
+      for (let i = 0; i + 4 <= a.length; i += 4) {
+        const ox = rel ? cx : 0, oy = rel ? cy : 0, x0 = cx, y0 = cy, x1 = a[i] + ox, y1 = a[i + 1] + oy, x2 = a[i + 2] + ox, y2 = a[i + 3] + oy;
+        for (let t = 1; t <= 6; t++) { const u = t / 6, v = 1 - u; add(v * v * x0 + 2 * v * u * x1 + u * u * x2, v * v * y0 + 2 * v * u * y1 + u * u * y2); }
+      }
+    }
+    prev = C;
+  }
+  if (cur && cur.length > 1) subs.push(cur);
+  return subs;
+}
+/* art = outlines in (u along, v across); u 0..1, v -1..1; aspect = length / width */
+function densify(sub) { const out = [sub[0]]; for (let i = 1; i < sub.length; i++) { const a = sub[i - 1], b = sub[i], n = Math.max(1, Math.ceil(Math.max(Math.abs(b[0] - a[0]) / .012, Math.abs(b[1] - a[1]) / .06))); for (let k = 1; k <= n; k++) out.push([a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n]); } return out; }
+function artFromSubs(subs, dir, flip) {
+  const pts = subs.flat(), xs = pts.map(p => p[0]), ys = pts.map(p => p[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys), w = x1 - x0, h = y1 - y0;
+  const horiz = dir === 'x';
+  const map = p => { let u = horiz ? (p[0] - x0) / w : (p[1] - y0) / h, v = horiz ? (p[1] - (y0 + h / 2)) / (h / 2) : (p[0] - (x0 + w / 2)) / (w / 2); if (flip) u = 1 - u; return [u, v]; };
+  return { subs: subs.map(sb => densify(sb.map(map))), aspect: horiz ? w / h : h / w };
+}
+const bestShape = (g, c) => { const ids = S.map((x, i) => x.g === g && x.c === c ? i : -1).filter(i => i >= 0), area = i => (S[i].b[2] - S[i].b[0]) * (S[i].b[3] - S[i].b[1]); return ids.reduce((a, i) => area(i) > area(a) ? i : a, ids[0]); };
+const poly = (top, bot, n = 60) => { const t = [], b = []; for (let i = 0; i <= n; i++) { const u = i / n; t.push([u, -top(u)]); b.push([u, bot(u)]); } return [[...t, ...b.reverse()]]; };
+const ART = [
+  { id: 'bird', name: 'Bird', from: 'doc', subs: () => flatten(S[bestShape('Birds', 'fil2')].d) },
+  { id: 'sparkle', name: 'Sparkle', from: 'doc', subs: () => flatten(S[bestShape('Stars', 'fil55')].d) },
+  { id: 'wash', name: 'Cloud wisp', from: 'doc', subs: () => flatten(S[bestShape('Cloud wash', 'fil25')].d) },
+  { id: 'hand', name: 'Hand', from: 'doc', subs: () => flatten(S[bestShape('Hand', 'fil54')].d) },
+  { id: 'leaf', name: 'Leaf', from: 'built', aspect: 5, subs: () => poly(u => Math.pow(Math.sin(Math.PI * u), .8), u => Math.pow(Math.sin(Math.PI * u), .8)) },
+  { id: 'arrow', name: 'Arrow', from: 'built', aspect: 6, subs: () => [[[0, -.3], [.72, -.3], [.72, -1], [1, 0], [.72, 1], [.72, .3], [0, .3]]] },
+  { id: 'ribbon', name: 'Ribbon', from: 'built', aspect: 7, subs: () => [[[0, -.5], [.18, -.5], [.3, -.9], [.7, -.9], [.82, -.5], [1, -.5], [1, .5], [.82, .5], [.7, .9], [.3, .9], [.18, .5], [0, .5]]] }
+];
+const ST = { art: 'bird', dir: 'x', flip: false, color: '#233244', mode: 'between', g1: .22, g2: .78, W: 44, grid: true, policy: 'smooth', R: 30, miter: 3, thr: 50 };
+const COLORS = ['#233244', '#E8572A', '#FFCC00', '#4375C6', '#32BBDB', '#7B3FA0'];
+const artCache = {};
+function curArt() { const a = ART.find(x => x.id === ST.art), key = a.id + ST.dir + ST.flip; if (!artCache[key]) { const r = artFromSubs(a.subs(), ST.dir, ST.flip); if (a.aspect) r.aspect = a.aspect * (ST.dir === 'y' ? 1 : 1); artCache[key] = r; } return artCache[key]; }
+
+/* path frames */
+function cumulative(pts) { const c = [0]; for (let i = 1; i < pts.length; i++) c.push(c[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)); return c; }
+function resamplePath(pts, step) {
+  const c = cumulative(pts), L = c[c.length - 1], out = []; let i = 1;
+  for (let s = 0; s <= L; s += step) { while (i < pts.length - 1 && c[i] < s) i++; const t = (s - c[i - 1]) / ((c[i] - c[i - 1]) || 1); out.push({ x: pts[i - 1].x + (pts[i].x - pts[i - 1].x) * t, y: pts[i - 1].y + (pts[i].y - pts[i - 1].y) * t }); }
+  out.push({ x: pts[pts.length - 1].x, y: pts[pts.length - 1].y }); return out;
+}
+function smoothPath(pts, radius) {
+  if (radius < 2) return pts;
+  let q = resamplePath(pts, 2); const w = Math.max(1, Math.round(radius / 2));
+  for (let pass = 0; pass < 2; pass++) q = q.map((p, i) => { let sx = 0, sy = 0, n = 0; for (let k = -w; k <= w; k++) { const j = Math.min(q.length - 1, Math.max(0, i + k)); if (i + k < 0 || i + k > q.length - 1) continue; sx += q[j].x; sy += q[j].y; n++; } return { x: sx / n, y: sy / n }; });
+  q[0] = { x: pts[0].x, y: pts[0].y }; q[q.length - 1] = { x: pts[pts.length - 1].x, y: pts[pts.length - 1].y }; return q;
+}
+function turnAngles(pts) { const out = []; for (let i = 1; i < pts.length - 1; i++) { const a = Math.atan2(pts[i].y - pts[i - 1].y, pts[i].x - pts[i - 1].x), b = Math.atan2(pts[i + 1].y - pts[i].y, pts[i + 1].x - pts[i].x); let d = Math.abs(b - a) * 180 / Math.PI; if (d > 180) d = 360 - d; out.push(d); } return out; }
+function makeFrame(pts, miter, limit) {
+  const c = cumulative(pts), L = c[c.length - 1], n = pts.length;
+  const nm = []; for (let i = 0; i < n - 1; i++) { const dx = pts[i + 1].x - pts[i].x, dy = pts[i + 1].y - pts[i].y, d = Math.hypot(dx, dy) || 1; nm.push([-dy / d, dx / d]); }
+  const vn = pts.map((_, i) => { if (!miter || i === 0 || i === n - 1) return i === n - 1 ? nm[n - 2] : nm[0]; const a = nm[i - 1], b = nm[i], k = 1 + a[0] * b[0] + a[1] * b[1], m = [(a[0] + b[0]) / Math.max(.15, k), (a[1] + b[1]) / Math.max(.15, k)], l = Math.hypot(m[0], m[1]); return l > limit ? [m[0] / l * limit, m[1] / l * limit] : m; });
+  return { L, at(s) { s = Math.max(0, Math.min(L, s)); let i = 1; while (i < n - 1 && c[i] < s) i++; const t = (s - c[i - 1]) / ((c[i] - c[i - 1]) || 1), a = pts[i - 1], b = pts[i];
+    const N = miter ? [vn[i - 1][0] + (vn[i][0] - vn[i - 1][0]) * t, vn[i - 1][1] + (vn[i][1] - vn[i - 1][1]) * t] : nm[i - 1]; return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, nx: N[0], ny: N[1] }; } };
+}
+/* fit: where along the path (px) does art position u land */
+function fitFn(A, L, mode, g1, g2) {
+  if (mode === 'between') { let head = g1 * A, tail = (1 - g2) * A, f = 1; if (head + tail > L) { f = L / (head + tail); head *= f; tail *= f; } const mid = L - head - tail;
+    return u => u < g1 ? u * A * f : u <= g2 ? head + (u - g1) / (g2 - g1) * mid : head + mid + (u - g2) * A * f; }
+  return u => u * L;
+}
+function drawArt(ctx, pathPts, o) {
+  const art = curArt(), W = ST.W, A = art.aspect * W;
+  let pieces = [pathPts], miter = false;
+  if (o.policy === 'smooth') pieces = [smoothPath(pathPts, ST.R)];
+  else if (o.policy === 'miter') { pieces = [resamplePath(pathPts, 1.5)]; miter = true; if (ST.miterRaw) pieces = [pathPts]; }
+  else if (o.policy === 'break') {
+    const ang = turnAngles(pathPts); pieces = []; let cur = [pathPts[0]];
+    for (let i = 1; i < pathPts.length; i++) { cur.push(pathPts[i]); if (i < pathPts.length - 1 && ang[i - 1] > ST.thr) { pieces.push(cur); cur = [pathPts[i]]; } }
+    pieces.push(cur);
+  }
+  ctx.fillStyle = ST.color; ctx.strokeStyle = '#0006'; ctx.lineWidth = 1;
+  pieces.forEach(pc => {
+    if (pc.length < 2) return;
+    const dense = o.policy === 'miter' && false ? pc : pc;
+    const fr = makeFrame(o.policy === 'bend' || o.policy === 'break' || o.policy === 'miter' ? densePath(pc) : densePath(pc), miter, ST.miter), L = fr.L; if (L < 4) return;
+    const reps = ST.mode === 'repeat' ? Math.max(1, Math.round(L / A)) : 1, segL = L / reps;
+    for (let r = 0; r < reps; r++) {
+      const f = fitFn(A, segL, ST.mode === 'repeat' ? 'stretch' : ST.mode, ST.g1, ST.g2), put = (u, v) => { const p = fr.at(r * segL + f(u)); return [p.x + p.nx * v * W / 2, p.y + p.ny * v * W / 2]; };
+      ctx.beginPath(); art.subs.forEach(sb => sb.forEach((q, i) => { const p = put(q[0], q[1]); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); }));
+      ctx.fill('evenodd'); ctx.stroke();
+      if (o.grid) { ctx.save(); ctx.strokeStyle = '#ffffff88'; ctx.lineWidth = .8; for (let k = 1; k < 10; k++) { ctx.beginPath(); const u = k / 10; for (let j = 0; j <= 12; j++) { const p = put(u, -1 + j / 6); j ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); } ctx.stroke(); } ctx.beginPath(); for (let j = 0; j <= 60; j++) { const p = put(j / 60, 0); j ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); } ctx.stroke(); ctx.restore(); }
+    }
+  });
+}
+const densePath = pts => resamplePath(pts, 2);
+
+/* tab 1: guides and result */
+const gcv = $('#gcv'), gctx = gcv.getContext('2d'), rcv = $('#rcv'), rctx = rcv.getContext('2d');
+const H = [{ x: 70, y: 280 }, { x: 250, y: 40 }, { x: 480, y: 330 }, { x: 690, y: 80 }];
+function bez(h, n = 140) { const out = []; for (let i = 0; i <= n; i++) { const t = i / n, u = 1 - t; out.push({ x: u * u * u * h[0].x + 3 * u * u * t * h[1].x + 3 * u * t * t * h[2].x + t * t * t * h[3].x, y: u * u * u * h[0].y + 3 * u * u * t * h[1].y + 3 * u * t * t * h[2].y + t * t * t * h[3].y }); } return out; }
+function paintGuides() {
+  const ctx = gctx, w = gcv.width, h = gcv.height, art = curArt(), pad = 24, boxH = 96, boxW = Math.min(w - 2 * pad, boxH * art.aspect), x0 = (w - boxW) / 2, y0 = 30;
+  ctx.clearRect(0, 0, w, h); ctx.fillStyle = '#EFDAC4'; ctx.fillRect(0, 0, w, h);
+  const gx = g => x0 + g * boxW, st = ST.mode === 'between';
+  ctx.fillStyle = st ? '#4c8dff22' : '#00000008'; ctx.fillRect(x0, y0, boxW * ST.g1, boxH); ctx.fillRect(gx(ST.g2), y0, boxW * (1 - ST.g2), boxH);
+  ctx.fillStyle = st ? '#ffb45433' : '#00000006'; ctx.fillRect(gx(ST.g1), y0, boxW * (ST.g2 - ST.g1), boxH);
+  ctx.fillStyle = ST.color; ctx.beginPath(); art.subs.forEach(sb => sb.forEach((q, i) => { const x = x0 + q[0] * boxW, y = y0 + boxH / 2 + q[1] * boxH / 2; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); })); ctx.fill('evenodd');
+  ctx.strokeStyle = '#00000044'; ctx.strokeRect(x0, y0, boxW, boxH);
+  ctx.font = '600 11px Segoe UI'; ctx.fillStyle = '#233244';
+  if (st) { ctx.textAlign = 'right'; ctx.fillText('rigid head', gx(ST.g1) - 6, y0 - 6); ctx.textAlign = 'center'; ctx.fillText('stretches', (gx(ST.g1) + gx(ST.g2)) / 2, y0 + boxH + 16); ctx.textAlign = 'left'; ctx.fillText('rigid tail', gx(ST.g2) + 6, y0 - 6); }
+  else { ctx.textAlign = 'left'; ctx.fillText(ST.mode === 'stretch' ? 'the whole art stretches to the path length' : 'the art repeats; its length stays in proportion to the width', x0, y0 - 6); }
+  [['g1', ST.g1], ['g2', ST.g2]].forEach(([k, g]) => { ctx.strokeStyle = st ? '#c2410c' : '#00000033'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(gx(g), y0 - 4); ctx.lineTo(gx(g), y0 + boxH + 4); ctx.stroke(); ctx.fillStyle = st ? '#c2410c' : '#00000033'; ctx.fillRect(gx(g) - 6, y0 + boxH + 4, 12, 12); });
+  gcv._box = { x0, boxW };
+  $('#modeNote').textContent = ST.mode === 'between' ? 'Rigid parts keep their proportions (the head of an arrow stays an arrowhead); only the middle stretches.' : ST.mode === 'stretch' ? 'Simple, but it distorts the art on long or short paths.' : 'Whole copies of the art, spaced to fill the path.';
+}
+function paintResult() {
+  const ctx = rctx; ctx.clearRect(0, 0, rcv.width, rcv.height); ctx.fillStyle = '#EFDAC4'; ctx.fillRect(0, 0, rcv.width, rcv.height);
+  const pts = bez(H); drawArt(ctx, pts, { policy: ST.policy === 'break' ? 'smooth' : ST.policy, grid: ST.grid });
+  ctx.strokeStyle = '#4c8dff'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(H[0].x, H[0].y); ctx.lineTo(H[1].x, H[1].y); ctx.moveTo(H[3].x, H[3].y); ctx.lineTo(H[2].x, H[2].y); ctx.stroke(); ctx.setLineDash([]);
+  H.forEach((h, i) => { ctx.fillStyle = i === 0 || i === 3 ? '#fff' : '#4c8dff'; ctx.strokeStyle = '#17181b'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(h.x, h.y, 6, 0, 6.2832); ctx.fill(); ctx.stroke(); });
+  const L = cumulative(bez(H, 60)).pop(); ctx.fillStyle = '#233244'; ctx.font = '12px Segoe UI'; ctx.fillText('path length ' + Math.round(L) + ' px · art ' + Math.round(curArt().aspect * ST.W) + ' px at this width', 10, rcv.height - 10);
+}
+function dragCanvas(cv, hit, move, done) {
+  cv.addEventListener('pointerdown', e => { const r = cv.getBoundingClientRect(), p = [(e.clientX - r.left) * cv.width / r.width, (e.clientY - r.top) * cv.height / r.height], h = hit(p); if (h == null) return; cv.setPointerCapture(e.pointerId);
+    const mv = ev => move(h, [(ev.clientX - r.left) * cv.width / r.width, (ev.clientY - r.top) * cv.height / r.height]); cv.addEventListener('pointermove', mv); const up = () => { cv.removeEventListener('pointermove', mv); cv.removeEventListener('pointerup', up); done && done(); }; cv.addEventListener('pointerup', up); });
+}
+dragCanvas(rcv, p => { const i = H.findIndex(h => Math.hypot(h.x - p[0], h.y - p[1]) < 12); return i < 0 ? null : i; }, (i, p) => { H[i].x = p[0]; H[i].y = p[1]; paintResult(); });
+dragCanvas(gcv, p => { const b = gcv._box; if (!b || ST.mode !== 'between') return null; const g = (p[0] - b.x0) / b.boxW; return Math.abs(g - ST.g1) < Math.abs(g - ST.g2) ? 'g1' : 'g2'; }, (k, p) => { const b = gcv._box, g = Math.max(0, Math.min(1, (p[0] - b.x0) / b.boxW)); if (k === 'g1') ST.g1 = Math.min(g, ST.g2 - .05); else ST.g2 = Math.max(g, ST.g1 + .05); paintGuides(); paintResult(); });
+function thumbArt(cv, a) {
+  const ctx = cv.getContext('2d'); ctx.fillStyle = '#EFDAC4'; ctx.fillRect(0, 0, cv.width, cv.height);
+  const r = { subs: a.subs() }; const art = artFromSubs(r.subs, 'x', false), asp = a.aspect || art.aspect, h = cv.height - 8, w = Math.min(cv.width - 8, h * asp), x0 = (cv.width - w) / 2;
+  ctx.fillStyle = '#233244'; ctx.beginPath(); art.subs.forEach(sb => sb.forEach((q, i) => { const x = x0 + q[0] * w, y = cv.height / 2 + q[1] * h / 2; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); })); ctx.fill('evenodd');
+}
+function buildPicker() {
+  [['docArt', 'doc'], ['builtArt', 'built']].forEach(([id, from]) => { const box = $('#' + id); box.innerHTML = '';
+    ART.filter(a => a.from === from).forEach(a => { const d = document.createElement('div'); d.className = 'art' + (ST.art === a.id ? ' sel' : ''); d.innerHTML = `<canvas width="140" height="76"></canvas><div style="flex:1"><b>${a.name}</b><div class="muted">${from === 'doc' ? 'shape in the document' : 'built in'}</div></div>`; thumbArt($('canvas', d), a);
+      d.onclick = () => { ST.art = a.id; buildPicker(); paintGuides(); paintResult(); paintCorners(); }; box.appendChild(d); }); });
+  $('#colors').innerHTML = COLORS.map(c => `<span class="sw ${c === ST.color ? 'sel' : ''}" data-c="${c}" style="background:${c}"></span>`).join(' ');
+  $$('#colors .sw').forEach(s => s.onclick = () => { ST.color = s.dataset.c; buildPicker(); paintGuides(); paintResult(); paintCorners(); });
+}
+$$('#dirChips [data-d]').forEach(c => c.onclick = () => { ST.dir = c.dataset.d; $$('#dirChips [data-d]').forEach(x => x.classList.toggle('on', x === c)); paintGuides(); paintResult(); paintCorners(); });
+$('#flipChip').onclick = e => { ST.flip = !ST.flip; e.target.classList.toggle('on', ST.flip); paintGuides(); paintResult(); paintCorners(); };
+$$('#modeChips .chip').forEach(c => c.onclick = () => { ST.mode = c.dataset.m; $$('#modeChips .chip').forEach(x => x.classList.toggle('on', x === c)); paintGuides(); paintResult(); paintCorners(); });
+$('#gridChk').onchange = e => { ST.grid = e.target.checked; paintResult(); };
+function track(id, key, fmt, after) {
+  const t = $('#' + id), mn = Number(t.dataset.min), mx = Number(t.dataset.max), paint = () => { const v = (ST[key] - mn) / (mx - mn) * 100; $('.f', t).style.width = $('.t', t).style.left = v + '%'; const l = $('#' + id.replace('Tr', 'V')); if (l) l.textContent = fmt(ST[key]); };
+  const set = e => { const r = t.getBoundingClientRect(); ST[key] = mn + Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * (mx - mn); paint(); after(); };
+  t.addEventListener('pointerdown', e => { t.setPointerCapture(e.pointerId); set(e); const mv = set, up = () => { t.removeEventListener('pointermove', mv); t.removeEventListener('pointerup', up); }; t.addEventListener('pointermove', mv); t.addEventListener('pointerup', up); }); paint();
+}
+track('wTr', 'W', v => Math.round(v) + ' px', () => { paintGuides(); paintResult(); paintCorners(); });
+
+/* tab 2: corners */
+const POL = [['bend', 'Bend (raw)', 'Tears on the outside of each corner and overlaps on the inside.'], ['smooth', 'Smooth', 'No kinks: the corner is rounded first, so the art is squeezed there.'], ['miter', 'Miter join', 'The outline stays continuous and the corner stays sharp; limited so it cannot spike.'], ['break', 'Break at corners', 'Each piece is fitted on its own, so the art is never bent through a sharp turn.']];
+const CP = [{ x: 40, y: 230 }, { x: 110, y: 60 }, { x: 170, y: 230 }, { x: 230, y: 60 }];
+const cvs = [];
+function buildPanels() {
+  const box = $('#panels'); box.innerHTML = '';
+  POL.forEach(([k, name, note], i) => {
+    const d = document.createElement('div'); d.className = 'pane glass'; d.style.cssText = `left:${10 + i * 273}px;top:104px;width:263px;height:480px`;
+    d.innerHTML = `<h4>${name} ${ST.policy === k ? '· default' : ''}</h4><canvas width="239" height="330" data-k="${k}"></canvas><div class="muted" style="margin-top:8px">${note}</div>`;
+    box.appendChild(d); const cv = $('canvas', d); cvs[i] = cv;
+    dragCanvas(cv, p => { const j = CP.findIndex(q => Math.hypot(q.x - p[0], q.y - p[1]) < 12); return j < 0 ? null : j; }, (j, p) => { CP[j].x = p[0]; CP[j].y = p[1]; paintCorners(); });
+  });
+  $('#polChips').innerHTML = POL.map(([k, n]) => `<span class="chip ${ST.policy === k ? 'on' : ''}" data-k="${k}">${n}</span>`).join('');
+  $$('#polChips .chip').forEach(c => c.onclick = () => { ST.policy = c.dataset.k; buildPanels(); paintCorners(); paintResult(); });
+}
+function paintCorners() {
+  cvs.forEach((cv, i) => { const ctx = cv.getContext('2d'); ctx.clearRect(0, 0, cv.width, cv.height); ctx.fillStyle = '#EFDAC4'; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.save(); ctx.translate(0, 70); const path = CP.map(p => ({ x: p.x, y: p.y })); drawArt(ctx, path, { policy: POL[i][0], grid: ST.grid }); ctx.restore();
+    ctx.strokeStyle = '#4c8dff'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.beginPath(); CP.forEach((p, j) => j ? ctx.lineTo(p.x, p.y + 70) : ctx.moveTo(p.x, p.y + 70)); ctx.stroke(); ctx.setLineDash([]);
+    CP.forEach(p => { ctx.fillStyle = '#4c8dff'; ctx.strokeStyle = '#17181b'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x, p.y + 70, 6, 0, 6.2832); ctx.fill(); ctx.stroke(); }); });
+}
+track('rTr', 'R', v => Math.round(v) + ' px', paintCorners); track('mTr', 'miter', v => v.toFixed(1), paintCorners); track('bTr', 'thr', v => Math.round(v) + '°', paintCorners);
+
+/* tabs and notes */
+const NOTES = {
+  art: `<h3>Choosing the art</h3><ul><li>Any shape in the document can be the art: it is picked from a list (or the current selection), and its outline is carried onto the stroke, so a <b>symbol or subnet becomes a brush</b>. Built-in art covers the usual cases (leaf, arrow, ribbon).</li><li>The art needs a direction: which of its axes runs along the path (left to right or top to bottom) and whether it is flipped. Its length-to-width ratio decides how long it is at a given stroke width.</li><li>The brush stays linked to the source art, like a symbol instance: change the source and every stroke follows.</li></ul>
+  <h3>Guides</h3><ul><li>Two guides split the art into a rigid head, a stretching middle and a rigid tail. The rigid parts keep their proportions at the stroke width, so an arrowhead is always an arrowhead; the middle takes up the rest of the path. If the path is shorter than head plus tail, they shrink together.</li><li>The other two fits are the whole art stretched to the path, which distorts it, and repeat, which lays whole copies along the path.</li><li>"Show how the art is stretched" draws the art's own grid on the result, which makes the stretch and the bends visible.</li></ul>`,
+  corners: `<h3>Corners</h3><ul><li>Walking the art along a path with a sharp corner has no single right answer, so the brush picks a policy: <b>Bend</b> (raw, usually wrong), <b>Smooth</b> (the corner is rounded first; the radius is a setting), <b>Miter join</b> (outline stays continuous, spike limited), or <b>Break at corners</b> (each piece fitted on its own once the turn exceeds a threshold).</li><li>Smooth is the best default for flowing strokes, miter for geometric art such as ribbons and arrows, and break for art with identity, such as a bird, which should not be folded round a corner.</li><li>This is a property of the deform-along-path node: path in, art in, fit mode, guides, and corner policy as parameters.</li></ul>`
+};
+function setTab(v) { $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.v === v)); $$('.view').forEach(x => x.classList.toggle('on', x.id === v + 'V')); $('#notes').innerHTML = NOTES[v]; }
+$$('#tabs button').forEach(b => b.onclick = () => setTab(b.dataset.v));
+buildPicker(); buildPanels(); paintGuides(); paintResult(); paintCorners();
+const h0 = location.hash.slice(1).split('-'); if (h0[0] === 'corners') setTab('corners'); else setTab('art');
+if (h0[1]) { ST.art = h0[1]; buildPicker(); paintGuides(); paintResult(); paintCorners(); }
+</script>
+</body>
+</html>

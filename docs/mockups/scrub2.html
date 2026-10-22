@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curvy context scrubbing</title>
+<style>
+  :root {
+    --bg: #1e1f22; --panel: #26272b; --workspace: #2b2d31; --paper: #f4f4f2; --text: #e6e7ea; --muted: #9a9ea8;
+    --accent: #4c8dff; --amber: #ffb454; --slot: #313338; --slotLine: #4a4d55;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid #000; }
+  header h1 { margin: 0 0 4px; font-size: 15px; }
+  header p { margin: 0; color: var(--muted); max-width: 940px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 18px; padding: 10px 16px; background: #222327; border-bottom: 1px solid #000; }
+  .group { display: flex; align-items: center; gap: 6px; }
+  .group span { color: var(--muted); margin-right: 4px; }
+  button { background: var(--slot); color: var(--text); border: 1px solid var(--slotLine); border-radius: 14px; padding: 4px 12px; font: inherit; cursor: pointer; }
+  button.on { background: var(--accent); border-color: var(--accent); }
+  #stage { position: relative; width: 900px; height: 520px; margin: 16px auto 8px; background: var(--workspace); border: 1px solid #000; overflow: hidden; cursor: none; user-select: none; }
+  #paper { position: absolute; left: 150px; top: 60px; width: 600px; height: 400px; background: var(--paper); box-shadow: 0 2px 12px #0008; }
+  #ellipse { position: absolute; left: 400px; top: 150px; width: 200px; height: 130px; border-radius: 50%; border-style: solid; }
+  #rect { position: absolute; left: 220px; top: 300px; width: 130px; height: 90px; border-style: solid; }
+  #text { position: absolute; left: 520px; top: 316px; white-space: nowrap; font: 700 44px/1 "Segoe UI", sans-serif; }
+  #text span { display: inline-block; position: relative; }
+  #hand { position: absolute; width: 260px; height: 120px; border-radius: 60px; background: #ff5a5a1c; border: 1px dashed #ff5a5a77; transform-origin: 0 50%; display: none; }
+  #hi, #over { position: absolute; left: 0; top: 0; }
+  #hi > *, #over > * { position: absolute; }
+  .hi { border: 2px dashed var(--amber); }
+  #cross { position: absolute; width: 0; height: 0; }
+  #cross::before { content: ""; position: absolute; left: -10px; top: -1px; width: 20px; height: 2px; background: #111; box-shadow: 0 0 0 1px #fffa; }
+  #cross::after { content: ""; position: absolute; top: -10px; left: -1px; height: 20px; width: 2px; background: #111; box-shadow: 0 0 0 1px #fffa; }
+  .tag { color: var(--text); background: #17181bf0; border-radius: 6px; padding: 2px 8px; font-size: 12px; white-space: nowrap; border: 1px solid #5a5d66; display: flex; align-items: center; gap: 6px; }
+  .tag b { color: var(--amber); }
+  .key { display: inline-flex; align-items: center; gap: 4px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 6px; background: #3a3d43; border: 1px solid #5a5d66; color: var(--text); font: 600 11px/20px "Segoe UI"; }
+  .key.lit { background: var(--amber); color: #1b1b1b; border-color: var(--amber); }
+  .key i { font-style: normal; opacity: .85; }
+  .hue { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); }
+  .track { position: relative; height: 6px; border-radius: 3px; background: #3a3d43; }
+  .fill { height: 100%; border-radius: 3px; background: var(--amber); }
+  .thumb { position: absolute; top: -5px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: var(--amber); border: 2px solid #17181b; }
+  .card { background: #17181bf0; border: 1px solid #5a5d66; border-radius: 10px; padding: 8px 12px 14px; box-shadow: 0 3px 10px #0007; }
+  .card .head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+  .card .head b { color: var(--amber); }
+  .nib { border-radius: 50%; border: 1px solid #fff; box-shadow: 0 0 0 1px #0006; }
+  .marker::before { content: ""; position: absolute; left: 50%; top: 50%; width: 14px; height: 2px; margin: -1px 0 0 -7px; background: #111; box-shadow: 0 0 0 1px #fffa; }
+  .marker::after { content: ""; position: absolute; left: 50%; top: 50%; width: 2px; height: 14px; margin: -7px 0 0 -1px; background: #111; box-shadow: 0 0 0 1px #fffa; }
+  .srow { display: flex; align-items: center; gap: 8px; height: 28px; color: var(--muted); font-size: 12px; }
+  .srow.act { color: var(--text); }
+  .srow .sname { width: 66px; }
+  .srow .sval { width: 56px; text-align: right; }
+  .srow .axis { width: 14px; color: var(--amber); }
+  .shead { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+  #bar { position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: var(--panel); border-top: 1px solid #000; color: var(--muted); padding: 3px 10px; white-space: nowrap; font-size: 12px; display: flex; align-items: center; gap: 8px; }
+  #bar b { color: var(--text); margin-right: 4px; }
+  #notes { width: 900px; margin: 0 auto 24px; color: var(--muted); }
+  #notes li { margin-bottom: 4px; }
+  #notes h2 { color: var(--text); font-size: 13px; margin: 14px 0 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Context scrubbing</h1>
+  <p>Live. Move the mouse over the objects: the part under the cursor is outlined and decides which keys scrub what. <b>Hold a key and move sideways</b>; Shift snaps; release keeps the value. The control box stays where the key was pressed and only its value moves.</p>
+</header>
+<div class="controls">
+  <div class="group"><span>Display</span>
+    <button data-variant="1" class="on">1 Fixed slider</button>
+    <button data-variant="2">2 Nib with centre marker</button>
+    <button data-variant="3">3 Nib + slider</button>
+    <button data-variant="4">4 Quick strip (two keys at once)</button>
+  </div>
+  <div class="group"><span>Hints</span>
+    <button data-hints="full" class="on">Full</button>
+    <button data-hints="keys">Keys only</button>
+    <button data-hints="off">Off</button>
+  </div>
+  <div class="group"><span>Hardware</span>
+    <button data-hw="display" class="on">Pen display</button>
+    <button data-hw="tablet">Separate tablet</button>
+  </div>
+  <div class="group"><span>Hand</span>
+    <button data-hand="right" class="on">Right</button>
+    <button data-hand="left">Left</button>
+  </div>
+</div>
+
+<div id="stage" tabindex="0">
+  <div id="paper"></div>
+  <div id="ellipse"></div>
+  <div id="rect"></div>
+  <div id="text"><span>C</span><span>u</span><span>r</span><span>v</span><span>y</span></div>
+  <div id="hand"></div>
+  <div id="hi"></div>
+  <div id="over"></div>
+  <div id="cross"></div>
+  <div id="bar"></div>
+</div>
+
+<ul id="notes">
+  <li><b>Try:</b> the ellipse outline, inside the ellipse, the gradient rectangle (outline and inside), the gaps between the letters of the word, and the letters themselves. Each gives different keys. Click the canvas first so it has the keyboard.</li>
+  <li><b>Fixed control.</b> The slider or nib is placed when the key goes down and does not follow the pointer; the pointer's sideways distance from there is the value. The small + is the real pointer.</li>
+  <li><b>Hints.</b> Full names the context and each key. Keys only shows just keycaps with a small icon, no words. Off shows nothing until a key is held (the value must still show). In the product this is a setting, and hints also retire by themselves with use.</li>
+  <li><b>Keys are placeholders.</b> The same letter keeps its meaning where it can (W size, O opacity, H hue), and context-specific ones (A angle, K spacing, Y height, B baseline, L lightness) are remappable.</li>
+</ul>
+
+<script>
+  const stage = document.getElementById('stage');
+  const $ = id => document.getElementById(id);
+  const st = { variant: '1', hints: 'full', hw: 'display', hand: 'right', x: 450, y: 330, shift: false, scrub: null };
+  const vals = {
+    strokeW: 4.5, strokeHue: 215, strokeOp: 100, fillHue: 215, fillOp: 100, fillL: 88,
+    rStrokeW: 2, rStrokeHue: 20, rStrokeOp: 100, gradA: 45, gradHue: 200, gradOp: 100,
+    spacing: 4, height: 44, baseline: 0, textHue: 230, textOp: 100
+  };
+
+  const P = (key, name, field, min, max, rate, unit, digits, snaps, icon) => ({ key, name, field, min, max, rate, unit, digits, snaps, icon });
+  const ICON = { W: '↔', O: '◐', H: '<span class="hue"></span>', L: '☀', A: '∠', K: '⇥', Y: '↕', B: '⤓' };
+  const deg = '°';
+  const contexts = {
+    'ellipse.stroke': { label: 'Outline', props: [P('W', 'Width', 'strokeW', 0.5, 40, 0.08, ' px', 1, [1, 2, 4, 8, 16, 32]), P('O', 'Opacity', 'strokeOp', 0, 100, 0.4, '%', 0, [0, 25, 50, 75, 100]), P('H', 'Hue', 'strokeHue', 0, 360, 1, deg, 0, [0, 60, 120, 180, 240, 300, 360])] },
+    'ellipse.fill': { label: 'Solid fill', props: [P('O', 'Opacity', 'fillOp', 0, 100, 0.4, '%', 0, [0, 25, 50, 75, 100]), P('H', 'Hue', 'fillHue', 0, 360, 1, deg, 0, [0, 60, 120, 180, 240, 300, 360]), P('L', 'Lightness', 'fillL', 15, 97, 0.3, '%', 0, [25, 50, 75, 90])] },
+    'rect.stroke': { label: 'Outline', props: [P('W', 'Width', 'rStrokeW', 0.5, 40, 0.08, ' px', 1, [1, 2, 4, 8, 16, 32]), P('O', 'Opacity', 'rStrokeOp', 0, 100, 0.4, '%', 0, [0, 25, 50, 75, 100]), P('H', 'Hue', 'rStrokeHue', 0, 360, 1, deg, 0, [0, 60, 120, 180, 240, 300, 360])] },
+    'rect.gradient': { label: 'Gradient fill', props: [P('A', 'Angle', 'gradA', 0, 360, 1, deg, 0, [0, 45, 90, 135, 180, 270, 360]), P('H', 'Hue shift', 'gradHue', 0, 360, 1, deg, 0, [0, 60, 120, 180, 240, 300, 360]), P('O', 'Opacity', 'gradOp', 0, 100, 0.4, '%', 0, [0, 25, 50, 75, 100])] },
+    'text.gap': { label: 'Between characters', props: [P('K', 'Spacing', 'spacing', -6, 40, 0.15, ' px', 1, [0, 2, 4, 8, 16]), P('Y', 'Height', 'height', 12, 120, 0.3, ' px', 0, [12, 24, 36, 48, 72, 96]), P('B', 'Baseline', 'baseline', -30, 30, 0.15, ' px', 1, [0])] },
+    'text.glyph': { label: 'Text', props: [P('Y', 'Height', 'height', 12, 120, 0.3, ' px', 0, [12, 24, 36, 48, 72, 96]), P('H', 'Hue', 'textHue', 0, 360, 1, deg, 0, [0, 60, 120, 180, 240, 300, 360]), P('O', 'Opacity', 'textOp', 0, 100, 0.4, '%', 0, [0, 25, 50, 75, 100])] },
+    'paper': { label: 'Paper', props: [] }
+  };
+
+  const sideX = () => st.hw === 'display' ? (st.hand === 'right' ? -1 : 1) : 1;
+  const sideY = () => st.hw === 'display' ? -1 : 1;
+  const fmt = (p, v) => v.toFixed(p.digits) + p.unit;
+  const pct = p => (vals[p.field] - p.min) / (p.max - p.min);
+  const nearest = (list, v) => list.reduce((a, b) => Math.abs(b - v) < Math.abs(a - v) ? b : a);
+  const put = (x, y, html, cls, style) => '<div class="' + (cls || '') + '" style="left:' + Math.round(x) + 'px;top:' + Math.round(y) + 'px;' + (style || '') + '">' + html + '</div>';
+
+  function textRects() {
+    const r0 = stage.getBoundingClientRect();
+    return [...document.querySelectorAll('#text span')].map(s => {
+      const r = s.getBoundingClientRect();
+      return { l: r.left - r0.left, r: r.right - r0.left, t: r.top - r0.top, b: r.bottom - r0.top };
+    });
+  }
+
+  // What is under the pointer, and the box to outline for it.
+  function hitTest(x, y) {
+    const rects = textRects();
+    const box = { l: rects[0].l - 4, r: rects[rects.length - 1].r + 4, t: Math.min(...rects.map(r => r.t)) - 4, b: Math.max(...rects.map(r => r.b)) + 4 };
+    if (x >= box.l && x <= box.r && y >= box.t && y <= box.b) {
+      for (let i = 0; i < rects.length - 1; ++i) {
+        const gap = (rects[i].r + rects[i + 1].l) / 2;
+        if (Math.abs(x - gap) <= Math.max(7, vals.spacing / 2 + 4)) {
+          return { id: 'text.gap', hi: put(gap - 1.5, box.t, '', '', 'width:3px;height:' + (box.b - box.t) + 'px;background:#ffb454;border-radius:2px') };
+        }
+      }
+      return { id: 'text.glyph', hi: put(box.l, box.t, '', 'hi', 'width:' + (box.r - box.l) + 'px;height:' + (box.b - box.t) + 'px;border-radius:4px') };
+    }
+    const cx = 500, cy = 215, rx = 100, ry = 65;
+    const r = Math.hypot((x - cx) / rx, (y - cy) / ry);
+    const band = Math.max(vals.strokeW / 2 + 5, 7) / Math.min(rx, ry);
+    if (Math.abs(r - 1) <= band) {
+      return { id: 'ellipse.stroke', hi: put(cx - rx - 5, cy - ry - 5, '', 'hi', 'width:' + (2 * rx + 10) + 'px;height:' + (2 * ry + 10) + 'px;border-radius:50%') };
+    }
+    if (r < 1) {
+      return { id: 'ellipse.fill', hi: put(cx - rx + 10, cy - ry + 10, '', 'hi', 'width:' + (2 * rx - 20) + 'px;height:' + (2 * ry - 20) + 'px;border-radius:50%;background:#ffb45422') };
+    }
+    const L = 220, T = 300, W = 130, H = 90, e = Math.max(vals.rStrokeW / 2 + 5, 7);
+    const inside = x >= L && x <= L + W && y >= T && y <= T + H;
+    const nearEdge = x >= L - e && x <= L + W + e && y >= T - e && y <= T + H + e && !(x > L + e && x < L + W - e && y > T + e && y < T + H - e);
+    if (nearEdge) {
+      return { id: 'rect.stroke', hi: put(L - 5, T - 5, '', 'hi', 'width:' + (W + 10) + 'px;height:' + (H + 10) + 'px') };
+    }
+    if (inside) {
+      return { id: 'rect.gradient', hi: put(L + 10, T + 10, '', 'hi', 'width:' + (W - 20) + 'px;height:' + (H - 20) + 'px;background:#ffb45422') };
+    }
+    return { id: 'paper', hi: '' };
+  }
+
+  function apply() {
+    const e = $('ellipse').style;
+    e.borderWidth = vals.strokeW + 'px';
+    e.borderColor = 'hsla(' + vals.strokeHue + ',65%,42%,' + vals.strokeOp / 100 + ')';
+    e.background = 'hsla(' + vals.fillHue + ',80%,' + vals.fillL + '%,' + vals.fillOp / 100 + ')';
+    const r = $('rect').style;
+    r.borderWidth = vals.rStrokeW + 'px';
+    r.borderColor = 'hsla(' + vals.rStrokeHue + ',65%,42%,' + vals.rStrokeOp / 100 + ')';
+    r.background = 'linear-gradient(' + vals.gradA + 'deg, hsla(' + vals.gradHue + ',85%,65%,' + vals.gradOp / 100 + '), hsla(' + (vals.gradHue + 90) + ',85%,70%,' + vals.gradOp / 100 + '))';
+    const t = $('text').style;
+    t.fontSize = vals.height + 'px';
+    t.color = 'hsla(' + vals.textHue + ',60%,35%,' + vals.textOp / 100 + ')';
+    document.querySelectorAll('#text span').forEach((s, i, all) => {
+      s.style.marginRight = (i < all.length - 1 ? vals.spacing : 0) + 'px';
+      s.style.top = (-vals.baseline) + 'px';
+    });
+  }
+
+  function keycap(p, lit) {
+    return '<span class="key' + (lit ? ' lit' : '') + '">' + (st.hints === 'keys' ? '<i>' + ICON[p.key] + '</i>' : '') + p.key + '</span>';
+  }
+
+  function idleChip(ctx) {
+    if (st.hints === 'off' || ctx.props.length === 0) { return ''; }
+    let html;
+    if (st.hints === 'keys') {
+      html = ctx.props.map(p => keycap(p, false)).join('');
+    } else {
+      html = '<b>' + ctx.label + '</b>' + ctx.props.map(p => '<span class="key">' + p.key + '</span> ' + p.name.toLowerCase()).join(' &nbsp; ');
+    }
+    const w = st.hints === 'keys' ? 36 * ctx.props.length + 12 : 310;
+    const x = st.x + (sideX() < 0 ? -24 - w : 24), y = st.y + (sideY() < 0 ? -24 - 28 : 24);
+    return put(x, y, html, 'tag', 'height:28px;' + (sideX() < 0 ? 'left:' + Math.round(x) + 'px;' : ''));
+  }
+
+  function nibSize(ctx) {
+    const w = ctx.props.find(p => p.key === 'W');
+    return w ? Math.max(vals[w.field], 6) : 14;
+  }
+
+  function nibHtml(cx, cy, d, ctx, prop) {
+    const hue = prop && prop.field.indexOf('Hue') >= 0 || (prop && prop.field === 'gradHue') ? vals[prop.field] : ctx.label === 'Solid fill' ? vals.fillHue : vals.strokeHue;
+    const op = prop && prop.key === 'O' ? vals[prop.field] / 100 : 1;
+    return put(cx - d / 2, cy - d / 2, '', 'nib marker', 'width:' + d + 'px;height:' + d + 'px;background:hsla(' + hue + ',65%,45%,' + op + ')') +
+           put(cx - d / 2 - 6, cy - d / 2 - 6, '', '', 'width:' + (d + 12) + 'px;height:' + (d + 12) + 'px;border-radius:50%;border:1px dashed #0007');
+  }
+
+  function scrubOverlay() {
+    const s = st.scrub, p = s.prop, ctx = contexts[s.ctx];
+    const value = fmt(p, vals[p.field]);
+    const named = st.hints !== 'keys';
+    let out = '';
+    const sy = sideY(), sx = sideX();
+    if (st.variant === '2' || st.variant === '3') {
+      const d = p.key === 'W' ? Math.max(vals[p.field], 6) : nibSize(ctx);
+      out += nibHtml(s.ax, s.ay, d, ctx, p);
+    }
+    if (st.variant === '4') {
+      // Every property of the context in one fixed card. Hold a second key and the pointer's vertical travel drives it.
+      const rows = ctx.props.map(q => {
+        const isMain = q === p, isSecond = s.second && q === s.second.prop;
+        const lit = isMain || isSecond;
+        const axis = isMain ? '↔' : isSecond ? '↕' : '';
+        const v = (vals[q.field] - q.min) / (q.max - q.min);
+        return '<div class="srow' + (lit ? ' act' : '') + '"><span class="key' + (lit ? ' lit' : '') + '">' + (st.hints === 'keys' ? '<i>' + ICON[q.key] + '</i>' : '') + q.key + '</span>' +
+               (named ? '<span class="sname">' + q.name + '</span>' : '') +
+               '<div class="track" style="flex:1"><div class="fill" style="width:' + v * 100 + '%;background:' + (lit ? '#ffb454' : '#6a6d76') + '"></div></div>' +
+               '<span class="sval">' + fmt(q, vals[q.field]) + '</span><span class="axis">' + axis + '</span></div>';
+      }).join('');
+      const w = named ? 330 : 250, h = 34 + ctx.props.length * 28;
+      const top = s.ay + (sy < 0 ? -h - 24 : 24);
+      out += put(s.ax - w / 2, top, (named ? '<div class="shead">' + ctx.label + '</div>' : '') + rows, 'card', 'width:' + w + 'px;padding-bottom:8px');
+      return out;
+    }
+    if (st.variant === '2') {
+      const w = named ? 190 : 120;
+      const x = s.ax + (sx < 0 ? -d_off() - w : d_off()), y = s.ay + (sy < 0 ? -50 : 28);
+      out += put(x, y, (named ? p.name + ' ' : '<i>' + ICON[p.key] + '</i>') + '<b>' + value + '</b>', 'tag', 'height:24px');
+    } else {
+      const w = 250;
+      const top = s.ay + (sy < 0 ? -(st.variant === '3' ? 130 : 92) : (st.variant === '3' ? 56 : 28));
+      const left = s.ax - w / 2;
+      const head = named ? '<span>' + ctx.label + ' &middot; ' + p.name + '</span>' : '<span class="key lit">' + '<i>' + ICON[p.key] + '</i>' + p.key + '</span>';
+      out += put(left, top, '<div class="head">' + head + '<b>' + value + '</b></div><div class="track"><div class="fill" style="width:' + pct(p) * 100 + '%"></div><div class="thumb" style="left:' + pct(p) * 100 + '%"></div></div>', 'card', 'width:' + w + 'px');
+    }
+    if (s.second) {
+      const q = s.second.prop;
+      out += put(s.ax + 140, s.ay - 12, '↕ ' + (named ? q.name + ' ' : '') + '<b>' + fmt(q, vals[q.field]) + '</b>', 'tag', 'height:24px');
+    }
+    return out;
+  }
+  function d_off() { return 26; }
+
+  function render() {
+    $('cross').style.left = st.x + 'px';
+    $('cross').style.top = st.y + 'px';
+    const hand = $('hand');
+    hand.style.display = st.hw === 'display' ? 'block' : 'none';
+    if (st.hw === 'display') {
+      hand.style.left = st.x + 'px';
+      hand.style.top = (st.y - 60) + 'px';
+      hand.style.transform = 'rotate(' + (st.hand === 'right' ? 45 : 135) + 'deg)';
+    }
+    apply();
+    const hit = st.scrub ? { id: st.scrub.ctx, hi: st.scrub.hi } : hitTest(st.x, st.y);
+    const ctx = contexts[hit.id];
+    $('hi').innerHTML = hit.hi;
+    let over = '';
+    if (st.scrub) {
+      over = scrubOverlay();
+    } else {
+      if (st.variant !== '1') {
+        const d = nibSize(ctx);
+        over += nibHtml(st.x, st.y, d, ctx, null);
+      }
+      over += idleChip(ctx);
+    }
+    $('over').innerHTML = over;
+    st.ctx = hit.id;
+
+    const a = st.scrub;
+    if (st.hints === 'off') {
+      $('bar').innerHTML = a ? '<b>' + a.prop.name + ' ' + fmt(a.prop, vals[a.prop.field]) + '</b>' : '';
+    } else if (st.hints === 'keys') {
+      $('bar').innerHTML = (a ? '<span class="key lit">' + a.prop.key + '</span><b>' + fmt(a.prop, vals[a.prop.field]) + '</b>' : ctx.props.map(p => keycap(p, false)).join(''));
+    } else {
+      $('bar').innerHTML = a ? '<b>' + contexts[a.ctx].label + ': ' + a.prop.name + ' ' + fmt(a.prop, vals[a.prop.field]) + '</b>move sideways - Shift snap - release to keep'
+                             : '<b>' + ctx.label + '</b>' + (ctx.props.length ? 'hold ' + ctx.props.map(p => p.key + ' ' + p.name.toLowerCase()).join(' - ') + ' and move sideways - [ ] step' : 'nothing under the pointer - Space for the menu');
+    }
+  }
+
+  stage.addEventListener('mousemove', e => {
+    const r = stage.getBoundingClientRect();
+    st.x = e.clientX - r.left; st.y = e.clientY - r.top;
+    st.shift = e.shiftKey;
+    if (st.scrub) {
+      const p = st.scrub.prop;
+      let v = st.scrub.startValue + (st.x - st.scrub.startX) * p.rate;
+      if (st.shift) { v = nearest(p.snaps, v); }
+      vals[p.field] = Math.min(p.max, Math.max(p.min, v));
+      const second = st.scrub.second;
+      if (second) {
+        let w = second.startValue + (second.startY - st.y) * second.prop.rate;
+        if (st.shift) { w = nearest(second.prop.snaps, w); }
+        vals[second.prop.field] = Math.min(second.prop.max, Math.max(second.prop.min, w));
+      }
+    }
+    render();
+  });
+  stage.addEventListener('mousedown', () => stage.focus());
+  document.addEventListener('keydown', e => {
+    if (e.repeat) { return; }
+    const ctx = contexts[st.scrub ? st.scrub.ctx : st.ctx];
+    const prop = ctx && ctx.props.find(p => p.key === e.key.toUpperCase());
+    if (st.scrub) {
+      if (prop && prop !== st.scrub.prop && !st.scrub.second) {
+        st.scrub.second = { prop, startValue: vals[prop.field], startY: st.y };
+        e.preventDefault();
+        render();
+      }
+      return;
+    }
+    if (prop) {
+      st.scrub = { ctx: st.ctx, prop, ax: st.x, ay: st.y, startX: st.x, startValue: vals[prop.field], hi: hitTest(st.x, st.y).hi };
+      e.preventDefault();
+      render();
+    }
+  });
+  document.addEventListener('keyup', e => {
+    if (!st.scrub) { return; }
+    const key = e.key.toUpperCase();
+    const s = st.scrub;
+    if (s.second && key === s.second.prop.key) {
+      s.second = null;
+    } else if (key === s.prop.key) {
+      if (s.second) {
+        // The held second key takes over the horizontal drive from where the pointer is now.
+        s.prop = s.second.prop; s.startX = st.x; s.startValue = vals[s.prop.field]; s.second = null;
+      } else {
+        st.scrub = null;
+      }
+    } else {
+      return;
+    }
+    render();
+  });
+  window.addEventListener('blur', () => { st.scrub = null; render(); });
+
+  document.querySelectorAll('button').forEach(btn => btn.addEventListener('click', () => {
+    const key = btn.dataset.variant ? 'variant' : btn.dataset.hints ? 'hints' : btn.dataset.hw ? 'hw' : 'hand';
+    st[key] = btn.dataset[key];
+    document.querySelectorAll('button[data-' + key + ']').forEach(b => b.classList.toggle('on', b === btn));
+    render();
+  }));
+  render();
+</script>
+</body>
+</html>

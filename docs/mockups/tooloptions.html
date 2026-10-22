@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curvy tool options</title>
+<style>
+  :root {
+    --bg: #1e1f22; --panel: #26272b; --workspace: #2b2d31; --text: #e6e7ea; --muted: #9a9ea8;
+    --accent: #4c8dff; --amber: #ffb454; --slot: #313338; --slotLine: #4a4d55;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid #000; }
+  header h1 { margin: 0 0 4px; font-size: 15px; }
+  header p { margin: 0; color: var(--muted); max-width: 1000px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 18px; padding: 10px 16px; background: #222327; border-bottom: 1px solid #000; align-items: center; }
+  .group { display: flex; align-items: center; gap: 6px; }
+  .group > span { color: var(--muted); margin-right: 4px; }
+  button { background: var(--slot); color: var(--text); border: 1px solid var(--slotLine); border-radius: 14px; padding: 4px 12px; font: inherit; cursor: pointer; }
+  button.on { background: var(--accent); border-color: var(--accent); }
+  label { color: var(--muted); display: flex; align-items: center; gap: 5px; }
+  input[type=number] { width: 60px; background: #2a2c31; color: var(--text); border: 1px solid #4a4d55; border-radius: 6px; padding: 2px 6px; font: inherit; }
+  #stage { position: relative; width: 900px; height: 560px; margin: 16px auto 8px; background: var(--workspace); border: 1px solid #000; overflow: hidden; user-select: none; touch-action: none; }
+  #svg, #over { position: absolute; left: 0; top: 0; }
+  #over { pointer-events: none; }
+  #tools { position: absolute; left: 0; top: 0; bottom: 28px; width: 46px; padding: 6px 4px; background: #17181b99; backdrop-filter: blur(2px); border-right: 1px solid #ffffff2a; display: none; flex-direction: column; gap: 4px; z-index: 3; }
+  #stage.tb #tools { display: flex; }
+  #tools .tool { position: relative; width: 36px; height: 32px; border-radius: 7px; border: 1px solid #ffffff22; background: none; color: var(--text); font-size: 15px; padding: 0; display: grid; place-items: center; cursor: pointer; }
+  #tools .tool.on { background: var(--accent); border-color: var(--accent); }
+  #tools .tool small { position: absolute; right: 3px; bottom: 1px; font-size: 8px; color: var(--muted); font-weight: 600; }
+  #tools .tool.on small { color: #fff; }
+  .obox { display: inline-block; box-sizing: border-box; width: 16px; height: 13.5px; border: 1.35px solid var(--amber); border-top-width: 3.6px; border-radius: 2.7px; flex: none; cursor: pointer; position: relative; }
+  .obox::after { content: ""; position: absolute; inset: -8px -6px; }
+  .obox:hover { background: #ffb45433; }
+  #tools .tool i { position: absolute; right: 3px; top: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--amber); }
+  #tools .tsep { height: 1px; background: #ffffff2a; margin: 2px 4px; }
+  #opts { position: absolute; display: none; width: 236px; padding: 8px 12px 10px; background: #17181bf5; border: 1px solid #5a5d66; border-radius: 10px; box-shadow: 0 3px 12px #0008; z-index: 9; }
+  #opts .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  #opts .head b { color: var(--text); }
+  #opts .head span { color: var(--muted); font-size: 11px; }
+  #opts .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; color: var(--muted); font-size: 12px; }
+  #opts .row .lab { width: 74px; flex: none; }
+  #opts input[type=range] { flex: 1; min-width: 0; accent-color: var(--amber); }
+  #opts .val { width: 34px; text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
+  #opts .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  #opts .chips button { padding: 1px 8px; font-size: 11px; border-radius: 10px; }
+  #opts .note { color: var(--amber); font-size: 11px; margin: 6px 0 0; }
+  #opts .nowire { color: var(--muted); font-size: 10px; margin: 6px 0 0; font-style: italic; }
+  #opts .prev { height: 64px; margin: 4px 0 2px; border-radius: 8px; background: #f2f3f6; display: grid; place-items: center; }
+  #opts .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
+  #opts .foot button { padding: 1px 10px; font-size: 11px; border-radius: 10px; }
+  #opts.tip::before { content: ""; position: absolute; width: 10px; height: 10px; background: #17181bf5; border-left: 1px solid #5a5d66; border-bottom: 1px solid #5a5d66; transform: rotate(45deg); left: -6px; top: var(--tipy, 20px); }
+  #hint { position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: var(--panel); border-top: 1px solid #000; color: var(--muted); padding: 3px 10px; white-space: nowrap; font-size: 12px; display: flex; align-items: center; gap: 12px; z-index: 3; overflow: hidden; }
+  #hint .tool { color: var(--amber); font-weight: 600; }
+  #hint .main { color: var(--text); }
+  #hint .grow { flex: 1; }
+  .key { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border-radius: 6px; background: #3a3d43; border: 1px solid #5a5d66; color: var(--text); font: 600 11px/18px "Segoe UI"; }
+  .mod { display: inline-flex; align-items: center; gap: 4px; }
+  #ring { position: absolute; width: 0; height: 0; z-index: 8; }
+  #ring .hub { position: absolute; left: -34px; top: -34px; width: 68px; height: 68px; border-radius: 50%; background: #17181bf0; border: 1px solid #5a5d66; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; color: var(--amber); line-height: 1.2; text-align: center; }
+  #ring .hub small { color: var(--muted); }
+  #ring .slot { position: absolute; transform: translate(-50%, -50%); min-width: 136px; height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 8px; border-radius: 15px; background: #17181bf0; border: 1px solid #5a5d66; color: var(--text); cursor: pointer; font-size: 12px; white-space: nowrap; }
+  #ring .slot:hover { border-color: var(--amber); background: #2b2d33; }
+  #ring .slot.cur { border-color: var(--amber); }
+  #ring .slot .key { height: 18px; min-width: 18px; justify-content: center; }
+  #ring .slot .bar { position: absolute; left: 6px; right: 6px; bottom: 2px; height: 3px; border-radius: 2px; background: var(--amber); transform-origin: left; transform: scaleX(0); }
+  #toast { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); padding: 4px 12px; border-radius: 8px; background: #17181bf0; border: 1px solid #5a5d66; display: none; color: var(--amber); z-index: 12; white-space: nowrap; }
+  #badge { position: absolute; display: none; padding: 1px 7px; border-radius: 9px; background: #17181bf0; border: 1px solid #5a5d66; color: var(--amber); font-size: 11px; white-space: nowrap; pointer-events: none; z-index: 6; }
+  #notes { width: 900px; margin: 0 auto 24px; color: var(--muted); }
+  #notes h2 { color: var(--text); font-size: 13px; margin: 14px 0 4px; }
+  #notes li { margin-bottom: 4px; }
+  #notes b { color: var(--text); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Tool options: double-click a tool, hold a slot</h1>
+  <p>Every tool can have defaults for the <i>next</i> shape it makes (a star's points, a rectangle's corner radius, how much a freehand stroke is smoothed). Turn on the toolbar and <b>double-click</b> a tool, or leave it off and tap <b>Space</b>, then <b>hold a ring slot</b> (about 0.4 s), press the <b>barrel button</b> (right-click here) on it, or hold <b>Shift</b> and press its key, or simply tap the option box. A toolbar button with an amber dot has options; a ring slot with a small <b>option box</b> (a tiny dialog with a heavier top edge, as in Maya) has options, and the box is itself a tap target. Line and Zoom have none, so nothing opens. Then pick the tool and drag on the page to see the options at work.</p>
+</header>
+<div class="controls">
+  <div class="group"><label><input id="cTb" type="checkbox" checked> toolbar</label></div>
+  <div class="group"><span>Hold delay (ms)</span><input id="nHold" type="number" min="0" step="50" value="400"></div>
+  <div class="group">
+    <button id="bUndo">Undo</button><button id="bClear">Clear page</button>
+  </div>
+</div>
+
+<div id="stage" class="tb">
+  <svg id="svg" width="900" height="560" viewBox="0 0 900 560"></svg>
+  <svg id="over" width="900" height="560" viewBox="0 0 900 560"></svg>
+  <div id="tools"></div>
+  <div id="opts"></div>
+  <div id="badge"></div>
+  <div id="toast"></div>
+  <div id="hint"></div>
+</div>
+
+<div id="notes">
+  <h2>How it works (proposal)</h2>
+  <ul>
+    <li><b>Two routes, one card.</b> With the toolbar on, a single click picks a tool and a <b>double-click</b> opens its options next to the button (the Photoshop/Illustrator habit). With the toolbar off there is no button, so the ring takes the same job: a plain tap or flick still picks the tool, while <b>holding the slot</b> (about 0.4 s, a progress bar fills along the slot), <b>the barrel button on it</b>, <b>Shift + its key</b>, or <b>a tap on its option box</b> opens the same card beside the slot. The hub was considered and rejected: with a pen you cannot hover a slot and tap the hub at once.</li>
+    <li><b>Which tools have options.</b> Marked by a small amber <b>dot</b> on the toolbar button (a bigger glyph there was too much), and on the ring by the <b>option box</b> (borrowed from Maya: a small dialog glyph with a heavier top edge) at the outer end of the slot. On the ring the box is also the quickest route: <b>tap it</b> and the card opens, no hold needed. It sits at the outer end of the slot, away from where a flick lands, so flicking to pick a tool never opens it. No dot or box, nothing happens (Line and Zoom here): no empty card, no error.</li>
+    <li><b>What they mean.</b> The values are <i>defaults for the next shape</i>, per tool, kept in the settings with the document or the profile. They never change a shape already on the page; that is the HUD's job (it shows the selected node's own parameters). A live shape made after the change simply starts with those values, and the preview in the card redraws as you move a slider.</li>
+    <li><b>Wired here:</b> Rectangle (corner radius, from centre), Ellipse (from centre), Polygon (sides), Star (points, inner radius), Freehand (smoothing: the fitted curve keeps fewer points as it rises, the badge shows the count). <b>Not wired</b> (the card exists but changes nothing, marked in the card): Select, Pen, Text, Eyedropper.</li>
+    <li><b>Dismissal.</b> Esc, a click anywhere else, the &times;, or picking another tool. The card is the same translucent style as the other floating cards and can sit over the artwork because it is momentary.</li>
+    <li><b>Open points.</b> Keys: the toolbar prints Pen on P while the ring's P is Polygon; ring keys are only live while the ring is open, so there is no clash, but the toolbar needs its own letter for Polygon (Y here). A hold of a ring slot could instead be the hold-key draw (&ldquo;hold the letter and drag&rdquo;); that one is on the keyboard, so the two do not collide. Touch screens would use long-press for both routes.</li>
+  </ul>
+</div>
+
+<script>
+"use strict";
+const stage = document.getElementById('stage'), svgEl = document.getElementById('svg'), overEl = document.getElementById('over');
+const toolsEl = document.getElementById('tools'), optsEl = document.getElementById('opts'), badgeEl = document.getElementById('badge');
+const hintEl = document.getElementById('hint'), toastEl = document.getElementById('toast');
+const ART = { x: 70, y: 40, w: 760, h: 470 };
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+// ---------- tools and their options ----------
+const TOOLS = [
+  { id: 'select', key: 'V', icon: '⬉', name: 'Select' },
+  { id: 'pen', key: 'P', icon: '✎', name: 'Pen' },
+  { id: 'freehand', key: 'B', icon: '🖌', name: 'Freehand' },
+  { sep: 1 },
+  { id: 'rect', key: 'R', icon: '▭', name: 'Rectangle' },
+  { id: 'ellipse', key: 'E', icon: '◯', name: 'Ellipse' },
+  { id: 'poly', key: 'Y', icon: '⬡', name: 'Polygon' },
+  { id: 'star', key: 'S', icon: '☆', name: 'Star' },
+  { id: 'line', key: 'L', icon: '╱', name: 'Line' },
+  { sep: 1 },
+  { id: 'text', key: 'T', icon: 'T', name: 'Text' },
+  { id: 'eyedrop', key: 'I', icon: '💧', name: 'Eyedropper' },
+  { id: 'zoom', key: 'Z', icon: '🔍', name: 'Zoom' },
+].map(t => t);
+const DEF = {
+  rect: { radius: 8, centre: false },
+  ellipse: { centre: false },
+  poly: { sides: 6 },
+  star: { points: 5, inner: 40 },
+  freehand: { smooth: 40 },
+  select: { marquee: 'By direction', guides: true },
+  pen: { rubber: true, autoAdd: true },
+  text: { size: 24, area: true },
+  eyedrop: { sample: '3 × 3', what: 'Both' },
+};
+const SPEC = {
+  rect: [{ k: 'radius', t: 'range', lab: 'Corner radius', min: 0, max: 60, u: ' px' }, { k: 'centre', t: 'check', lab: 'From centre' }],
+  ellipse: [{ k: 'centre', t: 'check', lab: 'From centre' }],
+  poly: [{ k: 'sides', t: 'range', lab: 'Sides', min: 3, max: 12, u: '' }],
+  star: [{ k: 'points', t: 'range', lab: 'Points', min: 3, max: 12, u: '' }, { k: 'inner', t: 'range', lab: 'Inner radius', min: 10, max: 90, u: '%' }],
+  freehand: [{ k: 'smooth', t: 'range', lab: 'Smoothing', min: 0, max: 100, u: '' }],
+  select: [{ k: 'marquee', t: 'chips', lab: 'Marquee', items: ['By direction', 'Contain', 'Touch'] }, { k: 'guides', t: 'check', lab: 'Smart guides' }],
+  pen: [{ k: 'rubber', t: 'check', lab: 'Rubber band' }, { k: 'autoAdd', t: 'check', lab: 'Auto add / delete points' }],
+  text: [{ k: 'size', t: 'range', lab: 'Size', min: 8, max: 120, u: ' pt' }, { k: 'area', t: 'check', lab: 'Drag makes area text' }],
+  eyedrop: [{ k: 'sample', t: 'chips', lab: 'Sample', items: ['1 px', '3 × 3', '5 × 5'] }, { k: 'what', t: 'chips', lab: 'Take', items: ['Fill', 'Stroke', 'Both'] }],
+};
+const WIRED = ['rect', 'ellipse', 'poly', 'star', 'freehand'];
+const opts = JSON.parse(JSON.stringify(DEF));
+const hasOpts = id => !!SPEC[id];
+let tool = 'select', shapes = [], undoStack = [], drag = null, ring = null, spaceDown = 0, cursor = [450, 270], ringHold = null, openFor = null;
+const held = { shift: false, alt: false };
+
+function toast(msg) { toastEl.textContent = msg; toastEl.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(() => { toastEl.style.display = 'none'; }, 2000); }
+const localPos = e => { const r = stage.getBoundingClientRect(); return [e.clientX - r.left - stage.clientLeft, e.clientY - r.top - stage.clientTop]; };
+const toolById = id => TOOLS.find(t => t.id === id);
+
+// ---------- shapes ----------
+function starPts(cx, cy, ro, ri, n, rot) { const pts = []; for (let i = 0; i < n * 2; i++) { const a = (rot === undefined ? -Math.PI / 2 : rot) + i * Math.PI / n, r = i % 2 ? ri : ro; pts.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]); } return pts; }
+function polyPts(cx, cy, r, n) { const pts = []; for (let i = 0; i < n; i++) { const a = -Math.PI / 2 + i * 2 * Math.PI / n; pts.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]); } return pts; }
+function rdp(pts, tol) {
+  if (pts.length < 3 || tol <= 0) return pts;
+  const a = pts[0], b = pts[pts.length - 1], dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy) || 1;
+  let md = 0, mi = 0;
+  for (let i = 1; i < pts.length - 1; i++) { const d = Math.abs((pts[i][0] - a[0]) * dy - (pts[i][1] - a[1]) * dx) / len; if (d > md) { md = d; mi = i; } }
+  if (md <= tol) return [a, b];
+  return rdp(pts.slice(0, mi + 1), tol).slice(0, -1).concat(rdp(pts.slice(mi), tol));
+}
+const fmt = n => +n.toFixed(1);
+const D = pts => 'M' + pts.map(p => fmt(p[0]) + ' ' + fmt(p[1])).join('L') + 'Z';
+function shapeFor(t, a, b, o) {
+  let x0 = a[0], y0 = a[1], x1 = b[0], y1 = b[1];
+  if (o.centre) { x0 = a[0] - (b[0] - a[0]); y0 = a[1] - (b[1] - a[1]); }
+  if (held.shift && t !== 'freehand' && t !== 'line') { const s = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)); x1 = x0 + Math.sign(x1 - x0 || 1) * s; y1 = y0 + Math.sign(y1 - y0 || 1) * s; }
+  const l = Math.min(x0, x1), tp = Math.min(y0, y1), w = Math.abs(x1 - x0), h = Math.abs(y1 - y0), cx = l + w / 2, cy = tp + h / 2;
+  if (t === 'rect') return { el: 'rect', x: l, y: tp, w, h, rx: Math.min(o.radius, w / 2, h / 2) };
+  if (t === 'ellipse') return { el: 'ellipse', cx, cy, rx: w / 2, ry: h / 2 };
+  if (t === 'poly') return { el: 'path', d: D(polyPts(cx, cy, Math.min(w, h) / 2, o.sides)), n: o.sides };
+  if (t === 'star') { const r = Math.min(w, h) / 2; return { el: 'path', d: D(starPts(cx, cy, r, r * o.inner / 100, o.points)), n: o.points * 2 }; }
+  if (t === 'line') return { el: 'line', x1: a[0], y1: a[1], x2: b[0], y2: b[1] };
+  return null;
+}
+const COLS = ['#4c8dff', '#e5527a', '#3ec3a0', '#ffb454', '#8e6bff'];
+function shapeMarkup(s, i) {
+  const col = s.col, st = s.el === 'line' ? ' stroke="' + col + '" stroke-width="4" stroke-linecap="round"' : s.el === 'free' ? ' fill="none" stroke="' + col + '" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"' : ' fill="' + col + '" fill-opacity=".9" stroke="#fff" stroke-width="3"';
+  const id = ' data-i="' + i + '"';
+  if (s.el === 'rect') return '<rect' + id + ' x="' + fmt(s.x) + '" y="' + fmt(s.y) + '" width="' + fmt(s.w) + '" height="' + fmt(s.h) + '" rx="' + fmt(s.rx) + '"' + st + '/>';
+  if (s.el === 'ellipse') return '<ellipse' + id + ' cx="' + fmt(s.cx) + '" cy="' + fmt(s.cy) + '" rx="' + fmt(s.rx) + '" ry="' + fmt(s.ry) + '"' + st + '/>';
+  if (s.el === 'path') return '<path' + id + ' d="' + s.d + '"' + st + ' stroke-linejoin="round"/>';
+  if (s.el === 'line') return '<line' + id + ' x1="' + fmt(s.x1) + '" y1="' + fmt(s.y1) + '" x2="' + fmt(s.x2) + '" y2="' + fmt(s.y2) + '"' + st + '/>';
+  return '<path' + id + ' d="M' + s.pts.map(p => fmt(p[0]) + ' ' + fmt(p[1])).join('L') + '"' + st + '/>';
+}
+function render() {
+  svgEl.innerHTML = '<rect x="' + ART.x + '" y="' + ART.y + '" width="' + ART.w + '" height="' + ART.h + '" fill="#f6f7f9"/>' + shapes.map(shapeMarkup).join('');
+  let o = '';
+  if (drag && drag.preview) o += shapeMarkup(Object.assign({}, drag.preview, { col: drag.col }), -1).replace('fill-opacity=".9"', 'fill-opacity=".45"');
+  if (drag && drag.t === 'freehand' && drag.pts.length > 1) o += '<path d="M' + drag.pts.map(p => fmt(p[0]) + ' ' + fmt(p[1])).join('L') + '" fill="none" stroke="#4c8dff" stroke-width="1.5" stroke-dasharray="3 3"/>';
+  overEl.innerHTML = o;
+}
+function snapshot() { return JSON.stringify(shapes); }
+function pushUndo() { undoStack.push(snapshot()); }
+
+// ---------- toolbar ----------
+function buildTools() {
+  toolsEl.innerHTML = '';
+  TOOLS.forEach(t => {
+    if (t.sep) { const d = document.createElement('div'); d.className = 'tsep'; toolsEl.appendChild(d); return; }
+    const b = document.createElement('button');
+    b.className = 'tool' + (tool === t.id ? ' on' : ''); b.dataset.id = t.id; b.title = t.name + ' (' + t.key + ')';
+    b.innerHTML = t.icon + '<small>' + t.key + '</small>' + (hasOpts(t.id) ? '<i></i>' : '');
+    b.onclick = () => setTool(t.id);
+    b.ondblclick = ev => { ev.stopPropagation(); setTool(t.id); openOptions(t.id, { el: b }); };
+    toolsEl.appendChild(b);
+  });
+}
+function setTool(id) {
+  tool = id; closeOptions();
+  [...toolsEl.querySelectorAll('.tool')].forEach(b => b.classList.toggle('on', b.dataset.id === id));
+  updateHint();
+}
+
+// ---------- options card ----------
+function previewSvg(id) {
+  const o = opts[id], W = 60, H = 60, c = 30;
+  let inner = '';
+  if (id === 'rect') inner = '<rect x="8" y="14" width="44" height="32" rx="' + clamp(o.radius * 44 / 120, 0, 16) + '" fill="#4c8dff"/>';
+  else if (id === 'ellipse') inner = '<ellipse cx="30" cy="30" rx="22" ry="16" fill="#4c8dff"/>';
+  else if (id === 'poly') inner = '<path d="' + D(polyPts(c, c, 22, o.sides)) + '" fill="#4c8dff"/>';
+  else if (id === 'star') inner = '<path d="' + D(starPts(c, c, 23, 23 * o.inner / 100, o.points)) + '" fill="#ffb454"/>';
+  else if (id === 'freehand') { const raw = []; for (let i = 0; i <= 60; i++) { const x = 4 + i * 0.86, y = 30 + Math.sin(i / 6) * 14 + Math.sin(i * 1.9) * 2.2; raw.push([x, y]); } const p = rdp(raw, o.smooth / 100 * 6); inner = '<path d="M' + p.map(q => fmt(q[0]) + ' ' + fmt(q[1])).join('L') + '" fill="none" stroke="#4c8dff" stroke-width="3" stroke-linejoin="round"/>' + p.map(q => '<circle cx="' + fmt(q[0]) + '" cy="' + fmt(q[1]) + '" r="1.6" fill="#ffb454"/>').join(''); }
+  else return '';
+  return '<div class="prev"><svg width="' + W + '" height="' + H + '" viewBox="0 0 60 60">' + inner + '</svg></div>';
+}
+function optionsHtml(id) {
+  const t = toolById(id), spec = SPEC[id], o = opts[id];
+  let h = '<div class="head"><b>' + t.name + ' options</b><span><button data-x style="padding:0 7px;border-radius:8px">×</button></span></div>' + previewSvg(id);
+  spec.forEach(f => {
+    if (f.t === 'range') h += '<div class="row"><span class="lab">' + f.lab + '</span><input type="range" data-k="' + f.k + '" min="' + f.min + '" max="' + f.max + '" value="' + o[f.k] + '"><span class="val">' + o[f.k] + f.u + '</span></div>';
+    else if (f.t === 'check') h += '<div class="row"><label style="gap:6px"><input type="checkbox" data-k="' + f.k + '"' + (o[f.k] ? ' checked' : '') + '> ' + f.lab + '</label></div>';
+    else h += '<div class="row"><span class="lab">' + f.lab + '</span><div class="chips">' + f.items.map(x => '<button data-k="' + f.k + '" data-v="' + x + '" class="' + (o[f.k] === x ? 'on' : '') + '">' + x + '</button>').join('') + '</div></div>';
+  });
+  h += '<div class="note">Defaults for the next ' + t.name.toLowerCase() + '. A selected one is edited in the HUD.</div>';
+  if (!WIRED.includes(id)) h += '<div class="nowire">Not wired in this bench: the values are kept but change nothing.</div>';
+  h += '<div class="foot"><button data-reset>Reset</button><span style="color:#9a9ea8;font-size:11px">Esc closes</span></div>';
+  return h;
+}
+function openOptions(id, anchor) {
+  if (!hasOpts(id)) { toast(toolById(id).name + ' has no options'); return false; }
+  openFor = id;
+  optsEl.innerHTML = optionsHtml(id); optsEl.style.display = 'block'; optsEl.className = '';
+  bindOptions(id);
+  const r = anchor.el ? anchor.el.getBoundingClientRect() : null, sr = stage.getBoundingClientRect();
+  let x, y, tip = false;
+  if (r) { x = r.right - sr.left + 10; y = r.top - sr.top - 6; tip = true; optsEl.style.setProperty('--tipy', clamp(r.top - sr.top + r.height / 2 - y - 5, 8, 200) + 'px'); }
+  else { x = anchor.x + 26; y = anchor.y - 40; }
+  const h = optsEl.offsetHeight;
+  x = clamp(x, 6, 900 - 236 - 6); y = clamp(y, 6, 560 - 28 - h - 6);
+  optsEl.style.left = x + 'px'; optsEl.style.top = y + 'px'; if (tip) optsEl.className = 'tip';
+  updateHint();
+  return true;
+}
+function closeOptions() { optsEl.style.display = 'none'; openFor = null; updateHint(); }
+function bindOptions(id) {
+  optsEl.querySelectorAll('[data-x]').forEach(b => { b.onclick = closeOptions; });
+  optsEl.querySelectorAll('[data-reset]').forEach(b => { b.onclick = () => { opts[id] = JSON.parse(JSON.stringify(DEF[id])); const p = { left: optsEl.style.left, top: optsEl.style.top, cls: optsEl.className }; optsEl.innerHTML = optionsHtml(id); bindOptions(id); }; });
+  optsEl.querySelectorAll('[data-k]').forEach(el => {
+    const k = el.dataset.k;
+    if (el.type === 'range') el.oninput = () => { opts[id][k] = +el.value; el.nextElementSibling.textContent = el.value + SPEC[id].find(f => f.k === k).u; const pv = optsEl.querySelector('.prev'); if (pv) pv.outerHTML = previewSvg(id); };
+    else if (el.type === 'checkbox') el.onchange = () => { opts[id][k] = el.checked; };
+    else el.onclick = () => { opts[id][k] = el.dataset.v; el.parentElement.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === el)); };
+  });
+}
+
+// ---------- ring ----------
+const RING = [['R', 'rect'], ['E', 'ellipse'], ['P', 'poly'], ['S', 'star'], ['L', 'line'], ['B', 'freehand'], ['T', 'text'], ['F', null]];
+function holdMs() { return Math.max(0, +document.getElementById('nHold').value || 0); }
+function openRing(pos) {
+  closeRing(); closeOptions();
+  const R = 92, cx = clamp(pos[0], R + 70, 900 - R - 70), cy = clamp(pos[1], R + 34, 560 - R - 56);
+  ring = { el: document.createElement('div'), pos: [cx, cy], slots: [] };
+  ring.el.id = 'ring'; ring.el.style.left = cx + 'px'; ring.el.style.top = cy + 'px';
+  ring.el.innerHTML = '<div class="hub">Create<small>Create...</small></div>';
+  RING.forEach((r, i) => {
+    const an = (-90 + i * 45) * Math.PI / 180, el = document.createElement('div'), t = r[1] ? toolById(r[1]) : null;
+    el.className = 'slot' + (t && tool === t.id ? ' cur' : '');
+    el.style.left = Math.cos(an) * R * 1.1 + 'px'; el.style.top = Math.sin(an) * R + 'px';
+    const left = Math.cos(an) < -0.2, box = t && hasOpts(t.id) ? '<span class="obox" title="Options" style="margin-' + (left ? 'right' : 'left') + ':' + (left ? '2' : 'auto') + 'px"></span>' : '';
+    el.innerHTML = (left ? box : '') + '<span class="key">' + r[0] + '</span>' + (t ? t.name : 'File') + (left ? '' : box) + '<div class="bar"></div>';
+    const slot = { key: r[0], tool: r[1], el, x: cx + Math.cos(an) * R * 1.1, y: cy + Math.sin(an) * R };
+    ring.slots.push(slot);
+    const ob = el.querySelector('.obox');
+    if (ob) { ob.onpointerdown = ev => { ev.stopPropagation(); cancelHold(); }; ob.onpointerup = ev => ev.stopPropagation(); ob.onclick = ev => { ev.stopPropagation(); optionsForSlot(slot); }; }
+    el.onpointerdown = ev => { ev.stopPropagation(); if (ev.button === 2) return; startHold(slot); };
+    el.onpointerup = ev => { ev.stopPropagation(); endHold(slot, true); };
+    el.onpointerleave = () => endHold(slot, false);
+    el.oncontextmenu = ev => { ev.preventDefault(); ev.stopPropagation(); cancelHold(); optionsForSlot(slot); };
+    ring.el.appendChild(el);
+  });
+  stage.appendChild(ring.el);
+  updateHint();
+}
+function closeRing() { cancelHold(); if (ring) { ring.el.remove(); ring = null; } }
+function startHold(slot) {
+  cancelHold();
+  if (!slot.tool || !hasOpts(slot.tool)) { ringHold = { slot, fired: false, t: null, none: true }; return; }
+  const bar = slot.el.querySelector('.bar'), ms = holdMs();
+  bar.style.transition = 'none'; bar.style.transform = 'scaleX(0)';
+  void bar.offsetWidth; bar.style.transition = 'transform ' + ms + 'ms linear'; bar.style.transform = 'scaleX(1)';
+  ringHold = { slot, fired: false, t: setTimeout(() => { if (ringHold) { ringHold.fired = true; optionsForSlot(slot); } }, ms) };
+}
+function cancelHold() { if (ringHold) { clearTimeout(ringHold.t); const bar = ringHold.slot.el.querySelector('.bar'); if (bar) { bar.style.transition = 'none'; bar.style.transform = 'scaleX(0)'; } ringHold = null; } }
+function endHold(slot, up) {
+  if (!ringHold || ringHold.slot !== slot) return;
+  const h = ringHold; cancelHold();
+  if (up && !h.fired) pickSlot(slot);
+}
+function pickSlot(slot) { closeRing(); if (slot.tool) setTool(slot.tool); else toast('File ring (not in this bench)'); }
+function optionsForSlot(slot) {
+  if (!slot.tool) return;
+  if (!hasOpts(slot.tool)) { toast(toolById(slot.tool).name + ' has no options'); return; }
+  const keep = ring; ring = null; if (keep) keep.el.style.display = 'none';
+  tool = slot.tool; [...toolsEl.querySelectorAll('.tool')].forEach(b => b.classList.toggle('on', b.dataset.id === tool));
+  if (keep) keep.el.remove();
+  openOptions(slot.tool, { x: slot.x, y: slot.y });
+}
+
+// ---------- pointer: drawing ----------
+stage.addEventListener('pointerdown', e => {
+  if (e.target.closest('#tools,#opts,#ring')) return;
+  const p = localPos(e); cursor = p;
+  if (ring) { closeRing(); return; }
+  if (openFor) { closeOptions(); return; }
+  if (e.button !== 0) return;
+  held.shift = e.shiftKey;
+  try { stage.setPointerCapture(e.pointerId); } catch (x) { /* synthetic */ }
+  if (['rect', 'ellipse', 'poly', 'star', 'line'].includes(tool)) drag = { t: tool, a: p, col: COLS[shapes.length % COLS.length], o: Object.assign({}, opts[tool] || {}) };
+  else if (tool === 'freehand') drag = { t: 'freehand', pts: [p], col: COLS[shapes.length % COLS.length] };
+  else toast(toolById(tool).name + ' is not wired in this bench');
+});
+stage.addEventListener('pointermove', e => {
+  const p = localPos(e); cursor = p; held.shift = e.shiftKey;
+  if (!drag) return;
+  if (drag.t === 'freehand') { drag.pts.push(p); badgeEl.style.display = 'block'; badgeEl.textContent = drag.pts.length + ' samples'; badgeEl.style.left = p[0] + 14 + 'px'; badgeEl.style.top = p[1] + 14 + 'px'; }
+  else { drag.preview = shapeFor(drag.t, drag.a, p, drag.o); badgeEl.style.display = 'block'; badgeEl.textContent = Math.round(Math.abs(p[0] - drag.a[0])) + ' × ' + Math.round(Math.abs(p[1] - drag.a[1])); badgeEl.style.left = p[0] + 14 + 'px'; badgeEl.style.top = p[1] + 14 + 'px'; }
+  render();
+});
+function endDraw(e) {
+  if (!drag) return;
+  const d = drag; drag = null; badgeEl.style.display = 'none';
+  const p = localPos(e);
+  if (d.t === 'freehand') {
+    if (d.pts.length < 3) { render(); return; }
+    const pts = rdp(d.pts, opts.freehand.smooth / 100 * 12);
+    pushUndo(); shapes.push({ el: 'free', pts, col: d.col, n: pts.length }); toast(pts.length + ' points kept from ' + d.pts.length + ' samples');
+  } else {
+    const s = shapeFor(d.t, d.a, p, d.o);
+    if (!s || Math.hypot(p[0] - d.a[0], p[1] - d.a[1]) < 4) { render(); return; }
+    pushUndo(); shapes.push(Object.assign(s, { col: d.col, tool: d.t }));
+  }
+  render();
+}
+stage.addEventListener('pointerup', endDraw);
+stage.addEventListener('pointercancel', () => { drag = null; render(); });
+stage.addEventListener('contextmenu', e => { if (!e.target.closest('#ring')) e.preventDefault(); });
+
+// ---------- keyboard ----------
+const isTyping = t => t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.isContentEditable);
+window.addEventListener('keydown', e => {
+  held.shift = e.shiftKey;
+  const key = e.key.toLowerCase();
+  if (ring) {
+    if (e.key === 'Escape') { closeRing(); return; }
+    const slot = ring.slots.find(s => s.key.toLowerCase() === key);
+    if (slot) { e.preventDefault(); if (e.shiftKey) optionsForSlot(slot); else pickSlot(slot); }
+    return;
+  }
+  if (isTyping(e.target)) { if (e.key === 'Escape') e.target.blur(); return; }
+  if (e.key === 'Escape') { if (openFor) closeOptions(); return; }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === ' ') { e.preventDefault(); if (!e.repeat && !spaceDown) spaceDown = Date.now(); return; }
+  const t = TOOLS.find(x => x.key && x.key.toLowerCase() === key);
+  if (t && !e.repeat) setTool(t.id);
+});
+window.addEventListener('keyup', e => {
+  held.shift = e.shiftKey;
+  if (e.key === ' ') { const had = spaceDown, dt = Date.now() - spaceDown; spaceDown = 0; if (had && dt < 250 && !ring && !isTyping(e.target)) openRing(cursor); }
+});
+
+// ---------- hint bar ----------
+function updateHint() {
+  const m = (k, t) => '<span class="mod"><span class="key">' + k + '</span>' + t + '</span>';
+  const t = toolById(tool);
+  let main = hasOpts(tool) ? 'has options' : 'no options', mods;
+  if (ring) { main = 'ring'; mods = [m('tap box', 'options'), m('hold slot', 'options'), m('Shift + key', 'options'), m('barrel', 'options')]; }
+  else if (openFor) { main = toolById(openFor).name + ' options'; mods = [m('Esc', 'close')]; }
+  else mods = [document.getElementById('cTb').checked ? m('2×click tool', 'options') : m('Space', 'ring, then hold a slot'), m('drag', 'draw')];
+  hintEl.innerHTML = '<span class="tool">' + t.name + ' ' + t.key + '</span><span class="main">' + main + '</span><span class="grow"></span>' + mods.join('');
+}
+
+// ---------- buttons ----------
+document.getElementById('cTb').onchange = () => { stage.classList.toggle('tb', document.getElementById('cTb').checked); closeOptions(); updateHint(); };
+document.getElementById('bUndo').onclick = () => { if (undoStack.length) { shapes = JSON.parse(undoStack.pop()); render(); } };
+document.getElementById('bClear').onclick = () => { pushUndo(); shapes = []; render(); };
+buildTools(); render(); updateHint();
+</script>
+</body>
+</html>

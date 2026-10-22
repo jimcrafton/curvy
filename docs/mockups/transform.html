@@ -1,0 +1,970 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curvy selection and transform</title>
+<style>
+  :root {
+    --bg: #1e1f22; --panel: #26272b; --workspace: #2b2d31; --text: #e6e7ea; --muted: #9a9ea8;
+    --accent: #4c8dff; --amber: #ffb454; --slot: #313338; --slotLine: #4a4d55;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid #000; }
+  header h1 { margin: 0 0 4px; font-size: 15px; }
+  header p { margin: 0; color: var(--muted); max-width: 1000px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 18px; padding: 10px 16px; background: #222327; border-bottom: 1px solid #000; align-items: center; }
+  .group { display: flex; align-items: center; gap: 6px; }
+  .group > span { color: var(--muted); margin-right: 4px; }
+  button { background: var(--slot); color: var(--text); border: 1px solid var(--slotLine); border-radius: 14px; padding: 4px 12px; font: inherit; cursor: pointer; }
+  button.on { background: var(--accent); border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: default; }
+  label { color: var(--muted); display: flex; align-items: center; gap: 5px; }
+  #stage { position: relative; width: 900px; height: 560px; margin: 16px auto 8px; background: var(--workspace); border: 1px solid #000; overflow: hidden; user-select: none; touch-action: none; }
+  #svg, #over { position: absolute; left: 0; top: 0; }
+  #over { pointer-events: none; }
+  .dim { opacity: .3; pointer-events: none; }
+  #badge { position: absolute; display: none; padding: 1px 7px; border-radius: 9px; background: #17181bf0; border: 1px solid #5a5d66; color: var(--amber); font-size: 11px; white-space: nowrap; pointer-events: none; z-index: 6; }
+  #hud { position: absolute; right: 12px; top: 12px; width: 236px; max-height: 500px; overflow-y: auto; overflow-x: hidden; padding: 8px 12px 10px; background: #17181bf0; border: 1px solid #5a5d66; border-radius: 10px; box-shadow: 0 3px 10px #0007; z-index: 4; }
+  #hud .node { border: 1px solid #3a3d43; border-radius: 8px; padding: 6px 8px 7px; margin-bottom: 8px; }
+  #hud .node.act { border-color: var(--amber); }
+  #hud .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  #hud .head b { color: var(--text); }
+  #hud .head span { color: var(--muted); font-size: 11px; }
+  #hud .row { display: flex; align-items: center; gap: 6px; margin: 4px 0; color: var(--muted); font-size: 12px; }
+  #hud .row .lab { width: 34px; flex: none; }
+  #hud input[type=number] { width: 56px; background: #2a2c31; color: var(--text); border: 1px solid #4a4d55; border-radius: 6px; padding: 2px 6px; font: inherit; }
+  #hud input:disabled { opacity: .4; }
+  #hud .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+  #hud .chips button, #hud button.small { padding: 2px 8px; font-size: 11px; border-radius: 10px; }
+  #hud .note { color: var(--amber); font-size: 11px; margin: 4px 0; }
+  #hud .chain { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-bottom: 8px; font-size: 11px; color: var(--muted); }
+  #hud .chain i { font-style: normal; padding: 1px 7px; border: 1px solid #4a4d55; border-radius: 8px; color: var(--text); }
+  #hud .chain i.act { border-color: var(--amber); color: var(--amber); }
+  #hud .ref { display: grid; grid-template-columns: repeat(3, 12px); gap: 3px; margin-right: 6px; }
+  #hud .ref b { width: 12px; height: 12px; border: 1px solid #6a6d76; border-radius: 3px; cursor: pointer; background: #2a2c31; }
+  #hud .ref b.on { background: var(--amber); border-color: var(--amber); }
+  #hud .objs div { padding: 2px 6px; border-radius: 6px; cursor: pointer; color: var(--text); font-size: 12px; }
+  #hud .objs div:hover { background: #2b2d33; }
+  #hud .objs div.sel { background: #3a3320; color: var(--amber); }
+  #hud .crumbs { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+  #hud .crumbs a { color: var(--accent); cursor: pointer; }
+  #hint { position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: var(--panel); border-top: 1px solid #000; color: var(--muted); padding: 3px 10px; white-space: nowrap; font-size: 12px; display: flex; align-items: center; gap: 12px; z-index: 3; overflow: hidden; }
+  #hint .tool { color: var(--amber); font-weight: 600; }
+  #hint .main { color: var(--text); }
+  #hint .grow { flex: 1; }
+  .key { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border-radius: 6px; background: #3a3d43; border: 1px solid #5a5d66; color: var(--text); font: 600 11px/18px "Segoe UI"; }
+  .key.lit { background: var(--amber); color: #1b1b1b; border-color: var(--amber); }
+  .mod { display: inline-flex; align-items: center; gap: 4px; }
+  #scrub { position: absolute; display: none; width: 210px; padding: 8px 12px 12px; background: #17181bf0; border: 1px solid #5a5d66; border-radius: 10px; box-shadow: 0 3px 10px #0007; z-index: 6; }
+  #scrub .head { display: flex; justify-content: space-between; margin-bottom: 10px; }
+  #scrub .head b { color: var(--amber); }
+  #scrub .track { position: relative; height: 6px; border-radius: 3px; background: #3a3d43; }
+  #scrub .mid { position: absolute; left: 50%; top: -3px; width: 1px; height: 12px; background: #6a6d76; }
+  #scrub .thumb { position: absolute; top: -5px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: var(--amber); border: 2px solid #17181b; }
+  #scrub .sub { margin-top: 10px; color: var(--muted); font-size: 11px; }
+  #ring { position: absolute; width: 0; height: 0; z-index: 8; }
+  #ring .hub { position: absolute; left: -34px; top: -34px; width: 68px; height: 68px; border-radius: 50%; background: #17181bf0; border: 1px solid #5a5d66; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; color: var(--amber); line-height: 1.2; text-align: center; }
+  #ring .hub small { color: var(--muted); }
+  #ring .hub.click:hover { border-color: var(--amber); }
+  #ring .slot { position: absolute; transform: translate(-50%, -50%); min-width: 112px; height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 8px; border-radius: 15px; background: #17181bf0; border: 1px solid #5a5d66; color: var(--text); cursor: pointer; font-size: 12px; white-space: nowrap; }
+  #ring .slot:hover { border-color: var(--amber); background: #2b2d33; }
+  #ring .slot.off { opacity: .35; cursor: default; }
+  #ring .slot small { opacity: .6; font-size: 10px; }
+  #ring .slot .key { height: 18px; min-width: 18px; justify-content: center; }
+  #toast { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); padding: 4px 12px; border-radius: 8px; background: #17181bf0; border: 1px solid #5a5d66; display: none; color: var(--amber); z-index: 12; white-space: nowrap; }
+  #notes { width: 900px; margin: 0 auto 24px; color: var(--muted); }
+  #notes h2 { color: var(--text); font-size: 13px; margin: 14px 0 4px; }
+  #notes li { margin-bottom: 4px; }
+  #notes b { color: var(--text); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Selection and transform</h1>
+  <p>Click to select (a group selects as one; double-click enters it). Drag empty canvas for a marquee: <b>left to right</b> takes what it fully contains, <b>right to left</b> everything it touches. Drag the body to move (<b>Shift</b> locks an axis, <b>Alt</b> drags a copy); drag a corner or edge handle to scale (<b>Shift</b> keeps proportions, <b>Alt</b> scales from the centre); drag just outside a corner to rotate (<b>Shift</b> = 15&deg; steps, <b>Alt</b> rotates a copy, then <b>Ctrl+D</b> repeats it); <b>Ctrl</b>-drag an edge handle to skew; <b>Ctrl</b>-drag the crosshair to move the pivot (once it is off-centre a plain drag grabs it). Hold <b>R</b>, <b>S</b> or <b>K</b> and move the pen up and down to rotate, scale or skew without touching a handle. <b>Space</b> taps the ring.</p>
+</header>
+<div class="controls">
+  <div class="group"><span>Snap</span>
+    <label><input id="cSnap" type="checkbox" checked> smart guides</label>
+    <label><input id="cGrid" type="checkbox"> grid 20</label>
+  </div>
+  <div class="group">
+    <label><input id="cStroke" type="checkbox" checked> scale strokes</label>
+  </div>
+  <div class="group">
+    <button id="bUndo">Undo</button>
+    <button id="bRedo">Redo</button>
+    <button id="bReset">Reset</button>
+    <button id="bSvg">Download SVG</button>
+  </div>
+</div>
+
+<div id="stage">
+  <svg id="svg" width="900" height="560" viewBox="0 0 900 560"></svg>
+  <svg id="over" width="900" height="560" viewBox="0 0 900 560"></svg>
+  <div id="hud"></div>
+  <div id="scrub"></div>
+  <div id="badge"></div>
+  <div id="toast"></div>
+  <div id="hint"></div>
+</div>
+
+<div id="notes">
+  <h2>How it works (proposal)</h2>
+  <ul>
+    <li><b>A transform is a node, not a rewrite.</b> Every object carries one Transform node (translate, rotate, scale, skew as a single affine matrix; the HUD shows it decomposed). Moving, scaling or rotating only edits that matrix, so the shape keeps its clean parameters (a Rectangle stays a Rectangle with width and height) and the move is cheap. <b>Bake</b> pushes the matrix into the geometry and makes a plain path (here a polygon; the real editor would write <code>bezierPath</code> anchors and handles).</li>
+    <li><b>Groups are subnets with their own Transform.</b> Dragging a group edits only the group's matrix; its children are untouched, and entering the group (double-click, Esc to leave) edits them in the group's space. Everything outside the group dims. Ungroup multiplies the group's matrix into each child.</li>
+    <li><b>The frame.</b> One object gets an oriented box that follows its own rotation and skew, so scaling stays along its axes. A multi-selection gets the axis-aligned box of everything. Every drag is computed as a delta matrix in world space (frame &middot; scale &middot; frame<sup>-1</sup>, about the anchor or pivot) and multiplied onto each selected object's start matrix, so a drag never accumulates error and Esc cancels it.</li>
+    <li><b>Pivot.</b> The crosshair is the pivot for rotate, scale scrubbing and the HUD fields. Ctrl-drag it from the centre (a plain drag works once it is off-centre; it snaps to the nine reference points), or choose a reference point in the HUD; double-click resets it to the centre. The X/Y fields read and set that reference point.</li>
+    <li><b>Transform again.</b> The last delta is remembered. Ctrl+D duplicates and applies it once more, so Alt-rotate a copy and tap Ctrl+D to build a ring; move-copy and tap Ctrl+D for a row. It starts as a small offset.</li>
+    <li><b>Smart guides.</b> While moving (and scaling an unrotated frame) edges and centres snap to other objects, the artboard and the optional grid; amber lines show the match. Not mocked: equal-spacing guides, distance labels, snapping to anchors.</li>
+    <li><b>Scrub keys.</b> Hold <b>R</b> (rotate), <b>S</b> (scale) or <b>K</b> (skew) and move up and down: the fixed card works like the other scrub cards, Shift snaps to 15&deg; / 10% / 5&deg;, release commits as one undo step. They act around the pivot. Letters are placeholders, as elsewhere.</li>
+    <li><b>Marquee direction.</b> Left to right: contained only. Right to left: touching. No modifier, which suits a pen. (The mock tests bounding boxes; the editor would test the real outline.)</li>
+    <li><b>Space ring.</b> Over a selection: Group / Ungroup, Duplicate, Delete, Flip H, Flip V, Align&hellip; and Arrange&hellip; (sub-rings), and a last slot that is <b>Enter group</b> when one group is selected, <b>Exit group</b> when you are inside a group, otherwise Bake. Over empty canvas: Select all, Invert, Deselect, Grid, Smart guides, Scale strokes, Exit group, Reset. The hub pins the HUD, as elsewhere.</li>
+    <li><b>Strokes.</b> "Scale strokes" off keeps stroke widths constant while the geometry scales (SVG <code>vector-effect: non-scaling-stroke</code> here; in the editor a flag on the Stroke node that divides by the matrix scale).</li>
+    <li><b>Not mocked:</b> pan and zoom (Space-drag), shear of a multi-selection from the HUD, per-object pivot memory, rotating the multi-selection frame, snapping to anchors, transforming individual anchors (that is Direct select in the pen bench), live-shape handles (corner radius), constraints and numeric expressions in the fields.</li>
+  </ul>
+</div>
+
+<script>
+"use strict";
+const stage = document.getElementById('stage'), svgEl = document.getElementById('svg'), overEl = document.getElementById('over');
+const hudEl = document.getElementById('hud'), badgeEl = document.getElementById('badge'), scrubEl = document.getElementById('scrub');
+const hintEl = document.getElementById('hint'), toastEl = document.getElementById('toast');
+const ART = { x: 30, y: 30, w: 620, h: 470 };
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const D2R = Math.PI / 180;
+
+// ---------- matrices [a b c d e f]: x' = a x + c y + e, y' = b x + d y + f ----------
+const IDM = [1, 0, 0, 1, 0, 0];
+const mul = (A, B) => [A[0] * B[0] + A[2] * B[1], A[1] * B[0] + A[3] * B[1], A[0] * B[2] + A[2] * B[3], A[1] * B[2] + A[3] * B[3], A[0] * B[4] + A[2] * B[5] + A[4], A[1] * B[4] + A[3] * B[5] + A[5]];
+function inv(M) {
+  const det = M[0] * M[3] - M[1] * M[2];
+  if (Math.abs(det) < 1e-12) return IDM.slice();
+  return [M[3] / det, -M[1] / det, -M[2] / det, M[0] / det, (M[2] * M[5] - M[3] * M[4]) / det, (M[1] * M[4] - M[0] * M[5]) / det];
+}
+const ap = (M, p) => [M[0] * p[0] + M[2] * p[1] + M[4], M[1] * p[0] + M[3] * p[1] + M[5]];
+const tr = (x, y) => [1, 0, 0, 1, x, y];
+const scl = (x, y) => [x, 0, 0, y, 0, 0];
+const rotM = a => [Math.cos(a), Math.sin(a), -Math.sin(a), Math.cos(a), 0, 0];
+const shearX = k => [1, 0, k, 1, 0, 0];
+const shearY = k => [1, k, 0, 1, 0, 0];
+const about = (M, p) => mul(tr(p[0], p[1]), mul(M, tr(-p[0], -p[1])));
+const lin = M => [M[0], M[1], M[2], M[3], 0, 0];
+const svgM = M => 'matrix(' + M.map(v => +v.toFixed(5)).join(' ') + ')';
+function decompose(M) {
+  const sx = Math.hypot(M[0], M[1]) || 1e-9, c = M[0] / sx, s = M[1] / sx;
+  const k = (M[0] * M[2] + M[1] * M[3]) / sx, sy = (M[0] * M[3] - M[1] * M[2]) / sx;
+  return { rot: Math.atan2(M[1], M[0]) / D2R, sx, sy, k, skew: Math.atan2(k, sy) / D2R, c, s };
+}
+function recompose(d, k) {
+  const c = Math.cos(d.rot * D2R), s = Math.sin(d.rot * D2R);
+  return [d.sx * c, d.sx * s, k * c - d.sy * s, k * s + d.sy * c, 0, 0];
+}
+
+// ---------- document ----------
+let nextId = 1;
+const newId = () => 'o' + nextId++;
+function starPts(cx, cy, ro, ri, n) {
+  const pts = [];
+  for (let i = 0; i < n * 2; i++) { const a = -Math.PI / 2 + i * Math.PI / n, r = i % 2 ? ri : ro; pts.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]); }
+  return pts;
+}
+function initialDoc() {
+  nextId = 1;
+  const T = (x, y, deg, s) => mul(tr(x, y), mul(rotM((deg || 0) * D2R), scl(s || 1, s || 1)));
+  return [
+    { id: newId(), name: 'Card', kind: 'rect', g: { x: 0, y: 0, w: 150, h: 96, rx: 10 }, fill: '#4c8dff', stroke: '#ffffff', sw: 4, m: T(70, 70) },
+    { id: newId(), name: 'Moon', kind: 'ellipse', g: { cx: 50, cy: 50, rx: 50, ry: 50 }, fill: '#ffb454', stroke: 'none', sw: 0, m: T(300, 60) },
+    { id: newId(), name: 'Star', kind: 'poly', g: { pts: starPts(50, 50, 50, 21, 5) }, fill: '#e5527a', stroke: '#ffffff', sw: 3, m: T(470, 70, 12) },
+    { id: newId(), name: 'Triangle', kind: 'poly', g: { pts: [[0, 80], [50, 0], [100, 80]] }, fill: '#3ec3a0', stroke: 'none', sw: 0, m: T(90, 250) },
+    { id: newId(), name: 'Badge', kind: 'group', m: T(300, 250), kids: [
+      { id: newId(), name: 'Disc', kind: 'ellipse', g: { cx: 55, cy: 55, rx: 55, ry: 55 }, fill: '#8e6bff', stroke: 'none', sw: 0, m: IDM.slice() },
+      { id: newId(), name: 'Spark', kind: 'poly', g: { pts: starPts(55, 55, 32, 14, 6) }, fill: '#ffffff', stroke: 'none', sw: 0, m: IDM.slice() },
+    ] },
+    { id: newId(), name: 'Bar', kind: 'rect', g: { x: 0, y: 0, w: 230, h: 24, rx: 4 }, fill: '#aab2c5', stroke: 'none', sw: 0, m: T(70, 420, -6) },
+  ];
+}
+let items = initialDoc();
+let ctx = [];
+let sel = [];
+let pv = [0.5, 0.5], pvKey = '';
+let lastDelta = tr(14, 14);
+let alignTo = 'sel';
+let aspectLock = true;
+let undo = [], redo = [], editBefore = null;
+let shiftToggle = null, drag = null, ring = null, scrub = null, spaceDown = 0, cursor = [300, 250], hover = null, guides = [];
+const held = { shift: false, alt: false, ctrl: false, key: '' };
+
+const snapDoc = () => JSON.stringify({ items, nextId, ctx });
+function beginEdit() { if (editBefore === null) editBefore = snapDoc(); }
+function endEdit() {
+  if (editBefore === null) return;
+  if (snapDoc() !== editBefore) { undo.push(editBefore); redo.length = 0; }
+  editBefore = null;
+}
+function restore(json) { const s = JSON.parse(json); items = s.items; nextId = s.nextId; ctx = s.ctx; sel = sel.filter(id => !!findItem(id)); }
+function doUndo() { endEdit(); if (!undo.length) return; redo.push(snapDoc()); restore(undo.pop()); refresh(); }
+function doRedo() { endEdit(); if (!redo.length) return; undo.push(snapDoc()); restore(redo.pop()); refresh(); }
+function toast(msg) {
+  toastEl.textContent = msg; toastEl.style.display = 'block';
+  clearTimeout(toast.t); toast.t = setTimeout(() => { toastEl.style.display = 'none'; }, 2200);
+}
+const localPos = e => { const r = stage.getBoundingClientRect(); return [e.clientX - r.left - stage.clientLeft, e.clientY - r.top - stage.clientTop]; };
+
+// ---------- tree helpers ----------
+function findItem(id, list) {
+  for (const o of (list || items)) { if (o.id === id) return o; if (o.kids) { const r = findItem(id, o.kids); if (r) return r; } }
+  return null;
+}
+function ctxChain() { return ctx.map(id => findItem(id)).filter(Boolean); }
+function container() { const ch = ctxChain(); return ch.length ? ch[ch.length - 1].kids : items; }
+function ctxMatrix() { return ctxChain().reduce((M, o) => mul(M, o.m), IDM); }
+function selObjs() { const c = container(); return sel.map(id => c.find(o => o.id === id)).filter(Boolean); }
+function localBBox(o) {
+  if (o.kind === 'rect') return [o.g.x, o.g.y, o.g.x + o.g.w, o.g.y + o.g.h];
+  if (o.kind === 'ellipse') return [o.g.cx - o.g.rx, o.g.cy - o.g.ry, o.g.cx + o.g.rx, o.g.cy + o.g.ry];
+  if (o.kind === 'poly') return boundsOf(o.g.pts);
+  const pts = [];
+  o.kids.forEach(k => { const b = localBBox(k); [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]].forEach(c => pts.push(ap(k.m, c))); });
+  return boundsOf(pts);
+}
+function boundsOf(pts) {
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  pts.forEach(p => { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); });
+  return [x0, y0, x1, y1];
+}
+function worldCorners(o, P) {
+  const b = localBBox(o), W = mul(P, o.m);
+  return [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]].map(c => ap(W, c));
+}
+function itemAABB(o, P) { return boundsOf(worldCorners(o, P)); }
+
+// ---------- the frame ----------
+function frame() {
+  const objs = selObjs();
+  if (!objs.length) return null;
+  const P = ctxMatrix();
+  let F;
+  if (objs.length === 1) {
+    const b = localBBox(objs[0]), w = Math.max(b[2] - b[0], 0.01), h = Math.max(b[3] - b[1], 0.01);
+    F = mul(mul(P, objs[0].m), mul(tr(b[0], b[1]), scl(w, h)));
+  } else {
+    const bb = boundsOf([].concat(...objs.map(o => worldCorners(o, P))));
+    F = mul(tr(bb[0], bb[1]), scl(Math.max(bb[2] - bb[0], 0.01), Math.max(bb[3] - bb[1], 0.01)));
+  }
+  const key = sel.join(',');
+  if (key !== pvKey) { pvKey = key; pv = [0.5, 0.5]; }
+  return { F, Fi: inv(F), w: Math.hypot(F[0], F[1]), h: Math.hypot(F[2], F[3]), objs, P };
+}
+const HANDLES = [[0, 0], [0.5, 0], [1, 0], [1, 0.5], [1, 1], [0.5, 1], [0, 1], [0, 0.5]];
+const isEdge = h => h[0] === 0.5 || h[1] === 0.5;
+function applyDelta(starts, objs, D, P) {
+  const Pi = inv(P);
+  objs.forEach((o, i) => { o.m = mul(Pi, mul(D, mul(P, starts[i]))); });
+}
+
+// ---------- rendering ----------
+function shapeMarkup(o, strokeFlag) {
+  const ve = (strokeFlag ? '' : ' vector-effect="non-scaling-stroke"');
+  const st = ' fill="' + o.fill + '" stroke="' + o.stroke + '" stroke-width="' + o.sw + '"' + ve;
+  if (o.kind === 'rect') return '<rect x="' + o.g.x + '" y="' + o.g.y + '" width="' + o.g.w + '" height="' + o.g.h + '" rx="' + (o.g.rx || 0) + '"' + st + '/>';
+  if (o.kind === 'ellipse') return '<ellipse cx="' + o.g.cx + '" cy="' + o.g.cy + '" rx="' + o.g.rx + '" ry="' + o.g.ry + '"' + st + '/>';
+  return '<polygon points="' + o.g.pts.map(p => p.map(v => +v.toFixed(3)).join(',')).join(' ') + '"' + st + ' stroke-linejoin="round"/>';
+}
+function nodeMarkup(o, mode, strokeFlag) {
+  const last = ctx[ctx.length - 1], cls = mode === 'dim' ? ' class="dim"' : '';
+  let inner;
+  if (o.kind === 'group') {
+    const kidMode = k => (!ctx.length || mode === 'n' || mode === 'dim' || o.id === last) ? (mode === 'dim' ? 'dim' : 'n') : (ctx.includes(k.id) ? 'anc' : 'dim');
+    inner = o.kids.map(k => nodeMarkup(k, kidMode(k), strokeFlag)).join('');
+  } else inner = shapeMarkup(o, strokeFlag);
+  return '<g data-id="' + o.id + '"' + cls + ' transform="' + svgM(o.m) + '">' + inner + '</g>';
+}
+function artMarkup(strokeFlag, plain) {
+  return items.map(o => nodeMarkup(o, plain || !ctx.length ? 'n' : (ctx.includes(o.id) ? 'anc' : 'dim'), strokeFlag)).join('');
+}
+const scaleStrokes = () => document.getElementById('cStroke').checked;
+function renderWorld() {
+  let g = '';
+  if (document.getElementById('cGrid').checked) {
+    for (let x = ART.x; x <= ART.x + ART.w; x += 20) g += '<line x1="' + x + '" y1="' + ART.y + '" x2="' + x + '" y2="' + (ART.y + ART.h) + '" stroke="#e3e5ea" stroke-width="1"/>';
+    for (let y = ART.y; y <= ART.y + ART.h; y += 20) g += '<line x1="' + ART.x + '" y1="' + y + '" x2="' + (ART.x + ART.w) + '" y2="' + y + '" stroke="#e3e5ea" stroke-width="1"/>';
+  }
+  svgEl.innerHTML = '<rect x="' + ART.x + '" y="' + ART.y + '" width="' + ART.w + '" height="' + ART.h + '" fill="#f6f7f9"/>' + g + '<g id="art">' + artMarkup(scaleStrokes()) + '</g>';
+}
+function mk(name, attrs) { return '<' + name + ' ' + Object.entries(attrs).map(([k, v]) => k + '="' + v + '"').join(' ') + '/>'; }
+const polyStr = pts => pts.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
+function drawOverlay() {
+  let s = '';
+  guides.forEach(gd => { s += gd.v ? mk('line', { x1: gd.at, y1: gd.a, x2: gd.at, y2: gd.b, stroke: '#ffb454', 'stroke-width': 1 }) : mk('line', { x1: gd.a, y1: gd.at, x2: gd.b, y2: gd.at, stroke: '#ffb454', 'stroke-width': 1 }); });
+  if (hover && !drag && !sel.includes(hover)) {
+    const o = container().find(x => x.id === hover);
+    if (o) s += '<polygon points="' + polyStr(worldCorners(o, ctxMatrix())) + '" fill="none" stroke="#7fb0ff" stroke-width="1.5" stroke-dasharray="4 3"/>';
+  }
+  const fr = frame();
+  if (fr) {
+    if (fr.objs.length > 1) fr.objs.forEach(o => { s += '<polygon points="' + polyStr(worldCorners(o, fr.P)) + '" fill="none" stroke="#4c8dff" stroke-width="1" opacity=".7"/>'; });
+    const cs = [[0, 0], [1, 0], [1, 1], [0, 1]].map(u => ap(fr.F, u));
+    s += '<polygon points="' + polyStr(cs) + '" fill="none" stroke="#4c8dff" stroke-width="1.3"/>';
+    HANDLES.forEach(h => {
+      const p = ap(fr.F, h), ed = isEdge(h);
+      s += mk('rect', { x: p[0] - (ed ? 4 : 5), y: p[1] - (ed ? 4 : 5), width: ed ? 8 : 10, height: ed ? 8 : 10, fill: ed ? '#17181b' : '#ffffff', stroke: '#4c8dff', 'stroke-width': 1.5, rx: ed ? 4 : 1 });
+    });
+    const pp = ap(fr.F, pv);
+    s += mk('circle', { cx: pp[0], cy: pp[1], r: 6, fill: 'none', stroke: '#ffb454', 'stroke-width': 1.5 }) + mk('line', { x1: pp[0] - 9, y1: pp[1], x2: pp[0] + 9, y2: pp[1], stroke: '#ffb454', 'stroke-width': 1.5 }) + mk('line', { x1: pp[0], y1: pp[1] - 9, x2: pp[0], y2: pp[1] + 9, stroke: '#ffb454', 'stroke-width': 1.5 });
+  }
+  if (drag && drag.mode === 'marquee' && drag.moved) {
+    const r = marqueeRect();
+    s += mk('rect', { x: r[0], y: r[1], width: r[2] - r[0], height: r[3] - r[1], fill: '#4c8dff22', stroke: '#4c8dff', 'stroke-width': 1, 'stroke-dasharray': drag.cur[0] >= drag.p0[0] ? '' : '5 3' });
+    marqueeHits().forEach(o => { s += '<polygon points="' + polyStr(worldCorners(o, ctxMatrix())) + '" fill="none" stroke="#7fb0ff" stroke-width="1.5" stroke-dasharray="4 3"/>'; });
+  }
+  overEl.innerHTML = s;
+}
+
+// ---------- HUD ----------
+const fmt = v => (Math.round(v * 100) / 100);
+function refPoint(fr) { return ap(fr.F, pv); }
+function updateHud() {
+  const ae = document.activeElement;
+  if (hudEl.contains(ae) && ae.tagName === 'INPUT') return;
+  const fr = frame(), chain = ctxChain();
+  let h = '<div class="crumbs"><a data-act="exit-all">Document</a>' + chain.map((o, i) => ' &rsaquo; <a data-act="exit-to" data-i="' + i + '">' + o.name + '</a>').join('') + '</div>';
+  if (!fr) {
+    h += '<div class="note">Nothing selected</div><div class="objs">' + container().map(o => '<div data-sel="' + o.id + '">' + o.name + (o.kind === 'group' ? ' <span style="color:#9a9ea8">(group)</span>' : '') + '</div>').join('') + '</div>';
+    hudEl.innerHTML = h; bindHud(); return;
+  }
+  const one = fr.objs.length === 1, o0 = fr.objs[0];
+  h += '<div class="chain">' + (one ? '<i>' + o0.kind + (o0.kind === 'group' ? ' &times;' + o0.kids.length : '') + '</i> &rarr; ' : '<i>' + fr.objs.length + ' objects</i> &rarr; ') + '<i class="act">Transform' + (one ? '' : ' &times;' + fr.objs.length) + '</i></div>';
+  const rp = refPoint(fr);
+  let rot = 0, skew = 0;
+  if (one) { const d = decompose(mul(fr.P, o0.m)); rot = d.rot; skew = d.skew; }
+  const refBtns = [0, 0.5, 1].map(y => [0, 0.5, 1].map(x => '<b data-pv="' + x + ',' + y + '" class="' + (pv[0] === x && pv[1] === y ? 'on' : '') + '"></b>').join('')).join('');
+  const num = (k, v, dis) => '<input type="number" step="1" data-f="' + k + '" value="' + fmt(v) + '"' + (dis ? ' disabled' : '') + '>';
+  h += '<div class="node act"><div class="head"><b>Transform</b><span>' + (one ? o0.name : 'relative') + '</span></div>' +
+    '<div class="row"><div class="ref">' + refBtns + '</div><span style="font-size:11px">reference</span></div>' +
+    '<div class="row"><span class="lab">X</span>' + num('x', rp[0] - ART.x) + '<span class="lab">Y</span>' + num('y', rp[1] - ART.y) + '</div>' +
+    '<div class="row"><span class="lab">W</span>' + num('w', fr.w) + '<span class="lab">H</span>' + num('h', fr.h) + '</div>' +
+    '<div class="row"><span class="lab">Lock</span><label style="gap:3px"><input type="checkbox" data-act="lock"' + (aspectLock ? ' checked' : '') + '> keep proportions</label></div>' +
+    '<div class="row"><span class="lab">Rot</span>' + num('rot', one ? rot : 0) + '<span class="lab">Skew</span>' + num('skew', skew, !one) + '</div>' +
+    (one ? '' : '<div class="note">Rotation is applied as a step to all.</div>') +
+    '<div class="chips"><button class="small" data-act="flipH">Flip &harr;</button><button class="small" data-act="flipV">Flip &updownarrow;</button><button class="small" data-act="reset">Reset</button><button class="small" data-act="bake">Bake</button><button class="small" data-act="again">Duplicate again</button></div></div>';
+  h += '<div class="node"><div class="head"><b>Align</b><span><a data-act="alignTo" style="color:#4c8dff;cursor:pointer">to ' + (alignTo === 'sel' && !one ? 'selection' : (one || alignTo === 'art' ? 'artboard' : 'selection')) + '</a></span></div><div class="chips">' +
+    ['left', 'hcenter', 'right', 'top', 'vcenter', 'bottom'].map(k => '<button class="small" data-al="' + k + '">' + ({ left: 'Left', hcenter: 'Centre', right: 'Right', top: 'Top', vcenter: 'Middle', bottom: 'Bottom' })[k] + '</button>').join('') +
+    '<button class="small" data-al="distH"' + (fr.objs.length < 3 ? ' disabled' : '') + '>Space &harr;</button><button class="small" data-al="distV"' + (fr.objs.length < 3 ? ' disabled' : '') + '>Space &updownarrow;</button></div></div>';
+  h += '<div class="node"><div class="head"><b>Arrange</b><span></span></div><div class="chips"><button class="small" data-ar="front">Front</button><button class="small" data-ar="fwd">Forward</button><button class="small" data-ar="back1">Backward</button><button class="small" data-ar="back">Back</button></div></div>';
+  h += '<div class="chips"><button class="small" data-act="group"' + (fr.objs.length < 2 ? ' disabled' : '') + '>Group</button><button class="small" data-act="ungroup"' + (fr.objs.some(o => o.kind === 'group') ? '' : ' disabled') + '>Ungroup</button>' + (one && o0.kind === 'group' ? '<button class="small" data-act="enter">Enter group</button>' : '') + '</div>';
+  hudEl.innerHTML = h; bindHud();
+}
+function bindHud() {
+  hudEl.querySelectorAll('[data-sel]').forEach(el => { el.onclick = () => { sel = [el.dataset.sel]; refresh(); }; });
+  hudEl.querySelectorAll('[data-pv]').forEach(el => { el.onclick = () => { pv = el.dataset.pv.split(',').map(Number); refresh(); }; });
+  hudEl.querySelectorAll('[data-act]').forEach(el => {
+    const a = el.dataset.act;
+    if (a === 'lock') el.onchange = () => { aspectLock = el.checked; };
+    else el.onclick = () => runAct(a, el);
+  });
+  hudEl.querySelectorAll('[data-al]').forEach(el => { el.onclick = () => doAlign(el.dataset.al); });
+  hudEl.querySelectorAll('[data-ar]').forEach(el => { el.onclick = () => doArrange(el.dataset.ar); });
+  hudEl.querySelectorAll('input[data-f]').forEach(el => {
+    el.onchange = () => { applyField(el.dataset.f, parseFloat(el.value)); el.blur(); refresh(); };
+    el.onkeydown = ev => { ev.stopPropagation(); if (ev.key === 'Enter' || ev.key === 'Escape') el.blur(); };
+  });
+}
+function runAct(a, el) {
+  if (a === 'exit-all') { exitTo(0); return; }
+  if (a === 'exit-to') { exitTo(+el.dataset.i + 1); return; }
+  if (a === 'flipH') flip(true); else if (a === 'flipV') flip(false);
+  else if (a === 'reset') resetTransform();
+  else if (a === 'bake') bake();
+  else if (a === 'again') duplicateAgain();
+  else if (a === 'group') groupSel();
+  else if (a === 'ungroup') ungroupSel();
+  else if (a === 'enter') enterGroup();
+  else if (a === 'alignTo') { alignTo = alignTo === 'sel' ? 'art' : 'sel'; refresh(); }
+}
+function applyField(k, v) {
+  const fr = frame(); if (!fr || !isFinite(v)) return;
+  beginEdit();
+  const starts = fr.objs.map(o => o.m.slice()), pw = ap(fr.F, pv);
+  let D = IDM;
+  if (k === 'x') D = tr(v + ART.x - pw[0], 0);
+  else if (k === 'y') D = tr(0, v + ART.y - pw[1]);
+  else if (k === 'w' || k === 'h') {
+    const sw = k === 'w' ? Math.max(v, 0.01) / fr.w : 1, sh = k === 'h' ? Math.max(v, 0.01) / fr.h : 1;
+    const s2 = aspectLock ? [k === 'w' ? sw : sh, k === 'w' ? sw : sh] : [sw, sh];
+    D = mul(fr.F, mul(about(scl(s2[0], s2[1]), pv), fr.Fi));
+  } else if (k === 'rot') {
+    const cur = fr.objs.length === 1 ? decompose(mul(fr.P, fr.objs[0].m)).rot : 0;
+    D = about(rotM((v - cur) * D2R), pw);
+  } else if (k === 'skew' && fr.objs.length === 1) {
+    const W = mul(fr.P, fr.objs[0].m), d = decompose(W), L = lin(W), nk = d.sy * Math.tan(clamp(v, -80, 80) * D2R);
+    D = about(mul(recompose(d, nk), inv(L)), pw);
+  }
+  applyDelta(starts, fr.objs, D, fr.P);
+  lastDelta = D; endEdit();
+}
+
+// ---------- edit commands ----------
+function flip(horizontal) {
+  const fr = frame(); if (!fr) return;
+  beginEdit();
+  const D = mul(fr.F, mul(about(horizontal ? scl(-1, 1) : scl(1, -1), [0.5, 0.5]), fr.Fi));
+  applyDelta(fr.objs.map(o => o.m.slice()), fr.objs, D, fr.P);
+  endEdit(); refresh();
+}
+function resetTransform() {
+  const objs = selObjs(); if (!objs.length) return;
+  beginEdit();
+  objs.forEach(o => { const b = localBBox(o), c = ap(o.m, [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2]), c0 = [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2]; o.m = tr(c[0] - c0[0], c[1] - c0[1]); });
+  endEdit(); refresh();
+}
+function bakeObj(o, M) {
+  if (o.kind === 'group') { o.kids.forEach(k => { k.m = mul(M, k.m); }); return; }
+  const mm = mul(M, IDM);
+  let pts;
+  if (o.kind === 'rect') pts = [[o.g.x, o.g.y], [o.g.x + o.g.w, o.g.y], [o.g.x + o.g.w, o.g.y + o.g.h], [o.g.x, o.g.y + o.g.h]];
+  else if (o.kind === 'ellipse') { pts = []; for (let i = 0; i < 48; i++) { const a = i / 48 * Math.PI * 2; pts.push([o.g.cx + Math.cos(a) * o.g.rx, o.g.cy + Math.sin(a) * o.g.ry]); } }
+  else pts = o.g.pts;
+  o.kind = 'poly'; o.g = { pts: pts.map(p => ap(mm, p)) };
+  const s = Math.sqrt(Math.abs(M[0] * M[3] - M[1] * M[2])); o.sw = +(o.sw * s).toFixed(3);
+}
+function bake() {
+  const objs = selObjs(); if (!objs.length) return;
+  beginEdit();
+  objs.forEach(o => { const M = o.m; if (o.kind === 'group') { bakeObj(o, M); o.m = IDM.slice(); } else { bakeObj(o, M); o.m = IDM.slice(); } });
+  endEdit(); toast('Baked: now plain paths (bezierPath in the editor)'); refresh();
+}
+function groupSel() {
+  const objs = selObjs(); if (objs.length < 2) return;
+  beginEdit();
+  const c = container(), idx = Math.max(...objs.map(o => c.indexOf(o)));
+  const g = { id: newId(), name: 'Group', kind: 'group', m: IDM.slice(), kids: [] };
+  const ordered = c.filter(o => objs.includes(o));
+  c.splice(idx + 1, 0, g);
+  ordered.forEach(o => { c.splice(c.indexOf(o), 1); g.kids.push(o); });
+  sel = [g.id]; endEdit(); refresh();
+}
+function ungroupSel() {
+  const c = container(); beginEdit();
+  const out = [];
+  selObjs().forEach(o => {
+    if (o.kind !== 'group') { out.push(o.id); return; }
+    const i = c.indexOf(o);
+    o.kids.forEach(k => { k.m = mul(o.m, k.m); });
+    c.splice(i, 1, ...o.kids);
+    o.kids.forEach(k => out.push(k.id));
+  });
+  sel = out; endEdit(); refresh();
+}
+function enterGroup() {
+  const o = selObjs()[0]; if (!o || o.kind !== 'group') return;
+  ctx = ctx.concat(o.id); sel = []; refresh();
+}
+function exitTo(n) { ctx = ctx.slice(0, n); sel = []; refresh(); }
+function cloneItem(o) {
+  const c = JSON.parse(JSON.stringify(o));
+  const fix = x => { x.id = newId(); (x.kids || []).forEach(fix); };
+  fix(c); return c;
+}
+function deleteSel() {
+  const objs = selObjs(); if (!objs.length) return;
+  beginEdit(); const c = container();
+  objs.forEach(o => c.splice(c.indexOf(o), 1));
+  sel = []; endEdit(); refresh();
+}
+function duplicateSel(D) {
+  const fr = frame(); if (!fr) return [];
+  const c = container(), clones = [];
+  fr.objs.forEach(o => { const cl = cloneItem(o); c.splice(c.indexOf(o) + 1, 0, cl); clones.push(cl); });
+  if (D) applyDelta(clones.map(o => o.m.slice()), clones, D, fr.P);
+  sel = clones.map(o => o.id);
+  return clones;
+}
+function duplicateAgain() {
+  if (!sel.length) return;
+  beginEdit(); duplicateSel(lastDelta); endEdit(); refresh();
+}
+function doArrange(how) {
+  const c = container(), objs = selObjs(); if (!objs.length) return;
+  beginEdit();
+  const ordered = c.filter(o => objs.includes(o));
+  if (how === 'front') { ordered.forEach(o => c.splice(c.indexOf(o), 1)); c.push(...ordered); }
+  else if (how === 'back') { ordered.forEach(o => c.splice(c.indexOf(o), 1)); c.unshift(...ordered); }
+  else if (how === 'fwd') { for (let i = ordered.length - 1; i >= 0; i--) { const j = c.indexOf(ordered[i]); if (j < c.length - 1 && !ordered.includes(c[j + 1])) { c.splice(j, 1); c.splice(j + 1, 0, ordered[i]); } } }
+  else { ordered.forEach(o => { const j = c.indexOf(o); if (j > 0 && !ordered.includes(c[j - 1])) { c.splice(j, 1); c.splice(j - 1, 0, o); } }); }
+  endEdit(); refresh();
+}
+function doAlign(how) {
+  const fr = frame(); if (!fr) return;
+  const objs = fr.objs, P = fr.P;
+  const bbs = objs.map(o => itemAABB(o, P));
+  const toArt = objs.length === 1 || alignTo === 'art';
+  const box = toArt ? [ART.x, ART.y, ART.x + ART.w, ART.y + ART.h] : boundsOf([].concat(...bbs.map(b => [[b[0], b[1]], [b[2], b[3]]])));
+  beginEdit();
+  const moves = objs.map(() => [0, 0]);
+  if (how === 'distH' || how === 'distV') {
+    const ax = how === 'distH' ? 0 : 1, order = objs.map((o, i) => i).sort((a, b) => bbs[a][ax] - bbs[b][ax]);
+    const lo = bbs[order[0]][ax], hi = bbs[order[order.length - 1]][ax + 2];
+    const total = order.reduce((s, i) => s + (bbs[i][ax + 2] - bbs[i][ax]), 0), gap = (hi - lo - total) / (order.length - 1);
+    let pos = lo;
+    order.forEach(i => { moves[i][ax] = pos - bbs[i][ax]; pos += bbs[i][ax + 2] - bbs[i][ax] + gap; });
+  } else {
+    objs.forEach((o, i) => {
+      const b = bbs[i];
+      if (how === 'left') moves[i][0] = box[0] - b[0];
+      if (how === 'right') moves[i][0] = box[2] - b[2];
+      if (how === 'hcenter') moves[i][0] = (box[0] + box[2]) / 2 - (b[0] + b[2]) / 2;
+      if (how === 'top') moves[i][1] = box[1] - b[1];
+      if (how === 'bottom') moves[i][1] = box[3] - b[3];
+      if (how === 'vcenter') moves[i][1] = (box[1] + box[3]) / 2 - (b[1] + b[3]) / 2;
+    });
+  }
+  objs.forEach((o, i) => applyDelta([o.m.slice()], [o], tr(moves[i][0], moves[i][1]), P));
+  endEdit(); refresh();
+}
+function selectAll() { sel = container().map(o => o.id); refresh(); }
+function invertSel() { sel = container().map(o => o.id).filter(id => !sel.includes(id)); refresh(); }
+
+// ---------- hint bar ----------
+function hintItems() {
+  const m = (k, t, lit) => '<span class="mod"><span class="key' + (lit ? ' lit' : '') + '">' + k + '</span>' + t + '</span>';
+  let main = 'Click to select, drag for a marquee', mods;
+  if (drag && drag.mode === 'move') { main = 'Moving'; mods = [m('Shift', 'lock axis', held.shift), m('Alt', 'copy', held.alt)]; }
+  else if (drag && drag.mode === 'scale') { main = 'Scaling'; mods = [m('Shift', 'keep proportions', held.shift), m('Alt', 'from centre', held.alt)]; }
+  else if (drag && drag.mode === 'rotate') { main = 'Rotating'; mods = [m('Shift', '15° steps', held.shift), m('Alt', 'rotate a copy', held.alt)]; }
+  else if (drag && drag.mode === 'skew') { main = 'Skewing'; mods = [m('Alt', 'from centre', held.alt)]; }
+  else if (sel.length) { main = sel.length + ' selected'; mods = [m('Ctrl', 'drag edge: skew', held.ctrl), m('R', 'hold: rotate', false), m('S', 'hold: scale', false), m('K', 'hold: skew', false), m('Ctrl D', 'duplicate again', false), m('Space', 'tap: ring', false)]; }
+  else mods = [m('Ctrl A', 'select all', false), m('2×click', 'enter group', false), m('Space', 'tap: ring', false)];
+  return '<span class="tool">Select V</span><span class="main">' + main + '</span><span class="grow"></span>' + mods.join('');
+}
+function updateHint() { hintEl.innerHTML = hintItems(); }
+function refresh() { renderWorld(); drawOverlay(); updateHud(); updateHint(); }
+
+// ---------- hit testing ----------
+function hitItem(e) {
+  const els = document.elementsFromPoint(e.clientX, e.clientY);
+  const c = container(), pid = ctx[ctx.length - 1];
+  for (const el of els) {
+    if (!svgEl.contains(el)) continue;
+    let n = el.closest('[data-id]');
+    while (n) {
+      const par = n.parentElement && n.parentElement.closest('[data-id]');
+      if ((par ? par.dataset.id : undefined) === pid && c.some(o => o.id === n.dataset.id)) return n.dataset.id;
+      if (!par) break;
+      n = par;
+    }
+  }
+  return null;
+}
+function handleAt(fr, p) {
+  for (const h of HANDLES) { const q = ap(fr.F, h), r = isEdge(h) ? 7 : 8; if (Math.hypot(p[0] - q[0], p[1] - q[1]) <= r) return h; }
+  return null;
+}
+function pivotAt(fr, p) { const q = ap(fr.F, pv); return Math.hypot(p[0] - q[0], p[1] - q[1]) <= 8; }
+function insideFrame(fr, p) { const u = ap(fr.Fi, p); return u[0] >= 0 && u[0] <= 1 && u[1] >= 0 && u[1] <= 1; }
+function rotateZone(fr, p) {
+  if (insideFrame(fr, p)) return false;
+  return [[0, 0], [1, 0], [1, 1], [0, 1]].some(c => { const q = ap(fr.F, c); return Math.hypot(p[0] - q[0], p[1] - q[1]) <= 26; });
+}
+function cursorFor(fr, p) {
+  if (!fr) return 'default';
+  if (pivotAt(fr, p)) return 'move';
+  const h = handleAt(fr, p);
+  if (h) {
+    const q = ap(fr.F, h), c = ap(fr.F, [0.5, 0.5]);
+    const a = ((Math.atan2(q[1] - c[1], q[0] - c[0]) / D2R) + 360 + 22.5) % 180;
+    return ['ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize'][Math.floor(a / 45) % 4];
+  }
+  if (rotateZone(fr, p)) return 'alias';
+  return 'default';
+}
+
+// ---------- snapping ----------
+function snapSources(excl) {
+  const P = ctxMatrix(), xs = [ART.x, ART.x + ART.w / 2, ART.x + ART.w], ys = [ART.y, ART.y + ART.h / 2, ART.y + ART.h];
+  container().forEach(o => { if (excl.includes(o.id)) return; const b = itemAABB(o, P); xs.push(b[0], (b[0] + b[2]) / 2, b[2]); ys.push(b[1], (b[1] + b[3]) / 2, b[3]); });
+  return { xs, ys };
+}
+function snapOn() { return document.getElementById('cSnap').checked; }
+function snapAxis(vals, cands) {
+  let best = null;
+  vals.forEach(v => {
+    cands.forEach(c => { const d = c - v; if (Math.abs(d) <= 6 && (best === null || Math.abs(d) < Math.abs(best.d))) best = { d, at: c }; });
+  });
+  return best;
+}
+function gridSnap(v, origin) { const g = origin + Math.round((v - origin) / 20) * 20; return Math.abs(g - v) <= 6 ? g - v : null; }
+
+// ---------- marquee ----------
+function marqueeRect() {
+  const a = drag.p0, b = drag.cur;
+  return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])];
+}
+function marqueeHits() {
+  const r = marqueeRect(), contain = drag.cur[0] >= drag.p0[0], P = ctxMatrix();
+  return container().filter(o => {
+    const b = itemAABB(o, P);
+    return contain ? (b[0] >= r[0] && b[1] >= r[1] && b[2] <= r[2] && b[3] <= r[3]) : !(b[2] < r[0] || b[0] > r[2] || b[3] < r[1] || b[1] > r[3]);
+  });
+}
+
+// ---------- pointer ----------
+function showBadge(text, p) {
+  badgeEl.textContent = text; badgeEl.style.display = 'block';
+  badgeEl.style.left = clamp(p[0] + 16, 4, 780) + 'px'; badgeEl.style.top = clamp(p[1] + 16, 4, 530) + 'px';
+}
+const hideBadge = () => { badgeEl.style.display = 'none'; };
+
+stage.addEventListener('pointerdown', e => {
+  if (e.target.closest('#hud,#ring,#scrub')) return;
+  if (e.button !== 0 && e.button !== undefined && e.button !== -1 && e.pointerType === 'mouse' && e.button !== 0) return;
+  const p = localPos(e); cursor = p;
+  if (ring) { closeRing(); refresh(); return; }
+  held.shift = e.shiftKey; held.alt = e.altKey; held.ctrl = e.ctrlKey;
+  try { stage.setPointerCapture(e.pointerId); } catch (x) { /* synthetic */ }
+  const fr = frame();
+  if (fr) {
+    if (pivotAt(fr, p) && (e.detail === 2 || e.ctrlKey || pv[0] !== 0.5 || pv[1] !== 0.5)) {
+      if (e.detail === 2) { pv = [0.5, 0.5]; refresh(); return; }
+      drag = { mode: 'pivot', fr }; return;
+    }
+    const h = handleAt(fr, p);
+    if (h) {
+      beginEdit();
+      const starts = fr.objs.map(o => o.m.slice());
+      if (isEdge(h) && e.ctrlKey) drag = { mode: 'skew', fr, h, starts, q0: ap(fr.Fi, p) };
+      else drag = { mode: 'scale', fr, h, starts, snapOk: Math.abs(decompose(fr.F).rot) % 90 < 0.01 && Math.abs(decompose(fr.F).k) < 1e-6, src: snapSources(sel) };
+      return;
+    }
+    if (rotateZone(fr, p)) {
+      beginEdit();
+      const starts = fr.objs.map(o => o.m.slice()), pw = ap(fr.F, pv);
+      drag = { mode: 'rotate', fr, starts, pw, a0: Math.atan2(p[1] - pw[1], p[0] - pw[0]), dupDone: false };
+      return;
+    }
+  }
+  const id = hitItem(e);
+  if (id) {
+    if (e.shiftKey) {
+      if (!sel.includes(id)) sel = sel.concat(id);
+      else shiftToggle = id;
+    } else if (!sel.includes(id)) sel = [id];
+    const f2 = frame();
+    drag = { mode: 'move', fr: f2, p0: p, starts: f2.objs.map(o => o.m.slice()), moved: false, clickId: id, src: snapSources(sel), dup: false, raw: p };
+    refresh();
+    return;
+  }
+  if (!e.shiftKey) sel = [];
+  drag = { mode: 'marquee', p0: p, cur: p, moved: false, base: e.shiftKey ? sel.slice() : [] };
+  refresh();
+});
+
+stage.addEventListener('pointermove', e => {
+  const p = localPos(e); cursor = p;
+  held.shift = e.shiftKey; held.alt = e.altKey; held.ctrl = e.ctrlKey;
+  if (scrub) { updateScrub(p); return; }
+  if (!drag) {
+    const hv = e.target.closest('#hud,#ring,#scrub') ? null : hitItem(e), fr = frame();
+    stage.style.cursor = cursorFor(fr, p);
+    if (hv !== hover) { hover = hv; drawOverlay(); }
+    return;
+  }
+  const d = drag;
+  if (d.mode === 'marquee') {
+    d.cur = p; if (Math.hypot(p[0] - d.p0[0], p[1] - d.p0[1]) > 3) d.moved = true;
+    if (d.moved) sel = d.base.concat(marqueeHits().map(o => o.id).filter(id => !d.base.includes(id)));
+    drawOverlay(); updateHud(); return;
+  }
+  if (d.mode === 'pivot') {
+    let u = ap(d.fr.Fi, p);
+    const cands = [0, 0.5, 1];
+    let best = null;
+    cands.forEach(x => cands.forEach(y => { const q = ap(d.fr.F, [x, y]), dd = Math.hypot(p[0] - q[0], p[1] - q[1]); if (dd < 9 && (!best || dd < best.d)) best = { d: dd, u: [x, y] }; }));
+    pv = best ? best.u : u; refresh(); return;
+  }
+  const fr = d.fr;
+  let D = IDM;
+  guides = [];
+  if (d.mode === 'move') {
+    if (!d.moved && Math.hypot(p[0] - d.p0[0], p[1] - d.p0[1]) < 3) return;
+    if (!d.moved) {
+      d.moved = true; beginEdit();
+      if (e.altKey) {
+        const clones = duplicateSel(null), fr2 = frame();
+        d.fr = fr2; d.starts = clones.map(o => o.m.slice()); d.dup = true;
+      }
+    }
+    let dx = p[0] - d.p0[0], dy = p[1] - d.p0[1];
+    if (e.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0; }
+    const objs = selObjs(), P = ctxMatrix();
+    const st = d.starts;
+    // bounding box of the start state, shifted by the tentative delta
+    const sb = d.sb || (d.sb = (() => { const cur = objs.map(o => o.m.slice()); objs.forEach((o, i) => { o.m = st[i]; }); const b = boundsOf([].concat(...objs.map(o => worldCorners(o, P)))); objs.forEach((o, i) => { o.m = cur[i]; }); return b; })());
+    if (snapOn() || document.getElementById('cGrid').checked) {
+      const xs = [sb[0] + dx, (sb[0] + sb[2]) / 2 + dx, sb[2] + dx], ys = [sb[1] + dy, (sb[1] + sb[3]) / 2 + dy, sb[3] + dy];
+      let sx = null, sy = null;
+      if (!e.shiftKey || dy === 0) { if (snapOn()) sx = snapAxis(xs, d.src.xs); }
+      if (!e.shiftKey || dx === 0) { if (snapOn()) sy = snapAxis(ys, d.src.ys); }
+      if (!sx && document.getElementById('cGrid').checked && dx !== 0) { const g = gridSnap(xs[0], ART.x); if (g !== null) sx = { d: g, at: xs[0] + g, grid: true }; }
+      if (!sy && document.getElementById('cGrid').checked && dy !== 0) { const g = gridSnap(ys[0], ART.y); if (g !== null) sy = { d: g, at: ys[0] + g, grid: true }; }
+      if (sx && dx !== 0 || (sx && e.shiftKey && dy === 0)) { dx += sx.d; if (!sx.grid) guides.push({ v: true, at: sx.at, a: Math.min(sb[1] + dy, ART.y), b: Math.max(sb[3] + dy, ART.y + ART.h) }); }
+      if (sy && dy !== 0 || (sy && e.shiftKey && dx === 0)) { dy += sy.d; if (!sy.grid) guides.push({ v: false, at: sy.at, a: Math.min(sb[0] + dx, ART.x), b: Math.max(sb[2] + dx, ART.x + ART.w) }); }
+    }
+    D = tr(dx, dy);
+    applyDelta(st, objs, D, P);
+    d.D = D; showBadge('dx ' + Math.round(dx) + '  dy ' + Math.round(dy), p);
+    drawOverlay(); updateHud(); updateHint(); return;
+  }
+  if (d.mode === 'scale') {
+    let pp = p;
+    if (d.snapOk && snapOn()) {
+      const u0 = d.h;
+      const sxn = u0[0] !== 0.5 ? snapAxis([p[0]], d.src.xs) : null, syn = u0[1] !== 0.5 ? snapAxis([p[1]], d.src.ys) : null;
+      pp = [p[0] + (sxn ? sxn.d : 0), p[1] + (syn ? syn.d : 0)];
+      if (sxn) guides.push({ v: true, at: sxn.at, a: ART.y, b: ART.y + ART.h });
+      if (syn) guides.push({ v: false, at: syn.at, a: ART.x, b: ART.x + ART.w });
+    }
+    const q = ap(fr.Fi, pp), h = d.h, a = e.altKey ? [0.5, 0.5] : [1 - h[0], 1 - h[1]];
+    let sx = 1, sy = 1;
+    if (h[0] !== 0.5) sx = (q[0] - a[0]) / (h[0] - a[0]);
+    if (h[1] !== 0.5) sy = (q[1] - a[1]) / (h[1] - a[1]);
+    if (e.shiftKey) {
+      if (h[0] !== 0.5 && h[1] !== 0.5) {
+        const hv = [(h[0] - a[0]) * fr.w, (h[1] - a[1]) * fr.h], qv = [(q[0] - a[0]) * fr.w, (q[1] - a[1]) * fr.h];
+        sx = sy = (qv[0] * hv[0] + qv[1] * hv[1]) / (hv[0] * hv[0] + hv[1] * hv[1]);
+      } else if (h[0] !== 0.5) sy = sx; else sx = sy;
+    }
+    const fixS = s => Math.abs(s) < 0.02 ? (s < 0 ? -0.02 : 0.02) : s;
+    sx = fixS(sx); sy = fixS(sy);
+    D = mul(fr.F, mul(about(scl(sx, sy), a), fr.Fi));
+    applyDelta(d.starts, fr.objs, D, fr.P);
+    d.D = D; showBadge('W ' + Math.round(fr.w * Math.abs(sx)) + '  H ' + Math.round(fr.h * Math.abs(sy)), p);
+    drawOverlay(); updateHud(); return;
+  }
+  if (d.mode === 'rotate') {
+    let da = Math.atan2(p[1] - d.pw[1], p[0] - d.pw[0]) - d.a0;
+    if (Math.abs(da) > Math.PI * 2) da %= Math.PI * 2;
+    if (e.shiftKey) da = Math.round(da / (15 * D2R)) * 15 * D2R;
+    if (!d.dupDone && e.altKey && Math.abs(da) > 1 * D2R) {
+      d.dupDone = true;
+      const clones = duplicateSel(null), f2 = frame();
+      d.fr = f2; d.starts = clones.map(o => o.m.slice());
+    }
+    D = about(rotM(da), d.pw);
+    applyDelta(d.starts, d.fr.objs, D, d.fr.P);
+    d.D = D;
+    const total = d.fr.objs.length === 1 ? decompose(mul(d.fr.P, d.fr.objs[0].m)).rot : da / D2R;
+    showBadge(Math.round(total * 10) / 10 + '°', p);
+    drawOverlay(); updateHud(); return;
+  }
+  if (d.mode === 'skew') {
+    const q = ap(fr.Fi, p), h = d.h, a = e.altKey ? [0.5, 0.5] : [1 - h[0], 1 - h[1]];
+    let kk = 0, ang = 0;
+    if (h[0] === 0.5) { kk = (q[0] - d.q0[0]) / (h[1] - a[1]); ang = Math.atan(kk * fr.w / fr.h) / D2R; D = mul(fr.F, mul(about(shearX(kk), a), fr.Fi)); }
+    else { kk = (q[1] - d.q0[1]) / (h[0] - a[0]); ang = Math.atan(kk * fr.h / fr.w) / D2R; D = mul(fr.F, mul(about(shearY(kk), a), fr.Fi)); }
+    applyDelta(d.starts, fr.objs, D, fr.P);
+    d.D = D; showBadge('skew ' + Math.round(ang * 10) / 10 + '°', p);
+    drawOverlay(); updateHud(); return;
+  }
+});
+
+function endDrag(e) {
+  if (!drag) return;
+  const d = drag; drag = null; guides = []; hideBadge();
+  if (d.mode === 'move' && !d.moved && shiftToggle) sel = sel.filter(x => x !== shiftToggle);
+  else if (d.mode === 'move' && !d.moved && d.clickId && sel.length > 1 && !(e && e.shiftKey)) sel = [d.clickId];
+  shiftToggle = null;
+  if (d.mode === 'marquee' && !d.moved && !(e && e.shiftKey)) sel = [];
+  if (d.D && (d.mode !== 'move' || d.moved)) lastDelta = d.D;
+  endEdit(); refresh();
+}
+stage.addEventListener('pointerup', endDrag);
+stage.addEventListener('pointercancel', endDrag);
+stage.addEventListener('dblclick', e => {
+  if (e.target.closest('#hud,#ring,#scrub')) return;
+  const id = hitItem(e);
+  if (id) { const o = container().find(x => x.id === id); if (o && o.kind === 'group') { sel = [id]; enterGroup(); } }
+  else if (!frame() && ctx.length) exitTo(ctx.length - 1);
+});
+
+// ---------- scrub keys ----------
+const SCR = { r: { name: 'Rotate', unit: '°', snap: 15 }, s: { name: 'Scale', unit: '%', snap: 10 }, k: { name: 'Skew', unit: '°', snap: 5 } };
+function startScrub(key) {
+  const fr = frame(); if (!fr) return;
+  beginEdit();
+  scrub = { key, fr, starts: fr.objs.map(o => o.m.slice()), y0: cursor[1], x: clamp(cursor[0] + 24, 6, 660), y: clamp(cursor[1] - 40, 6, 440), v: 0, pw: ap(fr.F, pv) };
+  showScrub();
+}
+function scrubValue(dy, shift) {
+  const k = scrub.key;
+  let v = k === 'r' ? dy * 0.5 : (k === 's' ? (Math.exp(dy * 0.006) - 1) * 100 : dy * 0.25);
+  if (shift) v = Math.round(v / SCR[k].snap) * SCR[k].snap;
+  return v;
+}
+function updateScrub(pos) {
+  const v = scrubValue(scrub.y0 - pos[1], held.shift), s = scrub, fr = s.fr;
+  s.v = v;
+  let D;
+  if (s.key === 'r') D = about(rotM(v * D2R), s.pw);
+  else if (s.key === 's') { const f = Math.max(0.02, 1 + v / 100); D = about(scl(f, f), s.pw); }
+  else D = mul(fr.F, mul(about(shearX(Math.tan(v * D2R) * fr.h / fr.w), pv), fr.Fi));
+  applyDelta(s.starts, fr.objs, D, fr.P);
+  s.D = D;
+  drawOverlay(); updateHud(); showScrub();
+}
+function showScrub() {
+  const s = scrub, k = SCR[s.key];
+  scrubEl.style.display = 'block'; scrubEl.style.left = s.x + 'px'; scrubEl.style.top = s.y + 'px';
+  const pos = 50 + clamp((s.y0 - cursor[1]) / 200, -1, 1) * 50;
+  scrubEl.innerHTML = '<div class="head"><span>' + k.name + ' <span class="key">' + s.key.toUpperCase() + '</span></span><b>' + (s.v > 0 ? '+' : '') + Math.round(s.v * 10) / 10 + k.unit + '</b></div><div class="track"><div class="mid"></div><div class="thumb" style="left:' + pos + '%"></div></div><div class="sub">around the pivot · move up to increase · Shift snaps ' + k.snap + k.unit + '</div>';
+}
+function endScrub() { if (scrub && scrub.D) lastDelta = scrub.D; scrub = null; scrubEl.style.display = 'none'; endEdit(); refresh(); }
+
+// ---------- ring ----------
+function showRing(pos, title, slots, hubFn, sub) {
+  closeRing();
+  const R = 92, cx = clamp(pos[0], R + 66, 900 - R - 66), cy = clamp(pos[1], R + 30, 560 - R - 50);
+  ring = { el: document.createElement('div'), slots };
+  ring.el.id = 'ring'; ring.el.style.left = cx + 'px'; ring.el.style.top = cy + 'px'; ring.pos = pos;
+  ring.el.innerHTML = '<div class="hub' + (hubFn ? ' click' : '') + '">' + title + '<small>' + (sub || '...') + '</small></div>';
+  if (hubFn) { const hb = ring.el.firstChild; hb.onpointerdown = ev => ev.stopPropagation(); hb.onclick = ev => { ev.stopPropagation(); closeRing(); hubFn(); }; }
+  slots.forEach((sl, i) => {
+    const an = (sl.a !== undefined ? sl.a : -90 + i * 360 / slots.length) * Math.PI / 180, el = document.createElement('div');
+    el.className = 'slot' + (sl.on ? '' : ' off');
+    el.style.left = Math.cos(an) * R + 'px'; el.style.top = Math.sin(an) * R + 'px';
+    el.innerHTML = '<span class="key">' + sl.key + '</span>' + sl.label;
+    el.onpointerdown = ev => ev.stopPropagation();
+    el.onclick = ev => { ev.stopPropagation(); runSlot(sl); };
+    ring.el.appendChild(el);
+  });
+  stage.appendChild(ring.el);
+  updateHint();
+}
+function runSlot(sl) { if (!sl.on) return; const pos = ring.pos; closeRing(); sl.fn(pos); refresh(); }
+function closeRing() { if (ring) { ring.el.remove(); ring = null; } }
+function openRing(pos) {
+  const objs = selObjs();
+  if (objs.length) {
+    const hasGroup = objs.some(o => o.kind === 'group');
+    showRing(pos, objs.length === 1 ? objs[0].name : objs.length + ' objects', [
+      { key: 'G', label: hasGroup && objs.length === 1 ? 'Ungroup' : 'Group', on: objs.length > 1 || hasGroup, fn: () => (hasGroup && objs.length === 1 ? ungroupSel() : groupSel()) },
+      { key: 'D', label: 'Duplicate<small>again</small>', on: true, fn: duplicateAgain },
+      { key: 'X', label: 'Delete', on: true, fn: deleteSel },
+      { key: 'H', label: 'Flip &harr;', on: true, fn: () => flip(true) },
+      { key: 'V', label: 'Flip &updownarrow;', on: true, fn: () => flip(false) },
+      { key: 'A', label: 'Align…', on: true, fn: p => openAlignRing(p) },
+      { key: 'O', label: 'Arrange…', on: true, fn: p => openArrangeRing(p) },
+      objs.length === 1 && hasGroup ? { key: 'E', label: 'Enter group', on: true, fn: enterGroup }
+        : ctx.length ? { key: 'E', label: 'Exit group', on: true, fn: () => exitTo(ctx.length - 1) }
+        : { key: 'B', label: 'Bake', on: true, fn: bake },
+    ], () => toast('The HUD is the box at the right'), 'Transform…');
+  } else {
+    showRing(pos, ctx.length ? 'Group' : 'Select', [
+      { key: 'A', label: 'Select all', on: true, fn: selectAll },
+      { key: 'I', label: 'Invert', on: true, fn: invertSel },
+      { key: 'N', label: 'Deselect', on: true, fn: () => { sel = []; } },
+      { key: 'G', label: 'Grid<small>' + (document.getElementById('cGrid').checked ? 'on' : 'off') + '</small>', on: true, fn: () => { const c = document.getElementById('cGrid'); c.checked = !c.checked; } },
+      { key: 'M', label: 'Smart guides<small>' + (snapOn() ? 'on' : 'off') + '</small>', on: true, fn: () => { const c = document.getElementById('cSnap'); c.checked = !c.checked; } },
+      { key: 'T', label: 'Scale strokes<small>' + (scaleStrokes() ? 'on' : 'off') + '</small>', on: true, fn: () => { const c = document.getElementById('cStroke'); c.checked = !c.checked; } },
+      { key: 'E', label: 'Exit group', on: ctx.length > 0, fn: () => exitTo(ctx.length - 1) },
+      { key: 'R', label: 'Reset', on: true, fn: resetDoc },
+    ], null, 'Selection');
+  }
+}
+function openAlignRing(pos) {
+  const mk2 = (key, label, how, on) => ({ key, label, on: on !== false, fn: () => doAlign(how) });
+  const n = selObjs().length;
+  showRing(pos, 'Align', [mk2('T', 'Top', 'top'), mk2('R', 'Right', 'right'), mk2('B', 'Bottom', 'bottom'), mk2('L', 'Left', 'left'),
+    mk2('M', 'Middle', 'vcenter'), mk2('C', 'Centre', 'hcenter'), mk2('H', 'Space &harr;', 'distH', n > 2), mk2('V', 'Space &updownarrow;', 'distV', n > 2)], null, n === 1 ? 'to artboard' : 'to ' + (alignTo === 'sel' ? 'selection' : 'artboard'));
+}
+function openArrangeRing(pos) {
+  showRing(pos, 'Arrange', [
+    { key: 'F', label: 'To front', on: true, fn: () => doArrange('front') },
+    { key: 'W', label: 'Forward', on: true, fn: () => doArrange('fwd') },
+    { key: 'S', label: 'To back', on: true, fn: () => doArrange('back') },
+    { key: 'Q', label: 'Backward', on: true, fn: () => doArrange('back1') },
+  ], null, 'order');
+}
+
+// ---------- keyboard ----------
+const isTyping = t => t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.isContentEditable);
+window.addEventListener('keydown', e => {
+  held.shift = e.shiftKey; held.alt = e.altKey; held.ctrl = e.ctrlKey;
+  const key = e.key.toLowerCase();
+  if (ring) {
+    if (e.key === 'Escape') { closeRing(); refresh(); return; }
+    const sl = ring.slots.find(x => x.key.toLowerCase() === key);
+    if (sl) { e.preventDefault(); runSlot(sl); }
+    return;
+  }
+  if (isTyping(e.target)) { if (e.key === 'Enter' || e.key === 'Escape') e.target.blur(); return; }
+  const ctrl = e.ctrlKey || e.metaKey;
+  if (ctrl && key === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
+  if (ctrl && key === 'y') { e.preventDefault(); doRedo(); return; }
+  if (ctrl && key === 'a') { e.preventDefault(); selectAll(); return; }
+  if (ctrl && key === 'g') { e.preventDefault(); e.shiftKey ? ungroupSel() : groupSel(); return; }
+  if (ctrl && key === 'd') { e.preventDefault(); duplicateAgain(); return; }
+  if (e.key === 'Shift' || e.key === 'Alt' || e.key === 'Control') { updateHint(); return; }
+  if (ctrl || e.altKey) return;
+  if (e.key.startsWith('Arrow') && sel.length) {
+    e.preventDefault();
+    const st = e.shiftKey ? 10 : 1, fr = frame(), dx = e.key === 'ArrowLeft' ? -st : e.key === 'ArrowRight' ? st : 0, dy = e.key === 'ArrowUp' ? -st : e.key === 'ArrowDown' ? st : 0;
+    beginEdit(); applyDelta(fr.objs.map(o => o.m.slice()), fr.objs, tr(dx, dy), fr.P); lastDelta = tr(dx, dy); endEdit(); refresh(); return;
+  }
+  if (e.repeat) return;
+  if (e.key === 'Escape') {
+    if (drag) { cancelDrag(); return; }
+    if (scrub) { cancelScrub(); return; }
+    if (sel.length) { sel = []; refresh(); return; }
+    if (ctx.length) exitTo(ctx.length - 1);
+    return;
+  }
+  if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSel(); return; }
+  if (SCR[key] && !scrub && !drag && sel.length) { startScrub(key); return; }
+  if (e.key === ' ') { e.preventDefault(); if (!spaceDown) spaceDown = Date.now(); return; }
+});
+window.addEventListener('keyup', e => {
+  held.shift = e.shiftKey; held.alt = e.altKey; held.ctrl = e.ctrlKey;
+  const key = e.key.toLowerCase();
+  if (e.key === ' ') {
+    const had = spaceDown, dt = Date.now() - spaceDown; spaceDown = 0;
+    if (had && dt < 250 && !scrub && !drag && !ring && !isTyping(e.target)) openRing(cursor);
+    return;
+  }
+  if (scrub && key === scrub.key) endScrub();
+  updateHint();
+});
+function cancelDrag() {
+  if (!drag) return;
+  if (editBefore !== null) { const j = editBefore; editBefore = null; restore(j); }
+  drag = null; guides = []; hideBadge(); refresh();
+}
+function cancelScrub() {
+  if (editBefore !== null) { const j = editBefore; editBefore = null; restore(j); }
+  scrub = null; scrubEl.style.display = 'none'; refresh();
+}
+
+// ---------- buttons ----------
+document.getElementById('cSnap').onchange = refresh;
+document.getElementById('cGrid').onchange = refresh;
+document.getElementById('cStroke').onchange = refresh;
+document.getElementById('bUndo').onclick = doUndo;
+document.getElementById('bRedo').onclick = doRedo;
+function resetDoc() { items = initialDoc(); ctx = []; sel = []; undo = []; redo = []; editBefore = null; lastDelta = tr(14, 14); }
+document.getElementById('bReset').onclick = () => { resetDoc(); refresh(); };
+document.getElementById('bSvg').onclick = () => {
+  const saveCtx = ctx; ctx = [];
+  const body = '<svg xmlns="http://www.w3.org/2000/svg" width="' + ART.w + '" height="' + ART.h + '" viewBox="' + ART.x + ' ' + ART.y + ' ' + ART.w + ' ' + ART.h + '"><rect x="' + ART.x + '" y="' + ART.y + '" width="' + ART.w + '" height="' + ART.h + '" fill="#ffffff"/>' + artMarkup(scaleStrokes(), true).replace(/ data-id="[^"]*"/g, '') + '</svg>';
+  ctx = saveCtx;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([body], { type: 'image/svg+xml' })); a.download = 'transform-test.svg';
+  document.body.appendChild(a); a.click(); a.remove();
+};
+
+refresh();
+</script>
+</body>
+</html>

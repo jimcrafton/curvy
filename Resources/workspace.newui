@@ -1,0 +1,230 @@
+{
+  meta: {
+    author: "",
+    date: "2026-10-18",
+    copyright: "",
+    version: "0.1.0.900"
+  },
+  type: "Frame",
+  title: "curvy workspace shell",
+  name: "workspace",
+  bounds: {
+    type: "Rect",
+    pos: { type: "Point", x: 40, y: 40 },
+    size: { type: "Size", width: 1360, height: 860 }
+  },
+  rootView: {
+    type: "RootView",
+    bounds: {
+      type: "Rect",
+      pos: { type: "Point", x: 0, y: 0 },
+      size: { type: "Size", width: 1360, height: 860 }
+    },
+    visible: true,
+    name: "rootview",
+    layout: { type: "FlexLayout", orientation: "Vertical" },
+    style: {
+      type: "ViewStyle",
+      backgroundFill: { type: "Fill", kind: "Color", color: "#1e1f22" }
+    },
+    childViews: [
+      {
+        type: "SubView",
+        bounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 0, y: 0 },
+          size: { type: "Size", width: 1360, height: 32 }
+        },
+        visible: true,
+        name: "topBar",
+        layout: {
+          type: "FlexLayout",
+          orientation: "Horizontal",
+          crossAxisAlignment: "Center",
+          spacing: 10,
+          padding: 6
+        },
+        style: {
+          type: "ViewStyle",
+          backgroundFill: { type: "Fill", kind: "Color", color: "#232428" }
+        },
+        desiredSize: { type: "Size", width: 1360, height: 32 },
+        desiredSizeOverride: true,
+        childViews: [
+          {
+            type: "Label",
+            text: "~",
+            textAlignment: "Left",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 6, y: 4 },
+              size: { type: "Size", width: 12, height: 23 }
+            },
+            name: "appLogo",
+            style: {
+              type: "LabelStyle",
+              text: "~",
+              wordWrap: false,
+              font: { type: "Font", name: "Segoe UI", size: 16, bold: true, italic: false, strikeThrough: false, underlined: false },
+              textColor: "#4c8dff",
+              textAlignment: "Left"
+            }
+          },
+          {
+            type: "Label",
+            text: "curvy",
+            textAlignment: "Left",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 28, y: 7 },
+              size: { type: "Size", width: 41, height: 19 }
+            },
+            name: "appName",
+            style: {
+              type: "LabelStyle",
+              text: "curvy",
+              wordWrap: false,
+              font: { type: "Font", name: "Segoe UI", size: 13, bold: true, italic: false, strikeThrough: false, underlined: false },
+              textColor: "#e6e7ea",
+              textAlignment: "Left"
+            }
+          },
+          {
+            type: "Label",
+            text: "",
+            textAlignment: "Left",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 79, y: 7 },
+              size: { type: "Size", width: 2, height: 17 }
+            },
+            name: "documentName",
+            style: {
+              type: "LabelStyle",
+              text: "",
+              wordWrap: false,
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+              textColor: "#9a9ea8",
+              textAlignment: "Left"
+            }
+          },
+          {
+            type: "Label",
+            text: "",
+            textAlignment: "Left",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 91, y: 7 },
+              size: { type: "Size", width: 1263, height: 17 }
+            },
+            name: "topBarSpace",
+            layoutParams: { type: "FlexLayoutParams", weight: 1 },
+            style: {
+              type: "LabelStyle",
+              text: "",
+              wordWrap: false,
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+              textColor: "#e6e7ea",
+              textAlignment: "Left"
+            }
+          }
+        ]
+      },
+      {
+        type: "CanvasView",
+        bounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 0, y: 32 },
+          size: { type: "Size", width: 1360, height: 800 }
+        },
+        name: "canvas",
+        layoutParams: { type: "FlexLayoutParams", weight: 1 }
+      },
+      {
+        type: "SubView",
+        bounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 0, y: 832 },
+          size: { type: "Size", width: 1360, height: 28 }
+        },
+        visible: true,
+        name: "hintBar",
+        layout: {
+          type: "FlexLayout",
+          orientation: "Horizontal",
+          crossAxisAlignment: "Center",
+          spacing: 18,
+          padding: 7
+        },
+        style: {
+          type: "ViewStyle",
+          backgroundFill: { type: "Fill", kind: "Color", color: "#232428" }
+        },
+        desiredSize: { type: "Size", width: 1360, height: 28 },
+        desiredSizeOverride: true,
+        childViews: [
+          {
+            type: "Label",
+            text: "Nothing open",
+            textAlignment: "Left",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 7, y: 5 },
+              size: { type: "Size", width: 89, height: 17 }
+            },
+            name: "hintTool",
+            style: {
+              type: "LabelStyle",
+              text: "Nothing open",
+              wordWrap: false,
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: true, italic: false, strikeThrough: false, underlined: false },
+              textColor: "#ffb454",
+              textAlignment: "Left"
+            }
+          },
+          {
+            type: "Label",
+            text: "Tap Space to start",
+            textAlignment: "Left",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 114, y: 5 },
+              size: { type: "Size", width: 1051, height: 17 }
+            },
+            name: "hintKeys",
+            layoutParams: { type: "FlexLayoutParams", weight: 1 },
+            style: {
+              type: "LabelStyle",
+              text: "Tap Space to start",
+              wordWrap: false,
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+              textColor: "#9a9ea8",
+              textAlignment: "Left"
+            }
+          },
+          {
+            type: "Label",
+            text: "",
+            textAlignment: "Right",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 1183, y: 5 },
+              size: { type: "Size", width: 170, height: 17 }
+            },
+            name: "hintInfo",
+            style: {
+              type: "LabelStyle",
+              text: "",
+              wordWrap: false,
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+              textColor: "#9a9ea8",
+              textAlignment: "Right"
+            },
+            desiredSize: { type: "Size", width: 170, height: 17 },
+            desiredSizeOverride: true
+          }
+        ]
+      }
+    ]
+  }
+}

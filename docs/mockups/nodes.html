@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curvy node graph in the minimal UI</title>
+<style>
+  :root {
+    --bg: #1e1f22; --panel: #26272b; --workspace: #2b2d31; --paper: #f4f4f2; --text: #e6e7ea; --muted: #9a9ea8;
+    --accent: #4c8dff; --amber: #ffb454; --slot: #313338; --slotLine: #4a4d55; --glass: #17181b99;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid #000; }
+  header h1 { margin: 0 0 4px; font-size: 15px; }
+  header p { margin: 0; color: var(--muted); max-width: 940px; }
+  .controls { display: flex; gap: 8px; align-items: center; padding: 10px 16px; background: #222327; border-bottom: 1px solid #000; }
+  button { background: var(--slot); color: var(--text); border: 1px solid var(--slotLine); border-radius: 14px; padding: 4px 12px; font: inherit; cursor: pointer; }
+  button.on { background: var(--accent); border-color: var(--accent); }
+  #stage { position: relative; width: 900px; height: 520px; margin: 16px auto 8px; background: var(--workspace); border: 1px solid #000; overflow: hidden; user-select: none; }
+  #paper { position: absolute; left: 60px; top: 30px; width: 600px; height: 460px; background: var(--paper); box-shadow: 0 2px 12px #0008; }
+  svg { position: absolute; left: 0; top: 0; }
+  #bar { position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: var(--panel); border-top: 1px solid #000; color: var(--muted); padding: 4px 10px; white-space: nowrap; font-size: 12px; z-index: 6; }
+  .glass { background: var(--glass); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); border: 1px solid #ffffff2a; }
+  .key { display: inline-flex; align-items: center; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 6px; background: #3a3d43; border: 1px solid #5a5d66; color: var(--text); font: 600 11px/20px "Segoe UI"; }
+  .key.lit { background: var(--amber); color: #1b1b1b; border-color: var(--amber); }
+  .muted { color: var(--muted); }
+  .chip { padding: 1px 8px; border-radius: 10px; border: 1px solid var(--slotLine); background: var(--slot); font-size: 11px; cursor: pointer; }
+  .chip.on { background: var(--amber); border-color: var(--amber); color: #1b1b1b; }
+
+  #props { position: absolute; right: 0; top: 0; bottom: 28px; width: 232px; padding: 10px; overflow-y: auto; border-width: 0 0 0 1px; font-size: 12px; z-index: 4; }
+  #props h4 { margin: 0 0 6px; font-size: 10px; color: var(--muted); font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+  #props .box { background: #26272b80; border: 1px solid #ffffff1f; border-radius: 8px; padding: 8px; margin-bottom: 8px; }
+  .prow { display: flex; align-items: center; gap: 6px; margin: 7px 0; }
+  .prow label { width: 52px; color: var(--muted); }
+  .track { position: relative; flex: 1; height: 6px; border-radius: 3px; background: #3a3d43; cursor: ew-resize; }
+  .track .f { height: 100%; border-radius: 3px; background: var(--amber); pointer-events: none; }
+  .track .t { position: absolute; top: -5px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: var(--amber); border: 2px solid #17181b; pointer-events: none; }
+  .prow .val { width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+  .mini { padding: 0 5px; font-size: 10px; }
+
+  #chain { position: absolute; display: none; z-index: 3; padding: 6px 8px; border-radius: 10px; align-items: center; gap: 4px; box-shadow: 0 3px 10px #0006; cursor: pointer; }
+  #chain .n { padding: 2px 8px; border-radius: 6px; background: #3a3d43; border: 1px solid #5a5d66; font-size: 12px; }
+  #chain .n.sel { background: var(--amber); color: #1b1b1b; border-color: var(--amber); }
+  #chain .ar { color: var(--muted); }
+  #drawer { position: absolute; left: 0; right: 232px; bottom: 28px; display: none; z-index: 3; border-width: 1px 0 0 0; }
+  #drawer .grip { height: 14px; display: grid; place-items: center; cursor: ns-resize; }
+  #drawer .grip::after { content: ""; width: 44px; height: 4px; border-radius: 2px; background: #ffffff55; }
+  #drawer .top { position: absolute; right: 10px; top: 16px; display: flex; gap: 6px; align-items: center; z-index: 2; }
+  #g { position: absolute; left: 0; top: 14px; right: 0; bottom: 0; overflow: hidden; }
+  #g svg { width: 100%; height: 100%; }
+  .nd { cursor: grab; }
+  #ring { position: absolute; display: none; z-index: 5; width: 260px; height: 260px; }
+  #ring .disc { position: absolute; inset: 0; border-radius: 50%; background: #17181bcc; border: 1px solid #ffffff33; }
+  #ring .hub { position: absolute; left: 90px; top: 90px; width: 80px; height: 80px; border-radius: 50%; background: #26272b; border: 1px solid #5a5d66; display: grid; place-items: center; text-align: center; font-size: 11px; line-height: 1.2; }
+  #ring .slot { position: absolute; width: 74px; height: 40px; margin: -20px 0 0 -37px; border-radius: 10px; background: var(--slot); border: 1px solid var(--slotLine); display: grid; place-items: center; font-size: 12px; text-align: center; line-height: 1.1; }
+  #ring .slot .key { position: absolute; right: 2px; top: -9px; min-width: 16px; height: 16px; font-size: 9px; line-height: 14px; padding: 0 4px; }
+  #ring .slot.hot { background: var(--accent); border-color: var(--accent); }
+  .notes { width: 900px; margin: 0 auto 24px; color: var(--muted); }
+  .notes h3 { color: var(--text); margin: 14px 0 4px; font-size: 13px; }
+  .notes ul { margin: 0; padding-left: 18px; }
+  .notes li { margin: 2px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>The node graph inside the minimal UI</h1>
+  <p>The graph is a layer under the drawing, not a separate application. Most of the time you never see it: a live shape's parameters are in the
+  property box. When you want the graph, it opens as a translucent drawer over the bottom of the canvas, so the artwork stays in view and shows
+  the display node as you edit. Three states below; the nodes, the parameter sliders and the drawer's top edge are live.</p>
+</header>
+<div class="controls" id="tabs">
+  <button data-m="peek" class="on">1 Peek (chain chip)</button>
+  <button data-m="drawer">2 Graph drawer</button>
+  <button data-m="ring">3 Add node ring</button>
+  <span style="flex:1"></span>
+  <span class="muted">Drag nodes, drag the drawer's top edge, scrub the parameters.</span>
+</div>
+
+<div id="stage">
+  <div id="paper"></div>
+  <svg id="art" width="900" height="520"></svg>
+
+  <div id="chain" class="glass"></div>
+
+  <div id="drawer" class="glass">
+    <div class="grip" id="grip"></div>
+    <div class="top"><span class="muted">Display: <b style="color:var(--text)">Output</b></span><span class="chip">Fit</span><span class="chip" id="closeG">Close <span class="key" style="height:16px;min-width:16px;line-height:14px;font-size:9px">N</span></span></div>
+    <div id="g"><svg id="gs"></svg></div>
+  </div>
+
+  <div id="ring"><div class="disc"></div><div class="hub"><div>Add node<br><span class="muted">...</span></div></div></div>
+
+  <div id="props" class="glass"></div>
+  <div id="bar"></div>
+</div>
+
+<div class="notes">
+  <h3>How it fits</h3>
+  <ul>
+    <li><b>Peek:</b> selecting a live shape shows its pipeline as a small chip beside it (Star, Transform, Copy). Tap a node name to select that node (its parameters appear in the property box); tap the chip's edge, or press <span class="key">N</span>, to open the drawer. This is as much graph as most people ever need.</li>
+    <li><b>Drawer:</b> the graph editor docks to the bottom as a translucent drawer between the toolbar and the property box, drag its top edge to resize, <span class="key">N</span> toggles it. The canvas above keeps showing the display node, so every change is seen immediately. Selecting a node selects its object, and the other way round.</li>
+    <li><b>Property box = parameters of the selected node.</b> Same boxes as the rest of the UI. Each parameter has <span class="key">fx</span> (switch to an expression) and <span class="key">key</span> (keyframe at the playhead), as in the jitnodes editor. Scrub keys work over a parameter too.</li>
+    <li><b>Pen on the graph:</b> drag from an output port to wire; drag a wire off an input to detach it; drop a wire on empty space (or tap Space) and the <b>add-node ring</b> opens there, with the new node wired in on pick. Barrel button over a node gives the node ring (display, bypass, rename, delete). Middle-drag or two-finger drag pans; pinch or wheel zooms.</li>
+    <li>The ring's categories here (Shape, Modify, Copy, Math, Attributes, Time, Group, More) are placeholders until they are taken from the registered node types.</li>
+  </ul>
+  <h3>For the code</h3>
+  <ul>
+    <li>jitnodes' <code>GraphController</code> and <code>ParameterPanel</code> are UI-toolkit-free but talk to <code>EditorModel</code> (own <code>History</code>). They use about twenty model calls, so extract a small interface that both <code>EditorModel</code> and <code>GraphDocument</code> implement; edits then go through curvy's shared undo stack.</li>
+    <li><code>GraphCanvas</code> is a newui <code>SubView</code>, so it can live in the drawer as it is, with pen-specific input (ring on wire drop) added on top.</li>
+  </ul>
+</div>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const NS = 'http://www.w3.org/2000/svg';
+const bar = $('#bar');
+
+const N = {
+  star: { title: 'Star', x: 30, y: 24, p: { Points: { v: 5, min: 3, max: 12, u: '' }, Inner: { v: 45, min: 20, max: 90, u: '%' }, Radius: { v: 100, min: 40, max: 160, u: '' } } },
+  xf: { title: 'Transform', x: 190, y: 56, p: { Rotate: { v: 0, min: 0, max: 360, u: '°' }, Scale: { v: 100, min: 50, max: 150, u: '%' } } },
+  copy: { title: 'Copy', x: 350, y: 24, p: { Count: { v: 3, min: 1, max: 8, u: '' }, Step: { v: 24, min: 0, max: 90, u: '°' } } },
+  out: { title: 'Output', x: 510, y: 56, p: {} }
+};
+const E = [['star', 'xf'], ['xf', 'copy'], ['copy', 'out']];
+let sel = 'star', mode = 'peek', dh = 190;
+const NW = 120, NH = 54;
+
+function paintArt() {
+  const s = N.star.p, x = N.xf.p, c = N.copy.p, art = $('#art');
+  art.innerHTML = '';
+  const cx = 360, cy = mode === 'peek' ? 250 : 175;
+  const pts = Math.round(s.Points.v), out = s.Radius.v * x.Scale.v / 100, inn = out * s.Inner.v / 100;
+  for (let i = 0; i < Math.round(c.Count.v); i++) {
+    const rot = x.Rotate.v + i * c.Step.v;
+    let d = '';
+    for (let k = 0; k < pts * 2; k++) {
+      const r = k % 2 ? inn : out, a = (rot - 90) * Math.PI / 180 + k * Math.PI / pts;
+      d += (k ? 'L' : 'M') + (cx + Math.cos(a) * r).toFixed(1) + ' ' + (cy + Math.sin(a) * r).toFixed(1);
+    }
+    const p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', d + 'Z'); p.setAttribute('fill', `hsl(${14 + i * 18} 80% 55%)`); p.setAttribute('fill-opacity', 1 - i * .1);
+    p.setAttribute('stroke', '#1f3a8a'); p.setAttribute('stroke-width', 2);
+    art.appendChild(p);
+  }
+  const sc = document.createElementNS(NS, 'ellipse');
+  sc.setAttribute('cx', cx); sc.setAttribute('cy', cy); sc.setAttribute('rx', out + 12); sc.setAttribute('ry', out + 12);
+  sc.setAttribute('fill', 'none'); sc.setAttribute('stroke', '#4c8dff'); sc.setAttribute('stroke-dasharray', '4 4');
+  art.appendChild(sc);
+  const chain = $('#chain');
+  chain.style.left = cx + out + 24 + 'px'; chain.style.top = cy - 16 + 'px';
+}
+
+function paintChain() {
+  const c = $('#chain'); c.innerHTML = '';
+  ['star', 'xf', 'copy'].forEach((k, i) => {
+    if (i) c.insertAdjacentHTML('beforeend', '<span class="ar">›</span>');
+    const n = document.createElement('span'); n.className = 'n' + (k === sel ? ' sel' : ''); n.textContent = N[k].title;
+    n.onclick = e => { e.stopPropagation(); sel = k; refresh(); };
+    c.appendChild(n);
+  });
+  c.insertAdjacentHTML('beforeend', '<span class="ar">›</span><span class="n" style="opacity:.7">Output</span><span class="key" style="margin-left:6px">N</span>');
+  c.onclick = () => setMode('drawer');
+}
+
+function paintProps() {
+  const n = N[sel], p = $('#props');
+  p.innerHTML = `<div class="box"><h4>Selected node</h4><div style="display:flex;align-items:center;gap:6px"><b style="flex:1;font-size:14px">${n.title}</b><span class="chip ${sel === 'out' ? 'on' : ''}">${sel === 'out' ? 'Display' : 'Set display'}</span></div></div>`;
+  const box = document.createElement('div'); box.className = 'box'; box.innerHTML = '<h4>Parameters</h4>';
+  const keys = Object.keys(n.p);
+  if (!keys.length) box.insertAdjacentHTML('beforeend', '<div class="muted">The result shown on the canvas. No parameters.</div>');
+  keys.forEach(k => {
+    const q = n.p[k], row = document.createElement('div'); row.className = 'prow';
+    const f = (q.v - q.min) / (q.max - q.min) * 100;
+    row.innerHTML = `<label>${k}</label><div class="track"><div class="f" style="width:${f}%"></div><div class="t" style="left:${f}%"></div></div><span class="val">${Math.round(q.v)}${q.u}</span><span class="chip mini" title="Use an expression">fx</span><span class="chip mini" title="Keyframe at the playhead">key</span>`;
+    const tr = $('.track', row);
+    const set = e => {
+      const r = tr.getBoundingClientRect(); const v = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+      q.v = q.min + v * (q.max - q.min); if (q.max - q.min <= 12) q.v = Math.round(q.v);
+      $('.f', tr).style.width = $('.t', tr).style.left = (q.v - q.min) / (q.max - q.min) * 100 + '%';
+      $('.val', row).textContent = Math.round(q.v) + q.u; paintArt();
+    };
+    tr.addEventListener('pointerdown', e => { tr.setPointerCapture(e.pointerId); set(e); const mv = ev => set(ev); const up = () => { tr.removeEventListener('pointermove', mv); tr.removeEventListener('pointerup', up); }; tr.addEventListener('pointermove', mv); tr.addEventListener('pointerup', up); });
+    box.appendChild(row);
+  });
+  p.appendChild(box);
+  p.insertAdjacentHTML('beforeend', '<div class="muted" style="font-size:11px">fx turns a value into an expression, key keyframes it at the playhead. In the drawer, these follow the selected node.</div>');
+}
+
+function paintGraph() {
+  const g = $('#gs'); g.innerHTML = '';
+  const mk = (tag, a, parent = g) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, a[k]); parent.appendChild(e); return e; };
+  E.forEach(([a, b]) => {
+    const A = N[a], B = N[b], x1 = A.x + NW, y1 = A.y + NH / 2, x2 = B.x, y2 = B.y + NH / 2, dx = Math.max(40, (x2 - x1) / 2);
+    mk('path', { d: `M${x1} ${y1} C${x1 + dx} ${y1} ${x2 - dx} ${y2} ${x2} ${y2}`, fill: 'none', stroke: '#9a9ea8', 'stroke-width': 2 });
+  });
+  Object.keys(N).forEach(k => {
+    const n = N[k], grp = mk('g', { class: 'nd', transform: `translate(${n.x} ${n.y})` });
+    mk('rect', { width: NW, height: NH, rx: 8, fill: '#26272bee', stroke: k === sel ? '#ffb454' : '#5a5d66', 'stroke-width': k === sel ? 2.5 : 1 }, grp);
+    mk('rect', { width: NW, height: 20, rx: 8, fill: k === 'out' ? '#4c8dff' : '#3a3d43' }, grp);
+    const t = mk('text', { x: 10, y: 14, fill: '#e6e7ea', 'font-size': 12, 'font-weight': 600 }, grp); t.textContent = n.title;
+    const ps = Object.keys(n.p).slice(0, 2).map(q => q + ' ' + Math.round(n.p[q].v) + n.p[q].u).join('  ');
+    const t2 = mk('text', { x: 10, y: 38, fill: '#9a9ea8', 'font-size': 10 }, grp); t2.textContent = ps;
+    if (k !== 'star') mk('circle', { cx: 0, cy: NH / 2, r: 6, fill: '#17181b', stroke: '#fff', 'stroke-width': 2 }, grp);
+    if (k !== 'out') mk('circle', { cx: NW, cy: NH / 2, r: 6, fill: '#17181b', stroke: '#fff', 'stroke-width': 2 }, grp);
+    if (k === 'out') mk('circle', { cx: NW - 12, cy: 10, r: 4, fill: '#ffb454' }, grp);
+    grp.addEventListener('pointerdown', e => {
+      e.preventDefault(); sel = k; const sx = e.clientX, sy = e.clientY, ox = n.x, oy = n.y;
+      const mv = ev => { n.x = ox + ev.clientX - sx; n.y = oy + ev.clientY - sy; paintGraph(); };
+      const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); refresh(); };
+      window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up); paintProps(); paintChain();
+    });
+  });
+}
+
+function refresh() { paintArt(); paintChain(); paintProps(); paintGraph(); }
+
+const hints = {
+  peek: 'A live shape is selected - tap a name in the chain to pick a node - N or tap the chip edge opens the graph drawer',
+  drawer: 'Graph drawer - drag a node, drag the top edge to resize - Space or drop a wire on empty space adds a node - N closes',
+  ring: 'Add node - pick a category, then the node; it is wired to the output you dragged from'
+};
+function setMode(m) {
+  mode = m;
+  $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.m === m));
+  $('#chain').style.display = m === 'peek' ? 'flex' : 'none';
+  $('#drawer').style.display = m === 'peek' ? 'none' : 'block';
+  $('#ring').style.display = m === 'ring' ? 'block' : 'none';
+  $('#drawer').style.height = dh + 'px';
+  bar.textContent = hints[m];
+  if (m === 'ring') placeRing();
+  refresh();
+}
+$$('#tabs button').forEach(b => b.onclick = () => setMode(b.dataset.m));
+$('#closeG').onclick = () => setMode('peek');
+
+$('#grip').addEventListener('pointerdown', e => {
+  e.preventDefault(); const y0 = e.clientY, h0 = dh;
+  const mv = ev => { dh = Math.max(110, Math.min(340, h0 + y0 - ev.clientY)); $('#drawer').style.height = dh + 'px'; };
+  const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); };
+  window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+});
+
+const CATS = [['Shape', 'S'], ['Modify', 'M'], ['Copy', 'C'], ['Math', 'A'], ['Attributes', 'T'], ['Time', 'Y'], ['Group', 'G'], ['More', '...']];
+function placeRing() {
+  const ring = $('#ring');
+  ring.style.left = '300px'; ring.style.top = '170px';
+  $$('.slot', ring).forEach(s => s.remove());
+  CATS.forEach(([name, key], i) => {
+    const a = (i * 45 - 90) * Math.PI / 180, s = document.createElement('div'); s.className = 'slot' + (i === 1 ? ' hot' : '');
+    s.style.left = 130 + Math.cos(a) * 100 + 'px'; s.style.top = 130 + Math.sin(a) * 100 + 'px';
+    s.innerHTML = `${name}<span class="key">${key}</span>`; ring.appendChild(s);
+  });
+}
+setMode('peek');
+</script>
+</body>
+</html>

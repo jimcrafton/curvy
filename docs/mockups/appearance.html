@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curvy colour, gradient and stroke editing</title>
+<style>
+  :root {
+    --bg: #1e1f22; --panel: #26272b; --workspace: #2b2d31; --paper: #f4f4f2; --text: #e6e7ea; --muted: #9a9ea8;
+    --accent: #4c8dff; --amber: #ffb454; --slot: #313338; --slotLine: #4a4d55;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid #000; }
+  header h1 { margin: 0 0 4px; font-size: 15px; }
+  header p { margin: 0; color: var(--muted); max-width: 940px; }
+  .controls { display: flex; gap: 8px; padding: 10px 16px; background: #222327; border-bottom: 1px solid #000; }
+  button { background: var(--slot); color: var(--text); border: 1px solid var(--slotLine); border-radius: 14px; padding: 4px 12px; font: inherit; cursor: pointer; }
+  button.on { background: var(--accent); border-color: var(--accent); }
+  #stage { position: relative; width: 900px; height: 520px; margin: 16px auto 8px; background: var(--workspace); border: 1px solid #000; overflow: hidden; user-select: none; }
+  #paper { position: absolute; left: 150px; top: 60px; width: 600px; height: 400px; background: var(--paper); box-shadow: 0 2px 12px #0008; }
+  svg.art { position: absolute; left: 0; top: 0; }
+  #bar { position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: var(--panel); border-top: 1px solid #000; color: var(--muted); padding: 4px 10px; white-space: nowrap; font-size: 12px; }
+  .card { position: absolute; background: #17181bf0; border: 1px solid #5a5d66; border-radius: 10px; padding: 10px 12px; box-shadow: 0 3px 10px #0007; }
+  .card .head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+  .card .head b { color: var(--amber); }
+  .key { display: inline-flex; align-items: center; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 6px; background: #3a3d43; border: 1px solid #5a5d66; color: var(--text); font: 600 11px/20px "Segoe UI"; }
+  .key.lit { background: var(--amber); color: #1b1b1b; border-color: var(--amber); }
+  .muted { color: var(--muted); }
+  .view { display: none; position: absolute; inset: 0; }
+  .view.on { display: block; }
+  .notes { width: 900px; margin: 0 auto 24px; color: var(--muted); }
+  .notes h3 { color: var(--text); margin: 14px 0 4px; font-size: 13px; }
+  .notes ul { margin: 0; padding-left: 18px; }
+  .notes li { margin: 2px 0; }
+  .notes .n { display: none; }
+  .notes .n.on { display: block; }
+
+  .ring { position: relative; width: 190px; height: 190px; border-radius: 50%; margin: 0 auto;
+    background: conic-gradient(from 0deg, hsl(0 100% 50%), hsl(60 100% 50%), hsl(120 100% 50%), hsl(180 100% 50%), hsl(240 100% 50%), hsl(300 100% 50%), hsl(360 100% 50%));
+    -webkit-mask: radial-gradient(circle, transparent 66px, #000 67px); mask: radial-gradient(circle, transparent 66px, #000 67px); }
+  .ringwrap { position: relative; width: 190px; height: 190px; margin: 0 auto 8px; }
+  .sv { position: absolute; left: 50px; top: 50px; width: 90px; height: 90px; border-radius: 4px; }
+  .dot { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px #000a; pointer-events: none; }
+  .swatches { display: flex; gap: 5px; align-items: center; }
+  .sw { width: 22px; height: 22px; border-radius: 5px; border: 1px solid #0008; position: relative; }
+  .sw i { position: absolute; left: 0; right: 0; bottom: -15px; text-align: center; font: 600 10px "Segoe UI"; color: var(--muted); font-style: normal; }
+  .prev { display: flex; height: 22px; border-radius: 5px; overflow: hidden; border: 1px solid #0008; }
+  .prev div { flex: 1; }
+  .chips { display: flex; gap: 4px; flex-wrap: wrap; }
+  .chip { padding: 2px 9px; border-radius: 10px; border: 1px solid var(--slotLine); background: var(--slot); font-size: 12px; cursor: pointer; }
+  .chip.dis { opacity: .4; cursor: default; }
+  .chip.on { background: var(--amber); border-color: var(--amber); color: #1b1b1b; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  .row label { width: 54px; color: var(--muted); font-size: 12px; }
+  .track { position: relative; flex: 1; height: 6px; border-radius: 3px; background: #3a3d43; cursor: ew-resize; }
+  .track .f { height: 100%; border-radius: 3px; background: var(--amber); pointer-events: none; }
+  .track .t { position: absolute; top: -5px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: var(--amber); border: 2px solid #17181b; pointer-events: none; }
+  .val { width: 50px; text-align: right; font-variant-numeric: tabular-nums; }
+  .gh { cursor: grab; }
+  .hud { position: absolute; right: 0; top: 0; bottom: 28px; width: 250px; background: #1c1d20f2; border-left: 1px solid #000; padding: 12px; }
+  .hud h4 { margin: 0 0 10px; font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+  .app { background: #26272b; border: 1px solid #3a3d43; border-radius: 8px; padding: 8px; margin-bottom: 8px; }
+  .app.sel { border-color: var(--amber); }
+  .app .top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .app .top b { flex: 1; font-weight: 600; }
+  .big { width: 34px; height: 34px; border-radius: 6px; border: 1px solid #0008; }
+  .gbar { height: 14px; border-radius: 4px; border: 1px solid #0008; }
+  .pro { width: 100%; height: 38px; }
+  #work { position: absolute; inset: 0 0 28px 0; overflow: hidden; }
+  .card { z-index: 3; }
+  #dock { position: absolute; inset: 0 0 28px 0; z-index: 2; pointer-events: none; }
+  #tools, #props { position: absolute; pointer-events: auto; display: none; background: #17181b99; -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+    border: 1px solid #ffffff2a; }
+  #tools { left: 0; top: 0; bottom: 0; width: 46px; padding: 6px 4px; flex-direction: column; gap: 4px; border-width: 0 1px 0 0; border-radius: 0; overflow-y: auto; }
+  #props { right: 0; top: 0; bottom: 0; width: 232px; padding: 10px 10px 4px; overflow-y: auto; border-width: 0 0 0 1px; border-radius: 0; }
+  #props .app { background: #26272b80; border-color: #ffffff1f; }
+  #dock.noblur #tools, #dock.noblur #props { -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 4px; }
+  .num { display: flex; align-items: center; gap: .4em; padding: .2em .5em; border-radius: 5px; background: #00000040; border: 1px solid #ffffff1a; font-variant-numeric: tabular-nums; }
+  .num i { font-style: normal; color: var(--muted); width: 1em; }
+  .num input { font: inherit; color: inherit; background: none; border: 0; outline: 0; width: 100%; min-width: 0; padding: 0; font-variant-numeric: tabular-nums; }
+  #props .app { padding: .6em; }
+  #props .big { width: 2.6em; height: 2.6em; }
+  #props .row { margin: .45em 0; }
+  #props .chip { font-size: .92em; }
+  #dock.tb #tools { display: flex; }
+  #dock.pp #props { display: block; }
+  #stage.hubv #props { display: none !important; }
+  .tool { position: relative; width: 36px; height: 36px; border-radius: 8px; border: 1px solid transparent; background: none; color: var(--text); padding: 0; display: grid; place-items: center; font-size: 16px; }
+  .tool:hover { background: var(--slot); }
+  .tool.on { background: var(--accent); }
+  .tool i { position: absolute; right: 2px; bottom: 0; font: 600 9px "Segoe UI"; font-style: normal; color: #ffffffaa; }
+  .tsep { height: 1px; background: #3a3d43; margin: 4px 2px; }
+  #props h4 { margin: 0 0 8px; font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+  #props { --pfs: 11; font-size: calc(var(--pfs) * 1px); width: calc(var(--pfs) * 17.9px); }
+  #props h4 { font-size: .85em; }
+  #props .app .row label { width: 3.5em; font-size: .92em; }
+  #props .val { width: 3em; }
+  #props .chips .chip { padding: 1px 7px; font-size: .92em; }
+  #props .muted { font-size: .9em !important; }
+  .fsz { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+  .fsz input { width: 90px; accent-color: var(--amber); }
+  .opt { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+  .opt.on { color: var(--text); }
+  .opt .sw2 { width: 28px; height: 16px; border-radius: 8px; background: #3a3d43; position: relative; }
+  .opt .sw2::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #9a9ea8; transition: left .12s; }
+  .opt.on .sw2 { background: var(--accent); }
+  .opt.on .sw2::after { left: 14px; background: #fff; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Colour, gradient and stroke editing</h1>
+  <p>Same premise as the rest of the UI: pen in one hand, keyboard in the other, no panels to travel to. Each editor opens at the pen from a held key
+  (or from the object ring), is fully usable with the pen alone, and commits on release as one undo step. The fourth tab is the "..." hub of the
+  object ring: the full appearance list, for when you want everything at once. The widgets in the first three tabs are live; the stroke width
+  profile is a picture only.</p>
+</header>
+<div class="controls" id="tabs">
+  <button data-v="colour" class="on">Colour</button>
+  <button data-v="gradient">Gradient</button>
+  <button data-v="stroke">Stroke</button>
+  <button data-v="hud">Appearance (hub)</button>
+  <span style="flex:1"></span>
+  <span class="opt" id="optTb" title="Show the toolbar on the left"><span class="sw2"></span>Toolbar</span>
+  <span class="fsz" title="Text size in the property boxes">Text size <input type="range" id="fsz" min="10" max="20" step="1" value="11"><span id="fszV">11</span></span>
+  <span class="opt on" id="optTr" title="Blur the artwork behind the panels"><span class="sw2"></span>Blur</span>
+  <span class="opt" id="optPp" title="Show the property boxes on the right"><span class="sw2"></span>Property boxes</span>
+</div>
+
+<div id="stage">
+  <div id="dock">
+    <div id="tools"></div>
+    <div id="props">
+      <div class="app">
+        <h4>Transform</h4>
+        <div class="grid2"><label class="num"><i>X</i><input value="412"></label><label class="num"><i>Y</i><input value="230"></label><label class="num"><i>W</i><input value="240"></label><label class="num"><i>H</i><input value="160"></label></div>
+        <div class="row"><label>Rotate</label><div class="track gen" data-max="360" data-unit="°"><div class="f" style="width:0"></div><div class="t" style="left:0"></div></div><span class="val">0°</span></div>
+      </div>
+      <div class="app sel">
+        <h4>Fill</h4>
+        <div class="top"><div class="big" id="dSw"></div><span class="muted" id="dHex">#E8572A</span></div>
+        <div class="row"><label>Hue</label><div class="track" id="dH"><div class="f"></div><div class="t"></div></div><span class="val" id="dHv"></span></div>
+        <div class="row"><label>Sat</label><div class="track" id="dS"><div class="f"></div><div class="t"></div></div><span class="val" id="dSv"></span></div>
+        <div class="row"><label>Bright</label><div class="track" id="dB"><div class="f"></div><div class="t"></div></div><span class="val" id="dBv"></span></div>
+      </div>
+      <div class="app">
+        <h4>Stroke</h4>
+        <div class="row"><label>Width</label><div class="track" id="dW"><div class="f"></div><div class="t"></div></div><span class="val" id="dWv"></span></div>
+        <div class="row"><label>Cap</label><div class="chips" id="dCap"><span class="chip" data-v="butt">Butt</span><span class="chip" data-v="round">Round</span><span class="chip" data-v="square">Sq</span></div></div>
+        <div class="row"><label>Corner</label><div class="chips" id="dJoin"><span class="chip" data-v="miter">Sharp</span><span class="chip" data-v="round">Round</span><span class="chip" data-v="bevel">Bevel</span></div></div>
+      </div>
+      <div class="app">
+        <h4>Opacity</h4>
+        <div class="row"><label>All</label><div class="track" id="dO"><div class="f" style="width:100%"></div><div class="t" style="left:100%"></div></div><span class="val" id="dOv">100</span></div>
+      </div>
+      <div class="app">
+        <h4>Live ellipse</h4>
+        <div class="row"><label>Radius X</label><div class="track gen" data-max="200" data-unit=""><div class="f" style="width:60%"></div><div class="t" style="left:60%"></div></div><span class="val">120</span></div>
+        <div class="row"><label>Radius Y</label><div class="track gen" data-max="200" data-unit=""><div class="f" style="width:40%"></div><div class="t" style="left:40%"></div></div><span class="val">80</span></div>
+        <div class="row"><label>Start</label><div class="track gen" data-max="360" data-unit="°"><div class="f" style="width:0"></div><div class="t" style="left:0"></div></div><span class="val">0°</span></div>
+      </div>
+      <div class="app">
+        <h4>Effects</h4>
+        <div class="row"><label>Shadow</label><div class="track gen" data-max="40" data-unit=" px"><div class="f" style="width:25%"></div><div class="t" style="left:25%"></div></div><span class="val">10 px</span></div>
+        <div class="row"><label>Blur</label><div class="track gen" data-max="40" data-unit=" px"><div class="f" style="width:0"></div><div class="t" style="left:0"></div></div><span class="val">0 px</span></div>
+      </div>
+      <div class="muted" style="font-size:11px;padding-bottom:8px">Fill, stroke and opacity show the same values as the popups; changing one updates the other. The other boxes are static here.</div>
+    </div>
+  </div>
+  <div id="work">
+  <div id="paper"></div>
+
+  <!-- COLOUR -->
+  <div class="view on" id="colour">
+    <svg class="art" width="900" height="520"><ellipse id="cEll" cx="450" cy="230" rx="120" ry="80" fill="#e8572a" stroke="#1f3a8a" stroke-width="6"/></svg>
+    <div class="card" style="left:560px;top:90px;width:244px">
+      <div class="head"><span><span class="key lit">C</span> <b>Fill colour</b></span><span class="muted"><span class="key">Space</span> fill / stroke</span></div>
+      <div class="ringwrap" id="rw">
+        <div class="ring" id="ring"></div>
+        <div class="sv" id="sv"></div>
+        <div class="dot" id="hueDot"></div>
+        <div class="dot" id="svDot"></div>
+      </div>
+      <div class="prev" style="margin-bottom:6px"><div id="old" style="background:#e8572a"></div><div id="new" style="background:#e8572a"></div></div>
+      <div class="muted" id="readout" style="margin-bottom:18px">H 14   S 82   B 91   #E8572A</div>
+      <div class="swatches" id="recents"></div>
+      <div class="muted" style="margin-top:20px;font-size:12px">Number row picks a recent colour. <span class="key">I</span> hold to sample from the canvas.</div>
+    </div>
+  </div>
+
+  <!-- GRADIENT -->
+  <div class="view" id="gradient">
+    <svg class="art" width="900" height="520">
+      <defs><linearGradient id="gGrad" gradientUnits="userSpaceOnUse" x1="350" y1="230" x2="560" y2="230"></linearGradient>
+        <clipPath id="gClip"><ellipse cx="450" cy="230" rx="170" ry="110"/></clipPath><g id="gRd"></g></defs>
+      <g id="gShape">
+        <ellipse id="gEll" cx="450" cy="230" rx="170" ry="110" fill="url(#gGrad)" stroke="#2a2a2a" stroke-width="2"/>
+        <g id="gPts" clip-path="url(#gClip)"></g>
+      </g>
+      <g id="gUi"></g>
+    </svg>
+    <div class="card" style="left:560px;top:50px;width:250px" id="gCard">
+      <div class="head"><span><b>Gradient</b></span><span class="muted"><span class="key">A</span> scrub angle</span></div>
+      <div class="chips" id="gModes" style="margin-bottom:10px"><span class="chip on" data-m="lin">Linear</span><span class="chip dis">Radial</span><span class="chip dis">Angular</span><span class="chip" data-m="pts">Points</span></div>
+      <div class="gbar" id="gBar"></div>
+      <div class="row"><label>Hue</label><div class="track" id="hTr"><div class="f"></div><div class="t"></div></div><span class="val" id="hVal">14</span></div>
+      <div class="row"><label>Light</label><div class="track" id="lTr"><div class="f"></div><div class="t"></div></div><span class="val" id="lVal">55</span></div>
+      <div class="muted" style="font-size:12px;margin:6px 0 10px" id="gHelp"></div>
+      <div class="head" style="margin:6px 0 2px"><span class="muted">Warp the shape to see the gradient follow</span><span class="chip" id="wReset">Reset</span></div>
+      <div class="row"><label>Rotate</label><div class="track" id="rTr"><div class="f"></div><div class="t"></div></div><span class="val" id="rVal"></span></div>
+      <div class="row"><label>Skew</label><div class="track" id="kTr"><div class="f"></div><div class="t"></div></div><span class="val" id="kVal"></span></div>
+      <div class="row"><label>Stretch</label><div class="track" id="sTr"><div class="f"></div><div class="t"></div></div><span class="val" id="sVal"></span></div>
+    </div>
+  </div>
+
+  <!-- STROKE -->
+  <div class="view" id="stroke">
+    <svg class="art" width="900" height="520">
+      <path id="sPath" d="M230 360 L330 220 L430 340 L530 200 L640 330" fill="none" stroke="#1f3a8a" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+      <g fill="#fff" stroke="#4c8dff" stroke-width="2"><rect x="224" y="354" width="12" height="12"/><rect x="324" y="214" width="12" height="12"/><rect x="424" y="334" width="12" height="12"/><rect x="524" y="194" width="12" height="12"/><rect x="634" y="324" width="12" height="12"/></g>
+    </svg>
+    <div class="card" style="left:660px;top:70px;width:224px;padding-bottom:8px;display:none"></div>
+    <div class="card" style="left:560px;top:70px;width:250px" id="sCard">
+      <div class="head"><span><span class="key lit">W</span> <b>Stroke</b></span><span class="muted">hold, move up/down</span></div>
+      <div class="row"><label>Width</label><div class="track" id="wTr"><div class="f"></div><div class="t"></div></div><span class="val" id="wVal">18 px</span></div>
+      <div class="muted" style="font-size:11px;margin:-2px 0 6px 62px">pressure drives it while drawing</div>
+      <div class="row"><label>Align</label><div class="chips" data-g="align"><span class="chip">Inside</span><span class="chip on">Centre</span><span class="chip">Outside</span></div></div>
+      <div class="row"><label>Cap</label><div class="chips" data-g="cap"><span class="chip" data-v="butt">Butt</span><span class="chip on" data-v="round">Round</span><span class="chip" data-v="square">Square</span></div></div>
+      <div class="row"><label>Corner</label><div class="chips" data-g="join"><span class="chip" data-v="miter">Sharp</span><span class="chip on" data-v="round">Round</span><span class="chip" data-v="bevel">Bevel</span></div></div>
+      <div class="row"><label>Dash</label><div class="chips" data-g="dash"><span class="chip on" data-v="none">Solid</span><span class="chip" data-v="dash">Dash</span><span class="chip" data-v="dot">Dots</span></div></div>
+      <div class="row" style="align-items:flex-start"><label style="padding-top:4px">Profile</label>
+        <div style="flex:1">
+          <div class="chips" data-g="profile"><span class="chip on">Even</span><span class="chip">Taper</span><span class="chip">Swell</span><span class="chip">Pressure</span></div>
+          <svg class="pro" viewBox="0 0 200 38"><path id="proP" d="M0 19 H200" stroke="#ffb454" stroke-width="10" fill="none"/></svg>
+        </div>
+      </div>
+      <div class="muted" style="font-size:12px">Profile is a picture only here. <span class="key">Shift</span> snaps width to 1 2 4 8 16 px.</div>
+    </div>
+  </div>
+
+  <!-- APPEARANCE HUB -->
+  <div class="view" id="hud">
+    <svg class="art" width="900" height="520"><ellipse cx="370" cy="250" rx="120" ry="80" fill="#e8572a" stroke="#1f3a8a" stroke-width="6"/></svg>
+    <div class="hud">
+      <h4>Live Ellipse - Appearance</h4>
+      <div class="app sel">
+        <div class="top"><div class="big" style="background:#e8572a"></div><b>Fill</b><span class="chip">Solid</span></div>
+        <div class="row"><label>Opacity</label><div class="track"><div class="f" style="width:100%"></div><div class="t" style="left:100%"></div></div><span class="val">100%</span></div>
+      </div>
+      <div class="app">
+        <div class="top"><div class="big" style="background:#1f3a8a"></div><b>Stroke</b><span class="chip">6 px</span></div>
+        <div class="row"><label>Cap</label><span class="chip on">Round</span><span class="chip">Centre</span><span class="chip">Solid</span></div>
+      </div>
+      <div class="app" style="opacity:.6">
+        <div class="top"><div class="big" style="background:repeating-linear-gradient(45deg,#333 0 4px,#444 4px 8px)"></div><b>+ Add fill</b></div>
+      </div>
+      <div class="app" style="opacity:.6">
+        <div class="top"><div class="big" style="background:repeating-linear-gradient(45deg,#333 0 4px,#444 4px 8px)"></div><b>+ Add stroke / effect</b></div>
+      </div>
+      <div class="muted" style="font-size:12px;margin-top:10px">Tapping a swatch opens the colour popup beside it. Tapping "Solid" switches to gradient. A row's own key (C, G, W) does the same from the keyboard. Stacked fills and strokes live here because they are rare and fiddly with the pen.</div>
+    </div>
+  </div>
+
+  </div>
+  <div id="bar">Colour</div>
+</div>
+
+<div class="notes">
+  <div class="n on" id="n-colour">
+    <h3>Colour</h3>
+    <ul>
+      <li><b>Hold C</b> opens the popup at the pen: hue ring with a saturation/brightness square inside. Drag the ring for hue, drag the square for S and B, release to keep.</li>
+      <li>The preview splits old and new, so a change can be judged against the original without undo.</li>
+      <li>Recent colours sit under the picker and on the number row (1 to 8), the keyboard hand's shortcut.</li>
+      <li>Space toggles fill or stroke while it is open, so one gesture covers both. Hold <b>I</b> to sample a colour from the canvas.</li>
+      <li>The quick H / S / L scrub keys from "Property scrubbing" stay: the popup is for choosing a colour, scrub is for nudging it.</li>
+    </ul>
+  </div>
+  <div class="n" id="n-gradient">
+    <h3>Gradient</h3>
+    <ul>
+      <li>The gradient is edited <b>on the shape</b>, with its line and stops drawn over it, not in a strip far away. A small card holds the type and the selected stop.</li>
+      <li>Stops are drag targets large enough for a pen. Tap the line to add one, drag one off the line to delete it; no separate add or remove buttons.</li>
+      <li>Selecting a stop shows its hue and lightness sliders in the card; a full colour popup opens with C while a stop is selected.</li>
+      <li>A (hold) scrubs the angle, as in the scrub decision. Linear, radial, angular and freeform share the same stop model; freeform places stops as points instead of a line.</li>
+    </ul>
+  </div>
+  <div class="n" id="n-stroke">
+    <h3>Stroke</h3>
+    <ul>
+      <li><b>Hold W</b> to scrub the width (existing behaviour); the card appears fixed at the pen and shows the rest of the stroke on one surface.</li>
+      <li>Cap, corner, dash and alignment are chips: one tap each, no dropdowns. Preview is the real stroke on the canvas.</li>
+      <li>Width profile: Even, Taper, Swell, or Pressure (record the pen's pressure as the profile while drawing). Dragging points on the profile graph for a custom shape comes later; the card shows what the choice does.</li>
+      <li>Dashes get a length/gap pair to scrub once Dash is on (not drawn here).</li>
+    </ul>
+  </div>
+  <h3>Docked toolbar and property boxes (the toggles at the top right)</h3>
+  <ul>
+    <li>Default is the plain canvas. Two switches, both off, bring back a conventional layout: a <b>toolbar</b> on the left with tools and their key letters, and <b>property boxes</b> on the right (Fill, Stroke, Opacity) in the same style as the popups.</li>
+    <li>They are translucent and float over the artwork, so the canvas keeps its full size. They show the same values as the popups, so either route works and they never disagree.</li>
+    <li>The same switches would sit in the settings ring and the Classic workspace path, so mouse users get a familiar layout without changing the pen workflow.</li>
+  </ul>
+  <div class="n" id="n-hud">
+    <h3>Appearance (the hub)</h3>
+    <ul>
+      <li>Reached from the "..." under the object ring's name. It is the one place with everything: all fills and strokes as rows, opacity, and later effects.</li>
+      <li>Each row's swatch opens the same colour popup, so there is only one colour editor. Docked to the right edge, hidden with Tab like other panels.</li>
+      <li>Most editing never needs it: C, G, W and the scrub keys cover the common cases from the keyboard.</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const bar = $('#bar');
+const barText = {
+  colour: 'Colour - hold C, drag ring and square, release keeps - Space fill/stroke - 1..8 recent - I sample',
+  gradient: 'Gradient - tap stop to select - tap line to add - drag off to remove - A scrub angle',
+  stroke: 'Stroke - hold W up/down for width - chips for cap, corner, dash - Shift snap',
+  hud: 'Appearance - Tab hides - C / G / W edit the row under focus'
+};
+$$('#tabs button').forEach(b => b.onclick = () => {
+  $$('#tabs button').forEach(x => x.classList.toggle('on', x === b));
+  $$('.view').forEach(v => v.classList.toggle('on', v.id === b.dataset.v));
+  $$('.notes .n').forEach(n => n.classList.toggle('on', n.id === 'n-' + b.dataset.v));
+  bar.textContent = barText[b.dataset.v];
+  $('#stage').classList.toggle('hubv', b.dataset.v === 'hud');
+});
+bar.textContent = barText.colour;
+
+let dockHook = () => {};
+function drag(el, fn) {
+  el.addEventListener('pointerdown', e => {
+    el.setPointerCapture(e.pointerId);
+    fn(e);
+    const mv = ev => fn(ev);
+    const up = () => { el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); };
+    el.addEventListener('pointermove', mv);
+    el.addEventListener('pointerup', up);
+  });
+}
+function hsb2rgb(h, s, v) {
+  s /= 100; v /= 100;
+  const f = n => { const k = (n + h / 60) % 6; return v - v * s * Math.max(0, Math.min(k, 4 - k, 1)); };
+  return [f(5), f(3), f(1)].map(x => Math.round(x * 255));
+}
+const hex = c => '#' + c.map(x => x.toString(16).padStart(2, '0')).join('').toUpperCase();
+
+/* colour */
+const C = { h: 14, s: 82, b: 91 };
+const rw = $('#rw'), sv = $('#sv');
+function paintColour() {
+  const col = hex(hsb2rgb(C.h, C.s, C.b));
+  sv.style.background = `linear-gradient(to top,#000,transparent),linear-gradient(to right,#fff,hsl(${C.h} 100% 50%))`;
+  const a = (C.h - 90) * Math.PI / 180;
+  Object.assign($('#hueDot').style, { left: 95 + Math.cos(a) * 80 + 'px', top: 95 + Math.sin(a) * 80 + 'px', background: `hsl(${C.h} 100% 50%)` });
+  Object.assign($('#svDot').style, { left: 50 + C.s * 0.9 + 'px', top: 50 + (100 - C.b) * 0.9 + 'px', background: col });
+  $('#new').style.background = col;
+  $('#cEll').setAttribute('fill', col);
+  $('#readout').textContent = `H ${Math.round(C.h)}   S ${Math.round(C.s)}   B ${Math.round(C.b)}   ${col}`;
+  dockHook();
+}
+drag(rw, e => {
+  const r = rw.getBoundingClientRect(), x = e.clientX - r.left - 95, y = e.clientY - r.top - 95;
+  if (rw.dataset.m === undefined || e.type === 'pointerdown') rw.dataset.m = Math.hypot(x, y) > 62 ? 'h' : 's';
+  if (rw.dataset.m === 'h') C.h = (Math.atan2(y, x) * 180 / Math.PI + 90 + 360) % 360;
+  else { C.s = Math.max(0, Math.min(100, (x + 45) / 90 * 100)); C.b = Math.max(0, Math.min(100, 100 - (y + 45) / 90 * 100)); }
+  paintColour();
+});
+['#e8572a', '#f5b700', '#4caf50', '#1f3a8a', '#8e44ad', '#ffffff', '#888888', '#111111'].forEach((c, i) => {
+  const d = document.createElement('div'); d.className = 'sw'; d.style.background = c; d.innerHTML = `<i>${i + 1}</i>`;
+  d.onclick = () => {
+    const r = parseInt(c.slice(1, 3), 16) / 255, g = parseInt(c.slice(3, 5), 16) / 255, b = parseInt(c.slice(5, 7), 16) / 255;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d2 = mx - mn;
+    let h = d2 === 0 ? 0 : mx === r ? ((g - b) / d2 + 6) % 6 : mx === g ? (b - r) / d2 + 2 : (r - g) / d2 + 4;
+    C.h = h * 60; C.s = mx === 0 ? 0 : d2 / mx * 100; C.b = mx * 100; paintColour();
+  };
+  $('#recents').appendChild(d);
+});
+paintColour();
+
+/* gradient: stops and points live in the shape's own coordinates, so warping the shape moves them with it */
+const G = {
+  mode: 'lin', sel: 0, rot: 0, skew: 0, str: 1, x1: 350, y1: 230, x2: 560, y2: 230,
+  stops: [{ t: 0, h: 14, l: 55 }, { t: .55, h: 45, l: 60 }, { t: 1, h: 210, l: 45 }],
+  pts: [{ x: 400, y: 190, h: 14, l: 55 }, { x: 520, y: 270, h: 210, l: 50 }, { x: 470, y: 160, h: 50, l: 60 }, { x: 380, y: 280, h: 300, l: 55 }]
+};
+const NS = 'http://www.w3.org/2000/svg';
+const stopCol = s => `hsl(${s.h} 85% ${s.l}%)`;
+const items = () => G.mode === 'lin' ? G.stops : G.pts;
+const matrix = () => new DOMMatrix().translate(450, 230).rotate(G.rot).skewX(G.skew).scale(G.str, 1).translate(-450, -230);
+const toScreen = (x, y) => { const p = matrix().transformPoint(new DOMPoint(x, y)); return [p.x, p.y]; };
+const toLocal = (x, y) => { const p = matrix().inverse().transformPoint(new DOMPoint(x, y)); return [p.x, p.y]; };
+const inShape = (x, y, k = 1) => ((x - 450) / 170) ** 2 + ((y - 230) / 110) ** 2 <= k;
+function paintGrad() {
+  const m = matrix();
+  $('#gShape').setAttribute('transform', `matrix(${m.a} ${m.b} ${m.c} ${m.d} ${m.e} ${m.f})`);
+  const gr = $('#gGrad');
+  gr.setAttribute('x1', G.x1); gr.setAttribute('y1', G.y1); gr.setAttribute('x2', G.x2); gr.setAttribute('y2', G.y2);
+  gr.innerHTML = G.stops.map(s => `<stop offset="${s.t}" stop-color="${stopCol(s)}"/>`).join('');
+  const lin = G.mode === 'lin';
+  $('#gEll').setAttribute('fill', lin ? 'url(#gGrad)' : stopCol(G.pts[0]));
+  $('#gRd').innerHTML = lin ? '' : G.pts.map((p, i) => `<radialGradient id="gR${i}" gradientUnits="userSpaceOnUse" cx="${p.x}" cy="${p.y}" r="150"><stop offset="0" stop-color="${stopCol(p)}"/><stop offset="1" stop-color="${stopCol(p)}" stop-opacity="0"/></radialGradient>`).join('');
+  $('#gPts').innerHTML = lin ? '' : G.pts.map((p, i) => `<circle cx="${p.x}" cy="${p.y}" r="150" fill="url(#gR${i})"/>`).join('');
+  $('#gBar').style.display = lin ? '' : 'none';
+  $('#gBar').style.background = `linear-gradient(to right,${G.stops.map(s => `${stopCol(s)} ${s.t * 100}%`).join(',')})`;
+  $('#gHelp').textContent = lin
+    ? 'Tap a stop to select it, drag along the line. Tap the line to add a stop; drag a stop off the line to remove it. Drag a line end to move or rotate.'
+    : 'Tap the shape to add a colour point; drag a point to move it, drag it off the shape to remove it. Points belong to the shape, not the page.';
+  $$('#gModes .chip').forEach(c => c.classList.toggle('on', c.dataset.m === G.mode));
+  const ui = $('#gUi'); ui.innerHTML = '';
+  const mk = (tag, a) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, a[k]); ui.appendChild(e); return e; };
+  if (lin) {
+    const [ax, ay] = toScreen(G.x1, G.y1), [bx, by] = toScreen(G.x2, G.y2);
+    const line = mk('line', { x1: ax, y1: ay, x2: bx, y2: by, stroke: '#fff', 'stroke-width': 5, opacity: .9, class: 'gh' });
+    mk('line', { x1: ax, y1: ay, x2: bx, y2: by, stroke: '#111', 'stroke-width': 1.5, 'pointer-events': 'none' });
+    [[ax, ay, 'a'], [bx, by, 'b']].forEach(([x, y, k]) => {
+      mk('rect', { x: x - 5, y: y - 5, width: 10, height: 10, fill: '#17181b', stroke: '#fff', 'stroke-width': 2, class: 'gh' }).addEventListener('pointerdown', ev => startEnd(ev, k));
+    });
+    line.addEventListener('pointerdown', addStop);
+    G.stops.forEach((s, i) => {
+      const [x, y] = toScreen(G.x1 + (G.x2 - G.x1) * s.t, G.y1 + (G.y2 - G.y1) * s.t);
+      mk('circle', { cx: x, cy: y, r: i === G.sel ? 13 : 10, fill: stopCol(s), stroke: i === G.sel ? '#ffb454' : '#fff', 'stroke-width': i === G.sel ? 4 : 3, class: 'gh' }).addEventListener('pointerdown', ev => startItem(ev, i));
+    });
+  } else {
+    G.pts.forEach((p, i) => {
+      const [x, y] = toScreen(p.x, p.y);
+      mk('circle', { cx: x, cy: y, r: i === G.sel ? 13 : 10, fill: stopCol(p), stroke: i === G.sel ? '#ffb454' : '#fff', 'stroke-width': i === G.sel ? 4 : 3, class: 'gh' }).addEventListener('pointerdown', ev => startItem(ev, i));
+    });
+  }
+  const s = items()[G.sel] || items()[0];
+  $('#hTr .f').style.width = $('#hTr .t').style.left = s.h / 360 * 100 + '%'; $('#hVal').textContent = Math.round(s.h);
+  $('#lTr .f').style.width = $('#lTr .t').style.left = (s.l - 10) / 80 * 100 + '%'; $('#lVal').textContent = Math.round(s.l);
+  const tv = (id, v, txt) => { $(id + ' .f').style.width = $(id + ' .t').style.left = v * 100 + '%'; $(id.replace('Tr', 'Val')).textContent = txt; };
+  tv('#rTr', (G.rot + 45) / 90, Math.round(G.rot) + '°'); tv('#kTr', (G.skew + 40) / 80, Math.round(G.skew) + '°'); tv('#sTr', (G.str - .5) / 1.5, G.str.toFixed(2));
+}
+const local = e => { const r = $('#gradient svg').getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+function along(x, y) {
+  const dx = G.x2 - G.x1, dy = G.y2 - G.y1, l2 = dx * dx + dy * dy;
+  const t = ((x - G.x1) * dx + (y - G.y1) * dy) / l2;
+  return { t, off: Math.hypot(x - (G.x1 + dx * t), y - (G.y1 + dy * t)) };
+}
+function track(ev, fn, end) {
+  ev.preventDefault(); ev.stopPropagation();
+  const mv = e => { fn(...toLocal(...local(e))); paintGrad(); };
+  const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); end && end(); paintGrad(); };
+  window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+}
+function startItem(ev, i) {
+  G.sel = i; paintGrad();
+  const list = items();
+  track(ev, (x, y) => {
+    if (G.mode === 'lin') {
+      const a = along(x, y);
+      G.removing = a.off > 50 && list.length > 2;
+      if (!G.removing) list[i].t = Math.max(0, Math.min(1, a.t));
+    } else {
+      G.removing = !inShape(x, y, 1.7) && list.length > 2;
+      if (!G.removing) { list[i].x = x; list[i].y = y; }
+    }
+  }, () => {
+    if (G.removing) { list.splice(i, 1); G.sel = 0; }
+    G.removing = false;
+    if (G.mode === 'lin') { const cur = list[G.sel]; list.sort((p, q) => p.t - q.t); G.sel = Math.max(0, list.indexOf(cur)); }
+  });
+}
+function startEnd(ev, k) {
+  track(ev, (x, y) => { if (k === 'a') { G.x1 = x; G.y1 = y; } else { G.x2 = x; G.y2 = y; } });
+}
+function addStop(ev) {
+  ev.preventDefault(); ev.stopPropagation();
+  const [x, y] = toLocal(...local(ev)), t = Math.max(.02, Math.min(.98, along(x, y).t));
+  const s = { t, h: 120, l: 50 }; G.stops.push(s); G.stops.sort((p, q) => p.t - q.t); G.sel = G.stops.indexOf(s); paintGrad();
+}
+$('#gEll').addEventListener('pointerdown', ev => {
+  if (G.mode !== 'pts') return;
+  const [x, y] = toLocal(...local(ev));
+  const p = { x, y, h: Math.round(Math.random() * 360), l: 55 }; G.pts.push(p); G.sel = G.pts.length - 1; paintGrad();
+});
+$$('#gModes .chip[data-m]').forEach(c => c.onclick = () => { G.mode = c.dataset.m; G.sel = 0; paintGrad(); });
+function slider(id, fn) { drag($(id), e => { const r = $(id).getBoundingClientRect(); fn(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width))); }); }
+slider('#hTr', v => { items()[G.sel].h = v * 360; paintGrad(); });
+slider('#lTr', v => { items()[G.sel].l = 10 + v * 80; paintGrad(); });
+slider('#rTr', v => { G.rot = v * 90 - 45; paintGrad(); });
+slider('#kTr', v => { G.skew = v * 80 - 40; paintGrad(); });
+slider('#sTr', v => { G.str = .5 + v * 1.5; paintGrad(); });
+$('#wReset').onclick = () => { G.rot = 0; G.skew = 0; G.str = 1; paintGrad(); };
+paintGrad();
+
+/* stroke */
+const W = { w: 18, cap: 'round', join: 'round', dash: 'none' };
+function paintStroke() {
+  const p = $('#sPath');
+  p.setAttribute('stroke-width', W.w);
+  p.setAttribute('stroke-linecap', W.dash === 'dot' ? 'round' : W.cap);
+  p.setAttribute('stroke-linejoin', W.join);
+  p.setAttribute('stroke-dasharray', W.dash === 'dash' ? `${W.w * 2.5} ${W.w * 1.2}` : W.dash === 'dot' ? `0.1 ${W.w * 1.8}` : '');
+  $('#wTr .f').style.width = $('#wTr .t').style.left = (W.w - 1) / 47 * 100 + '%';
+  $('#wVal').textContent = Math.round(W.w) + ' px';
+  dockHook();
+}
+drag($('#wTr'), e => {
+  const r = $('#wTr').getBoundingClientRect(); let v = 1 + Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * 47;
+  if (e.shiftKey) v = [1, 2, 4, 8, 16, 32].reduce((a, b) => Math.abs(a - v) < Math.abs(b - v) ? a : b);
+  W.w = v; paintStroke();
+});
+$$('#sCard .chips').forEach(g => $$('.chip', g).forEach(c => c.onclick = () => {
+  $$('.chip', g).forEach(x => x.classList.toggle('on', x === c));
+  if (g.dataset.g === 'cap' || g.dataset.g === 'join' || g.dataset.g === 'dash') W[g.dataset.g] = c.dataset.v;
+  if (g.dataset.g === 'profile') {
+    const d = { Even: 'M0 19 H200', Taper: 'M0 19 L200 19', Swell: 'M0 19 H200', Pressure: 'M0 19 H200' }[c.textContent];
+    const shapes = { Even: 'M0 14 H200 V24 H0Z', Taper: 'M0 8 L200 19 L0 30Z', Swell: 'M0 19 Q100 0 200 19 Q100 38 0 19Z', Pressure: 'M0 17 Q30 6 60 15 T120 20 T200 16 V22 Q170 28 120 26 T60 22 T0 21Z' };
+    $('#proP').outerHTML = `<path id="proP" d="${shapes[c.textContent]}" fill="#ffb454"/>`;
+  }
+  paintStroke();
+}));
+paintStroke();
+
+/* docked toolbar and property boxes (both off by default) */
+const TOOLS = [['V', '⬉', 'Select'], ['A', '▷', 'Direct select'], ['-'], ['P', '✎', 'Pen'], ['B', '🖌', 'Brush'], ['-'],
+  ['R', '▭', 'Rectangle'], ['E', '◯', 'Ellipse'], ['S', '☆', 'Star'], ['T', 'T', 'Text'], ['-'], ['G', '◧', 'Gradient'], ['I', '💧', 'Eyedropper'], ['Z', '🔍', 'Zoom']];
+TOOLS.forEach(t => {
+  if (t[0] === '-') { const s = document.createElement('div'); s.className = 'tsep'; $('#tools').appendChild(s); return; }
+  const b = document.createElement('button'); b.className = 'tool' + (t[0] === 'V' ? ' on' : ''); b.title = t[2] + ' (' + t[0] + ')';
+  b.innerHTML = `${t[1]}<i>${t[0]}</i>`;
+  b.onclick = () => { $$('.tool').forEach(x => x.classList.toggle('on', x === b)); bar.textContent = t[2] + ' - the key ' + t[0] + ' does the same'; };
+  $('#tools').appendChild(b);
+});
+function setTrack(id, v, text) {
+  $(id + ' .f').style.width = v * 100 + '%'; $(id + ' .t').style.left = v * 100 + '%'; $(id + 'v').textContent = text;
+}
+function paintDock() {
+  const col = hex(hsb2rgb(C.h, C.s, C.b));
+  $('#dSw').style.background = col; $('#dHex').textContent = col;
+  setTrack('#dH', C.h / 360, Math.round(C.h)); setTrack('#dS', C.s / 100, Math.round(C.s)); setTrack('#dB', C.b / 100, Math.round(C.b));
+  setTrack('#dW', (W.w - 1) / 47, Math.round(W.w));
+  $$('#dCap .chip').forEach(c => c.classList.toggle('on', c.dataset.v === W.cap));
+  $$('#dJoin .chip').forEach(c => c.classList.toggle('on', c.dataset.v === W.join));
+}
+dockHook = paintDock;
+const trk = (id, fn) => drag($(id), e => { const r = $(id).getBoundingClientRect(); fn(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width))); });
+trk('#dH', v => { C.h = v * 360; paintColour(); });
+trk('#dS', v => { C.s = v * 100; paintColour(); });
+trk('#dB', v => { C.b = v * 100; paintColour(); });
+trk('#dW', v => { W.w = 1 + v * 47; paintStroke(); });
+trk('#dO', v => { setTrack('#dO', v, Math.round(v * 100)); });
+$$('#dCap .chip').forEach(c => c.onclick = () => { W.cap = c.dataset.v; $$('#sCard [data-g=cap] .chip').forEach(x => x.classList.toggle('on', x.dataset.v === W.cap)); paintStroke(); });
+$$('#dJoin .chip').forEach(c => c.onclick = () => { W.join = c.dataset.v; $$('#sCard [data-g=join] .chip').forEach(x => x.classList.toggle('on', x.dataset.v === W.join)); paintStroke(); });
+const dockOn = { tb: false, pp: false };
+function layoutDock() {
+  const dock = $('#dock');
+  dock.classList.toggle('tb', dockOn.tb); dock.classList.toggle('pp', dockOn.pp);
+}
+[['#optTb', 'tb'], ['#optPp', 'pp']].forEach(([id, k]) => $(id).onclick = () => { dockOn[k] = !dockOn[k]; $(id).classList.toggle('on', dockOn[k]); layoutDock(); });
+$('#fsz').oninput = e => { $('#props').style.setProperty('--pfs', e.target.value); $('#fszV').textContent = e.target.value; };
+$('#optTr').onclick = () => { const on = !$('#optTr').classList.contains('on'); $('#optTr').classList.toggle('on', on); $('#dock').classList.toggle('noblur', !on); };
+$$('.track.gen').forEach(t => drag(t, e => {
+  const r = t.getBoundingClientRect(), v = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+  t.querySelector('.f').style.width = t.querySelector('.t').style.left = v * 100 + '%';
+  t.nextElementSibling.textContent = Math.round(v * Number(t.dataset.max)) + t.dataset.unit;
+}));
+paintDock();
+</script>
+</body>
+</html>

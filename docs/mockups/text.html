@@ -1,0 +1,1000 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curvy text and fonts</title>
+<style>
+  :root {
+    --bg: #1e1f22; --panel: #26272b; --workspace: #2b2d31; --paper: #f4f4f2; --text: #e6e7ea; --muted: #9a9ea8;
+    --accent: #4c8dff; --amber: #ffb454; --slot: #313338; --slotLine: #4a4d55;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid #000; }
+  header h1 { margin: 0 0 4px; font-size: 15px; }
+  header p { margin: 0; color: var(--muted); max-width: 980px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 18px; padding: 10px 16px; background: #222327; border-bottom: 1px solid #000; align-items: center; }
+  .group { display: flex; align-items: center; gap: 6px; }
+  .group > span { color: var(--muted); margin-right: 4px; }
+  button { background: var(--slot); color: var(--text); border: 1px solid var(--slotLine); border-radius: 14px; padding: 4px 12px; font: inherit; cursor: pointer; }
+  button.on { background: var(--accent); border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: default; }
+  label { color: var(--muted); display: flex; align-items: center; gap: 5px; }
+  #stage { position: relative; width: 900px; height: 540px; margin: 16px auto 8px; background: var(--workspace); border: 1px solid #000; overflow: hidden; cursor: default; user-select: none; touch-action: none; }
+  #stage.textTool { cursor: text; }
+  #svg, #over { position: absolute; left: 0; top: 0; }
+  #over { pointer-events: none; }
+  #texts { position: absolute; left: 0; top: 0; width: 900px; height: 540px; pointer-events: none; }
+  .t { position: absolute; pointer-events: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .t.area { overflow: hidden; }
+  .t.editing { user-select: text; cursor: text; outline: none; overflow: visible; }
+  #badge { position: absolute; display: none; padding: 1px 7px; border-radius: 9px; background: #17181bf0; border: 1px solid #5a5d66; color: var(--amber); font-size: 11px; white-space: nowrap; pointer-events: none; z-index: 6; }
+  #pathEdit { position: absolute; display: none; min-width: 160px; max-width: 320px; padding: 6px 10px; background: #17181bf0; border: 1px solid var(--accent); border-radius: 8px; color: var(--text); font: 14px "Segoe UI"; outline: none; user-select: text; white-space: pre; z-index: 5; }
+  #hud { position: absolute; right: 12px; top: 12px; width: 236px; max-height: 504px; overflow: auto; padding: 8px 12px 10px; background: #17181bf0; border: 1px solid #5a5d66; border-radius: 10px; box-shadow: 0 3px 10px #0007; display: none; z-index: 4; }
+  #hud .node { border: 1px solid #3a3d43; border-radius: 8px; padding: 6px 8px 7px; }
+  #hud .head { display: flex; justify-content: space-between; margin-bottom: 4px; }
+  #hud .head b { color: var(--text); }
+  #hud .head span { color: var(--muted); font-size: 11px; }
+  #hud .link { text-align: center; color: var(--accent); font-size: 11px; line-height: 1.1; }
+  #hud .row { display: flex; align-items: center; gap: 6px; margin: 4px 0; color: var(--muted); font-size: 12px; }
+  #hud .row .lab { width: 54px; flex: none; }
+  #hud input[type=range] { width: 92px; }
+  #hud .mono { font-variant-numeric: tabular-nums; color: var(--text); }
+  #hud .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+  #hud .chips button, #hud button.small { padding: 2px 8px; font-size: 11px; border-radius: 10px; }
+  #hud .fontbtn { width: 100%; text-align: left; border-radius: 8px; font-size: 15px; padding: 3px 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  #hud .note { color: var(--amber); font-size: 11px; margin: 4px 0; }
+  #hud .sw { width: 18px; height: 18px; border-radius: 4px; border: 1px solid #5a5d66; padding: 0; }
+  #hud .sw.on { outline: 2px solid var(--amber); }
+  #hint { position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: var(--panel); border-top: 1px solid #000; color: var(--muted); padding: 3px 10px; white-space: nowrap; font-size: 12px; display: flex; align-items: center; gap: 12px; z-index: 3; overflow: hidden; }
+  #hint .tool { color: var(--amber); font-weight: 600; }
+  #hint .main { color: var(--text); }
+  #hint .grow { flex: 1; }
+  .key { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border-radius: 6px; background: #3a3d43; border: 1px solid #5a5d66; color: var(--text); font: 600 11px/18px "Segoe UI"; }
+  .key.lit { background: var(--amber); color: #1b1b1b; border-color: var(--amber); }
+  .mod { display: inline-flex; align-items: center; gap: 4px; }
+  #scrub { position: absolute; display: none; width: 210px; padding: 8px 12px 12px; background: #17181bf0; border: 1px solid #5a5d66; border-radius: 10px; box-shadow: 0 3px 10px #0007; z-index: 6; }
+  #scrub .head { display: flex; justify-content: space-between; margin-bottom: 10px; }
+  #scrub .head b { color: var(--amber); }
+  #scrub .track { position: relative; height: 6px; border-radius: 3px; background: #3a3d43; }
+  #scrub .fill { height: 100%; border-radius: 3px; background: var(--amber); }
+  #scrub .thumb { position: absolute; top: -5px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: var(--amber); border: 2px solid #17181b; }
+  #scrub .sub { margin-top: 10px; color: var(--muted); font-size: 11px; }
+  #scrub .frow { padding: 2px 6px; border-radius: 6px; font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #8a8e98; }
+  #scrub .frow.cur { background: #3a3d43; color: var(--text); }
+  #fontCard { position: absolute; display: none; width: 340px; height: 430px; padding: 8px; background: #17181bf0; border: 1px solid #5a5d66; border-radius: 10px; box-shadow: 0 3px 10px #0007; z-index: 7; flex-direction: column; gap: 6px; }
+  #fontCard input { width: 100%; background: #2a2c31; color: var(--text); border: 1px solid #4a4d55; border-radius: 6px; padding: 4px 8px; font: inherit; }
+  #fontCard .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  #fontCard .chips button { padding: 1px 8px; font-size: 11px; border-radius: 10px; }
+  #fontCard .list { flex: 1; overflow: auto; border: 1px solid #3a3d43; border-radius: 6px; }
+  #fontCard .frow { display: flex; align-items: center; gap: 6px; padding: 3px 8px; cursor: pointer; }
+  #fontCard .frow:hover, #fontCard .frow.cur { background: #30333a; }
+  #fontCard .frow .nm { font-size: 19px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #fontCard .frow .tag { font-size: 10px; color: var(--muted); border: 1px solid #4a4d55; border-radius: 8px; padding: 0 5px; }
+  #fontCard .frow .star { color: #5a5d66; cursor: pointer; }
+  #fontCard .frow .star.on { color: var(--amber); }
+  #fontCard .frow .in { color: var(--accent); font-size: 11px; }
+  #fontCard .foot { color: var(--muted); font-size: 11px; display: flex; justify-content: space-between; }
+  #ring { position: absolute; width: 0; height: 0; z-index: 8; }
+  #ring .hub { position: absolute; left: -34px; top: -34px; width: 68px; height: 68px; border-radius: 50%; background: #17181bf0; border: 1px solid #5a5d66; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; color: var(--amber); line-height: 1.2; }
+  #ring .hub small { color: var(--muted); }
+  #ring .slot { position: absolute; transform: translate(-50%, -50%); width: 104px; height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 8px; border-radius: 15px; background: #17181bf0; border: 1px solid #5a5d66; color: var(--text); cursor: pointer; font-size: 12px; white-space: nowrap; }
+  #ring .slot:hover { border-color: var(--amber); background: #2b2d33; }
+  #ring .slot.off { opacity: .35; cursor: default; }
+  #ring .slot .key { height: 18px; min-width: 18px; justify-content: center; }
+  #toast { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); padding: 4px 12px; border-radius: 8px; background: #17181bf0; border: 1px solid #5a5d66; display: none; color: var(--amber); z-index: 9; }
+  #notes { width: 900px; margin: 0 auto 24px; color: var(--muted); }
+  #notes h2 { color: var(--text); font-size: 13px; margin: 14px 0 4px; }
+  #notes li { margin-bottom: 4px; }
+  #notes b { color: var(--text); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Text and fonts</h1>
+  <p>Text is a node (<code>Text</code> &rsaquo; <code>Glyphs</code> &rsaquo; <code>Fill</code>), not a separate kind of object. Try it: with the Text tool click empty canvas for point text, drag for area text (it wraps), or click the grey curves for text on a path.
+  Tap <b>F</b> over a text object for the font card, or hold <b>F</b> and move up/down to scrub through fonts. Hold <b>S</b> size, <b>K</b> tracking (kerning when the pen sits between two letters), <b>L</b> leading, <b>E</b> weight, <b>N</b> width.</p>
+</header>
+<div class="controls">
+  <div class="group"><span>Tool</span>
+    <button id="tSel" class="on">Select <span class="key">V</span></button>
+    <button id="tText">Text <span class="key">T</span></button>
+  </div>
+  <div class="group"><label><input id="cGuides" type="checkbox"> typography guides</label><label><input id="cKern" type="checkbox"> kerning view</label></div>
+  <div class="group">
+    <button id="bUndo">Undo</button>
+    <button id="bRedo">Redo</button>
+    <button id="bReset">Reset sample</button>
+  </div>
+</div>
+
+<div id="stage">
+  <svg id="svg" width="900" height="540" viewBox="0 0 900 540">
+    <rect x="40" y="20" width="820" height="460" fill="#f4f4f2"/>
+    <g id="curves"></g>
+    <g id="pathTexts"></g>
+  </svg>
+  <div id="texts"></div>
+  <svg id="over" width="900" height="540" viewBox="0 0 900 540"></svg>
+  <div id="pathEdit" contenteditable="true"></div>
+  <div id="hud"></div>
+  <div id="fontCard"></div>
+  <div id="scrub"></div>
+  <div id="badge"></div>
+  <div id="toast"></div>
+  <div id="hint"></div>
+</div>
+
+<div id="notes">
+  <h2>How it works (proposal)</h2>
+  <ul>
+    <li><b>Creating text (T).</b> Click empty canvas = point text (grows as you type), drag = area text (wraps in the box, a red + marks overflow), click a curve = text on that path (the badge says so on hover). Click existing text to edit it. Esc or clicking elsewhere finishes; empty text disappears.</li>
+    <li><b>Fonts (F).</b> Tap F over text for the font card: search, filters (Document, Recent, Favourites, Serif, Sans, Mono, Script, Display), each family drawn in itself. Hovering a row previews it on the real text, click keeps it (one undo step), arrows and Enter work too. <b>Hold F and move vertically</b> to step through the installed fonts with the text updating live; release keeps it. Missing fonts are listed in the HUD with a Replace button that opens the same card.</li>
+    <li><b>Space ring.</b> Tap Space (or press the barrel button) over text for the <b>text ring</b>: Edit, Font, Style (cycles Regular / Bold / Italic, or the weight of a variable font), Align (cycles), To path / Detach, Outlines, Fill (cycles the swatches) and Clear kern; the hub "Text ..." is where the full character and paragraph panel will open. Over empty canvas or an empty curve it is the <b>creation ring</b>, where only the Text slot works in this mockup. While you are typing Space types a space, so use the barrel button there.</li>
+    <li><b>Kerning, three ways.</b> (1) <b>In the text</b>, as in Illustrator: with the caret between two letters Alt+&larr;/&rarr; moves the pair by 20/1000 em, Ctrl+Alt makes it five times that; with a range selected the same keys add the step after every selected letter (tracking over a range). An amber tick and the pair label flash at the gap. (2) <b>Hold K</b> with the pen between two letters and scrub. (3) The <b>kerning view</b> toggle in the header puts a tick on every gap of the selected text; drag a tick sideways to kern that pair directly, and the values are listed in the Glyphs box. <b>Auto kern</b> (Metrics / Off) is the font's own pair kerning underneath, and the overrides are added on top of it. Optical kerning (spacing from the letter shapes) is not mocked.</li>
+    <li><b>Hold-key scrubbing</b> follows the rule from the other mockups: the object under the pen (or the selection), vertical travel, release commits as one step, Shift snaps size to common sizes. S size, K tracking, L leading, E weight, N width (the last two only for a variable font such as Bahnschrift). With the pen between two letters K changes the <b>kerning of that pair</b> instead, and an amber tick marks which gap. Letters are placeholders like the others.</li>
+    <li><b>Select tool (V).</b> Drag text to move it; area text has handles to resize the box; text on a path has an amber handle at its start that slides it along the curve. Double-click text to edit.</li>
+    <li><b>Typography guides</b> (toggle, and shown while scrubbing size/leading): baseline, x-height and cap-height lines measured from the actual font.</li>
+  </ul>
+  <h2>What this means for the graph and the code</h2>
+  <ul>
+    <li>A text object is a <code>Text</code> node (string, font, style or variable axes, size, tracking, leading, alignment, box or path input) feeding a <code>Glyphs</code> node that outputs one primitive per glyph with outline geometry and point/primitive attributes (advance, kerning, baseline shift, rotation, glyph index). Hand-set kerning is just an attribute override on the glyph, in the same spirit as the pen's pressure attribute, so downstream nodes can modify it (a wave or random-baseline node would be an ordinary attribute node).</li>
+    <li><b>Text on a path</b> is the same <code>Text</code> node with a path input: the shared <code>bezierPath</code> node, a start offset and a side. Editing the curve with the pen moves the text; the text never owns the curve.</li>
+    <li><b>Convert to outlines</b> is a bake like <code>fitCurve</code>: the Glyphs node becomes plain <code>bezierPath</code> nodes, the string and font are dropped, editing is blocked with a hint, and undo brings the text back.</li>
+    <li>Fonts are document resources (the Fonts tab of the document card): used, installed, embedded or missing. A missing font keeps its name and renders with a substitute until replaced.</li>
+    <li>Risk to check before building: Blend2D loads fonts and returns glyph outlines, but its shaping is basic (I believe kerning only; not verified), so ligatures, complex scripts and right-to-left text may need HarfBuzz as a separate dependency.</li>
+  </ul>
+  <h2>Not in this mockup</h2>
+  <ul>
+    <li>OpenType features (ligatures, small caps, stylistic sets), paragraph and character styles, threading text between boxes, vertical and right-to-left text, hyphenation, per-character selection styling (bold one word), a glyph palette for alternates, and text on a closed shape (inside/outside). The sample draws with the browser's text engine, so wrapping and kerning here are approximations of what curvy would do.</li>
+  </ul>
+</div>
+
+<script>
+const stage = document.getElementById('stage'), textsEl = document.getElementById('texts'), over = document.getElementById('over');
+const hud = document.getElementById('hud'), hintEl = document.getElementById('hint'), badge = document.getElementById('badge');
+const scrubEl = document.getElementById('scrub'), toastEl = document.getElementById('toast'), fontCard = document.getElementById('fontCard');
+const pathEdit = document.getElementById('pathEdit'), curvesG = document.getElementById('curves'), pathTextsG = document.getElementById('pathTexts');
+const NS = 'http://www.w3.org/2000/svg';
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+const FONTS = [
+  { n: 'Segoe UI', k: 'sans' }, { n: 'Bahnschrift', k: 'sans', v: true }, { n: 'Arial', k: 'sans' }, { n: 'Verdana', k: 'sans' },
+  { n: 'Trebuchet MS', k: 'sans' }, { n: 'Candara', k: 'sans' }, { n: 'Corbel', k: 'sans' },
+  { n: 'Georgia', k: 'serif' }, { n: 'Cambria', k: 'serif' }, { n: 'Palatino Linotype', k: 'serif' }, { n: 'Times New Roman', k: 'serif' },
+  { n: 'Consolas', k: 'mono' }, { n: 'Courier New', k: 'mono' },
+  { n: 'Segoe Script', k: 'script' }, { n: 'Ink Free', k: 'script' }, { n: 'Brush Script MT', k: 'script' }, { n: 'Lucida Handwriting', k: 'script' }, { n: 'Caveat', k: 'script' },
+  { n: 'Impact', k: 'display' }, { n: 'Comic Sans MS', k: 'display' },
+];
+const FALLBACK = { sans: 'sans-serif', serif: 'serif', mono: 'monospace', script: 'cursive', display: 'sans-serif' };
+const cv = document.createElement('canvas').getContext('2d');
+function isInstalled(name) {
+  const t = 'mmmmmmmmmmlli';
+  for (const base of ['monospace', 'serif', 'sans-serif']) {
+    cv.font = '72px ' + base; const w0 = cv.measureText(t).width;
+    cv.font = '72px "' + name + '", ' + base;
+    if (cv.measureText(t).width !== w0) return true;
+  }
+  return false;
+}
+FONTS.forEach(f => { f.ok = isInstalled(f.n); });
+const fontMeta = name => FONTS.find(f => f.n === name) || { n: name, k: 'sans', ok: false };
+const installed = () => FONTS.filter(f => f.ok);
+
+const CURVES = [
+  { id: 'c1', d: 'M 60 440 C 220 330, 360 480, 540 390' },
+  { id: 'c2', d: 'M 390 125 C 460 45, 570 45, 640 125' },
+];
+
+const SAMPLE = () => [
+  { id: 1, kind: 'point', x: 70, y: 52, text: 'Night sky', font: 'Georgia', weight: 400, italic: false, size: 58, track: 0, lead: 1.2, align: 'left', color: '#1d2a44', wght: 400, wdth: 100, kern: {}, outlined: false },
+  { id: 2, kind: 'area', x: 70, y: 150, w: 310, h: 120, text: 'The quick brown fox jumps over the lazy dog. Stars appear one by one, and the long road home is lit only by the moon on the water below.', font: 'Segoe UI', weight: 400, italic: false, size: 15, track: 0, lead: 1.45, align: 'left', color: '#2a2c31', wght: 400, wdth: 100, kern: {}, outlined: false },
+  { id: 3, kind: 'path', pathId: 'c1', offset: 0.04, side: 'above', text: 'Text follows the curve', font: 'Bahnschrift', weight: 400, italic: false, size: 30, track: 20, lead: 1.2, align: 'left', color: '#c0392b', wght: 600, wdth: 100, kern: {}, outlined: false },
+  { id: 4, kind: 'point', x: 640, y: 330, text: 'sketch note', font: 'Caveat', weight: 400, italic: false, size: 34, track: 0, lead: 1.2, align: 'left', color: '#2f7d4f', wght: 400, wdth: 100, kern: {}, outlined: false },
+];
+
+let objs = SAMPLE();
+let nextId = 10;
+let tool = 'sel';
+let selId = null, editing = null, hoverId = null, hoverCurve = null;
+let drag = null, scrub = null, fcard = null, fkey = null;
+let lastPos = [450, 270];
+let ring = null, spaceDown = 0, kernFlash = null;
+const held = { shift: false };
+let undo = [], redo = [], editBefore = null;
+const favs = new Set(['Georgia', 'Bahnschrift']);
+const recent = [];
+
+const byId = id => objs.find(o => o.id === id);
+const snap = () => JSON.stringify(objs);
+function beginEdit() { if (editBefore === null) editBefore = snap(); }
+function endEdit() {
+  if (editBefore === null) return;
+  if (snap() !== editBefore) { undo.push(editBefore); redo.length = 0; }
+  editBefore = null;
+}
+function restore(json) { objs = JSON.parse(json); if (selId !== null && !byId(selId)) selId = null; editing = null; hideEditors(); }
+function doUndo() { endEdit(); if (!undo.length) return; redo.push(snap()); restore(undo.pop()); refresh(); }
+function doRedo() { endEdit(); if (!redo.length) return; undo.push(snap()); restore(redo.pop()); refresh(); }
+
+function toast(msg) {
+  toastEl.textContent = msg; toastEl.style.display = 'block';
+  clearTimeout(toast.t); toast.t = setTimeout(() => { toastEl.style.display = 'none'; }, 2000);
+}
+function textEditable(o) {
+  if (o && o.outlined) { toast('Converted to outlines: undo to edit the text'); return false; }
+  return true;
+}
+
+function cssOf(o) {
+  const m = fontMeta(o.font);
+  let s = 'font-family:"' + o.font + '",' + FALLBACK[m.k] + ';font-size:' + o.size + 'px;letter-spacing:' + (o.track / 1000) + 'em;line-height:' + o.lead + ';color:' + o.color + ';text-align:' + o.align + ';';
+  if (m.v) s += "font-variation-settings:'wght' " + o.wght + ",'wdth' " + o.wdth + ';';
+  else s += 'font-weight:' + o.weight + ';';
+  if (o.italic) s += 'font-style:italic;';
+  s += 'font-kerning:' + (o.autoKern === 'off' ? 'none' : 'normal') + ';';
+  return s;
+}
+function spansOf(o, edit) {
+  let h = '', i = 0;
+  for (const ch of o.text) {
+    if (ch === '\n' && !edit) h += '<br>';
+    else {
+      const k = o.kern[i];
+      h += '<span data-i="' + i + '"' + (k ? ' style="margin-left:' + (k / 1000) + 'em"' : '') + '>' + esc(ch) + '</span>';
+    }
+    i++;
+  }
+  return h || (edit ? '' : '&#8203;');
+}
+function remapKern(oldT, newT, kern) {
+  const a = [...oldT], b = [...newT];
+  let p = 0; while (p < a.length && p < b.length && a[p] === b[p]) p++;
+  let sfx = 0; while (sfx < a.length - p && sfx < b.length - p && a[a.length - 1 - sfx] === b[b.length - 1 - sfx]) sfx++;
+  const delta = b.length - a.length, out = {};
+  for (const k in kern) {
+    const i = +k;
+    if (i <= p) out[i] = kern[k];
+    else if (i >= a.length - sfx) out[i + delta] = kern[k];
+  }
+  return out;
+}
+
+const divs = new Map();
+function renderTexts() {
+  const live = new Set();
+  objs.forEach(o => {
+    if (o.kind === 'path') return;
+    live.add(o.id);
+    let el = divs.get(o.id);
+    if (!el) {
+      el = document.createElement('div'); el.dataset.id = o.id;
+      el.addEventListener('input', () => {
+        const t = byId(+el.dataset.id);
+        if (!t) return;
+        const nt = el.innerText.replace(/\u200b/g, '').replace(/\n$/, '');
+        t.kern = remapKern(t.text, nt, t.kern); t.text = nt;
+        updateHud(); drawOverlay();
+      });
+      textsEl.appendChild(el); divs.set(o.id, el);
+    }
+    el.className = 't ' + o.kind + (editing === o.id ? ' editing' : '');
+    el.style.cssText = cssOf(o) + 'left:' + o.x + 'px;top:' + o.y + 'px;' + (o.kind === 'area' ? 'width:' + o.w + 'px;height:' + o.h + 'px;' : 'white-space:pre;');
+    if (editing === o.id) { if (o.kind === 'area') el.style.overflow = 'visible'; if (o.kind === 'point') el.style.whiteSpace = 'pre-wrap'; }
+    if (editing !== o.id) { el.contentEditable = 'false'; el.innerHTML = spansOf(o); }
+  });
+  for (const [id, el] of divs) if (!live.has(id)) { el.remove(); divs.delete(id); }
+}
+function renderPathTexts() {
+  curvesG.innerHTML = CURVES.map(c => '<path id="' + c.id + '" d="' + c.d + '" fill="none" stroke="#b8bcc4" stroke-width="1"/><path class="hit" data-curve="' + c.id + '" d="' + c.d + '" fill="none" stroke="transparent" stroke-width="18"/>').join('');
+  pathTextsG.innerHTML = objs.filter(o => o.kind === 'path').map(o =>
+    '<text data-id="' + o.id + '" style="' + cssOf(o) + '" dy="' + (o.side === 'below' ? o.size * 0.85 : 0) + '"><textPath href="#' + o.pathId + '" startOffset="' + (o.offset * 100).toFixed(1) + '%">' + esc(o.text || '') + '</textPath></text>').join('');
+}
+
+function relRect(el) {
+  const r = el.getBoundingClientRect(), s = stage.getBoundingClientRect();
+  return { x: r.left - s.left - stage.clientLeft, y: r.top - s.top - stage.clientTop, w: r.width, h: r.height };
+}
+function objRect(o) {
+  if (o.kind === 'path') {
+    const el = pathTextsG.querySelector('[data-id="' + o.id + '"]');
+    return el ? relRect(el) : null;
+  }
+  const el = divs.get(o.id);
+  return el ? relRect(el) : null;
+}
+function curvePoint(id, frac) {
+  const p = document.getElementById(id);
+  const L = p.getTotalLength(), q = p.getPointAtLength(L * clamp(frac, 0, 1));
+  return [q.x, q.y];
+}
+function nearestFrac(id, pos) {
+  let best = 0, bd = 1e9;
+  for (let i = 0; i <= 160; i++) { const d = dist(curvePoint(id, i / 160), pos); if (d < bd) { bd = d; best = i / 160; } }
+  return best;
+}
+
+function mk(name, attrs) {
+  const e = document.createElementNS(NS, name);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  over.appendChild(e);
+  return e;
+}
+function metricsOf(o) {
+  cv.font = (o.italic ? 'italic ' : '') + (fontMeta(o.font).v ? o.wght : o.weight) + ' ' + o.size + 'px "' + o.font + '"';
+  const a = cv.measureText('Hx'), cap = cv.measureText('H'), xh = cv.measureText('x');
+  return { asc: a.fontBoundingBoxAscent || o.size * 0.9, desc: a.fontBoundingBoxDescent || o.size * 0.25, cap: cap.actualBoundingBoxAscent || o.size * 0.7, xh: xh.actualBoundingBoxAscent || o.size * 0.5 };
+}
+function boundaryAt(o, pos) {
+  const el = divs.get(o.id);
+  if (!el) return null;
+  const spans = [...el.querySelectorAll('span[data-i]')];
+  let best = null;
+  spans.forEach(sp => {
+    const r = relRect(sp), i = +sp.dataset.i;
+    if (pos[1] < r.y - 4 || pos[1] > r.y + r.h + 4) return;
+    const dl = Math.abs(pos[0] - r.x);
+    if (i > 0 && dl < 9 && (!best || dl < best.d)) best = { i, x: r.x, y: r.y, h: r.h, d: dl };
+  });
+  return best;
+}
+
+function drawOverlay() {
+  over.textContent = '';
+  const o = byId(selId);
+  const hov = byId(hoverId);
+  if (hov && hov !== o && tool === 'text') {
+    const r = objRect(hov);
+    if (r) mk('rect', { x: r.x - 2, y: r.y - 2, width: r.w + 4, height: r.h + 4, fill: 'none', stroke: '#ffb454', 'stroke-width': 1 });
+  }
+  if (tool === 'text' && hoverCurve && !drag) {
+    mk('path', { d: CURVES.find(c => c.id === hoverCurve).d, fill: 'none', stroke: '#ffb454', 'stroke-width': 3, opacity: .8 });
+  }
+  if (o) {
+    const r = objRect(o);
+    if (r) {
+      mk('rect', { x: r.x - 3, y: r.y - 3, width: r.w + 6, height: r.h + 6, fill: 'none', stroke: '#4c8dff', 'stroke-width': 1, 'stroke-dasharray': '4 3' });
+      if (o.kind === 'area') {
+        const hs = areaHandles(o);
+        hs.forEach(h => mk('rect', { x: h.p[0] - 4, y: h.p[1] - 4, width: 8, height: 8, fill: '#fff', stroke: '#4c8dff', 'stroke-width': 1.5 }));
+        const el = divs.get(o.id);
+        if (el && el.scrollHeight > el.clientHeight + 1 && editing !== o.id) {
+          mk('rect', { x: o.x + o.w - 2, y: o.y + o.h - 2, width: 14, height: 14, fill: '#c0392b' });
+          mk('path', { d: 'M' + (o.x + o.w + 5) + ' ' + (o.y + o.h + 1) + 'v8M' + (o.x + o.w + 1) + ' ' + (o.y + o.h + 5) + 'h8', stroke: '#fff', 'stroke-width': 1.6 });
+        }
+      }
+      if (o.kind === 'path') {
+        const p = curvePoint(o.pathId, o.offset);
+        mk('circle', { cx: p[0], cy: p[1], r: 6, fill: '#ffb454', stroke: '#17181b', 'stroke-width': 2 });
+      }
+    }
+  }
+  const guideObj = (scrub && ['s', 'l'].includes(scrub.key)) ? scrub.o : (document.getElementById('cGuides').checked ? o : null);
+  if (guideObj && guideObj.kind !== 'path') {
+    const r = objRect(guideObj), m = metricsOf(guideObj), lh = guideObj.size * guideObj.lead;
+    if (r) {
+      const base = r.y + (lh - (m.asc + m.desc)) / 2 + m.asc;
+      [['baseline', base, '#4c8dff'], ['x-height', base - m.xh, '#7ab87a'], ['cap height', base - m.cap, '#c58fd8']].forEach(([n, y, c]) => {
+        mk('line', { x1: r.x - 10, x2: r.x + Math.max(r.w, 60) + 10, y1: y, y2: y, stroke: c, 'stroke-width': 1, 'stroke-dasharray': '6 3' });
+      });
+    }
+  }
+  if (scrub && scrub.kern && scrub.bd) {
+    mk('line', { x1: scrub.bd.x, x2: scrub.bd.x, y1: scrub.bd.y - 3, y2: scrub.bd.y + scrub.bd.h + 3, stroke: '#ffb454', 'stroke-width': 2 });
+  }
+  const ko = o && o.kind !== 'path' && editing !== o.id && document.getElementById('cKern').checked ? o : null;
+  if (ko) {
+    kernTicks(ko).forEach(tk => {
+      const on = drag && drag.type === 'kern' && drag.i === tk.i;
+      mk('line', { x1: tk.x, x2: tk.x, y1: tk.y, y2: tk.y + tk.h, stroke: tk.v || on ? '#ffb454' : '#4c8dff', 'stroke-width': tk.v || on ? 2 : 1, opacity: tk.v || on ? 1 : .55 });
+      mk('circle', { cx: tk.x, cy: tk.y + tk.h + 5, r: 3.5, fill: tk.v || on ? '#ffb454' : '#4c8dff' });
+      if (tk.v) { const t = mk('text', { x: tk.x, y: tk.y - 3, fill: '#ffb454', 'font-size': 10, 'text-anchor': 'middle', 'font-family': 'Segoe UI' }); t.textContent = (tk.v > 0 ? '+' : '') + tk.v; }
+    });
+  }
+  if (kernFlash && Date.now() - kernFlash.t < 1600 && kernFlash.i !== null) {
+    const fo = byId(kernFlash.id), fe = fo && divs.get(fo.id), sp = fe && fe.querySelector('span[data-i="' + kernFlash.i + '"]');
+    if (sp) {
+      const r = relRect(sp), v = fo.kern[kernFlash.i] || 0;
+      mk('line', { x1: r.x, x2: r.x, y1: r.y - 3, y2: r.y + r.h + 3, stroke: '#ffb454', 'stroke-width': 2 });
+      const t = mk('text', { x: r.x, y: r.y - 7, fill: '#ffb454', 'font-size': 11, 'text-anchor': 'middle', 'font-family': 'Segoe UI' });
+      t.textContent = (fo.text[kernFlash.i - 1] || '') + '|' + (fo.text[kernFlash.i] || '') + '  ' + (v > 0 ? '+' : '') + v;
+    }
+  }
+  if (drag && drag.type === 'newText' && drag.moved) {
+    const a = drag.start, b = lastPos;
+    mk('rect', { x: Math.min(a[0], b[0]), y: Math.min(a[1], b[1]), width: Math.abs(a[0] - b[0]), height: Math.abs(a[1] - b[1]), fill: '#4c8dff22', stroke: '#4c8dff', 'stroke-dasharray': '4 3' });
+  }
+}
+function areaHandles(o) {
+  return [{ k: 'se', p: [o.x + o.w, o.y + o.h] }, { k: 'e', p: [o.x + o.w, o.y + o.h / 2] }, { k: 's', p: [o.x + o.w / 2, o.y + o.h] }];
+}
+
+function updateBadge() {
+  let text = '';
+  if (tool === 'text' && !drag && editing === null) {
+    const hov = byId(hoverId);
+    if (hov) text = hov.outlined ? 'outlined' : 'edit text';
+    else if (hoverCurve) text = objs.some(o => o.kind === 'path' && o.pathId === hoverCurve) ? 'edit path text' : 'text on path';
+    else text = 'click: point text · drag: area';
+  } else if (tool === 'sel' && !drag && byId(hoverId)) text = 'move · double-click edits';
+  if (!text || fcard) { badge.style.display = 'none'; return; }
+  badge.textContent = text; badge.style.display = 'block';
+  badge.style.left = Math.min(lastPos[0] + 16, 740) + 'px'; badge.style.top = (lastPos[1] + 16) + 'px';
+}
+
+const SWATCHES = ['#1d2a44', '#c0392b', '#2f7d4f', '#e0a100', '#6a3fb5', '#111111'];
+function updateHud() {
+  if (hud.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return;
+  const o = byId(selId);
+  if (!o) { hud.style.display = 'none'; return; }
+  hud.style.display = 'block';
+  const m = fontMeta(o.font), nodes = [];
+  const glyphs = o.text.replace(/\s/g, '').length, kerns = Object.keys(o.kern).length;
+  const rng = (p, lab, min, max, step, val, fmt) => '<div class="row"><span class="lab">' + lab + '</span><input type="range" data-p="' + p + '" min="' + min + '" max="' + max + '" step="' + step + '" value="' + val + '"' + (o.outlined ? ' disabled' : '') + '><span class="mono" id="v_' + p + '">' + fmt(val) + '</span></div>';
+  if (o.outlined) {
+    nodes.push('<div class="node"><div class="head"><b>bezierPath</b><span>x ' + glyphs + ' outlines</span></div><div class="note">Converted to outlines. The string and font are gone from the document; undo brings the text back.</div></div>');
+  } else {
+    let t = '<div class="node"><div class="head"><b>Text</b><span>' + (o.kind === 'point' ? 'point' : o.kind === 'area' ? 'area ' + Math.round(o.w) + ' x ' + Math.round(o.h) : 'on path') + '</span></div>' +
+      '<div class="row"><button class="fontbtn" id="fontbtn" style="' + cssOf(Object.assign({}, o, { size: 15, color: '#e6e7ea', track: 0 })) + '">' + esc(o.font) + (m.v ? ' <span style="font:10px Segoe UI;color:#9a9ea8">variable</span>' : '') + '</button></div>';
+    if (!m.ok) t += '<div class="note">' + esc(o.font) + ' is not installed here; a substitute is shown. <button class="small" id="replace">Replace…</button></div>';
+    if (m.v) {
+      t += rng('wght', 'Weight', 300, 700, 1, o.wght, v => Math.round(v)) + rng('wdth', 'Width', 75, 100, 1, o.wdth, v => Math.round(v));
+    } else {
+      t += '<div class="chips">' + [['Regular', 400, false], ['Bold', 700, false], ['Italic', 400, true], ['Bold Italic', 700, true]].map(([n, w, i]) => '<button data-style="' + w + ',' + i + '"' + (o.weight === w && o.italic === i ? ' class="on"' : '') + '>' + n + '</button>').join('') + '</div>';
+    }
+    t += '<div class="chips"><span style="color:#9a9ea8;font-size:12px;margin-right:4px">Auto kern</span>' + [['metrics', 'Metrics'], ['off', 'Off']].map(([k, n]) => '<button data-ak="' + k + '"' + ((o.autoKern || 'metrics') === k ? ' class="on"' : '') + '>' + n + '</button>').join('') + '</div>';
+    t += rng('size', 'Size', 6, 200, 0.5, o.size, v => (+v).toFixed(1)) + rng('track', 'Tracking', -100, 800, 5, o.track, v => Math.round(v));
+    if (o.kind !== 'path') t += rng('lead', 'Leading', 0.8, 3, 0.05, o.lead, v => (+v).toFixed(2));
+    if (o.kind !== 'path') t += '<div class="chips">' + ['left', 'center', 'right', 'justify'].map(a => '<button data-align="' + a + '"' + (o.align === a ? ' class="on"' : '') + '>' + a + '</button>').join('') + '</div>';
+    if (o.kind === 'area') {
+      const el = divs.get(o.id), hidden = el && el.scrollHeight > el.clientHeight + 1 ? Math.ceil((el.scrollHeight - el.clientHeight) / (o.size * o.lead)) : 0;
+      t += '<div class="row">box <span class="mono">' + Math.round(o.w) + ' x ' + Math.round(o.h) + '</span>' + (hidden ? ' <span style="color:#e57368">overflow: ' + hidden + ' line' + (hidden > 1 ? 's' : '') + ' hidden</span>' : '') + '</div>';
+    }
+    if (o.kind === 'path') {
+      t += rng('offset', 'Offset', 0, 0.95, 0.005, o.offset, v => Math.round(v * 100) + '%');
+      t += '<div class="chips">' + ['above', 'below'].map(a => '<button data-side="' + a + '"' + (o.side === a ? ' class="on"' : '') + '>' + a + '</button>').join('') + '</div>';
+      t += '<div class="row">path <span class="mono">bezierPath (' + (o.pathId === 'c1' ? 'curve 1' : 'curve 2') + ')</span></div>';
+    }
+    nodes.push(t + '</div>');
+    nodes.push('<div class="node"><div class="head"><b>Glyphs</b><span>' + glyphs + ' glyphs</span></div>' +
+      '<div class="row">kerning overrides <span class="mono">' + kerns + '</span>' + (kerns ? ' <button class="small" id="clearKern">Clear</button>' : '') + '</div>' +
+      Object.keys(o.kern).map(Number).sort((x, y) => x - y).slice(0, 6).map(i => '<div class="row"><span class="mono">' + esc(o.text[i - 1] || '') + '|' + esc(o.text[i] || '') + '</span><span class="mono">' + (o.kern[i] > 0 ? '+' : '') + o.kern[i] + '</span><button class="small" data-kdel="' + i + '">x</button></div>').join('') +
+      '<div class="row"><button class="small" id="outline">Convert to outlines</button></div></div>');
+  }
+  nodes.push('<div class="node"><div class="head"><b>Fill</b><span>' + o.color + '</span></div><div class="chips">' +
+    SWATCHES.map(c => '<button class="sw' + (o.color === c ? ' on' : '') + '" data-color="' + c + '" style="background:' + c + '"' + (o.outlined ? ' disabled' : '') + '></button>').join('') + '</div></div>');
+  hud.innerHTML = nodes.join('<div class="link">&darr;</div>');
+  const fb = hud.querySelector('#fontbtn');
+  if (fb) fb.onclick = () => openFontCard([clamp(lastPos[0] - 340, 6, 554), 20], o);
+  const rp = hud.querySelector('#replace');
+  if (rp) rp.onclick = () => openFontCard([260, 60], o);
+  hud.querySelectorAll('[data-style]').forEach(b => b.onclick = () => {
+    const [w, i] = b.dataset.style.split(','); beginEdit(); o.weight = +w; o.italic = i === 'true'; endEdit(); refresh();
+  });
+  hud.querySelectorAll('[data-ak]').forEach(b => b.onclick = () => { beginEdit(); o.autoKern = b.dataset.ak; endEdit(); refresh(); });
+  hud.querySelectorAll('[data-kdel]').forEach(b => b.onclick = () => { beginEdit(); delete o.kern[b.dataset.kdel]; endEdit(); refresh(); });
+  hud.querySelectorAll('[data-align]').forEach(b => b.onclick = () => { beginEdit(); o.align = b.dataset.align; endEdit(); refresh(); });
+  hud.querySelectorAll('[data-side]').forEach(b => b.onclick = () => { beginEdit(); o.side = b.dataset.side; endEdit(); refresh(); });
+  hud.querySelectorAll('[data-color]').forEach(b => b.onclick = () => { if (!textEditable(o)) return; beginEdit(); o.color = b.dataset.color; endEdit(); refresh(); });
+  const ck = hud.querySelector('#clearKern');
+  if (ck) ck.onclick = () => { beginEdit(); o.kern = {}; endEdit(); refresh(); };
+  const ol = hud.querySelector('#outline');
+  if (ol) ol.onclick = () => { if (editing === o.id) finishEdit(); beginEdit(); o.outlined = true; endEdit(); toast('Converted: ' + glyphs + ' bezierPath nodes'); refresh(); };
+  hud.querySelectorAll('input[type=range]').forEach(r => {
+    const p = r.dataset.p;
+    r.oninput = () => {
+      beginEdit(); o[p] = +r.value;
+      const lab = hud.querySelector('#v_' + p);
+      lab.textContent = p === 'offset' ? Math.round(o[p] * 100) + '%' : p === 'size' ? o[p].toFixed(1) : p === 'lead' ? o[p].toFixed(2) : Math.round(o[p]);
+      renderPathTexts(); renderTexts(); drawOverlay();
+    };
+    r.onchange = () => { endEdit(); r.blur(); refresh(); };
+  });
+}
+
+function hintItems() {
+  const m = (k, t, lit) => ({ k, t, lit });
+  let main = '', mods = [];
+  if (fcard) { main = 'type to search · hover previews on the text · click or Enter keeps · Esc cancels'; }
+  else if (scrub) { main = 'release to keep'; mods = [m('Shift', 'snap', held.shift)]; }
+  else if (editing !== null) { main = 'typing · Alt+←/→ kerns at the caret (a selection: tracking) · Esc finishes'; mods = [m('Ctrl+Alt', '×5 step', false), m('barrel', 'ring', false)]; }
+  else if (tool === 'text') { main = 'click: point text · drag: area text · click a curve: text on path · click text to edit'; mods = [m('Space', 'tap: ring', false), m('F', 'fonts', false)]; }
+  else { main = 'click text to select · drag moves · double-click edits'; mods = [m('Space', 'tap: ring', false), m('S', 'size', false), m('K', 'tracking / kerning', false), m('L', 'leading', false), m('E', 'weight', false), m('F', 'fonts', false)]; }
+  return { tool: tool === 'text' ? 'Text' : 'Select', main, mods };
+}
+function updateHint() {
+  const h = hintItems();
+  hintEl.innerHTML = '<span class="tool">' + h.tool + '</span><span class="main">' + h.main + '</span><span class="grow"></span>' +
+    h.mods.map(x => '<span class="mod"><span class="key' + (x.lit ? ' lit' : '') + '">' + x.k + '</span>' + x.t + '</span>').join('') +
+    '<span>' + Math.round(lastPos[0]) + ', ' + Math.round(lastPos[1]) + '</span>';
+}
+
+function refresh() {
+  renderPathTexts(); renderTexts(); drawOverlay(); updateHud(); updateHint(); updateBadge();
+  document.getElementById('bUndo').disabled = !undo.length; document.getElementById('bRedo').disabled = !redo.length;
+}
+
+function hideEditors() { pathEdit.style.display = 'none'; }
+function startEdit(o, pos) {
+  if (!textEditable(o)) { selId = o.id; refresh(); return; }
+  finishEdit();
+  selId = o.id; editing = o.id; beginEdit();
+  refresh();
+  if (o.kind === 'path') {
+    const r = objRect(o) || { x: 100, y: 100, w: 100, h: 20 };
+    pathEdit.textContent = o.text; pathEdit.style.display = 'block';
+    pathEdit.style.left = clamp(r.x, 6, 560) + 'px'; pathEdit.style.top = clamp(r.y - 46, 6, 480) + 'px';
+    pathEdit.oninput = () => { o.text = pathEdit.innerText.replace(/\n/g, ' '); renderPathTexts(); drawOverlay(); updateHud(); };
+    pathEdit.focus();
+    return;
+  }
+  const el = divs.get(o.id);
+  try { el.contentEditable = 'plaintext-only'; } catch (e) { el.contentEditable = 'true'; }
+  el.innerHTML = spansOf(o, true);
+  el.focus();
+  if (pos) setTimeout(() => {
+    try {
+      const rg = document.caretRangeFromPoint(pos[0] + stage.getBoundingClientRect().left + stage.clientLeft, pos[1] + stage.getBoundingClientRect().top + stage.clientTop);
+      if (rg && el.contains(rg.startContainer)) { const sl = window.getSelection(); sl.removeAllRanges(); sl.addRange(rg); return; }
+    } catch (e) { /* fall through */ }
+    const sl = window.getSelection(); sl.selectAllChildren(el); sl.collapseToEnd();
+  }, 0);
+}
+function finishEdit() {
+  if (editing === null) return;
+  const o = byId(editing);
+  editing = null; hideEditors();
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+  if (o && !o.text.trim()) { objs = objs.filter(x => x !== o); if (selId === o.id) selId = null; }
+  endEdit();
+  refresh();
+}
+function newObj(props) {
+  const o = Object.assign({ id: nextId++, kind: 'point', x: 0, y: 0, text: '', font: 'Segoe UI', weight: 400, italic: false, size: 28, track: 0, lead: 1.2, align: 'left', color: '#1d2a44', wght: 400, wdth: 100, kern: {}, outlined: false }, props);
+  objs.push(o);
+  return o;
+}
+
+function targetOf(e) {
+  const d = e.target.closest ? e.target.closest('[data-id]') : null;
+  return d ? +d.dataset.id : null;
+}
+function curveOf(e) {
+  const d = e.target.closest ? e.target.closest('[data-curve]') : null;
+  return d ? d.dataset.curve : null;
+}
+
+stage.addEventListener('pointerdown', e => {
+  if (e.target.closest('#hud,#fontCard,#pathEdit,#scrub,#ring')) return;
+  const pos = localPos(e); lastPos = pos;
+  const id = targetOf(e), curve = curveOf(e);
+  if (ring) { closeRing(); refresh(); return; }
+  if (e.button === 2) { contextRing(pos, id, curve); return; }
+  if (id !== null && id === editing) return;
+  stage.setPointerCapture(e.pointerId);
+  if (editing !== null && id !== editing) finishEdit();
+  if (fcard) { closeFontCard(true); return; }
+  const ko = byId(selId);
+  if (ko && ko.kind !== 'path' && document.getElementById('cKern').checked && editing === null) {
+    const tk = kernTicks(ko).find(t => Math.abs(t.x - pos[0]) <= 6 && pos[1] >= t.y - 4 && pos[1] <= t.y + t.h + 12);
+    if (tk) { beginEdit(); drag = { type: 'kern', o: ko, i: tk.i, x0: pos[0], v0: ko.kern[tk.i] || 0 }; return; }
+  }
+  if (tool === 'text') {
+    if (id !== null) { startEdit(byId(id), pos); return; }
+    if (curve) {
+      let o = objs.find(x => x.kind === 'path' && x.pathId === curve);
+      if (!o) { beginEdit(); o = newObj({ kind: 'path', pathId: curve, offset: nearestFrac(curve, pos), side: 'above', size: 26 }); }
+      startEdit(o, null); return;
+    }
+    selId = null; drag = { type: 'newText', start: pos, moved: false }; refresh(); return;
+  }
+  const o = byId(selId);
+  if (o && o.kind === 'area' && !o.outlined) {
+    const h = areaHandles(o).find(hh => dist(hh.p, pos) < 9);
+    if (h) { beginEdit(); drag = { type: 'resize', k: h.k, o }; return; }
+  }
+  if (o && o.kind === 'path' && dist(curvePoint(o.pathId, o.offset), pos) < 10) { beginEdit(); drag = { type: 'offset', o }; return; }
+  if (id !== null) {
+    const t = byId(id);
+    selId = id;
+    if (e.detail >= 2) { setTool('text'); startEdit(t, pos); return; }
+    if (t.kind !== 'path') { beginEdit(); drag = { type: 'move', o: t, start: pos, ox: t.x, oy: t.y }; }
+    refresh(); return;
+  }
+  if (curve) { const t = objs.find(x => x.kind === 'path' && x.pathId === curve); if (t) { selId = t.id; refresh(); return; } }
+  selId = null; refresh();
+});
+
+stage.addEventListener('pointermove', e => {
+  const pos = localPos(e); lastPos = pos;
+  if (fkey && !fkey.moved && Math.abs(pos[1] - fkey.y0) > 4) { fkey.moved = true; startFontScrub(); }
+  if (scrub) { updateScrub(pos); return; }
+  if (drag) {
+    if (drag.type === 'newText' && dist(pos, drag.start) > 6) drag.moved = true;
+    if (drag.type === 'move') { drag.o.x = Math.round(drag.ox + pos[0] - drag.start[0]); drag.o.y = Math.round(drag.oy + pos[1] - drag.start[1]); }
+    if (drag.type === 'resize') {
+      const o = drag.o;
+      if (drag.k !== 's') o.w = Math.max(40, Math.round(pos[0] - o.x));
+      if (drag.k !== 'e') o.h = Math.max(20, Math.round(pos[1] - o.y));
+    }
+    if (drag.type === 'kern') { const v = Math.round(clamp(drag.v0 + (pos[0] - drag.x0) / drag.o.size * 1000, -500, 1000)); if (v === 0) delete drag.o.kern[drag.i]; else drag.o.kern[drag.i] = v; }
+    if (drag.type === 'offset') drag.o.offset = clamp(nearestFrac(drag.o.pathId, pos), 0, 0.95);
+    refresh(); return;
+  }
+  hoverId = targetOf(e); hoverCurve = curveOf(e);
+  if (hoverId !== null) hoverCurve = null;
+  drawOverlay(); updateBadge(); updateHint();
+});
+
+stage.addEventListener('pointerup', e => {
+  const pos = localPos(e); lastPos = pos;
+  if (drag && drag.type === 'newText') {
+    const d = drag; drag = null;
+    beginEdit();
+    const o = d.moved
+      ? newObj({ kind: 'area', x: Math.min(d.start[0], pos[0]), y: Math.min(d.start[1], pos[1]), w: Math.max(60, Math.abs(pos[0] - d.start[0])), h: Math.max(30, Math.abs(pos[1] - d.start[1])), size: 16, lead: 1.4 })
+      : newObj({ kind: 'point', x: Math.round(d.start[0]), y: Math.round(d.start[1] - 14) });
+    startEdit(o, null);
+    return;
+  }
+  if (drag) { drag = null; endEdit(); refresh(); }
+});
+
+function openFontCardAtPointer() {
+  const o = byId(hoverId !== null ? hoverId : selId);
+  if (!o) { toast('Hover or select a text object, then tap F'); return; }
+  selId = o.id;
+  openFontCard([clamp(lastPos[0] - 30, 6, 554), clamp(lastPos[1] - 40, 6, 100)], o);
+}
+
+const FILTERS = ['All', 'Document', 'Recent', 'Favourites', 'Serif', 'Sans', 'Mono', 'Script', 'Display'];
+function openFontCard(pos, o) {
+  if (!textEditable(o)) return;
+  finishEdit();
+  fcard = { o, orig: o.font, filter: 'All', q: '', cur: 0 };
+  beginEdit();
+  fontCard.style.display = 'flex'; fontCard.style.left = pos[0] + 'px'; fontCard.style.top = pos[1] + 'px';
+  fontCard.innerHTML = '<input id="fq" placeholder="Search fonts"><div class="chips" id="fchips"></div><div class="list" id="flist"></div><div class="foot"><span id="fcount"></span><span>Esc cancels</span></div>';
+  fontCard.querySelector('#fq').oninput = ev => { fcard.q = ev.target.value; fcard.cur = 0; fillFontList(); };
+  fontCard.querySelector('#fq').focus();
+  fcard.cur = Math.max(0, fontList().findIndex(f => f.n === o.font));
+  fillFontList();
+  refresh();
+}
+function fontList() {
+  const docFonts = new Set(objs.map(x => x.font));
+  return installed().filter(f => {
+    if (fcard.q && !f.n.toLowerCase().includes(fcard.q.toLowerCase())) return false;
+    const fl = fcard.filter;
+    if (fl === 'Document') return docFonts.has(f.n);
+    if (fl === 'Recent') return recent.includes(f.n);
+    if (fl === 'Favourites') return favs.has(f.n);
+    if (['Serif', 'Sans', 'Mono', 'Script', 'Display'].includes(fl)) return f.k === fl.toLowerCase();
+    return true;
+  });
+}
+function fillFontList() {
+  const list = fontList(), docFonts = new Set(objs.map(x => x.font)), sample = esc((fcard.o.text || 'Night sky').slice(0, 16));
+  fcard.cur = clamp(fcard.cur, 0, Math.max(0, list.length - 1));
+  fontCard.querySelector('#fchips').innerHTML = FILTERS.map(f => '<button data-f="' + f + '"' + (fcard.filter === f ? ' class="on"' : '') + '>' + f + '</button>').join('');
+  fontCard.querySelectorAll('#fchips button').forEach(b => b.onclick = () => { fcard.filter = b.dataset.f; fcard.cur = 0; fillFontList(); });
+  const l = fontCard.querySelector('#flist');
+  l.innerHTML = list.map((f, i) => '<div class="frow' + (i === fcard.cur ? ' cur' : '') + '" data-n="' + f.n + '"><span class="star' + (favs.has(f.n) ? ' on' : '') + '">&#9733;</span><span class="nm" style="font-family:\'' + f.n + '\',' + FALLBACK[f.k] + '">' + esc(f.n) + '</span>' +
+    (f.v ? '<span class="tag">variable</span>' : '') + (docFonts.has(f.n) ? '<span class="in">in document</span>' : '') + '</div>').join('') || '<div style="padding:10px;color:#9a9ea8">No installed font matches.</div>';
+  l.querySelectorAll('.frow').forEach((row, i) => {
+    row.onmouseenter = () => { fcard.cur = i; previewFont(list[i].n); markCur(); };
+    row.onclick = ev => {
+      if (ev.target.classList.contains('star')) { const n = list[i].n; if (favs.has(n)) favs.delete(n); else favs.add(n); fillFontList(); return; }
+      applyFont(list[i].n);
+    };
+  });
+  fontCard.querySelector('#fcount').textContent = list.length + ' of ' + installed().length + ' installed fonts';
+}
+function markCur() {
+  fontCard.querySelectorAll('.frow').forEach((r, i) => r.classList.toggle('cur', i === fcard.cur));
+}
+function previewFont(n) { fcard.o.font = n; renderPathTexts(); renderTexts(); drawOverlay(); }
+function applyFont(n) {
+  fcard.o.font = n;
+  const i = recent.indexOf(n); if (i >= 0) recent.splice(i, 1);
+  recent.unshift(n); recent.length = Math.min(recent.length, 6);
+  closeFontCard(false);
+}
+function closeFontCard(cancel) {
+  if (!fcard) return;
+  if (cancel) fcard.o.font = fcard.orig;
+  fcard = null; fontCard.style.display = 'none';
+  endEdit(); refresh();
+}
+
+function startFontScrub() {
+  const o = fkey.o, list = installed();
+  if (!list.length) { toast('No installed fonts found from the list'); fkey = null; return; }
+  const idx = Math.max(0, list.findIndex(f => f.n === o.font));
+  beginEdit();
+  scrub = { key: 'f', o, y0: fkey.y0, idx0: idx, list, x: clamp(lastPos[0] + 24, 6, 680), y: clamp(lastPos[1] - 60, 6, 380), orig: o.font };
+  showScrub();
+}
+
+const SCRUBS = {
+  s: { name: 'Size', prop: 'size', min: 6, max: 200, per: 0.4, fmt: v => v.toFixed(1) + ' px', snaps: [8, 10, 12, 14, 16, 18, 24, 32, 36, 48, 64, 72, 96, 128] },
+  k: { name: 'Tracking', prop: 'track', min: -100, max: 800, per: 3, fmt: v => Math.round(v) + '' },
+  l: { name: 'Leading', prop: 'lead', min: 0.8, max: 3, per: 0.01, fmt: v => v.toFixed(2) },
+  e: { name: 'Weight', prop: 'wght', min: 300, max: 700, per: 3, fmt: v => Math.round(v) + '', variable: true },
+  n: { name: 'Width', prop: 'wdth', min: 75, max: 100, per: 0.3, fmt: v => Math.round(v) + '', variable: true },
+};
+function startScrub(key) {
+  const o = byId(hoverId !== null ? hoverId : selId);
+  if (!o) { toast('Hover or select a text object first'); return; }
+  if (!textEditable(o)) return;
+  const def = SCRUBS[key];
+  if (def.variable && !fontMeta(o.font).v) { toast(o.font + ' has no ' + def.name.toLowerCase() + ' axis: use Bold, or pick a variable font such as Bahnschrift'); return; }
+  if (def.prop === 'lead' && o.kind === 'path') { toast('Leading needs more than one line'); return; }
+  let kern = null, bd = null;
+  if (key === 'k' && o.kind !== 'path') { bd = boundaryAt(o, lastPos); if (bd) kern = bd.i; }
+  beginEdit();
+  selId = o.id;
+  scrub = { key, o, def, y0: lastPos[1], v0: kern !== null ? (o.kern[kern] || 0) : o[def.prop], kern, bd, x: clamp(lastPos[0] + 24, 6, 680), y: clamp(lastPos[1] - 40, 6, 420) };
+  if (kern !== null) scrub.def = { name: 'Kerning', min: -300, max: 800, per: 3, fmt: v => Math.round(v) + '' };
+  showScrub();
+}
+function updateScrub(pos) {
+  if (scrub.key === 'f') {
+    const i = clamp(scrub.idx0 + Math.round((scrub.y0 - pos[1]) / 18), 0, scrub.list.length - 1);
+    scrub.o.font = scrub.list[i].n; scrub.cur = i;
+    refresh(); showScrub(); return;
+  }
+  const d = scrub.def;
+  let v = clamp(scrub.v0 + (scrub.y0 - pos[1]) * d.per, d.min, d.max);
+  if (held.shift && d.snaps) v = d.snaps.reduce((a, b) => Math.abs(b - v) < Math.abs(a - v) ? b : a);
+  if (scrub.kern !== null) { if (Math.round(v) === 0) delete scrub.o.kern[scrub.kern]; else scrub.o.kern[scrub.kern] = Math.round(v); }
+  else scrub.o[d.prop] = d.prop === 'lead' ? +v.toFixed(2) : +v.toFixed(1);
+  scrub.val = v;
+  refresh(); showScrub();
+}
+function showScrub() {
+  scrubEl.style.display = 'block'; scrubEl.style.left = scrub.x + 'px'; scrubEl.style.top = scrub.y + 'px';
+  if (scrub.key === 'f') {
+    const i = scrub.cur !== undefined ? scrub.cur : scrub.idx0, rows = [];
+    for (let j = i - 2; j <= i + 2; j++) {
+      const f = scrub.list[j];
+      rows.push('<div class="frow' + (j === i ? ' cur' : '') + '"' + (f ? ' style="font-family:\'' + f.n + '\',' + FALLBACK[f.k] + '"' : '') + '>' + (f ? esc(f.n) : '&nbsp;') + '</div>');
+    }
+    scrubEl.innerHTML = '<div class="head"><span>Font <span class="key">F</span></span><b>' + (i + 1) + ' / ' + scrub.list.length + '</b></div>' + rows.join('') + '<div class="sub">move up / down &middot; release to keep</div>';
+    return;
+  }
+  const d = scrub.def, v = scrub.val !== undefined ? scrub.val : scrub.v0, pct = clamp((v - d.min) / (d.max - d.min), 0, 1) * 100;
+  let title = d.name, sub = 'move up to increase' + (d.snaps ? ' &middot; Shift snaps' : '');
+  if (scrub.kern !== null) {
+    const t = scrub.o.text, i = scrub.kern;
+    title = 'Kerning ' + esc(t[i - 1] || '') + '|' + esc(t[i] || ''); sub = 'this pair only &middot; 1/1000 em';
+  } else if (scrub.key === 'k') sub = 'whole object &middot; pen between two letters kerns that pair';
+  scrubEl.innerHTML = '<div class="head"><span>' + title + ' <span class="key">' + scrub.key.toUpperCase() + '</span></span><b>' + d.fmt(v) + '</b></div>' +
+    '<div class="track"><div class="fill" style="width:' + pct + '%"></div><div class="thumb" style="left:' + pct + '%"></div></div><div class="sub">' + sub + '</div>';
+}
+function endScrub() { scrub = null; scrubEl.style.display = 'none'; endEdit(); refresh(); }
+
+function offsetsOf(el) {
+  const sl = window.getSelection();
+  if (!sl.rangeCount) return null;
+  const r = sl.getRangeAt(0);
+  if (!el.contains(r.startContainer)) return null;
+  const at = (node, off) => { const rg = document.createRange(); rg.selectNodeContents(el); rg.setEnd(node, off); return rg.toString().length; };
+  return [at(r.startContainer, r.startOffset), at(r.endContainer, r.endOffset)];
+}
+function setOffsets(el, s0, e0) {
+  const tw = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let n = 0, node, st = null, en = null;
+  while ((node = tw.nextNode())) {
+    const L = node.length;
+    if (st === null && s0 <= n + L) st = [node, s0 - n];
+    if (en === null && e0 <= n + L) en = [node, e0 - n];
+    n += L;
+    if (st && en) break;
+  }
+  if (!st || !en) return;
+  const rg = document.createRange();
+  rg.setStart(st[0], st[1]); rg.setEnd(en[0], en[1]);
+  const sl = window.getSelection(); sl.removeAllRanges(); sl.addRange(rg);
+}
+function kernAtCaret(dir, big) {
+  const o = byId(editing), el = divs.get(editing);
+  if (!o || o.kind === 'path' || !el) return;
+  const offs = offsetsOf(el);
+  if (!offs) return;
+  const s0 = offs[0], e0 = offs[1], step = 20 * (big ? 5 : 1) * dir, n = [...o.text].length;
+  let first = null;
+  if (s0 === e0) {
+    if (s0 > 0 && s0 < n) { o.kern[s0] = (o.kern[s0] || 0) + step; first = s0; }
+    else { toast('Put the caret between two letters'); return; }
+  } else {
+    for (let i = s0 + 1; i <= e0; i++) if (i < n) { o.kern[i] = (o.kern[i] || 0) + step; if (first === null) first = i; }
+  }
+  Object.keys(o.kern).forEach(k => { if (!o.kern[k]) delete o.kern[k]; });
+  el.innerHTML = spansOf(o, true); setOffsets(el, s0, e0);
+  kernFlash = { id: o.id, i: first, t: Date.now() };
+  drawOverlay(); updateHud(); setTimeout(drawOverlay, 1700);
+}
+function kernTicks(o) {
+  const el = divs.get(o.id), out = [];
+  if (!el) return out;
+  el.querySelectorAll('span[data-i]').forEach(sp => {
+    const i = +sp.dataset.i;
+    if (i === 0) return;
+    const r = relRect(sp);
+    out.push({ i, x: r.x, y: r.y, h: r.h, v: o.kern[i] || 0 });
+  });
+  return out;
+}
+
+function showRing(pos, title, slots) {
+  closeRing();
+  const R = 90, cx = clamp(pos[0], R + 66, 900 - R - 66), cy = clamp(pos[1], R + 30, 540 - R - 50);
+  ring = { el: document.createElement('div'), slots };
+  ring.el.id = 'ring'; ring.el.style.left = cx + 'px'; ring.el.style.top = cy + 'px';
+  ring.el.innerHTML = '<div class="hub">' + title + '<small>...</small></div>';
+  slots.forEach((sl, i) => {
+    const a = -Math.PI / 2 + i * Math.PI / 4, el = document.createElement('div');
+    el.className = 'slot' + (sl.on ? '' : ' off');
+    el.style.left = Math.cos(a) * R + 'px'; el.style.top = Math.sin(a) * R + 'px';
+    el.innerHTML = '<span class="key">' + sl.key + '</span>' + sl.label;
+    el.onpointerdown = ev => ev.stopPropagation();
+    el.onclick = ev => { ev.stopPropagation(); runSlot(sl); };
+    ring.el.appendChild(el);
+  });
+  stage.appendChild(ring.el);
+  refresh();
+}
+function runSlot(sl) { if (!sl.on) return; closeRing(); sl.fn(); }
+function closeRing() { if (ring) { ring.el.remove(); ring = null; } }
+
+function contextRing(pos, id, curve) {
+  if (editing !== null) finishEdit();
+  let o = id !== null && id !== undefined ? byId(id) : null;
+  if (!o && curve) o = objs.find(x => x.kind === 'path' && x.pathId === curve) || null;
+  if (o) { selId = o.id; textRing(pos, o); } else creationRing(pos, curve);
+}
+function cycleStyle(o) {
+  if (!textEditable(o)) return;
+  beginEdit();
+  if (fontMeta(o.font).v) o.wght = o.wght >= 600 ? 300 : (o.wght <= 300 ? 400 : 700);
+  else {
+    const st = [[400, false], [700, false], [400, true], [700, true]], i = st.findIndex(x => x[0] === o.weight && x[1] === o.italic), n = st[(i + 1) % 4];
+    o.weight = n[0]; o.italic = n[1];
+  }
+  endEdit(); refresh();
+}
+function togglePath(o) {
+  if (!textEditable(o)) return;
+  if (o.kind === 'path') {
+    const p = curvePoint(o.pathId, o.offset);
+    beginEdit(); o.kind = 'point'; o.x = Math.round(p[0]); o.y = Math.round(p[1] - o.size); delete o.pathId; endEdit(); refresh(); return;
+  }
+  const r = objRect(o) || { x: o.x, y: o.y, w: 0, h: 0 }, c = [r.x + r.w / 2, r.y + r.h / 2];
+  const free = CURVES.filter(cu => !objs.some(x => x.kind === 'path' && x.pathId === cu.id));
+  if (!free.length) { toast('Every curve already has text'); return; }
+  let best = free[0], bd = 1e9;
+  free.forEach(cu => { for (let i = 0; i <= 40; i++) { const d = dist(curvePoint(cu.id, i / 40), c); if (d < bd) { bd = d; best = cu; } } });
+  beginEdit(); o.kind = 'path'; o.pathId = best.id; o.offset = 0.04; o.side = 'above'; endEdit(); refresh();
+}
+function outlineObj(o) {
+  if (!textEditable(o)) return;
+  beginEdit(); o.outlined = true; endEdit(); toast('Converted: ' + o.text.replace(/\s/g, '').length + ' bezierPath nodes'); refresh();
+}
+function textRing(pos, o) {
+  const ok = !o.outlined;
+  showRing(pos, 'Text', [
+    { key: 'T', label: 'Edit', on: ok, fn: () => { setTool('text'); startEdit(o, null); } },
+    { key: 'F', label: 'Font', on: ok, fn: () => openFontCard([clamp(pos[0] - 30, 6, 554), clamp(pos[1] - 40, 6, 100)], o) },
+    { key: 'B', label: 'Style', on: ok, fn: () => cycleStyle(o) },
+    { key: 'A', label: 'Align', on: ok && o.kind !== 'path', fn: () => { beginEdit(); const al = ['left', 'center', 'right', 'justify']; o.align = al[(al.indexOf(o.align) + 1) % 4]; endEdit(); refresh(); } },
+    { key: 'P', label: o.kind === 'path' ? 'Detach' : 'To path', on: ok, fn: () => togglePath(o) },
+    { key: 'O', label: 'Outlines', on: ok, fn: () => outlineObj(o) },
+    { key: 'C', label: 'Fill', on: ok, fn: () => { beginEdit(); o.color = SWATCHES[(SWATCHES.indexOf(o.color) + 1) % SWATCHES.length]; endEdit(); refresh(); } },
+    { key: 'K', label: 'Clear kern', on: ok && Object.keys(o.kern).length > 0, fn: () => { beginEdit(); o.kern = {}; endEdit(); refresh(); } },
+  ]);
+}
+function creationRing(pos, curve) {
+  const off = fn => ({ on: false, fn });
+  const textFn = () => {
+    setTool('text'); beginEdit();
+    const o = curve ? newObj({ kind: 'path', pathId: curve, offset: nearestFrac(curve, pos), side: 'above', size: 26 }) : newObj({ kind: 'point', x: Math.round(pos[0]), y: Math.round(pos[1] - 14) });
+    startEdit(o, null);
+  };
+  showRing(pos, 'Create', [
+    Object.assign({ key: 'R', label: 'Rectangle' }, off()), Object.assign({ key: 'E', label: 'Ellipse' }, off()),
+    Object.assign({ key: 'P', label: 'Polygon' }, off()), Object.assign({ key: 'S', label: 'Star' }, off()),
+    Object.assign({ key: 'L', label: 'Line' }, off()), Object.assign({ key: 'B', label: 'Freehand' }, off()),
+    { key: 'T', label: curve ? 'Text on path' : 'Text', on: !curve || !objs.some(x => x.kind === 'path' && x.pathId === curve), fn: textFn },
+    Object.assign({ key: 'F', label: 'File' }, off()),
+  ]);
+}
+
+function isTyping(t) { return t && (t.tagName === 'INPUT' || t.isContentEditable); }
+window.addEventListener('keydown', e => {
+  if (e.key === 'Shift') held.shift = true;
+  const key = e.key.toLowerCase();
+  if (fcard) {
+    if (e.key === 'Escape') { closeFontCard(true); return; }
+    const list = fontList();
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault(); fcard.cur = clamp(fcard.cur + (e.key === 'ArrowDown' ? 1 : -1), 0, Math.max(0, list.length - 1));
+      markCur(); if (list[fcard.cur]) previewFont(list[fcard.cur].n);
+      const row = fontCard.querySelectorAll('.frow')[fcard.cur]; if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter') { e.preventDefault(); if (list[fcard.cur]) applyFont(list[fcard.cur].n); }
+    return;
+  }
+  if (ring) {
+    if (e.key === 'Escape') { closeRing(); refresh(); return; }
+    const sl = ring.slots.find(x => x.key.toLowerCase() === key);
+    if (sl) { e.preventDefault(); runSlot(sl); }
+    return;
+  }
+  if (isTyping(e.target)) {
+    if (e.key === 'Escape') { e.preventDefault(); finishEdit(); }
+    else if (editing !== null && e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { e.preventDefault(); kernAtCaret(e.key === 'ArrowRight' ? 1 : -1, e.ctrlKey); }
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && key === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
+  if ((e.ctrlKey || e.metaKey) && key === 'y') { e.preventDefault(); doRedo(); return; }
+  if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+  if (e.key === 'Escape') { selId = null; refresh(); return; }
+  if (key === 't') { setTool('text'); return; }
+  if (key === 'v') { setTool('sel'); return; }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && selId !== null) {
+    const o = byId(selId); beginEdit(); objs = objs.filter(x => x !== o); selId = null; endEdit(); refresh(); return;
+  }
+  if (e.key === ' ') { e.preventDefault(); if (!spaceDown) spaceDown = Date.now(); return; }
+  if (scrub || drag) return;
+  if (SCRUBS[key]) { e.preventDefault(); startScrub(key); return; }
+  if (key === 'f') {
+    e.preventDefault();
+    const o = byId(hoverId !== null ? hoverId : selId);
+    if (!o) { toast('Hover or select a text object, then tap or hold F'); return; }
+    fkey = { o, y0: lastPos[1], t: Date.now(), moved: false };
+  }
+});
+window.addEventListener('keyup', e => {
+  if (e.key === 'Shift') held.shift = false;
+  const key = e.key.toLowerCase();
+  if (e.key === ' ') {
+    const had = spaceDown, dt = Date.now() - spaceDown; spaceDown = 0;
+    if (had && dt < 250 && !scrub && !drag && !fcard && !ring && editing === null && !isTyping(e.target)) contextRing(lastPos, hoverId, hoverCurve);
+    return;
+  }
+  if (key === 'f') {
+    const k = fkey; fkey = null;
+    if (scrub && scrub.key === 'f') { const o = scrub.o; recent.unshift(o.font); recent.length = Math.min(recent.length, 6); endScrub(); return; }
+    if (k && !k.moved && Date.now() - k.t < 400) openFontCardAtPointer();
+    return;
+  }
+  if (scrub && scrub.key === key) endScrub();
+});
+
+function localPos(e) {
+  const r = stage.getBoundingClientRect();
+  return [e.clientX - r.left - stage.clientLeft, e.clientY - r.top - stage.clientTop];
+}
+function setTool(t) {
+  if (editing !== null) finishEdit();
+  tool = t;
+  document.getElementById('tSel').classList.toggle('on', t === 'sel');
+  document.getElementById('tText').classList.toggle('on', t === 'text');
+  stage.classList.toggle('textTool', t === 'text');
+  refresh();
+}
+document.getElementById('tSel').onclick = () => setTool('sel');
+document.getElementById('tText').onclick = () => setTool('text');
+document.getElementById('bUndo').onclick = doUndo;
+document.getElementById('bRedo').onclick = doRedo;
+document.getElementById('cGuides').onchange = refresh;
+document.getElementById('bReset').onclick = () => { editing = null; hideEditors(); undo = []; redo = []; objs = SAMPLE(); selId = null; refresh(); };
+
+refresh();
+</script>
+</body>
+</html>

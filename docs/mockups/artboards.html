@@ -1,0 +1,1010 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curvy artboards and export</title>
+<style>
+  :root {
+    --bg: #1e1f22; --panel: #26272b; --workspace: #2b2d31; --text: #e6e7ea; --muted: #9a9ea8;
+    --accent: #4c8dff; --amber: #ffb454; --slot: #313338; --slotLine: #4a4d55;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid #000; }
+  header h1 { margin: 0 0 4px; font-size: 15px; }
+  header p { margin: 0; color: var(--muted); max-width: 980px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 18px; padding: 10px 16px; background: #222327; border-bottom: 1px solid #000; align-items: center; }
+  .group { display: flex; align-items: center; gap: 6px; }
+  .group > span { color: var(--muted); margin-right: 4px; }
+  button { background: var(--slot); color: var(--text); border: 1px solid var(--slotLine); border-radius: 14px; padding: 4px 12px; font: inherit; cursor: pointer; }
+  button.on { background: var(--accent); border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: default; }
+  label { color: var(--muted); display: flex; align-items: center; gap: 5px; }
+  select, input[type=text], input[type=number] { background: #2a2c31; color: var(--text); border: 1px solid #4a4d55; border-radius: 6px; padding: 2px 6px; font: inherit; }
+  #stage { position: relative; width: 900px; height: 560px; margin: 16px auto 8px; background: var(--workspace); border: 1px solid #000; overflow: hidden; cursor: default; user-select: none; touch-action: none; }
+  #stage.abTool { cursor: crosshair; }
+  #world, #over { position: absolute; left: 0; top: 0; }
+  #over { pointer-events: none; }
+  #badge { position: absolute; display: none; padding: 1px 7px; border-radius: 9px; background: #17181bf0; border: 1px solid #5a5d66; color: var(--amber); font-size: 11px; white-space: nowrap; pointer-events: none; z-index: 6; }
+  #hud { position: absolute; right: 12px; top: 12px; width: 236px; max-height: 516px; overflow: auto; padding: 8px 12px 10px; background: #17181bf0; border: 1px solid #5a5d66; border-radius: 10px; box-shadow: 0 3px 10px #0007; display: none; z-index: 4; }
+  #hud .node { border: 1px solid #3a3d43; border-radius: 8px; padding: 6px 8px 7px; }
+  #hud .head { display: flex; justify-content: space-between; margin-bottom: 4px; }
+  #hud .head b { color: var(--text); }
+  #hud .head span { color: var(--muted); font-size: 11px; }
+  #hud .link { text-align: center; color: var(--accent); font-size: 11px; line-height: 1.1; }
+  #hud .row { display: flex; align-items: center; gap: 6px; margin: 4px 0; color: var(--muted); font-size: 12px; }
+  #hud .row .lab { width: 18px; flex: none; }
+  #hud input[type=number] { width: 62px; }
+  #hud input[type=text] { width: 100%; }
+  #hud .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+  #hud .chips button, #hud button.small { padding: 2px 8px; font-size: 11px; border-radius: 10px; }
+  #hud .mono { font-variant-numeric: tabular-nums; color: var(--text); }
+  #hud .note { color: var(--amber); font-size: 11px; margin: 4px 0; }
+  #hint { position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: var(--panel); border-top: 1px solid #000; color: var(--muted); padding: 3px 10px; white-space: nowrap; font-size: 12px; display: flex; align-items: center; gap: 12px; z-index: 3; overflow: hidden; }
+  #hint .tool { color: var(--amber); font-weight: 600; }
+  #hint .main { color: var(--text); }
+  #hint .grow { flex: 1; }
+  .key { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border-radius: 6px; background: #3a3d43; border: 1px solid #5a5d66; color: var(--text); font: 600 11px/18px "Segoe UI"; }
+  .key.lit { background: var(--amber); color: #1b1b1b; border-color: var(--amber); }
+  .mod { display: inline-flex; align-items: center; gap: 4px; }
+  #scrub { position: absolute; display: none; width: 210px; padding: 8px 12px 12px; background: #17181bf0; border: 1px solid #5a5d66; border-radius: 10px; box-shadow: 0 3px 10px #0007; z-index: 6; }
+  #scrub .head { display: flex; justify-content: space-between; margin-bottom: 10px; }
+  #scrub .head b { color: var(--amber); }
+  #scrub .track { position: relative; height: 6px; border-radius: 3px; background: #3a3d43; }
+  #scrub .fill { height: 100%; border-radius: 3px; background: var(--amber); }
+  #scrub .thumb { position: absolute; top: -5px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: var(--amber); border: 2px solid #17181b; }
+  #scrub .sub { margin-top: 10px; color: var(--muted); font-size: 11px; }
+  #ring { position: absolute; width: 0; height: 0; z-index: 8; }
+  #ring .hub { position: absolute; left: -34px; top: -34px; width: 68px; height: 68px; border-radius: 50%; background: #17181bf0; border: 1px solid #5a5d66; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; color: var(--amber); line-height: 1.2; text-align: center; }
+  #ring .hub small { color: var(--muted); }
+  #ring .hub.click:hover { border-color: var(--amber); }
+  #ring .slot small { opacity: .6; font-size: 10px; }
+  #ring .slot { position: absolute; transform: translate(-50%, -50%); min-width: 112px; height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 8px; border-radius: 15px; background: #17181bf0; border: 1px solid #5a5d66; color: var(--text); cursor: pointer; font-size: 12px; white-space: nowrap; }
+  #ring .slot:hover { border-color: var(--amber); background: #2b2d33; }
+  #ring .slot.off { opacity: .35; cursor: default; }
+  #ring .slot .key { height: 18px; min-width: 18px; justify-content: center; }
+  #exp { position: absolute; left: 40px; top: 24px; width: 820px; height: 508px; display: none; background: #17181bf8; border: 1px solid #5a5d66; border-radius: 12px; box-shadow: 0 6px 24px #000a; z-index: 9; flex-direction: column; }
+  #exp .eh { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; border-bottom: 1px solid #3a3d43; }
+  #exp .eh b { color: var(--amber); }
+  #exp .eb { flex: 1; display: flex; min-height: 0; }
+  #exp .left { width: 220px; border-right: 1px solid #3a3d43; padding: 10px 12px; overflow: auto; }
+  #exp .right { flex: 1; padding: 10px 14px; overflow: auto; }
+  #exp h4 { margin: 8px 0 4px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+  #exp .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+  #exp .chips button { padding: 2px 9px; font-size: 11px; border-radius: 10px; }
+  #exp .item { display: flex; align-items: center; gap: 8px; padding: 3px 0; color: var(--text); }
+  #exp .item svg { background: #fff; border-radius: 3px; flex: none; }
+  #exp .orow { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 5px 8px; margin: 4px 0; border: 1px solid #3a3d43; border-radius: 8px; }
+  #exp .orow input[type=range] { width: 80px; }
+  #exp .orow .grow { flex: 1; }
+  #exp table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  #exp td, #exp th { padding: 3px 6px; text-align: left; border-bottom: 1px solid #2f3136; white-space: nowrap; }
+  #exp th { color: var(--muted); font-weight: 600; font-size: 11px; }
+  #exp td.nm { overflow: hidden; text-overflow: ellipsis; max-width: 230px; }
+  #exp td.num { font-variant-numeric: tabular-nums; text-align: right; }
+  #exp .ef { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; border-top: 1px solid #3a3d43; gap: 10px; }
+  #exp .ef .grow { flex: 1; color: var(--muted); }
+  #exp .thumbs svg { display: block; }
+  #newdoc { position: absolute; left: 150px; top: 60px; width: 600px; display: none; background: #17181bf8; border: 1px solid #5a5d66; border-radius: 12px; box-shadow: 0 6px 24px #000a; z-index: 10; flex-direction: column; }
+  #newdoc .eh { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; border-bottom: 1px solid #3a3d43; }
+  #newdoc .eh b { color: var(--amber); }
+  #newdoc .nb { display: flex; gap: 16px; padding: 12px 14px; }
+  #newdoc .nl { flex: 1; }
+  #newdoc .nr { width: 190px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #222327; border-radius: 8px; color: var(--muted); font-size: 11px; gap: 6px; }
+  #newdoc h4 { margin: 8px 0 4px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+  #newdoc .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+  #newdoc .chips button { padding: 2px 9px; font-size: 11px; border-radius: 10px; }
+  #newdoc .frow { display: flex; align-items: center; gap: 8px; margin: 4px 0; color: var(--muted); }
+  #newdoc input[type=number] { width: 78px; }
+  #newdoc input[type=text] { width: 100%; }
+  #newdoc .ef { display: flex; justify-content: flex-end; gap: 8px; padding: 8px 14px; border-top: 1px solid #3a3d43; }
+  #toast { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); padding: 4px 12px; border-radius: 8px; background: #17181bf0; border: 1px solid #5a5d66; display: none; color: var(--amber); z-index: 12; white-space: nowrap; }
+  #notes { width: 900px; margin: 0 auto 24px; color: var(--muted); }
+  #notes h2 { color: var(--text); font-size: 13px; margin: 14px 0 4px; }
+  #notes li { margin-bottom: 4px; }
+  #notes b { color: var(--text); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Artboards and export</h1>
+  <p>An artboard is a node (a named rectangle with a background) that crops the shared canvas; export is a node too, so the export settings live in the document. Try it: with the Artboard tool drag on the grey workspace to make one, drag one to move it (its artwork follows),
+  drag the handles to resize; tap <b>Space</b> over an artboard or over the workspace for the rings; hold <b>W</b> or <b>H</b> over an artboard and move up/down to set its size (Shift snaps to common sizes). Open <b>Export</b> and <b>Save</b> a file: SVG, PNG, JPG and WebP are really produced and downloaded.</p>
+</header>
+<div class="controls">
+  <div class="group"><span>Tool</span>
+    <button id="tSel" class="on">Select <span class="key">V</span></button>
+    <button id="tAb">Artboard <span class="key">O</span></button>
+  </div>
+  <div class="group">
+    <label><input id="cSnap" type="checkbox" checked> snap to other artboards</label>
+    <label><input id="cMove" type="checkbox" checked> artwork moves with artboard</label>
+  </div>
+  <div class="group">
+    <button id="bExport">Export&hellip; <span class="key">Ctrl+E</span></button>
+    <button id="bUndo">Undo</button>
+    <button id="bRedo">Redo</button>
+    <button id="bReset">Reset sample</button>
+    <button id="bNew">New&hellip;</button>
+    <button id="bClose">Close document</button>
+  </div>
+</div>
+
+<div id="stage">
+  <svg id="world" width="900" height="560" viewBox="0 0 900 560"></svg>
+  <svg id="over" width="900" height="560" viewBox="0 0 900 560"></svg>
+  <div id="hud"></div>
+  <div id="scrub"></div>
+  <div id="exp"></div>
+  <div id="newdoc"></div>
+  <div id="badge"></div>
+  <div id="toast"></div>
+  <div id="hint"></div>
+</div>
+
+<div id="notes">
+  <h2>How it works (proposal)</h2>
+  <ul>
+    <li><b>Artboards are crops, artwork is shared.</b> All artwork lives on one canvas; an artboard is a named rectangle (position, size, background, bleed) that decides what an export contains. Artwork can overhang an artboard (the green hill below the poster) and is cut off in the export. An object belongs to an artboard for <i>moving</i> purposes when its centre is inside it; the header switch decides whether moving or duplicating an artboard takes that artwork with it.</li>
+    <li><b>Making and editing.</b> Artboard tool (O): drag on the workspace to create, drag an artboard to move it (Alt-drag duplicates it with its artwork), drag the handles to resize, edges snap to the other artboards (amber guides). In the Select tool the artboard is picked by clicking its empty area, and moved by its label. The HUD holds the name, presets, X/Y/W/H, orientation, background (white, transparent, dark), bleed and the artboard's order, which is also the PDF page order.</li>
+    <li><b>Space rings.</b> Over an artboard (in the Artboard tool always; in the Select tool an object under the pen gets the object ring instead, so a full-size background rectangle can be passed by using the artboard's label): Export, Quick export, Fit to art, Duplicate, Rename, Orientation, Background, Delete. Over the grey workspace (the document ring, the same slots and keys as <code>main.html</code> state 3b): New artboard <kbd>A</kbd>, New document <kbd>N</kbd>, Open, Save, Export <kbd>E</kbd>, Place image, Fit <kbd>0</kbd>, Rulers &middot; grid. Open, Save and Place image are greyed out here. Arrange all is a button in the artboard side box. The barrel button opens the same rings.</li>
+    <li><b>No document open: the New ring.</b> Close the document (button above) and the workspace is empty; tap Space on it (or press the barrel button) and the <b>New ring</b> appears: four default sizes (Letter, A4, Full HD, Square 1080, one tap creates the document), Open, and Recent (the sample). Its hub, <b>Create&hellip;</b>, opens the full New Document dialog: name, size presets or a custom size in px / in / mm, orientation, number of artboards, background and colour mode, with a preview. With a document open, the document ring's <b>New document</b> slot opens the same New ring, and its <b>New artboard</b> slot opens an <b>Artboard ring</b> of the same four sizes plus Same size (as the selected artboard) and Custom, placed centred on the pen. So the empty-workspace press is about documents when none is open and about artboards when one is. The view zooms to fit the new artboards.</li>
+    <li><b>Hold-key size.</b> W and H over an artboard scrub its width and height with vertical travel; Shift snaps to common sizes, and the card shows the preset it matches.</li>
+    <li><b>Export card.</b> Left: what to export (everything, or only the selection), a checklist of artboards and of objects marked <b>Export as asset</b>. Right: the outputs, each a format + scale + options (SVG responsive / outline text; PNG and WebP transparent; JPG and WebP quality; PDF with bleed), with presets (Web, App icon, Social, Print) and a naming template. Below, the resulting files with thumbnail, pixel size and the real byte size; <b>Save</b> downloads one file, <b>Export N files</b> all of them.</li>
+    <li><b>The export settings are nodes.</b> The outputs, the checked artboards and the template belong to the document (an <code>Export</code> node reading the artboard and asset nodes), so reopening the file and pressing Quick export or Export all repeats the same export. Marking an object as an asset adds it to that set.</li>
+  </ul>
+  <h2>What this means for the graph and the code</h2>
+  <ul>
+    <li><code>Artboard</code> node: name, rect, background, bleed, clip. It is an output the Export node and the document card's artboard list both read; the order of the nodes is the page order. Artboards do not own geometry, so moving one with its artwork is an editing convenience that moves the selected nodes' transforms, not a parent/child relationship.</li>
+    <li><code>Export</code> node: input = a set of artboards and/or objects, parameters = the output rows and the name template, output = files (no geometry). It evaluates on demand, never during editing. Rasterising goes through the same renderer as the canvas (Blend2D) at the requested scale; SVG export needs the stroke-outline and text-to-path steps from the stroke and text notes, plus the embedded graph metadata as an option.</li>
+    <li>The sample does the real thing in the browser: it builds a cropped SVG per file, and rasterises it through a canvas for PNG, JPG and WebP, so the byte sizes shown are real. PDF is listed but not produced here.</li>
+  </ul>
+  <h2>Not in this mockup</h2>
+  <ul>
+    <li>PDF output, colour profiles, slices (an export region that is not an artboard), pan and zoom (fixed at 60%), artboard presets editing, the document card's artboard list, importing, a folder picker (the browser decides where files go), batch rename, and a progress view for large exports.</li>
+  </ul>
+</div>
+
+<script>
+// ==LOGIC START
+let Z = 0.6, OX = 24, OY = 40;
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'untitled';
+let docName = 'night-sky';
+const PRESETS = [['Letter', 816, 1056], ['A4', 794, 1123], ['Full HD', 1920, 1080], ['Square', 1080, 1080], ['Icon', 256, 256], ['Phone', 393, 852], ['Banner', 560, 200]];
+const SIZE_SNAPS = [64, 128, 200, 256, 360, 393, 500, 512, 560, 794, 816, 852, 1024, 1056, 1080, 1123, 1920];
+const BGS = ['white', 'transparent', 'dark'];
+const FMTS = ['svg', 'png', 'jpg', 'webp', 'pdf'];
+const SCALES = [0.5, 1, 2, 3, 4];
+
+const SAMPLE_ABS = () => [
+  { id: 1, name: 'Poster', x: 60, y: 60, w: 360, h: 500, bg: 'white', bleed: 0 },
+  { id: 2, name: 'Icon', x: 480, y: 60, w: 256, h: 256, bg: 'transparent', bleed: 0 },
+  { id: 3, name: 'Banner', x: 480, y: 360, w: 560, h: 200, bg: 'dark', bleed: 0 },
+];
+const SAMPLE_OBJS = () => [
+  { id: 101, name: 'Sky', t: 'rect', x: 60, y: 60, w: 360, h: 500, fill: '#1d2a44' },
+  { id: 102, name: 'Moon', t: 'ellipse', cx: 240, cy: 200, rx: 70, ry: 70, fill: '#f4e7a1' },
+  { id: 103, name: 'Star', t: 'star', cx: 340, cy: 120, r: 26, fill: '#ffffff' },
+  { id: 105, name: 'Hill', t: 'ellipse', cx: 240, cy: 540, rx: 250, ry: 110, fill: '#2f7d4f' },
+  { id: 104, name: 'Title', t: 'text', x: 240, y: 400, text: 'Night sky', size: 46, fill: '#ffffff', anchor: 'middle' },
+  { id: 106, name: 'Icon disc', t: 'ellipse', cx: 608, cy: 188, rx: 128, ry: 128, fill: '#c0392b' },
+  { id: 107, name: 'Icon star', t: 'star', cx: 608, cy: 188, r: 70, fill: '#ffffff', asset: true },
+  { id: 108, name: 'Banner text', t: 'text', x: 510, y: 475, text: 'Night sky: new collection', size: 40, fill: '#ffb454', anchor: 'start' },
+];
+const SAMPLE_EXP = () => ({ scope: 'all', template: '{doc}-{artboard}{scale}', off: {}, rows: [{ fmt: 'png', scale: 1, q: 90, transparent: false, responsive: false, outline: false, bleed: false }, { fmt: 'svg', scale: 1, q: 90, transparent: false, responsive: true, outline: false, bleed: false }] });
+
+let abs = SAMPLE_ABS(), objs = SAMPLE_OBJS(), exp = SAMPLE_EXP();
+let nextId = 200;
+
+function starPts(o) {
+  const out = [];
+  for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? o.r * 0.45 : o.r; out.push((o.cx + Math.cos(a) * r).toFixed(1) + ',' + (o.cy + Math.sin(a) * r).toFixed(1)); }
+  return out.join(' ');
+}
+function objMarkup(o) {
+  if (o.t === 'rect') return '<rect x="' + o.x + '" y="' + o.y + '" width="' + o.w + '" height="' + o.h + '" fill="' + o.fill + '"/>';
+  if (o.t === 'ellipse') return '<ellipse cx="' + o.cx + '" cy="' + o.cy + '" rx="' + o.rx + '" ry="' + o.ry + '" fill="' + o.fill + '"/>';
+  if (o.t === 'star') return '<polygon points="' + starPts(o) + '" fill="' + o.fill + '"/>';
+  return '<text x="' + o.x + '" y="' + o.y + '" font-family="Georgia, serif" font-size="' + o.size + '" text-anchor="' + o.anchor + '" fill="' + o.fill + '">' + esc(o.text) + '</text>';
+}
+const artMarkup = () => objs.map(objMarkup).join('');
+function bboxOf(o) {
+  if (o.t === 'rect') return { x: o.x, y: o.y, w: o.w, h: o.h };
+  if (o.t === 'ellipse') return { x: o.cx - o.rx, y: o.cy - o.ry, w: o.rx * 2, h: o.ry * 2 };
+  if (o.t === 'star') return { x: o.cx - o.r, y: o.cy - o.r, w: o.r * 2, h: o.r * 2 };
+  const w = o.text.length * o.size * 0.52, x = o.anchor === 'middle' ? o.x - w / 2 : o.x;
+  return { x, y: o.y - o.size * 0.8, w, h: o.size * 1.0 };
+}
+function shiftObj(o, dx, dy) {
+  if (o.t === 'rect' || o.t === 'text') { o.x += dx; o.y += dy; } else { o.cx += dx; o.cy += dy; }
+}
+function centerIn(o, a) {
+  const b = bboxOf(o), cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+  return cx >= a.x && cx <= a.x + a.w && cy >= a.y && cy <= a.y + a.h;
+}
+function snapRect(r, others, mode, thr) {
+  const out = { r: Object.assign({}, r), guides: [] };
+  const xs = [], ys = [];
+  others.forEach(a => { xs.push(a.x, a.x + a.w / 2, a.x + a.w); ys.push(a.y, a.y + a.h / 2, a.y + a.h); });
+  const best = (vals, targets) => { let bd = thr + 1, bv = null; for (const v of vals) for (const t of targets) { const d = Math.abs(v - t.val); if (d < bd) { bd = d; bv = { d: t.val - v, at: t.val }; } } return bd <= thr ? bv : null; };
+  const tx = xs.map(v => ({ val: v })), ty = ys.map(v => ({ val: v }));
+  if (mode === 'move') {
+    const bx = best([r.x, r.x + r.w / 2, r.x + r.w], tx), by = best([r.y, r.y + r.h / 2, r.y + r.h], ty);
+    if (bx) { out.r.x += bx.d; out.guides.push({ x: bx.at }); }
+    if (by) { out.r.y += by.d; out.guides.push({ y: by.at }); }
+  }
+  return out;
+}
+function resizeRect(r0, sides, dx, dy, others, snap, thr) {
+  const r = Object.assign({}, r0);
+  let l = r.x, rt = r.x + r.w, t = r.y, b = r.y + r.h;
+  if (sides.l) l += dx; if (sides.r) rt += dx; if (sides.t) t += dy; if (sides.b) b += dy;
+  const guides = [];
+  if (snap) {
+    const xs = [], ys = [];
+    others.forEach(a => { xs.push(a.x, a.x + a.w); ys.push(a.y, a.y + a.h); });
+    const near = (v, arr) => { let bd = thr + 1, bv = null; arr.forEach(t => { const d = Math.abs(v - t); if (d < bd) { bd = d; bv = t; } }); return bd <= thr ? bv : null; };
+    if (sides.l) { const s = near(l, xs); if (s !== null) { l = s; guides.push({ x: s }); } }
+    if (sides.r) { const s = near(rt, xs); if (s !== null) { rt = s; guides.push({ x: s }); } }
+    if (sides.t) { const s = near(t, ys); if (s !== null) { t = s; guides.push({ y: s }); } }
+    if (sides.b) { const s = near(b, ys); if (s !== null) { b = s; guides.push({ y: s }); } }
+  }
+  if (rt - l < 16) { if (sides.l) l = rt - 16; else rt = l + 16; }
+  if (b - t < 16) { if (sides.t) t = b - 16; else b = t + 16; }
+  return { r: { x: Math.round(l), y: Math.round(t), w: Math.round(rt - l), h: Math.round(b - t) }, guides };
+}
+function exportItems(selAb, selObj) {
+  const items = [];
+  const rows = exp.rows, scopeSel = exp.scope === 'selection';
+  abs.forEach((a, i) => {
+    if (scopeSel ? selAb !== a.id : exp.off['a' + a.id]) return;
+    rows.forEach(row => items.push({ kind: 'ab', id: a.id, label: a.name, idx: i + 1, rect: { x: a.x, y: a.y, w: a.w, h: a.h }, bg: a.bg, bleed: a.bleed, row }));
+  });
+  objs.forEach(o => {
+    if (scopeSel ? selObj !== o.id : (!o.asset || exp.off['o' + o.id])) return;
+    if (scopeSel && !o.asset && selAb !== null) return;
+    const b = bboxOf(o);
+    rows.forEach(row => items.push({ kind: 'asset', id: o.id, label: o.name, idx: 0, rect: { x: Math.floor(b.x), y: Math.floor(b.y), w: Math.ceil(b.w), h: Math.ceil(b.h) }, bg: 'transparent', bleed: 0, row, only: o.id }));
+  });
+  items.forEach((it, k) => { it.name = fileName(it, k); it.rect = effRect(it); it.px = [Math.max(1, Math.round(it.rect.w * it.row.scale)), Math.max(1, Math.round(it.rect.h * it.row.scale))]; });
+  return items;
+}
+function effRect(it) {
+  const r = it.rect;
+  if (it.row.fmt === 'pdf' && it.row.bleed && it.bleed) return { x: r.x - it.bleed, y: r.y - it.bleed, w: r.w + it.bleed * 2, h: r.h + it.bleed * 2 };
+  return r;
+}
+function fileName(it, k) {
+  return exp.template.replace('{doc}', docName).replace('{artboard}', slug(it.label)).replace('{n}', it.idx || (k + 1)).replace('{scale}', it.row.scale !== 1 ? '@' + it.row.scale + 'x' : '') + '.' + it.row.fmt;
+}
+function bgFill(it) {
+  if (it.row.transparent && (it.row.fmt === 'png' || it.row.fmt === 'webp')) return null;
+  if (it.bg === 'white') return '#ffffff';
+  if (it.bg === 'dark') return '#26272b';
+  return it.row.fmt === 'jpg' ? '#ffffff' : null;
+}
+function svgFor(it) {
+  const r = it.rect, f = bgFill(it), w = Math.round(r.w * it.row.scale), h = Math.round(r.h * it.row.scale);
+  const dims = it.row.fmt === 'svg' && it.row.responsive ? '' : ' width="' + w + '" height="' + h + '"';
+  let body = artMarkup();
+  if (it.only) body = objMarkup(objs.find(o => o.id === it.only));
+  return '<svg xmlns="http://www.w3.org/2000/svg"' + dims + ' viewBox="' + r.x + ' ' + r.y + ' ' + r.w + ' ' + r.h + '">' + (f ? '<rect x="' + r.x + '" y="' + r.y + '" width="' + r.w + '" height="' + r.h + '" fill="' + f + '"/>' : '') + body + '</svg>';
+}
+const fmtBytes = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(2) + ' MB';
+// ==LOGIC END
+
+const stage = document.getElementById('stage'), world = document.getElementById('world'), over = document.getElementById('over');
+const hud = document.getElementById('hud'), hintEl = document.getElementById('hint'), badge = document.getElementById('badge');
+const scrubEl = document.getElementById('scrub'), toastEl = document.getElementById('toast'), expEl = document.getElementById('exp'), newdocEl = document.getElementById('newdoc');
+const NS = 'http://www.w3.org/2000/svg';
+
+let tool = 'sel', selAb = 1, selObj = null, hoverAb = null, hoverObj = null, hoverLabel = null;
+let drag = null, scrub = null, ring = null, guides = [], spaceDown = 0, gridOn = false;
+let lastPos = [450, 270];
+const held = { shift: false, alt: false };
+let undo = [], redo = [], editBefore = null;
+let expOpen = false, docOpen = true, dlgOpen = false, dlg = null;
+
+const byAb = id => abs.find(a => a.id === id);
+const byObj = id => objs.find(o => o.id === id);
+const snap = () => JSON.stringify({ abs, objs, exp });
+function beginEdit() { if (editBefore === null) editBefore = snap(); }
+function endEdit() {
+  if (editBefore === null) return;
+  if (snap() !== editBefore) { undo.push(editBefore); redo.length = 0; }
+  editBefore = null;
+}
+function restore(json) { const s = JSON.parse(json); abs = s.abs; objs = s.objs; exp = s.exp; if (!byAb(selAb)) selAb = null; if (!byObj(selObj)) selObj = null; }
+function doUndo() { endEdit(); if (!undo.length) return; redo.push(snap()); restore(undo.pop()); refresh(); }
+function doRedo() { endEdit(); if (!redo.length) return; undo.push(snap()); restore(redo.pop()); refresh(); }
+function toast(msg) {
+  toastEl.textContent = msg; toastEl.style.display = 'block';
+  clearTimeout(toast.t); toast.t = setTimeout(() => { toastEl.style.display = 'none'; }, 2200);
+}
+const localPos = e => { const r = stage.getBoundingClientRect(); return [e.clientX - r.left - stage.clientLeft, e.clientY - r.top - stage.clientTop]; };
+const toWorld = p => [(p[0] - OX) / Z, (p[1] - OY) / Z];
+const sx = x => OX + x * Z, sy = y => OY + y * Z;
+
+function mk(name, attrs, text) {
+  const e = document.createElementNS(NS, name);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text !== undefined) e.textContent = text;
+  over.appendChild(e);
+  return e;
+}
+const bgPaint = a => a.bg === 'white' ? '#ffffff' : a.bg === 'dark' ? '#26272b' : 'url(#chk)';
+
+function renderWorld() {
+  let h = '<defs><pattern id="chk" width="16" height="16" patternUnits="userSpaceOnUse"><rect width="16" height="16" fill="#ffffff"/><rect width="8" height="8" fill="#d6d6d6"/><rect x="8" y="8" width="8" height="8" fill="#d6d6d6"/></pattern>' +
+    '<pattern id="dots" width="40" height="40" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1.2" fill="#4a4d55"/></pattern></defs>';
+  if (gridOn) h += '<rect width="900" height="560" fill="url(#dots)"/>';
+  h += '<g transform="translate(' + OX + ' ' + OY + ') scale(' + Z + ')">';
+  abs.forEach(a => { h += '<rect x="' + (a.x + 6) + '" y="' + (a.y + 8) + '" width="' + a.w + '" height="' + a.h + '" fill="#000" opacity=".28"/>'; });
+  abs.forEach(a => { h += '<rect x="' + a.x + '" y="' + a.y + '" width="' + a.w + '" height="' + a.h + '" fill="' + bgPaint(a) + '"/>'; });
+  h += artMarkup();
+  abs.forEach(a => { if (a.bleed) h += '<rect x="' + (a.x - a.bleed) + '" y="' + (a.y - a.bleed) + '" width="' + (a.w + a.bleed * 2) + '" height="' + (a.h + a.bleed * 2) + '" fill="none" stroke="#e57368" stroke-width="' + (1 / Z) + '" stroke-dasharray="' + (6 / Z) + ' ' + (4 / Z) + '"/>'; });
+  h += '</g>';
+  world.innerHTML = h;
+}
+
+function handlesOf(a) {
+  const x0 = sx(a.x), y0 = sy(a.y), x1 = sx(a.x + a.w), y1 = sy(a.y + a.h), xm = (x0 + x1) / 2, ym = (y0 + y1) / 2;
+  return [
+    { s: { l: 1, t: 1 }, p: [x0, y0] }, { s: { t: 1 }, p: [xm, y0] }, { s: { r: 1, t: 1 }, p: [x1, y0] },
+    { s: { r: 1 }, p: [x1, ym] }, { s: { r: 1, b: 1 }, p: [x1, y1] }, { s: { b: 1 }, p: [xm, y1] },
+    { s: { l: 1, b: 1 }, p: [x0, y1] }, { s: { l: 1 }, p: [x0, ym] },
+  ];
+}
+function drawOverlay() {
+  over.textContent = '';
+  if (!docOpen) {
+    mk('text', { x: 450, y: 250, fill: '#6b6f78', 'font-size': 20, 'text-anchor': 'middle', 'font-family': 'Segoe UI' }, 'Nothing open');
+    mk('text', { x: 450, y: 278, fill: '#6b6f78', 'font-size': 13, 'text-anchor': 'middle', 'font-family': 'Segoe UI' }, 'Tap Space (or press the barrel button) to start');
+    return;
+  }
+  abs.forEach((a, i) => {
+    const on = a.id === selAb;
+    mk('text', { x: sx(a.x), y: sy(a.y) - 7, fill: on ? '#ffb454' : '#aeb2bb', 'font-size': 11, 'font-family': 'Segoe UI', 'font-weight': on ? 600 : 400 }, (i + 1) + '  ' + a.name + '   ' + a.w + ' × ' + a.h);
+  });
+  const a = byAb(selAb);
+  if (a) {
+    mk('rect', { x: sx(a.x), y: sy(a.y), width: a.w * Z, height: a.h * Z, fill: 'none', stroke: '#4c8dff', 'stroke-width': 1.5 });
+    handlesOf(a).forEach(h => mk('rect', { x: h.p[0] - 4, y: h.p[1] - 4, width: 8, height: 8, fill: '#fff', stroke: '#4c8dff', 'stroke-width': 1.5 }));
+  }
+  const o = byObj(selObj);
+  if (o) {
+    const b = bboxOf(o);
+    mk('rect', { x: sx(b.x) - 2, y: sy(b.y) - 2, width: b.w * Z + 4, height: b.h * Z + 4, fill: 'none', stroke: '#4c8dff', 'stroke-width': 1, 'stroke-dasharray': '4 3' });
+  }
+  objs.filter(x => x.asset).forEach(x => {
+    const b = bboxOf(x);
+    mk('rect', { x: sx(b.x + b.w) - 8, y: sy(b.y) - 8, width: 16, height: 14, rx: 3, fill: '#ffb454' });
+    mk('text', { x: sx(b.x + b.w), y: sy(b.y) + 3, fill: '#1b1b1b', 'font-size': 10, 'font-weight': 700, 'text-anchor': 'middle', 'font-family': 'Segoe UI' }, '⇩');
+  });
+  if (hoverAb !== null && hoverObj === null && !drag) {
+    const h = byAb(hoverAb);
+    if (h && h.id !== selAb) mk('rect', { x: sx(h.x), y: sy(h.y), width: h.w * Z, height: h.h * Z, fill: 'none', stroke: '#ffb454', 'stroke-width': 1, opacity: .7 });
+  }
+  guides.forEach(g => {
+    if (g.x !== undefined) mk('line', { x1: sx(g.x), x2: sx(g.x), y1: 0, y2: 560, stroke: '#ffb454', 'stroke-width': 1, 'stroke-dasharray': '5 3' });
+    else mk('line', { y1: sy(g.y), y2: sy(g.y), x1: 0, x2: 900, stroke: '#ffb454', 'stroke-width': 1, 'stroke-dasharray': '5 3' });
+  });
+  if (drag && drag.type === 'create') {
+    const r = drag.rect;
+    if (r) mk('rect', { x: sx(r.x), y: sy(r.y), width: r.w * Z, height: r.h * Z, fill: '#4c8dff22', stroke: '#4c8dff', 'stroke-dasharray': '4 3' });
+    if (r) mk('text', { x: sx(r.x + r.w) + 6, y: sy(r.y + r.h) + 14, fill: '#ffb454', 'font-size': 11, 'font-family': 'Segoe UI' }, Math.round(r.w) + ' × ' + Math.round(r.h));
+  }
+}
+
+function updateBadge() {
+  let text = '';
+  if (!drag && !ring && !expOpen) {
+    if (tool === 'ab') {
+      const a = byAb(selAb);
+      if (a && handleAt(a, lastPos)) text = 'resize';
+      else if (hoverAb !== null) text = held.alt ? 'duplicate' : 'move artboard';
+      else text = 'drag: new artboard';
+    } else if (hoverObj !== null) text = 'move ' + byObj(hoverObj).name;
+    else if (hoverLabel !== null) text = 'move artboard';
+    else if (hoverAb !== null) text = 'select artboard';
+  }
+  if (!text) { badge.style.display = 'none'; return; }
+  badge.textContent = text; badge.style.display = 'block';
+  badge.style.left = Math.min(lastPos[0] + 16, 700) + 'px'; badge.style.top = (lastPos[1] + 16) + 'px';
+}
+
+function handleAt(a, pos) { return handlesOf(a).find(h => dist(h.p, pos) < 8) || null; }
+function hitObj(pos) {
+  const w = toWorld(pos);
+  for (let i = objs.length - 1; i >= 0; i--) { const b = bboxOf(objs[i]); if (w[0] >= b.x && w[0] <= b.x + b.w && w[1] >= b.y && w[1] <= b.y + b.h) return objs[i]; }
+  return null;
+}
+function hitAb(pos) {
+  const w = toWorld(pos);
+  for (let i = abs.length - 1; i >= 0; i--) { const a = abs[i]; if (w[0] >= a.x && w[0] <= a.x + a.w && w[1] >= a.y && w[1] <= a.y + a.h) return a; }
+  return null;
+}
+function hitLabel(pos) {
+  for (const a of abs) { if (pos[0] >= sx(a.x) && pos[0] <= sx(a.x) + 150 && pos[1] >= sy(a.y) - 20 && pos[1] <= sy(a.y) - 2) return a; }
+  return null;
+}
+
+function updateHud() {
+  const act = document.activeElement;
+  if (hud.contains(act) && (act.tagName === 'INPUT' || act.tagName === 'SELECT')) return;
+  const a = byAb(selAb), o = byObj(selObj);
+  if (!a && !o) { hud.style.display = 'none'; return; }
+  hud.style.display = 'block';
+  const nodes = [];
+  if (o) {
+    const b = bboxOf(o);
+    nodes.push('<div class="node"><div class="head"><b>Object</b><span>' + o.t + '</span></div>' +
+      '<div class="row"><input type="text" id="oname" value="' + esc(o.name) + '"></div>' +
+      '<div class="row">size <span class="mono">' + Math.round(b.w) + ' × ' + Math.round(b.h) + '</span></div>' +
+      '<div class="row"><label><input type="checkbox" id="oasset"' + (o.asset ? ' checked' : '') + '> Export as asset</label></div>' +
+      (o.asset ? '<div class="note">Exported on its own, cropped to its bounds, as ' + esc(slug(o.name)) + '.*</div>' : '') + '</div>');
+  } else if (a) {
+    const i = abs.indexOf(a);
+    nodes.push('<div class="node"><div class="head"><b>Artboard</b><span>' + (i + 1) + ' of ' + abs.length + '</span></div>' +
+      '<div class="row"><input type="text" id="aname" value="' + esc(a.name) + '"></div>' +
+      '<div class="chips">' + PRESETS.map(([n, w, h]) => '<button data-pre="' + n + '"' + (a.w === w && a.h === h ? ' class="on"' : '') + '>' + n + '</button>').join('') + '</div>' +
+      '<div class="row"><span class="lab">X</span><input type="number" id="ax" value="' + a.x + '"><span class="lab">Y</span><input type="number" id="ay" value="' + a.y + '"></div>' +
+      '<div class="row"><span class="lab">W</span><input type="number" id="aw" value="' + a.w + '" min="16"><span class="lab">H</span><input type="number" id="ah" value="' + a.h + '" min="16"></div>' +
+      '<div class="row"><button class="small" id="swap">Swap W / H</button><button class="small" id="fit">Fit to art</button></div>' +
+      '<div class="chips">' + BGS.map(b => '<button data-bg="' + b + '"' + (a.bg === b ? ' class="on"' : '') + '>' + b + '</button>').join('') + '</div>' +
+      '<div class="row">bleed <input type="number" id="abl" value="' + a.bleed + '" min="0" max="60"> px</div>' +
+      '<div class="row">order <button class="small" id="earlier"' + (i === 0 ? ' disabled' : '') + '>&larr;</button><button class="small" id="later"' + (i === abs.length - 1 ? ' disabled' : '') + '>&rarr;</button><button class="small" id="arr">Arrange all</button></div></div>');
+  }
+  const items = exportItems(selAb, selObj).filter(it => (o ? it.kind === 'asset' && it.id === o.id : it.kind === 'ab' && it.id === a.id));
+  nodes.push('<div class="node"><div class="head"><b>Export</b><span>' + exp.rows.length + ' output' + (exp.rows.length > 1 ? 's' : '') + '</span></div>' +
+    '<div class="chips">' + exp.rows.map(r => '<button disabled>' + r.fmt.toUpperCase() + ' ' + r.scale + 'x</button>').join('') + '</div>' +
+    '<div class="row"><button class="small" id="hexp">Export&hellip;</button><button class="small" id="hquick">Quick export</button></div>' +
+    (o && !o.asset ? '<div class="note">Mark it as an asset to export it on its own.</div>' : '') + '</div>');
+  hud.innerHTML = nodes.join('<div class="link">&darr;</div>');
+  const g = id => hud.querySelector('#' + id);
+  if (o) {
+    g('oname').onchange = () => { beginEdit(); o.name = g('oname').value || o.name; endEdit(); refresh(); };
+    g('oasset').onchange = () => { beginEdit(); o.asset = g('oasset').checked; endEdit(); refresh(); };
+  }
+  if (a) {
+    g('aname').onchange = () => { beginEdit(); a.name = g('aname').value || a.name; endEdit(); refresh(); };
+    ['ax', 'ay', 'aw', 'ah', 'abl'].forEach(id => { g(id).onchange = () => {
+      beginEdit(); const p = { ax: 'x', ay: 'y', aw: 'w', ah: 'h', abl: 'bleed' }[id]; a[p] = Math.max(p === 'w' || p === 'h' ? 16 : p === 'bleed' ? 0 : -9999, Math.round(+g(id).value || 0)); endEdit(); refresh();
+    }; });
+    hud.querySelectorAll('[data-pre]').forEach(b => b.onclick = () => { const p = PRESETS.find(x => x[0] === b.dataset.pre); beginEdit(); a.w = p[1]; a.h = p[2]; endEdit(); refresh(); });
+    hud.querySelectorAll('[data-bg]').forEach(b => b.onclick = () => { beginEdit(); a.bg = b.dataset.bg; endEdit(); refresh(); });
+    g('swap').onclick = () => swapAb(a);
+    g('fit').onclick = () => fitAb(a);
+    g('earlier').onclick = () => moveOrder(a, -1);
+    g('later').onclick = () => moveOrder(a, 1);
+    g('arr').onclick = arrange;
+  }
+  g('hexp').onclick = () => openExport();
+  g('hquick').onclick = () => quickExport(items);
+}
+
+function hintItems() {
+  const m = (k, t, lit) => ({ k, t, lit });
+  if (!docOpen) return { tool: 'Nothing open', main: 'Tap Space or press the barrel button for the New ring', mods: [m('Space', 'tap: New ring', false)] };
+  let main = '', mods = [];
+  if (expOpen) main = 'Esc closes · Save downloads one file · Export N files downloads all';
+  else if (scrub) { main = 'release to keep'; mods = [m('Shift', 'snap to common sizes', held.shift)]; }
+  else if (tool === 'ab') { main = 'drag: new artboard · drag an artboard: move with its art · handles resize'; mods = [m('Alt', 'duplicate', held.alt), m('Space', 'tap: ring', false), m('W / H', 'size', false)]; }
+  else { main = 'click art or an artboard · drag art to move · drag the artboard label to move it'; mods = [m('Space', 'tap: ring', false), m('W / H', 'size', false), m('Ctrl+E', 'export', false)]; }
+  return { tool: tool === 'ab' ? 'Artboard' : 'Select', main, mods };
+}
+function updateHint() {
+  const h = hintItems();
+  hintEl.innerHTML = '<span class="tool">' + h.tool + '</span><span class="main">' + h.main + '</span><span class="grow"></span>' +
+    h.mods.map(x => '<span class="mod"><span class="key' + (x.lit ? ' lit' : '') + '">' + x.k + '</span>' + x.t + '</span>').join('') +
+    '<span>' + Math.round(Z * 100) + '% · ' + Math.round(toWorld(lastPos)[0]) + ', ' + Math.round(toWorld(lastPos)[1]) + '</span>';
+}
+function refresh() {
+  renderWorld(); drawOverlay(); updateHud(); updateHint(); updateBadge();
+  document.getElementById('bUndo').disabled = !undo.length; document.getElementById('bRedo').disabled = !redo.length;
+  if (expOpen) renderExport();
+}
+
+// ---------- artboard operations ----------
+function newAb(rect, name) {
+  const a = { id: nextId++, name: name || 'Artboard ' + (abs.length + 1), x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.w), h: Math.round(rect.h), bg: 'white', bleed: 0 };
+  abs.push(a);
+  return a;
+}
+function swapAb(a) { beginEdit(); const w = a.w; a.w = a.h; a.h = w; endEdit(); refresh(); }
+function fitAb(a) {
+  const inside = objs.filter(o => centerIn(o, a));
+  if (!inside.length) { toast('No artwork inside this artboard to fit to'); return; }
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  inside.forEach(o => { const b = bboxOf(o); x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h); });
+  beginEdit(); a.x = Math.round(x0); a.y = Math.round(y0); a.w = Math.round(x1 - x0); a.h = Math.round(y1 - y0); endEdit(); refresh();
+}
+function moveOrder(a, d) {
+  const i = abs.indexOf(a), j = i + d;
+  if (j < 0 || j >= abs.length) return;
+  beginEdit(); abs.splice(i, 1); abs.splice(j, 0, a); endEdit(); refresh();
+}
+function duplicateAb(a) {
+  beginEdit();
+  const dx = a.w + 60, copy = Object.assign({}, a, { id: nextId++, name: a.name + ' copy', x: a.x + dx });
+  abs.push(copy);
+  if (document.getElementById('cMove').checked) objs.filter(o => centerIn(o, a)).forEach(o => { const c = JSON.parse(JSON.stringify(o)); c.id = nextId++; c.asset = false; shiftObj(c, dx, 0); objs.push(c); });
+  selAb = copy.id; selObj = null; endEdit(); refresh();
+  return copy;
+}
+function deleteAb(a) { beginEdit(); abs = abs.filter(x => x !== a); selAb = null; endEdit(); toast('Deleted ' + a.name + ' (its artwork stays on the canvas)'); refresh(); }
+function arrange() {
+  if (!abs.length) return;
+  beginEdit();
+  const move = document.getElementById('cMove').checked, own = abs.map(a => objs.filter(o => centerIn(o, a)));
+  let x = abs[0].x, y = abs[0].y, rowH = 0;
+  const x0 = x;
+  abs.forEach((a, i) => {
+    if (x > x0 && x + a.w > x0 + 1000) { x = x0; y += rowH + 60; rowH = 0; }
+    const dx = x - a.x, dy = y - a.y;
+    if (move) own[i].forEach(o => shiftObj(o, dx, dy));
+    a.x = x; a.y = y; x += a.w + 60; rowH = Math.max(rowH, a.h);
+  });
+  endEdit(); refresh();
+}
+function cycleBg(a) { beginEdit(); a.bg = BGS[(BGS.indexOf(a.bg) + 1) % BGS.length]; endEdit(); refresh(); }
+
+// ---------- pointer ----------
+stage.addEventListener('contextmenu', e => e.preventDefault());
+stage.addEventListener('pointerdown', e => {
+  if (e.target.closest('#hud,#exp,#scrub,#ring,#newdoc')) return;
+  if (!docOpen && e.button !== 2) return;
+  const pos = localPos(e); lastPos = pos;
+  if (ring) { closeRing(); refresh(); return; }
+  if (e.button === 2) { contextRing(pos); return; }
+  stage.setPointerCapture(e.pointerId);
+  const w = toWorld(pos), a = byAb(selAb);
+  if (a) {
+    const h = handleAt(a, pos);
+    if (h) { beginEdit(); drag = { type: 'resize', a, sides: h.s, r0: { x: a.x, y: a.y, w: a.w, h: a.h }, start: w }; return; }
+  }
+  const o = hitObj(pos), ab = hitAb(pos), lab = hitLabel(pos);
+  if (tool === 'ab') {
+    if (ab) {
+      selAb = ab.id; selObj = null;
+      let target = ab;
+      beginEdit();
+      let copies = null;
+      if (e.altKey) {
+        const c = Object.assign({}, ab, { id: nextId++, name: ab.name + ' copy' }); abs.push(c); target = c; selAb = c.id; copies = [];
+        if (document.getElementById('cMove').checked) objs.filter(x => centerIn(x, ab)).forEach(x => { const cp = JSON.parse(JSON.stringify(x)); cp.id = nextId++; cp.asset = false; objs.push(cp); copies.push(cp); });
+      }
+      startMoveAb(target, w, copies); refresh(); return;
+    }
+    selAb = null; selObj = null;
+    beginEdit();
+    drag = { type: 'create', start: w, rect: null }; refresh(); return;
+  }
+  if (lab) { selAb = lab.id; selObj = null; beginEdit(); startMoveAb(lab, w); refresh(); return; }
+  if (o) { selObj = o.id; selAb = null; beginEdit(); drag = { type: 'obj', o, orig: JSON.parse(JSON.stringify(o)), start: w }; refresh(); return; }
+  if (ab) { selAb = ab.id; selObj = null; refresh(); return; }
+  selAb = null; selObj = null; refresh();
+});
+function startMoveAb(a, w, copies) {
+  const list = copies || (document.getElementById('cMove').checked ? objs.filter(o => centerIn(o, a)) : []);
+  const own = list.map(o => ({ o, orig: JSON.parse(JSON.stringify(o)) }));
+  drag = { type: 'move', a, r0: { x: a.x, y: a.y, w: a.w, h: a.h }, own, start: w };
+}
+stage.addEventListener('pointermove', e => {
+  const pos = localPos(e); lastPos = pos;
+  if (scrub) { updateScrub(pos); return; }
+  if (drag) {
+    const w = toWorld(pos), dx = w[0] - drag.start[0], dy = w[1] - drag.start[1], snapOn = document.getElementById('cSnap').checked, thr = 8 / Z * Z;
+    guides = [];
+    if (drag.type === 'move') {
+      let r = { x: drag.r0.x + dx, y: drag.r0.y + dy, w: drag.r0.w, h: drag.r0.h };
+      if (snapOn) { const s = snapRect(r, abs.filter(x => x !== drag.a), 'move', 8); r = s.r; guides = s.guides; }
+      const ddx = r.x - drag.r0.x, ddy = r.y - drag.r0.y;
+      drag.a.x = Math.round(r.x); drag.a.y = Math.round(r.y);
+      drag.own.forEach(it => { Object.assign(it.o, JSON.parse(JSON.stringify(it.orig))); shiftObj(it.o, ddx, ddy); });
+    } else if (drag.type === 'resize') {
+      const r = resizeRect(drag.r0, drag.sides, dx, dy, abs.filter(x => x !== drag.a), snapOn, 8);
+      Object.assign(drag.a, r.r); guides = r.guides;
+    } else if (drag.type === 'obj') {
+      Object.assign(drag.o, JSON.parse(JSON.stringify(drag.orig)));
+      shiftObj(drag.o, Math.round(dx), Math.round(dy));
+    } else if (drag.type === 'create') {
+      let x0 = drag.start[0], y0 = drag.start[1], x1 = w[0], y1 = w[1];
+      let r = { x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) };
+      drag.rect = r.w > 4 || r.h > 4 ? r : null;
+    }
+    refresh(); return;
+  }
+  hoverObj = null; hoverLabel = null;
+  const o = hitObj(pos), ab = hitAb(pos), lab = hitLabel(pos);
+  hoverObj = tool === 'sel' && o ? o.id : null;
+  hoverLabel = tool === 'sel' && lab ? lab.id : null;
+  hoverAb = ab ? ab.id : (lab ? lab.id : null);
+  drawOverlay(); updateBadge(); updateHint();
+});
+stage.addEventListener('pointerup', e => {
+  const pos = localPos(e); lastPos = pos;
+  if (drag) {
+    if (drag.type === 'create') {
+      const r = drag.rect; drag = null;
+      if (r && r.w > 20 && r.h > 20) { const a = newAb(r); selAb = a.id; }
+      endEdit(); guides = []; refresh(); return;
+    }
+    drag = null; guides = []; endEdit(); refresh();
+  }
+});
+
+// ---------- rings ----------
+function showRing(pos, title, slots, hubFn, sub) {
+  closeRing();
+  const R = 90, cx = clamp(pos[0], R + 66, 900 - R - 66), cy = clamp(pos[1], R + 30, 560 - R - 50);
+  ring = { el: document.createElement('div'), slots };
+  ring.el.id = 'ring'; ring.el.style.left = cx + 'px'; ring.el.style.top = cy + 'px';
+  ring.el.innerHTML = '<div class="hub' + (hubFn ? ' click' : '') + '">' + title + '<small>' + (sub || '...') + '</small></div>';
+  if (hubFn) { const hb = ring.el.firstChild; hb.style.cursor = 'pointer'; hb.onpointerdown = ev => ev.stopPropagation(); hb.onclick = ev => { ev.stopPropagation(); closeRing(); hubFn(); }; }
+  slots.forEach((sl, i) => {
+    const an = (sl.a !== undefined ? sl.a : -90 + i * 45) * Math.PI / 180, el = document.createElement('div');
+    el.className = 'slot' + (sl.on ? '' : ' off');
+    el.style.left = Math.cos(an) * R + 'px'; el.style.top = Math.sin(an) * R + 'px';
+    el.innerHTML = '<span class="key">' + sl.key + '</span>' + sl.label;
+    el.onpointerdown = ev => ev.stopPropagation();
+    el.onclick = ev => { ev.stopPropagation(); runSlot(sl); };
+    ring.el.appendChild(el);
+  });
+  stage.appendChild(ring.el);
+  refresh();
+}
+function runSlot(sl) { if (!sl.on) return; closeRing(); sl.fn(); }
+function closeRing() { if (ring) { ring.el.remove(); ring = null; } }
+function contextRing(pos) {
+  if (!docOpen) { newRing(pos); return; }
+  const ab = hitAb(pos) || hitLabel(pos), o = tool === 'ab' && ab ? null : hitObj(pos);
+  if (o) { selObj = o.id; selAb = null; refresh(); objectRing(pos, o); return; }
+  if (ab) { selAb = ab.id; selObj = null; refresh(); artboardRing(pos, ab); return; }
+  documentRing(pos);
+}
+function artboardRing(pos, a) {
+  showRing(pos, a.name, [
+    { key: 'E', label: 'Export…', on: true, fn: () => openExport() },
+    { key: 'Q', label: 'Quick export', on: true, fn: () => quickExport(exportItems(selAb, null).filter(it => it.kind === 'ab' && it.id === a.id)) },
+    { key: 'F', label: 'Fit to art', on: true, fn: () => fitAb(a) },
+    { key: 'D', label: 'Duplicate', on: true, fn: () => duplicateAb(a) },
+    { key: 'N', label: 'Rename', on: true, fn: () => { const i = hud.querySelector('#aname'); if (i) { i.focus(); i.select(); } } },
+    { key: 'O', label: 'Orientation', on: true, fn: () => swapAb(a) },
+    { key: 'B', label: 'Background', on: true, fn: () => cycleBg(a) },
+    { key: 'X', label: 'Delete', on: true, fn: () => deleteAb(a) },
+  ]);
+}
+function objectRing(pos, o) {
+  showRing(pos, o.name, [
+    { key: 'A', label: o.asset ? 'Not an asset' : 'Export asset', on: true, fn: () => { beginEdit(); o.asset = !o.asset; endEdit(); refresh(); } },
+    { key: 'E', label: 'Export…', on: true, fn: () => openExport() },
+    { key: 'Q', label: 'Quick export', on: o.asset, fn: () => quickExport(exportItems(null, o.id).filter(it => it.kind === 'asset' && it.id === o.id)) },
+    { key: 'D', label: 'Duplicate', on: false, fn: () => {} }, { key: 'F', label: 'Fill', on: false, fn: () => {} },
+    { key: 'S', label: 'Stroke', on: false, fn: () => {} }, { key: 'G', label: 'Group', on: false, fn: () => {} }, { key: 'X', label: 'Delete', on: false, fn: () => {} },
+  ]);
+}
+function documentRing(pos) {
+  showRing(pos, 'Document', [
+    { key: 'A', label: 'New artboard', on: true, fn: () => newArtboardRing(pos) },
+    { key: 'N', label: 'New document', on: true, fn: () => newRing(pos) },
+    { key: 'O', label: 'Open', on: false, fn: () => {} },
+    { key: 'S', label: 'Save', on: false, fn: () => {} },
+    { key: 'E', label: 'Export', on: true, fn: () => { exp.scope = 'all'; openExport(); } },
+    { key: 'I', label: 'Place image', on: false, fn: () => {} },
+    { key: '0', label: 'Fit', on: true, fn: () => { fitView(); refresh(); } },
+    { key: 'G', label: gridOn ? 'Rulers · grid off' : 'Rulers · grid', on: true, fn: () => { gridOn = !gridOn; refresh(); } },
+  ], () => toast('Document Setup opens from this hub; it is not in this mockup'), 'Setup…');
+}
+
+// ---------- new document ----------
+function fitView() {
+  if (!abs.length) { Z = 0.6; OX = 24; OY = 40; return; }
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  abs.forEach(a => { x0 = Math.min(x0, a.x); y0 = Math.min(y0, a.y); x1 = Math.max(x1, a.x + a.w); y1 = Math.max(y1, a.y + a.h); });
+  const bw = x1 - x0, bh = y1 - y0;
+  Z = clamp(Math.min(620 / bw, 450 / bh), 0.05, 0.6);
+  OX = 24 + (620 - bw * Z) / 2 - x0 * Z; OY = 40 + (450 - bh * Z) / 2 - y0 * Z;
+}
+function loadSample() {
+  docOpen = true; docName = 'night-sky'; abs = SAMPLE_ABS(); objs = SAMPLE_OBJS(); exp = SAMPLE_EXP();
+  undo = []; redo = []; selAb = 1; selObj = null; gridOn = false; blobCache.clear(); Z = 0.6; OX = 24; OY = 40; refresh();
+}
+function closeDoc() {
+  closeRing(); if (expOpen) closeExport();
+  docOpen = false; abs = []; objs = []; selAb = null; selObj = null; undo = []; redo = []; hoverAb = null; hoverObj = null; refresh();
+}
+function createDoc(d) {
+  docOpen = true; docName = slug(d.name); abs = []; objs = []; exp = SAMPLE_EXP(); nextId = 200;
+  for (let i = 0; i < d.count; i++) abs.push({ id: nextId++, name: 'Artboard ' + (i + 1), x: i * (d.w + 60), y: 0, w: Math.round(d.w), h: Math.round(d.h), bg: d.bg, bleed: 0 });
+  undo = []; redo = []; blobCache.clear(); selAb = abs[0].id; selObj = null; gridOn = false;
+  fitView(); closeNewDialog(); refresh();
+  toast('Created "' + d.name + '": ' + d.count + ' artboard' + (d.count > 1 ? 's' : '') + ' of ' + Math.round(d.w) + ' × ' + Math.round(d.h) + ' px');
+}
+function newRing(pos) {
+  const pre = n => PRESETS.find(p => p[0] === n);
+  const mkp = (key, n, a, sub) => ({ key, label: n + '<small>' + sub + '</small>', a, on: true, fn: () => createDoc({ name: 'Untitled ' + n, w: pre(n)[1], h: pre(n)[2], count: 1, bg: 'white', mode: 'RGB' }) });
+  showRing(pos, 'New', [
+    mkp('1', 'Letter', -90, '8.5 × 11 in'), mkp('2', 'A4', -30, '210 × 297 mm'), mkp('3', 'Full HD', 30, '1920 × 1080'), mkp('4', 'Square', 90, '1080 × 1080'),
+    { key: 'O', label: 'Open', a: 150, on: false, fn: () => {} },
+    { key: 'R', label: 'Recent<small>Night sky</small>', a: 210, on: true, fn: loadSample },
+  ], () => openNewDialog(), 'Create…');
+}
+function newArtboardRing(pos) {
+  const w = toWorld(pos), pre = n => PRESETS.find(p => p[0] === n), cur = byAb(selAb) || abs[abs.length - 1];
+  const add = (name, W, H) => { beginEdit(); const a = newAb({ x: w[0] - W / 2, y: w[1] - H / 2, w: W, h: H }, name || 'Artboard ' + (abs.length + 1)); selAb = a.id; selObj = null; endEdit(); fitView(); refresh(); };
+  const mkp = (key, n, a, sub) => ({ key, label: n + '<small>' + sub + '</small>', a, on: true, fn: () => add(null, pre(n)[1], pre(n)[2]) });
+  showRing(pos, 'Artboard', [
+    mkp('1', 'Letter', -90, '816 × 1056'), mkp('2', 'A4', -30, '794 × 1123'), mkp('3', 'Full HD', 30, '1920 × 1080'), mkp('4', 'Square', 90, '1080 × 1080'),
+    { key: 'S', label: 'Same size' + (cur ? '<small>' + cur.w + ' × ' + cur.h + '</small>' : ''), a: 150, on: !!cur, fn: () => add(null, cur.w, cur.h) },
+    { key: 'C', label: 'Custom<small>256 × 256</small>', a: 210, on: true, fn: () => { add(null, 256, 256); toast('Set the exact size in the side box, or hold W / H over it'); } },
+  ], null, 'New at the pen');
+}
+const UNIT = { px: 1, in: 96, mm: 96 / 25.4 };
+function openNewDialog(pre) {
+  dlg = Object.assign({ name: 'Untitled', w: 816, h: 1056, unit: 'px', count: 1, bg: 'white', mode: 'RGB' }, pre || {});
+  dlgOpen = true; newdocEl.style.display = 'flex'; renderNewDialog(); updateHint(); updateBadge();
+}
+function closeNewDialog() { dlgOpen = false; newdocEl.style.display = 'none'; updateHint(); }
+function renderNewDialog() {
+  const d = dlg, u = UNIT[d.unit], show = v => +(v / u).toFixed(d.unit === 'px' ? 0 : 2);
+  const chip = (attr, val, cur, label) => '<button ' + attr + '="' + val + '"' + (cur === val ? ' class="on"' : '') + '>' + (label || val) + '</button>';
+  const k = Math.min(170 / (d.count * d.w + (d.count - 1) * 60), 110 / d.h);
+  let prev = '<svg width="176" height="116" viewBox="0 0 176 116">';
+  for (let i = 0; i < d.count; i++) {
+    const w = d.w * k, h = d.h * k, x = (176 - (d.count * d.w + (d.count - 1) * 60) * k) / 2 + i * (d.w + 60) * k, y = (116 - h) / 2;
+    prev += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + h.toFixed(1) + '" fill="' + (d.bg === 'white' ? '#fff' : d.bg === 'dark' ? '#26272b' : '#cfcfcf') + '" stroke="#4c8dff"/>';
+  }
+  prev += '</svg>';
+  newdocEl.innerHTML = '<div class="eh"><b>New document</b><button id="ncancel">Cancel <span class="key">Esc</span></button></div><div class="nb"><div class="nl">' +
+    '<h4>Name</h4><input type="text" id="nname" value="' + esc(d.name) + '">' +
+    '<h4>Size</h4><div class="chips">' + PRESETS.map(([n, w, h]) => '<button data-pre="' + n + '"' + (d.w === w && d.h === h ? ' class="on"' : '') + '>' + n + '</button>').join('') + '</div>' +
+    '<div class="frow"><input type="number" id="nw" value="' + show(d.w) + '" step="any"> × <input type="number" id="nh" value="' + show(d.h) + '" step="any">' +
+    '<select id="nunit">' + Object.keys(UNIT).map(x => '<option' + (d.unit === x ? ' selected' : '') + '>' + x + '</option>').join('') + '</select><button id="nswap" class="small">swap</button></div>' +
+    '<h4>Artboards</h4><div class="frow"><input type="number" id="ncount" min="1" max="6" value="' + d.count + '"> in a row, 60 px apart</div>' +
+    '<h4>Background</h4><div class="chips">' + BGS.map(b => chip('data-bg', b, d.bg)).join('') + '</div>' +
+    '<h4>Colour mode</h4><div class="chips">' + ['RGB', 'CMYK'].map(m => chip('data-mode', m, d.mode)).join('') + '</div>' +
+    '</div><div class="nr">' + prev + '<span>' + d.count + ' × ' + Math.round(d.w) + ' × ' + Math.round(d.h) + ' px</span></div></div>' +
+    '<div class="ef"><button id="ncreate" class="on">Create</button></div>';
+  const g = id => newdocEl.querySelector('#' + id);
+  g('ncancel').onclick = closeNewDialog;
+  g('ncreate').onclick = () => createDoc(dlg);
+  g('nname').onchange = () => { d.name = g('nname').value || 'Untitled'; };
+  newdocEl.querySelectorAll('[data-pre]').forEach(b => b.onclick = () => { const p = PRESETS.find(x => x[0] === b.dataset.pre); d.w = p[1]; d.h = p[2]; renderNewDialog(); });
+  newdocEl.querySelectorAll('[data-bg]').forEach(b => b.onclick = () => { d.bg = b.dataset.bg; renderNewDialog(); });
+  newdocEl.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { d.mode = b.dataset.mode; renderNewDialog(); });
+  g('nw').onchange = () => { d.w = Math.max(16, (+g('nw').value || 1) * u); renderNewDialog(); };
+  g('nh').onchange = () => { d.h = Math.max(16, (+g('nh').value || 1) * u); renderNewDialog(); };
+  g('nunit').onchange = () => { d.unit = g('nunit').value; renderNewDialog(); };
+  g('nswap').onclick = () => { const t = d.w; d.w = d.h; d.h = t; renderNewDialog(); };
+  g('ncount').onchange = () => { d.count = clamp(Math.round(+g('ncount').value || 1), 1, 6); renderNewDialog(); };
+}
+
+// ---------- scrub size ----------
+function startScrub(key) {
+  const a = byAb(hoverAb !== null ? hoverAb : selAb);
+  if (!a) { toast('Hover or select an artboard, then hold W or H'); return; }
+  selAb = a.id; selObj = null;
+  beginEdit();
+  const p = key === 'w' ? 'w' : 'h';
+  scrub = { key, a, p, y0: lastPos[1], v0: a[p], x: clamp(lastPos[0] + 24, 6, 680), y: clamp(lastPos[1] - 40, 6, 440) };
+  showScrub();
+}
+function updateScrub(pos) {
+  let v = clamp(scrub.v0 + (scrub.y0 - pos[1]) * 3, 16, 2000);
+  if (held.shift) v = SIZE_SNAPS.reduce((m, n) => Math.abs(n - v) < Math.abs(m - v) ? n : m);
+  scrub.a[scrub.p] = Math.round(v);
+  refresh(); showScrub();
+}
+function showScrub() {
+  const a = scrub.a, v = a[scrub.p], pct = clamp(v / 2000, 0, 1) * 100, pre = PRESETS.find(x => x[1] === a.w && x[2] === a.h);
+  scrubEl.style.display = 'block'; scrubEl.style.left = scrub.x + 'px'; scrubEl.style.top = scrub.y + 'px';
+  scrubEl.innerHTML = '<div class="head"><span>' + (scrub.p === 'w' ? 'Width' : 'Height') + ' <span class="key">' + scrub.key.toUpperCase() + '</span></span><b>' + v + ' px</b></div>' +
+    '<div class="track"><div class="fill" style="width:' + pct + '%"></div><div class="thumb" style="left:' + pct + '%"></div></div>' +
+    '<div class="sub">' + a.w + ' × ' + a.h + (pre ? ' · matches ' + pre[0] : '') + ' · Shift snaps</div>';
+}
+function endScrub() { scrub = null; scrubEl.style.display = 'none'; endEdit(); refresh(); }
+
+// ---------- export ----------
+const blobCache = new Map();
+function blobFor(it) {
+  const svg = svgFor(it), fmt = it.row.fmt;
+  const key = fmt + '|' + it.row.scale + '|' + it.row.q + '|' + svg;
+  if (blobCache.has(key)) return blobCache.get(key);
+  let p;
+  if (fmt === 'svg') p = Promise.resolve(new Blob([svg], { type: 'image/svg+xml' }));
+  else if (fmt === 'pdf') p = Promise.resolve(new Blob([svg], { type: 'application/pdf' }));
+  else {
+    const mime = fmt === 'png' ? 'image/png' : fmt === 'jpg' ? 'image/jpeg' : 'image/webp';
+    p = new Promise((res, rej) => {
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement('canvas'); c.width = it.px[0]; c.height = it.px[1];
+        const g = c.getContext('2d');
+        if (fmt === 'jpg') { g.fillStyle = '#ffffff'; g.fillRect(0, 0, c.width, c.height); }
+        g.drawImage(img, 0, 0, c.width, c.height);
+        c.toBlob(b => b ? res(b) : rej(new Error('encode failed')), mime, it.row.q / 100);
+      };
+      img.onerror = () => rej(new Error('render failed'));
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    });
+  }
+  blobCache.set(key, p);
+  return p;
+}
+function download(blob, name) {
+  const url = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+function saveItem(it) {
+  if (it.row.fmt === 'pdf') { toast('PDF output is not in this mockup'); return Promise.resolve(); }
+  return blobFor(it).then(b => { download(b, it.name); toast('Saved ' + it.name + ' (' + fmtBytes(b.size) + ')'); }).catch(err => toast('Could not export ' + it.name + ': ' + err.message));
+}
+function quickExport(items) {
+  if (!items.length) { toast('Nothing to export for this selection'); return; }
+  saveItem(items.find(it => it.row.fmt !== 'pdf') || items[0]);
+}
+function openExport() {
+  if (!docOpen || !abs.length) { toast('Nothing to export: no document is open'); return; }
+  expOpen = true; expEl.style.display = 'flex';
+  if (selObj !== null && byObj(selObj) && (byObj(selObj).asset)) exp.scope = exp.scope;
+  renderExport();
+  hintAndBadge();
+}
+function closeExport() { expOpen = false; expEl.style.display = 'none'; hintAndBadge(); }
+function hintAndBadge() { updateHint(); updateBadge(); }
+const EXP_PRESETS = {
+  Web: [{ fmt: 'svg', scale: 1, responsive: true }, { fmt: 'png', scale: 1 }, { fmt: 'png', scale: 2 }],
+  'App icon': [{ fmt: 'png', scale: 1 }, { fmt: 'png', scale: 2 }, { fmt: 'png', scale: 3 }],
+  Social: [{ fmt: 'jpg', scale: 1, q: 85 }, { fmt: 'png', scale: 2 }],
+  Print: [{ fmt: 'pdf', scale: 1, bleed: true }],
+};
+const mkRow = o => Object.assign({ fmt: 'png', scale: 1, q: 90, transparent: false, responsive: false, outline: false, bleed: false }, o);
+
+function thumb(it, w, h) {
+  const r = it.rect, k = Math.min(w / r.w, h / r.h), f = bgFill(it);
+  const body = it.only ? objMarkup(byObj(it.only)) : artMarkup();
+  return '<svg width="' + Math.round(r.w * k) + '" height="' + Math.round(r.h * k) + '" viewBox="' + r.x + ' ' + r.y + ' ' + r.w + ' ' + r.h + '" style="' + (it.bg === 'transparent' ? 'background:repeating-conic-gradient(#d6d6d6 0% 25%, #fff 0% 50%) 0 0 / 10px 10px' : '') + '">' + (f ? '<rect x="' + r.x + '" y="' + r.y + '" width="' + r.w + '" height="' + r.h + '" fill="' + f + '"/>' : '') + body + '</svg>';
+}
+function renderExport() {
+  const items = exportItems(selAb, selObj);
+  const left = '<div class="left"><h4>What</h4><div class="chips">' +
+    [['all', 'Everything'], ['selection', 'Selection only']].map(([k, n]) => '<button data-scope="' + k + '"' + (exp.scope === k ? ' class="on"' : '') + '>' + n + '</button>').join('') + '</div>' +
+    '<h4>Artboards</h4>' + abs.map((a, i) => '<label class="item"><input type="checkbox" data-a="' + a.id + '"' + (exp.off['a' + a.id] ? '' : ' checked') + (exp.scope === 'selection' ? ' disabled' : '') + '>' +
+      '<span class="thumbs">' + thumb({ rect: a, bg: a.bg, row: { fmt: 'png', transparent: false } }, 44, 32) + '</span><span>' + (i + 1) + ' ' + esc(a.name) + '</span></label>').join('') +
+    '<h4>Assets</h4>' + (objs.filter(o => o.asset).map(o => '<label class="item"><input type="checkbox" data-o="' + o.id + '"' + (exp.off['o' + o.id] ? '' : ' checked') + (exp.scope === 'selection' ? ' disabled' : '') + '><span>' + esc(o.name) + '</span></label>').join('') || '<div style="color:#9a9ea8;font-size:12px">None. Select an object and tick "Export as asset".</div>') + '</div>';
+  const rows = exp.rows.map((r, i) => '<div class="orow" data-i="' + i + '">' +
+    '<select data-k="fmt">' + FMTS.map(f => '<option' + (r.fmt === f ? ' selected' : '') + '>' + f + '</option>').join('') + '</select>' +
+    '<select data-k="scale">' + SCALES.map(s => '<option value="' + s + '"' + (r.scale === s ? ' selected' : '') + '>' + s + 'x</option>').join('') + '</select>' +
+    (r.fmt === 'svg' ? '<label><input type="checkbox" data-k="responsive"' + (r.responsive ? ' checked' : '') + '> responsive</label><label><input type="checkbox" data-k="outline"' + (r.outline ? ' checked' : '') + '> outline text</label>' : '') +
+    (r.fmt === 'png' || r.fmt === 'webp' ? '<label><input type="checkbox" data-k="transparent"' + (r.transparent ? ' checked' : '') + '> transparent</label>' : '') +
+    (r.fmt === 'jpg' || r.fmt === 'webp' ? '<label>quality <input type="range" min="30" max="100" data-k="q" value="' + r.q + '"><span class="mono">' + r.q + '</span></label>' : '') +
+    (r.fmt === 'pdf' ? '<label><input type="checkbox" data-k="bleed"' + (r.bleed ? ' checked' : '') + '> include bleed</label><span style="color:#e57368;font-size:11px">not produced here</span>' : '') +
+    '<span class="grow"></span>' + (exp.rows.length > 1 ? '<button data-rm="' + i + '" class="small">×</button>' : '') + '</div>').join('');
+  const right = '<div class="right"><h4>Outputs</h4>' + rows +
+    '<div class="chips"><button id="addRow">+ Add output</button>' + Object.keys(EXP_PRESETS).map(n => '<button data-preset="' + n + '">' + n + '</button>').join('') + '</div>' +
+    '<h4>File name</h4><div class="orow"><input type="text" id="tmpl" value="' + esc(exp.template) + '" style="width:260px"><span style="color:#9a9ea8;font-size:11px">{doc} {artboard} {n} {scale}</span></div>' +
+    '<h4>Files</h4><table><tr><th></th><th>Name</th><th>Pixels</th><th class="num">Size</th><th></th></tr>' +
+    (items.map((it, k) => '<tr><td class="thumbs">' + thumb(it, 40, 28) + '</td><td class="nm">' + esc(it.name) + '</td><td>' + it.px[0] + ' × ' + it.px[1] + '</td><td class="num" id="sz' + k + '">…</td><td><button class="small" data-save="' + k + '">Save</button></td></tr>').join('') || '<tr><td colspan="5" style="color:#9a9ea8">Nothing selected to export.</td></tr>') + '</table></div>';
+  expEl.innerHTML = '<div class="eh"><b>Export</b><button id="eclose">Close <span class="key">Esc</span></button></div><div class="eb">' + left + right + '</div>' +
+    '<div class="ef"><span class="grow" id="etotal">' + items.length + ' file' + (items.length === 1 ? '' : 's') + '</span><span style="color:#9a9ea8;font-size:11px">Saved into the document as an Export node</span><button id="eall" class="on"' + (items.length ? '' : ' disabled') + '>Export ' + items.length + ' file' + (items.length === 1 ? '' : 's') + '</button></div>';
+  wireExport(items);
+  let total = 0, done = 0;
+  items.forEach((it, k) => {
+    const cell = expEl.querySelector('#sz' + k);
+    if (it.row.fmt === 'pdf') { if (cell) cell.textContent = '~' + fmtBytes(Math.round(svgFor(it).length * 0.8)); done++; return; }
+    blobFor(it).then(b => { if (cell) cell.textContent = fmtBytes(b.size); total += b.size; }).catch(() => { if (cell) cell.textContent = 'n/a'; }).then(() => {
+      done++;
+      const t = expEl.querySelector('#etotal');
+      if (t && done === items.length) t.textContent = items.length + ' file' + (items.length === 1 ? '' : 's') + ' · ' + fmtBytes(total);
+    });
+  });
+}
+function wireExport(items) {
+  const g = sel => expEl.querySelector(sel), ga = sel => expEl.querySelectorAll(sel);
+  g('#eclose').onclick = closeExport;
+  ga('[data-scope]').forEach(b => b.onclick = () => { beginEdit(); exp.scope = b.dataset.scope; endEdit(); renderExport(); });
+  ga('[data-a]').forEach(c => c.onchange = () => { beginEdit(); if (c.checked) delete exp.off['a' + c.dataset.a]; else exp.off['a' + c.dataset.a] = true; endEdit(); renderExport(); });
+  ga('[data-o]').forEach(c => c.onchange = () => { beginEdit(); if (c.checked) delete exp.off['o' + c.dataset.o]; else exp.off['o' + c.dataset.o] = true; endEdit(); renderExport(); });
+  ga('.orow[data-i]').forEach(rowEl => {
+    const r = exp.rows[+rowEl.dataset.i];
+    rowEl.querySelectorAll('[data-k]').forEach(el => {
+      const k = el.dataset.k;
+      el.onchange = () => {
+        beginEdit();
+        if (el.type === 'checkbox') r[k] = el.checked;
+        else if (k === 'scale') r.scale = +el.value;
+        else if (k === 'q') r.q = +el.value;
+        else r[k] = el.value;
+        endEdit(); renderExport(); updateHud();
+      };
+      if (k === 'q') el.oninput = () => { el.nextElementSibling.textContent = el.value; };
+    });
+  });
+  ga('[data-rm]').forEach(b => b.onclick = () => { beginEdit(); exp.rows.splice(+b.dataset.rm, 1); endEdit(); renderExport(); updateHud(); });
+  g('#addRow').onclick = () => { beginEdit(); exp.rows.push(mkRow({})); endEdit(); renderExport(); updateHud(); };
+  ga('[data-preset]').forEach(b => b.onclick = () => { beginEdit(); exp.rows = EXP_PRESETS[b.dataset.preset].map(mkRow); endEdit(); renderExport(); updateHud(); });
+  g('#tmpl').oninput = ev => { exp.template = ev.target.value || '{doc}-{artboard}{scale}'; refreshFileNames(); };
+  g('#tmpl').onchange = () => { endEdit(); };
+  g('#tmpl').onfocus = () => beginEdit();
+  ga('[data-save]').forEach(b => b.onclick = () => saveItem(items[+b.dataset.save]));
+  g('#eall').onclick = () => { items.forEach((it, i) => setTimeout(() => saveItem(it), i * 350)); };
+}
+function refreshFileNames() {
+  const items = exportItems(selAb, selObj);
+  expEl.querySelectorAll('td.nm').forEach((td, i) => { if (items[i]) td.textContent = items[i].name; });
+  expEl.querySelectorAll('[data-save]').forEach(b => { b.onclick = () => saveItem(exportItems(selAb, selObj)[+b.dataset.save]); });
+}
+
+// ---------- keyboard ----------
+const isTyping = t => t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.isContentEditable);
+window.addEventListener('keydown', e => {
+  if (e.key === 'Shift') held.shift = true;
+  if (e.key === 'Alt') { held.alt = true; e.preventDefault(); }
+  const key = e.key.toLowerCase();
+  if (dlgOpen) { if (e.key === 'Escape') { if (isTyping(e.target)) e.target.blur(); else closeNewDialog(); } return; }
+  if (expOpen) { if (e.key === 'Escape' && !isTyping(e.target)) closeExport(); else if (e.key === 'Escape') e.target.blur(); return; }
+  if (ring) {
+    if (e.key === 'Escape') { closeRing(); refresh(); return; }
+    const sl = ring.slots.find(x => x.key.toLowerCase() === key);
+    if (sl) { e.preventDefault(); runSlot(sl); }
+    return;
+  }
+  if (isTyping(e.target)) { if (e.key === 'Enter' || e.key === 'Escape') e.target.blur(); return; }
+  if ((e.ctrlKey || e.metaKey) && key === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
+  if ((e.ctrlKey || e.metaKey) && key === 'y') { e.preventDefault(); doRedo(); return; }
+  if ((e.ctrlKey || e.metaKey) && key === 'e') { e.preventDefault(); openExport(); return; }
+  if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+  if (e.key === 'Escape') { selAb = null; selObj = null; refresh(); return; }
+  if (key === 'v') { setTool('sel'); return; }
+  if (key === 'o') { setTool('ab'); return; }
+  if (e.key === ' ') { e.preventDefault(); if (!spaceDown) spaceDown = Date.now(); return; }
+  if (key === 'w' || key === 'h') { if (!scrub && !drag) { e.preventDefault(); startScrub(key); } return; }
+  const a = byAb(selAb);
+  if ((e.key === 'Delete' || e.key === 'Backspace') && a) { deleteAb(a); return; }
+  if (e.key.startsWith('Arrow') && a) {
+    e.preventDefault();
+    const st = e.shiftKey ? 10 : 1, dx = { ArrowLeft: -st, ArrowRight: st }[e.key] || 0, dy = { ArrowUp: -st, ArrowDown: st }[e.key] || 0;
+    beginEdit(); a.x += dx; a.y += dy;
+    if (document.getElementById('cMove').checked) objs.filter(o => centerIn(o, { x: a.x - dx, y: a.y - dy, w: a.w, h: a.h })).forEach(o => shiftObj(o, dx, dy));
+    endEdit(); refresh();
+  }
+});
+window.addEventListener('keyup', e => {
+  if (e.key === 'Shift') held.shift = false;
+  if (e.key === 'Alt') { held.alt = false; e.preventDefault(); }
+  const key = e.key.toLowerCase();
+  if (e.key === ' ') {
+    const had = spaceDown, dt = Date.now() - spaceDown; spaceDown = 0;
+    if (had && dt < 250 && !scrub && !drag && !ring && !expOpen && !dlgOpen && !isTyping(e.target)) contextRing(lastPos);
+    return;
+  }
+  if (scrub && scrub.key === key) endScrub();
+  updateHint();
+});
+
+function setTool(t) {
+  tool = t; hoverAb = null; hoverObj = null;
+  document.getElementById('tSel').classList.toggle('on', t === 'sel');
+  document.getElementById('tAb').classList.toggle('on', t === 'ab');
+  stage.classList.toggle('abTool', t === 'ab');
+  refresh();
+}
+document.getElementById('tSel').onclick = () => setTool('sel');
+document.getElementById('tAb').onclick = () => setTool('ab');
+document.getElementById('bExport').onclick = () => openExport();
+document.getElementById('bUndo').onclick = doUndo;
+document.getElementById('bRedo').onclick = doRedo;
+document.getElementById('bReset').onclick = loadSample;
+document.getElementById('bNew').onclick = () => newRing([450, 250]);
+document.getElementById('bClose').onclick = closeDoc;
+
+refresh();
+</script>
+</body>
+</html>

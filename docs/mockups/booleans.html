@@ -1,0 +1,948 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curvy booleans and masks</title>
+<style>
+  :root {
+    --bg: #1e1f22; --panel: #26272b; --workspace: #2b2d31; --text: #e6e7ea; --muted: #9a9ea8;
+    --accent: #4c8dff; --amber: #ffb454; --slot: #313338; --slotLine: #4a4d55;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid #000; }
+  header h1 { margin: 0 0 4px; font-size: 15px; }
+  header p { margin: 0; color: var(--muted); max-width: 1000px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 18px; padding: 10px 16px; background: #222327; border-bottom: 1px solid #000; align-items: center; }
+  .group { display: flex; align-items: center; gap: 6px; }
+  .group > span { color: var(--muted); margin-right: 4px; }
+  button { background: var(--slot); color: var(--text); border: 1px solid var(--slotLine); border-radius: 14px; padding: 4px 12px; font: inherit; cursor: pointer; }
+  button.on { background: var(--accent); border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: default; }
+  label { color: var(--muted); display: flex; align-items: center; gap: 5px; }
+  #stage { position: relative; width: 900px; height: 560px; margin: 16px auto 8px; background: var(--workspace); border: 1px solid #000; overflow: hidden; user-select: none; touch-action: none; }
+  #svg, #over { position: absolute; left: 0; top: 0; }
+  #over { pointer-events: none; }
+  .dim { opacity: .28; pointer-events: none; }
+  .nopick { pointer-events: none; }
+  .faded { opacity: .3; }
+  #badge { position: absolute; display: none; padding: 1px 7px; border-radius: 9px; background: #17181bf0; border: 1px solid #5a5d66; color: var(--amber); font-size: 11px; white-space: nowrap; pointer-events: none; z-index: 6; }
+  #hud { position: absolute; right: 12px; top: 12px; width: 236px; max-height: 500px; overflow-y: auto; overflow-x: hidden; padding: 8px 12px 10px; background: #17181bf0; border: 1px solid #5a5d66; border-radius: 10px; box-shadow: 0 3px 10px #0007; z-index: 4; }
+  #hud .node { border: 1px solid #3a3d43; border-radius: 8px; padding: 6px 8px 7px; margin-bottom: 8px; }
+  #hud .node.act { border-color: var(--amber); }
+  #hud .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  #hud .head b { color: var(--text); }
+  #hud .head span { color: var(--muted); font-size: 11px; }
+  #hud .row { display: flex; align-items: center; gap: 6px; margin: 4px 0; color: var(--muted); font-size: 12px; }
+  #hud .row .lab { width: 44px; flex: none; }
+  #hud input[type=number] { width: 56px; background: #2a2c31; color: var(--text); border: 1px solid #4a4d55; border-radius: 6px; padding: 2px 6px; font: inherit; }
+  #hud input[type=color] { width: 34px; height: 22px; padding: 0; border: 1px solid #4a4d55; border-radius: 5px; background: none; }
+  #hud select { background: #2a2c31; color: var(--text); border: 1px solid #4a4d55; border-radius: 6px; padding: 2px 4px; font: inherit; font-size: 12px; max-width: 110px; }
+  #hud .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+  #hud .chips button, #hud button.small { padding: 2px 8px; font-size: 11px; border-radius: 10px; }
+  #hud .note { color: var(--amber); font-size: 11px; margin: 4px 0; }
+  #hud .chain { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-bottom: 8px; font-size: 11px; color: var(--muted); }
+  #hud .chain i { font-style: normal; padding: 1px 7px; border: 1px solid #4a4d55; border-radius: 8px; color: var(--text); }
+  #hud .chain i.act { border-color: var(--amber); color: var(--amber); }
+  #hud .opr { display: flex; align-items: center; gap: 4px; margin: 3px 0; font-size: 12px; }
+  #hud .opr .nm { flex: 1; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #hud .opr .nm:hover { color: var(--amber); }
+  #hud .opr .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  #hud .opr button { padding: 0 6px; font-size: 11px; border-radius: 8px; }
+  #hud .opr.off .nm { opacity: .4; text-decoration: line-through; }
+  #hud .objs div { padding: 2px 6px; border-radius: 6px; cursor: pointer; color: var(--text); font-size: 12px; display: flex; gap: 6px; }
+  #hud .objs div:hover { background: #2b2d33; }
+  #hud .objs div span.n { flex: 1; }
+  #hud .objs div small { color: var(--muted); }
+  #hud .crumbs { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+  #hud .crumbs a { color: var(--accent); cursor: pointer; }
+  #hint { position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: var(--panel); border-top: 1px solid #000; color: var(--muted); padding: 3px 10px; white-space: nowrap; font-size: 12px; display: flex; align-items: center; gap: 12px; z-index: 3; overflow: hidden; }
+  #hint .tool { color: var(--amber); font-weight: 600; }
+  #hint .main { color: var(--text); }
+  #hint .grow { flex: 1; }
+  .key { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border-radius: 6px; background: #3a3d43; border: 1px solid #5a5d66; color: var(--text); font: 600 11px/18px "Segoe UI"; }
+  .key.lit { background: var(--amber); color: #1b1b1b; border-color: var(--amber); }
+  .mod { display: inline-flex; align-items: center; gap: 4px; }
+  #scrub { position: absolute; display: none; width: 210px; padding: 8px 12px 12px; background: #17181bf0; border: 1px solid #5a5d66; border-radius: 10px; box-shadow: 0 3px 10px #0007; z-index: 6; }
+  #scrub .head { display: flex; justify-content: space-between; margin-bottom: 10px; }
+  #scrub .head b { color: var(--amber); }
+  #scrub .track { position: relative; height: 6px; border-radius: 3px; background: #3a3d43; }
+  #scrub .mid { position: absolute; left: 50%; top: -3px; width: 1px; height: 12px; background: #6a6d76; }
+  #scrub .thumb { position: absolute; top: -5px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: var(--amber); border: 2px solid #17181b; }
+  #scrub .sub { margin-top: 10px; color: var(--muted); font-size: 11px; }
+  #ring { position: absolute; width: 0; height: 0; z-index: 8; }
+  #ring .hub { position: absolute; left: -34px; top: -34px; width: 68px; height: 68px; border-radius: 50%; background: #17181bf0; border: 1px solid #5a5d66; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; color: var(--amber); line-height: 1.2; text-align: center; }
+  #ring .hub small { color: var(--muted); }
+  #ring .hub.click:hover { border-color: var(--amber); }
+  #ring .slot { position: absolute; transform: translate(-50%, -50%); min-width: 112px; height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 8px; border-radius: 15px; background: #17181bf0; border: 1px solid #5a5d66; color: var(--text); cursor: pointer; font-size: 12px; white-space: nowrap; }
+  #ring .slot:hover { border-color: var(--amber); background: #2b2d33; }
+  #ring .slot.off { opacity: .35; cursor: default; }
+  #ring .slot small { opacity: .6; font-size: 10px; }
+  #ring .slot .key { height: 18px; min-width: 18px; justify-content: center; }
+  #toast { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); padding: 4px 12px; border-radius: 8px; background: #17181bf0; border: 1px solid #5a5d66; display: none; color: var(--amber); z-index: 12; white-space: nowrap; }
+  #notes { width: 900px; margin: 0 auto 24px; color: var(--muted); }
+  #notes h2 { color: var(--text); font-size: 13px; margin: 14px 0 4px; }
+  #notes li { margin-bottom: 4px; }
+  #notes b { color: var(--text); }
+</style>
+<script src="tools/polygon-clipping.umd.min.js"></script>
+</head>
+<body>
+<header>
+  <h1>Booleans and masks</h1>
+  <p>Select two or more shapes (click, Shift-click or marquee) and tap <b>Space</b> for the Combine ring: <b>Union</b>, <b>Subtract</b>, <b>Intersect</b>, <b>Exclude</b> make a live Boolean node (drag an operand and the result follows), <b>Divide</b> and <b>Shape builder</b> (<b>B</b>: drag across regions to merge them, <b>Alt</b>-drag to delete them) make plain shapes. <b>Clip</b> and <b>Opacity mask</b> use the top-most selected shape as the mask. Double-click a node to enter it; each operand has a mode (add, subtract, intersect, exclude), an eye and an order in the HUD. Hold <b>R</b> or <b>S</b> and move up and down to rotate or scale. Try: both circles, Subtract; Stripes + Disc, Opacity mask; Disc fill to a gradient inside the mask.</p>
+</header>
+<div class="controls">
+  <div class="group">
+    <label><input id="cGhost" type="checkbox" checked> show operands</label>
+  </div>
+  <div class="group">
+    <button id="bUndo">Undo</button>
+    <button id="bRedo">Redo</button>
+    <button id="bReset">Reset</button>
+    <button id="bSvg">Download SVG</button>
+  </div>
+</div>
+
+<div id="stage">
+  <svg id="svg" width="900" height="560" viewBox="0 0 900 560"></svg>
+  <svg id="over" width="900" height="560" viewBox="0 0 900 560"></svg>
+  <div id="hud"></div>
+  <div id="scrub"></div>
+  <div id="badge"></div>
+  <div id="toast"></div>
+  <div id="hint"></div>
+</div>
+
+<div id="notes">
+  <h2>How it works (proposal)</h2>
+  <ul>
+    <li><b>A boolean is a node with ordered operands.</b> The Boolean node has any number of inputs; the first is the base and every later input carries a mode: <i>add</i>, <i>subtract</i>, <i>intersect</i> or <i>exclude</i>, folded in order. Union is all adds; Subtract is the bottom shape with every other input subtracting (Illustrator's "Minus Front"); "Reverse order" makes the top shape the base ("Minus Back"). Nothing is destroyed: operands keep their own geometry and transforms, hidden operands (the eye) are skipped, and the result is an ordinary path with the node's own fill and stroke (copied from the base at creation).</li>
+    <li><b>Live editing.</b> Enter the node (double-click, E from the ring) to see every operand as an outlined ghost coloured by its mode (blue add, red subtract, green intersect, purple exclude); move or rotate one and the result recomputes. The ghosts also show, as thin outlines, whenever the node is merely selected. Booleans of booleans work because a node's geometry is just a function of its inputs.</li>
+    <li><b>Separate and Expand.</b> Separate puts the operands back as separate shapes with their own appearance (an opacity mask's shape gets its original fill back, because the gradient belonged to its role as a mask; position and size edits stay). Expand bakes the result into a plain shape (a compound path with holes drawn with the even-odd rule) and forgets the operands.</li>
+    <li><b>Shape builder and Divide are destructive.</b> They cut the selection into the regions of its overlap (up to six shapes), then keep each as a plain shape: Divide keeps all regions, the builder lets you drag across regions to merge them (one new shape) or Alt-drag to delete them. They are commands, not nodes, because their output has no meaningful live inputs. Appearance of a region comes from the top-most shape that covers it.</li>
+    <li><b>Clip mask.</b> A Clip node has Content inputs and one Mask input; the result is the content clipped to the mask shape (rendered as an SVG <code>clipPath</code>, so strokes, gradients and nested nodes clip correctly, and no geometry is computed). Entering shows the unclipped content faded, with the mask shape outlined in orange. The mask can be any shape or Boolean node.</li>
+    <li><b>Opacity mask.</b> Same structure, but the mask is a luminosity mask: white shows, black hides, greys fade. Give the mask shape a white-to-black gradient for a soft fade; Invert flips it. It maps to an SVG <code>mask</code>. In the future a mask input could also be any node that renders, such as a blurred shape.</li>
+    <li><b>Blend and opacity.</b> Every node has an opacity and a blend mode (normal, multiply, screen, overlay, darken, lighten, difference, soft light) in the HUD and a Blend sub-ring. They compose with masks (the mask applies first).</li>
+    <li><b>Rings.</b> Two or more selected: Union, Subtract, Intersect, Exclude, Divide, Clip, Opacity mask, Shape builder. One shape: Duplicate, Delete, Front, Back, Blend&hellip;, Hide, Lock. One Boolean or mask node: Enter, Separate, Expand (Boolean only), Reverse (Boolean) or Invert (opacity mask), Duplicate, Delete, Blend&hellip;, Hide. An operand while inside a Boolean: Add, Subtract, Intersect, Exclude, Hide, Duplicate, Delete, Exit. Empty canvas: Select all, Invert, Deselect, Exit node, Operands on/off, Undo, Reset, and more.</li>
+    <li><b>Geometry in the mock.</b> Shapes are flattened polygons and the booleans use the <code>polygon-clipping</code> library (MIT, in <code>tools/</code>). The real editor needs the same ops on curves: either exact bezier clipping (as Paper.js does) or flatten, clip, then refit with <code>fitCurve</code> (lossy; fine for a first version). Strokes and open paths cannot take part until outlined (an Outline stroke command, not mocked). jitnodes is polyline-only today, so a first <code>boolean</code> node can run on flattened polylines.</li>
+    <li><b>Not mocked:</b> compound paths made by hand (Make compound), Outline stroke, knockout groups and isolation, gradient mask handles on canvas, trim/merge/crop pathfinder variants (reachable with operand modes), boolean of text, direct editing of an Expanded result's anchors (that is the pen bench), full transform handles (the transform bench).</li>
+  </ul>
+</div>
+
+<script>
+"use strict";
+const pc = polygonClipping;
+const stage = document.getElementById('stage'), svgEl = document.getElementById('svg'), overEl = document.getElementById('over');
+const hudEl = document.getElementById('hud'), badgeEl = document.getElementById('badge'), scrubEl = document.getElementById('scrub');
+const hintEl = document.getElementById('hint'), toastEl = document.getElementById('toast');
+const ART = { x: 30, y: 30, w: 620, h: 470 };
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const D2R = Math.PI / 180;
+const MODECOL = { add: '#6aa8ff', sub: '#ff6b6b', int: '#4ccf7e', xor: '#c58bff', base: '#cfd3dc' };
+const MODENAME = { add: 'Add', sub: 'Subtract', int: 'Intersect', xor: 'Exclude' };
+const BLENDS = ['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'difference', 'soft-light'];
+
+// ---------- matrices [a b c d e f] ----------
+const IDM = [1, 0, 0, 1, 0, 0];
+const mul = (A, B) => [A[0] * B[0] + A[2] * B[1], A[1] * B[0] + A[3] * B[1], A[0] * B[2] + A[2] * B[3], A[1] * B[2] + A[3] * B[3], A[0] * B[4] + A[2] * B[5] + A[4], A[1] * B[4] + A[3] * B[5] + A[5]];
+function inv(M) {
+  const det = M[0] * M[3] - M[1] * M[2];
+  if (Math.abs(det) < 1e-12) return IDM.slice();
+  return [M[3] / det, -M[1] / det, -M[2] / det, M[0] / det, (M[2] * M[5] - M[3] * M[4]) / det, (M[1] * M[4] - M[0] * M[5]) / det];
+}
+const ap = (M, p) => [M[0] * p[0] + M[2] * p[1] + M[4], M[1] * p[0] + M[3] * p[1] + M[5]];
+const tr = (x, y) => [1, 0, 0, 1, x, y];
+const scl = (x, y) => [x, 0, 0, y, 0, 0];
+const rotM = a => [Math.cos(a), Math.sin(a), -Math.sin(a), Math.cos(a), 0, 0];
+const about = (M, p) => mul(tr(p[0], p[1]), mul(M, tr(-p[0], -p[1])));
+const svgM = M => 'matrix(' + M.map(v => +v.toFixed(5)).join(' ') + ')';
+
+// ---------- multipolygon helpers ----------
+const xfMP = (mp, M) => mp.map(poly => poly.map(r => r.map(p => ap(M, p))));
+function boundsMP(mp) {
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, any = false;
+  mp.forEach(poly => poly.forEach(r => r.forEach(p => { any = true; x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); })));
+  return any ? [x0, y0, x1, y1] : null;
+}
+const ringArea = r => { let a = 0; for (let i = 0; i < r.length; i++) { const p = r[i], q = r[(i + 1) % r.length]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; };
+const areaMP = mp => mp.reduce((s, poly) => s + poly.reduce((t, r, i) => t + (i === 0 ? 1 : -1) * Math.abs(ringArea(r)), 0), 0);
+function pathD(mp) { return mp.map(poly => poly.map(r => 'M' + r.map(p => p[0].toFixed(2) + ' ' + p[1].toFixed(2)).join('L') + 'Z').join('')).join(''); }
+function inRing(r, x, y) {
+  let c = false;
+  for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+    const a = r[i], b = r[j];
+    if ((a[1] > y) !== (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]) c = !c;
+  }
+  return c;
+}
+const inMP = (mp, x, y) => mp.some(poly => poly.reduce((n, r) => n + (inRing(r, x, y) ? 1 : 0), 0) % 2 === 1);
+function ellipseMP(cx, cy, rx, ry, n) { const r = []; for (let i = 0; i < (n || 64); i++) { const a = i / (n || 64) * Math.PI * 2; r.push([cx + Math.cos(a) * rx, cy + Math.sin(a) * ry]); } return [[r]]; }
+function starMP(cx, cy, ro, ri, n) { const r = []; for (let i = 0; i < n * 2; i++) { const a = -Math.PI / 2 + i * Math.PI / n, q = i % 2 ? ri : ro; r.push([cx + Math.cos(a) * q, cy + Math.sin(a) * q]); } return [[r]]; }
+const rectMP = (x, y, w, h) => [[[[x, y], [x + w, y], [x + w, y + h], [x, y + h]]]];
+function unionAll(list) { let acc = []; list.forEach(g => { acc = acc.length ? pc.union(acc, g) : g; }); return acc; }
+
+// ---------- document ----------
+let nextId = 1;
+const newId = () => 'o' + nextId++;
+const solid = c => ({ c });
+function shape(name, mp, fill, extra) { return Object.assign({ id: newId(), name, kind: 'shape', mp, fill, stroke: 'none', sw: 0, op: 1, blend: 'normal', m: IDM.slice() }, extra || {}); }
+function initialDoc() {
+  nextId = 1;
+  const stripes = []; for (let i = 0; i < 7; i++) stripes.push(rectMP(i * 36, 0, 20, 120)[0]);
+  return [
+    shape('Sky', rectMP(ART.x, ART.y, ART.w, ART.h), { c: '#233a7a', c2: '#f4a36b', a: 90 }, { locked: true }),
+    shape('Circle A', ellipseMP(150, 190, 70, 70), solid('#4c8dff')),
+    shape('Circle B', ellipseMP(215, 190, 70, 70), solid('#e5527a')),
+    shape('Star', starMP(430, 150, 75, 32, 5), solid('#ffb454')),
+    shape('Rect', rectMP(360, 130, 150, 80), solid('#3ec3a0')),
+    shape('Stripes', stripes, { c: '#ffe29a', c2: '#8e6bff', a: 0 }, { m: tr(100, 300) }),
+    shape('Disc', ellipseMP(230, 360, 70, 70), solid('#ffffff'), { m: IDM.slice() }),
+    shape('Moon', ellipseMP(480, 360, 62, 62), solid('#ffffff'), { m: IDM.slice() }),
+  ];
+}
+let items = initialDoc();
+let ctx = [], sel = [], builder = null;
+let undo = [], redo = [], editBefore = null;
+let shiftToggle = null, drag = null, ring = null, scrub = null, spaceDown = 0, cursor = [300, 250], hover = null;
+const held = { shift: false, alt: false };
+
+const snapDoc = () => JSON.stringify({ items, nextId, ctx });
+function beginEdit() { if (editBefore === null) editBefore = snapDoc(); }
+function endEdit() {
+  if (editBefore === null) return;
+  if (snapDoc() !== editBefore) { undo.push(editBefore); redo.length = 0; }
+  editBefore = null;
+}
+function restore(json) { const s = JSON.parse(json); items = s.items; nextId = s.nextId; ctx = s.ctx; sel = sel.filter(id => !!find(id)); builder = null; }
+function doUndo() { endEdit(); if (!undo.length) return; redo.push(snapDoc()); restore(undo.pop()); refresh(); }
+function doRedo() { endEdit(); if (!redo.length) return; undo.push(snapDoc()); restore(redo.pop()); refresh(); }
+function toast(msg) {
+  toastEl.textContent = msg; toastEl.style.display = 'block';
+  clearTimeout(toast.t); toast.t = setTimeout(() => { toastEl.style.display = 'none'; }, 2400);
+}
+const localPos = e => { const r = stage.getBoundingClientRect(); return [e.clientX - r.left - stage.clientLeft, e.clientY - r.top - stage.clientTop]; };
+
+// ---------- tree ----------
+const childArrays = o => [o.kids, o.mask].filter(Boolean);
+function find(id, list) {
+  for (const o of (list || items)) { if (o.id === id) return o; for (const a of childArrays(o)) { const r = find(id, a); if (r) return r; } }
+  return null;
+}
+function locate(id, list, parent) {
+  for (const o of (list || items)) {
+    if (o.id === id) return { arr: list || items, node: o, parent: parent || null };
+    for (const a of childArrays(o)) { const r = locate(id, a, o); if (r) return r; }
+  }
+  return null;
+}
+const ctxChain = () => ctx.map(id => find(id)).filter(Boolean);
+const lastCtx = () => { const c = ctxChain(); return c.length ? c[c.length - 1] : null; };
+function container() { const n = lastCtx(); return n ? [].concat(n.kids || [], n.mask || []) : items; }
+const ctxMatrix = () => ctxChain().reduce((M, o) => mul(M, o.m), IDM);
+const selObjs = () => { const c = container(); return sel.map(id => c.find(o => o.id === id)).filter(Boolean); };
+function geomLocal(o) {
+  if (o.kind === 'shape') return o.mp;
+  if (o.kind === 'bool') {
+    let acc = null;
+    o.kids.forEach(k => {
+      if (k.hidden) return;
+      const g = xfMP(geomLocal(k), k.m);
+      if (acc === null) { acc = g; return; }
+      if (!acc.length) { acc = (k.mode === 'sub' || k.mode === 'int') ? [] : g; return; }
+      acc = k.mode === 'sub' ? pc.difference(acc, g) : k.mode === 'int' ? pc.intersection(acc, g) : k.mode === 'xor' ? pc.xor(acc, g) : pc.union(acc, g);
+    });
+    return acc || [];
+  }
+  const c = unionAll(o.kids.filter(k => !k.hidden).map(k => xfMP(geomLocal(k), k.m)));
+  if (o.kind === 'omask') return c;
+  const m = unionAll(o.mask.map(k => xfMP(geomLocal(k), k.m)));
+  return c.length && m.length ? pc.intersection(c, m) : [];
+}
+const geomWorld = (o, P) => xfMP(geomLocal(o), mul(P, o.m));
+const aabb = (o, P) => boundsMP(geomWorld(o, P));
+function centerOf(objs, P) {
+  const bs = objs.map(o => aabb(o, P)).filter(Boolean);
+  if (!bs.length) return null;
+  return [(Math.min(...bs.map(b => b[0])) + Math.max(...bs.map(b => b[2]))) / 2, (Math.min(...bs.map(b => b[1])) + Math.max(...bs.map(b => b[3]))) / 2];
+}
+function applyDelta(starts, objs, D, P) { const Pi = inv(P); objs.forEach((o, i) => { o.m = mul(Pi, mul(D, mul(P, starts[i]))); }); }
+
+// ---------- rendering ----------
+let DEFS = [];
+function fillAttr(o) {
+  const f = o.fill;
+  if (!f.c2) return f.c;
+  const a = (f.a || 0) * D2R, dx = Math.cos(a) / 2, dy = Math.sin(a) / 2, gid = 'gr_' + o.id;
+  DEFS.push('<linearGradient id="' + gid + '" x1="' + (0.5 - dx) + '" y1="' + (0.5 - dy) + '" x2="' + (0.5 + dx) + '" y2="' + (0.5 + dy) + '"><stop offset="0" stop-color="' + f.c + '"/><stop offset="1" stop-color="' + f.c2 + '"/></linearGradient>');
+  return 'url(#' + gid + ')';
+}
+function pathEl(o, extra) {
+  const g = geomLocal(o);
+  if (!g.length) return '';
+  return '<path d="' + pathD(g) + '" fill="' + fillAttr(o) + '" fill-rule="evenodd" stroke="' + o.stroke + '" stroke-width="' + o.sw + '" stroke-linejoin="round"' + (extra || '') + '/>';
+}
+function shapeMask(k) { return '<path transform="' + svgM(k.m) + '" d="' + pathD(geomLocal(k)) + '"/>'; }
+function bodyOf(o) {
+  if (o.kind === 'shape' || o.kind === 'bool') return pathEl(o);
+  const inner = o.kids.map(k => nodeSvg(k, 'n', -1)).join('');
+  if (o.kind === 'clip') {
+    DEFS.push('<clipPath id="cp_' + o.id + '">' + o.mask.map(shapeMask).join('') + '</clipPath>');
+    return '<g clip-path="url(#cp_' + o.id + ')">' + inner + '</g>';
+  }
+  const mk = o.mask.map(k => nodeSvg(k, 'n', -1)).join('');
+  DEFS.push('<mask id="mk_' + o.id + '" maskUnits="userSpaceOnUse" x="-4000" y="-4000" width="8000" height="8000"><g' + (o.invert ? ' filter="url(#inv)"' : '') + '><rect x="-4000" y="-4000" width="8000" height="8000" fill="#000"/>' + mk + '</g></mask>');
+  return '<g mask="url(#mk_' + o.id + ')">' + inner + '</g>';
+}
+function ghostOutline(k, color, dash) {
+  const g = geomLocal(k);
+  return '<g data-id="' + k.id + '" transform="' + svgM(k.m) + '"' + (k.hidden ? ' opacity=".35"' : '') + '><path d="' + pathD(g) + '" fill="rgba(0,0,0,0.004)" fill-rule="evenodd" stroke="' + color + '" stroke-width="1.6" stroke-dasharray="' + dash + '" vector-effect="non-scaling-stroke"/></g>';
+}
+function nodeSvg(o, role, depth) {
+  if (o.hidden && role !== 'ghost') return '';
+  const style = ' style="' + (o.op < 1 ? 'opacity:' + o.op + ';' : '') + (o.blend && o.blend !== 'normal' ? 'mix-blend-mode:' + o.blend + ';' : '') + '"';
+  const pe = (o.locked && role === 'n') ? ' nopick' : '';
+  const open = cls => '<g data-id="' + o.id + '" class="' + cls + '" transform="' + svgM(o.m) + '"' + style + '>';
+  if (role === 'dim') return open('dim') + bodyOf(o) + '</g>';
+  if (role === 'anc') {
+    const kidId = ctx[depth + 1], kid = childArrays(o).flat().find(k => k.id === kidId);
+    return open('') + '<g class="dim">' + bodyOf(o) + '</g>' + (kid ? nodeSvg(kid, depth + 1 === ctx.length - 1 ? 'ent' : 'anc', depth + 1) : '') + '</g>';
+  }
+  if (role === 'ent') {
+    let ghosts = '';
+    const showG = document.getElementById('cGhost').checked;
+    if (o.kind === 'bool') {
+      if (showG) ghosts = o.kids.map((k, i) => ghostOutline(k, i === 0 ? MODECOL.base : MODECOL[k.mode || 'add'], i === 0 ? '' : '5 3')).join('');
+      return open('') + '<g class="nopick">' + bodyOf(o) + '</g>' + ghosts + '</g>';
+    }
+    const faded = o.kids.map(k => nodeSvg(k, 'ghost', -1)).join('');
+    ghosts = o.mask.map(k => ghostOutline(k, '#ffb454', '6 3')).join('');
+    return open('') + '<g class="faded">' + faded + '</g><g class="nopick">' + bodyOf(o) + '</g>' + ghosts + '</g>';
+  }
+  if (role === 'ghost') return '<g data-id="' + o.id + '" transform="' + svgM(o.m) + '">' + bodyOf(Object.assign({}, o, { hidden: false })) + '</g>';
+  return open(pe.trim()) + bodyOf(o) + '</g>';
+}
+function artMarkup(plain) {
+  DEFS = [];
+  const bid = builder ? builder.ids : [];
+  const body = items.map(o => {
+    if (plain) return nodeSvg(o, 'n', -1);
+    if (bid.includes(o.id)) return nodeSvg(o, 'dim', -1);
+    if (!ctx.length) return nodeSvg(o, 'n', -1);
+    if (ctx[0] === o.id) return nodeSvg(o, ctx.length === 1 ? 'ent' : 'anc', 0);
+    return nodeSvg(o, 'dim', -1);
+  }).join('');
+  const inv = '<filter id="inv" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="-1 0 0 0 1 0 -1 0 0 1 0 0 -1 0 1 0 0 0 1 0"/></filter>';
+  return '<defs>' + DEFS.join('') + inv + '</defs>' + body;
+}
+function renderWorld() {
+  const art = artMarkup(false);
+  svgEl.innerHTML = '<rect x="' + ART.x + '" y="' + ART.y + '" width="' + ART.w + '" height="' + ART.h + '" fill="#f6f7f9"/><g id="art">' + art + '</g>';
+}
+const mk = (name, attrs) => '<' + name + ' ' + Object.entries(attrs).map(([k, v]) => k + '="' + v + '"').join(' ') + '/>';
+function outlineWorld(o, W, stroke, w, dash) {
+  const g = xfMP(geomLocal(o), W);
+  return g.length ? '<path d="' + pathD(g) + '" fill="none" stroke="' + stroke + '" stroke-width="' + w + '"' + (dash ? ' stroke-dasharray="' + dash + '"' : '') + ' fill-rule="evenodd"/>' : '';
+}
+function drawOverlay() {
+  let s = '';
+  const P = ctxMatrix();
+  if (builder) {
+    builder.regions.forEach((r, i) => {
+      const vis = builder.visited.includes(i), hv = builder.hover === i;
+      s += '<path d="' + pathD(r.mp) + '" fill="' + (vis ? (builder.alt ? 'rgba(255,90,90,.55)' : 'rgba(255,180,84,.6)') : (hv ? 'rgba(255,255,255,.35)' : 'rgba(255,255,255,.0)')) + '" fill-rule="evenodd" stroke="' + (vis ? '#ffb454' : '#c9ccd4') + '" stroke-width="1.2" stroke-dasharray="' + (vis ? '' : '3 3') + '"/>';
+    });
+    if (builder.trail && builder.trail.length > 1) s += '<polyline points="' + builder.trail.map(p => p[0].toFixed(0) + ',' + p[1].toFixed(0)).join(' ') + '" fill="none" stroke="#ffb454" stroke-width="2" stroke-linecap="round"/>';
+    overEl.innerHTML = s; return;
+  }
+  if (hover && !drag && !sel.includes(hover)) { const o = container().find(x => x.id === hover); if (o) s += outlineWorld(o, mul(P, o.m), '#7fb0ff', 1.5, '4 3'); }
+  selObjs().forEach(o => {
+    const W = mul(P, o.m);
+    s += outlineWorld(o, W, '#4c8dff', 1.6);
+    if (o.kind === 'bool') o.kids.forEach((k, i) => { if (document.getElementById('cGhost').checked) s += outlineWorld(k, mul(W, k.m), i === 0 ? MODECOL.base : MODECOL[k.mode || 'add'], 1, '4 3'); });
+    if (o.kind === 'clip' || o.kind === 'omask') o.mask.forEach(k => { s += outlineWorld(k, mul(W, k.m), '#ffb454', 1, '5 3'); });
+    const b = aabb(o, P);
+    if (b) s += mk('rect', { x: b[0] - 3, y: b[1] - 3, width: b[2] - b[0] + 6, height: b[3] - b[1] + 6, fill: 'none', stroke: '#4c8dff', 'stroke-width': 0.8, opacity: 0.6 });
+  });
+  if (drag && drag.mode === 'marquee' && drag.moved) {
+    const r = marqueeRect();
+    s += mk('rect', { x: r[0], y: r[1], width: r[2] - r[0], height: r[3] - r[1], fill: '#4c8dff22', stroke: '#4c8dff', 'stroke-width': 1, 'stroke-dasharray': drag.cur[0] >= drag.p0[0] ? '' : '5 3' });
+  }
+  overEl.innerHTML = s;
+}
+
+// ---------- appearance helpers ----------
+const KINDNAME = { shape: 'Shape', bool: 'Boolean', clip: 'Clip', omask: 'Opacity mask' };
+function setAp(k, v) {
+  const objs = selObjs(); if (!objs.length) return;
+  beginEdit();
+  objs.forEach(o => {
+    if (k.startsWith('fill') && !o.fill) return;
+    if (k === 'fill.c') o.fill.c = v;
+    else if (k === 'fill.c2') o.fill.c2 = v;
+    else if (k === 'fill.a') o.fill.a = v;
+    else if (k === 'fill.type') { if (v === 'solid') { delete o.fill.c2; delete o.fill.a; } else { o.fill.c2 = o.fill.c2 || '#000000'; o.fill.a = o.fill.a || 0; } }
+    else if (k === 'stroke' && o.fill) o.stroke = v;
+    else if (k === 'sw' && o.fill) o.sw = v;
+    else if (k === 'op') o.op = v;
+    else if (k === 'blend') o.blend = v;
+  });
+  endEdit(); refresh();
+}
+function isOperand() { const n = lastCtx(); return !!n && n.kind === 'bool'; }
+
+// ---------- commands ----------
+function ordered(objs) { const c = container(); return c.filter(o => objs.includes(o)); }
+function placeNode(node, objs) {
+  const loc = locate(objs[0].id), arr = loc.arr;
+  const idx = Math.max(...objs.map(o => arr.indexOf(o)));
+  objs.forEach(o => { arr.splice(arr.indexOf(o), 1); });
+  arr.splice(idx - objs.length + 1, 0, node);
+  sel = [node.id];
+}
+function combine(kind) {
+  const objs = ordered(selObjs());
+  if (objs.length < 2) { toast('Select two or more shapes'); return; }
+  if (objs.some(o => o.kind === 'clip' || o.kind === 'omask')) { toast('Masks cannot be combined; separate the mask first'); return; }
+  beginEdit();
+  const mode = { union: 'add', subtract: 'sub', intersect: 'int', exclude: 'xor' }[kind];
+  objs.forEach((o, i) => { o.mode = i === 0 ? 'add' : mode; });
+  const base = objs[0];
+  const node = { id: newId(), name: KINDNAME.bool + ' ' + kind, kind: 'bool', kids: objs, m: IDM.slice(), fill: JSON.parse(JSON.stringify(base.fill)), stroke: base.stroke, sw: base.sw, op: 1, blend: 'normal' };
+  placeNode(node, objs);
+  endEdit(); refresh();
+}
+function makeMask(kind) {
+  const objs = ordered(selObjs());
+  if (objs.length < 2) { toast('Select content and, on top, the mask shape'); return; }
+  beginEdit();
+  const maskShape = objs[objs.length - 1], content = objs.slice(0, -1);
+  if (kind === 'omask') { maskShape.prevFill = maskShape.fill; maskShape.fill = { c: '#ffffff', c2: '#000000', a: 0 }; }
+  const node = { id: newId(), name: kind === 'clip' ? 'Clip' : 'Opacity mask', kind, kids: content, mask: [maskShape], m: IDM.slice(), op: 1, blend: 'normal', invert: false };
+  const loc = locate(objs[0].id), arr = loc.arr, idx = Math.max(...objs.map(o => arr.indexOf(o)));
+  objs.forEach(o => arr.splice(arr.indexOf(o), 1));
+  arr.splice(idx - objs.length + 1, 0, node);
+  sel = [node.id];
+  endEdit(); refresh();
+}
+function separateNode() {
+  const o = selObjs()[0]; if (!o || !o.kids || selObjs().length !== 1) return;
+  beginEdit();
+  const loc = locate(o.id), arr = loc.arr, i = arr.indexOf(o), back = [].concat(o.kids, o.mask || []);
+  back.forEach(k => { k.m = mul(o.m, k.m); delete k.mode; if (k.prevFill) { k.fill = k.prevFill; delete k.prevFill; } });
+  arr.splice(i, 1, ...back);
+  sel = back.map(k => k.id);
+  endEdit(); refresh();
+}
+function expandNode() {
+  const o = selObjs()[0]; if (!o || o.kind !== 'bool') return;
+  beginEdit();
+  const s = shape(o.name.replace('Boolean', 'Path'), geomLocal(o), JSON.parse(JSON.stringify(o.fill)), { stroke: o.stroke, sw: o.sw, op: o.op, blend: o.blend, m: o.m.slice() });
+  const arr = locate(o.id).arr; arr.splice(arr.indexOf(o), 1, s); sel = [s.id];
+  endEdit(); toast('Expanded: now a plain path'); refresh();
+}
+function enterNode(id) {
+  const byId = typeof id === 'string';
+  const o = byId ? find(id) : selObjs()[0];
+  if (!o || !o.kids || (selObjs().length > 1 && !byId)) return;
+  ctx = ctx.concat(o.id); sel = []; refresh();
+}
+function exitTo(n) { ctx = ctx.slice(0, n); sel = []; refresh(); }
+function reverseOrder() {
+  const o = selObjs()[0]; if (!o || o.kind !== 'bool') return;
+  beginEdit(); const modes = ['add'].concat(o.kids.slice(1).map(k => k.mode || 'add').reverse()); o.kids.reverse(); o.kids.forEach((k, i) => { k.mode = modes[i]; }); endEdit(); refresh();
+}
+function setOperandMode(id, mode) { const k = find(id); if (!k) return; beginEdit(); k.mode = mode; endEdit(); refresh(); }
+function toggleHidden(id) { const k = find(id); if (!k) return; beginEdit(); k.hidden = !k.hidden; endEdit(); refresh(); }
+function toggleLocked(id) { const k = find(id); if (!k) return; beginEdit(); k.locked = !k.locked; endEdit(); refresh(); }
+function moveOperand(id, dir) {
+  const loc = locate(id); if (!loc || !loc.parent || loc.parent.kind !== 'bool') return;
+  const a = loc.arr, i = a.indexOf(loc.node), j = i + dir;
+  if (j < 0 || j >= a.length) return;
+  beginEdit(); a.splice(i, 1); a.splice(j, 0, loc.node);
+  a.forEach((k, n) => { if (n === 0) k.mode = k.mode || 'add'; else if (!k.mode) k.mode = 'add'; });
+  endEdit(); refresh();
+}
+function invertMask() { const o = selObjs()[0]; if (!o || o.kind !== 'omask') return; beginEdit(); o.invert = !o.invert; endEdit(); refresh(); }
+function cloneItem(o) { const c = JSON.parse(JSON.stringify(o)); const fix = x => { x.id = newId(); childArrays(x).forEach(a => a.forEach(fix)); }; fix(c); return c; }
+function duplicateSel() {
+  const objs = selObjs(); if (!objs.length) return;
+  beginEdit();
+  const clones = [];
+  objs.forEach(o => { const loc = locate(o.id), c = cloneItem(o); c.m = mul(tr(14, 14), c.m); loc.arr.splice(loc.arr.indexOf(o) + 1, 0, c); clones.push(c); });
+  sel = clones.map(c => c.id); endEdit(); refresh();
+}
+function deleteSel() {
+  const objs = selObjs(); if (!objs.length) return;
+  beginEdit(); objs.forEach(o => { const loc = locate(o.id); if (loc) loc.arr.splice(loc.arr.indexOf(o), 1); });
+  sel = []; endEdit(); refresh();
+}
+function arrange(how) {
+  const objs = selObjs(); if (!objs.length) return;
+  beginEdit();
+  objs.forEach(o => { const loc = locate(o.id), a = loc.arr; a.splice(a.indexOf(o), 1); if (how === 'front') a.push(o); else a.unshift(o); });
+  endEdit(); refresh();
+}
+function setBlendAll(b) { setAp('blend', b); }
+function selectAll() { sel = container().filter(o => !o.locked && !o.hidden).map(o => o.id); refresh(); }
+function invertSel() { sel = container().filter(o => !o.locked && !o.hidden).map(o => o.id).filter(id => !sel.includes(id)); refresh(); }
+
+// ---------- shape builder / divide ----------
+function builderRegions(objs) {
+  const geoms = objs.map(o => xfMP(geomLocal(o), o.m)), n = objs.length, out = [];
+  for (let mask = 1; mask < (1 << n); mask++) {
+    const mem = [], oth = [];
+    geoms.forEach((g, i) => ((mask >> i) & 1 ? mem : oth).push(i));
+    if (mem.some(i => !geoms[i].length)) continue;
+    let r = geoms[mem[0]];
+    mem.slice(1).forEach(i => { r = r.length ? pc.intersection(r, geoms[i]) : r; });
+    if (r.length && oth.length) { const u = unionAll(oth.map(i => geoms[i]).filter(g => g.length)); if (u.length) r = pc.difference(r, u); }
+    if (r.length && areaMP(r) > 2) out.push({ mp: r, src: objs[Math.max(...mem)] });
+  }
+  return out;
+}
+function startBuilder(commitAll) {
+  const objs = ordered(selObjs());
+  if (ctx.length) { toast('Leave the node first'); return; }
+  if (objs.length < 2) { toast('Select two or more shapes'); return; }
+  if (objs.length > 6) { toast('Up to six shapes'); return; }
+  if (objs.some(o => o.kind === 'clip' || o.kind === 'omask')) { toast('Separate the mask first'); return; }
+  builder = { ids: objs.map(o => o.id), objs, regions: builderRegions(objs), visited: [], hover: -1, trail: [], alt: false };
+  if (commitAll) { commitBuilder(false, true); return; }
+  refresh();
+}
+function commitBuilder(del, keepAll) {
+  const b = builder; if (!b) return;
+  beginEdit();
+  const mergeIdx = keepAll ? [] : b.visited.slice();
+  const made = [];
+  const mk2 = (r, name) => shape(name, r.mp, JSON.parse(JSON.stringify(r.src.fill)), { stroke: r.src.stroke, sw: r.src.sw, op: r.src.op, blend: r.src.blend });
+  let n = 1;
+  b.regions.forEach((r, i) => {
+    if (mergeIdx.includes(i)) return;
+    made.push(mk2(r, 'Region ' + n++));
+  });
+  if (!del && mergeIdx.length) {
+    const merged = unionAll(mergeIdx.map(i => b.regions[i].mp));
+    made.push(mk2({ mp: merged, src: b.regions[mergeIdx[0]].src }, 'Merged'));
+  }
+  const arr = locate(b.objs[0].id).arr, idx = Math.max(...b.objs.map(o => arr.indexOf(o)));
+  b.objs.forEach(o => arr.splice(arr.indexOf(o), 1));
+  arr.splice(idx - b.objs.length + 1, 0, ...made);
+  sel = made.map(s => s.id);
+  builder = null; endEdit(); refresh();
+}
+function regionAt(p) { if (!builder) return -1; for (let i = builder.regions.length - 1; i >= 0; i--) if (inMP(builder.regions[i].mp, p[0], p[1])) return i; return -1; }
+
+// ---------- HUD ----------
+const fmt = v => Math.round(v * 100) / 100;
+function appearanceCard(objs) {
+  const o = objs[0], f = o.fill || { c: '#000000' }, grad = !!f.c2, painted = objs.every(x => x.fill);
+  const noStroke = o.stroke === 'none';
+  const opRow = '<div class="row"><span class="lab">Opac.</span><input type="number" min="0" max="100" step="5" data-ap="op" value="' + Math.round(o.op * 100) + '"><select data-ap="blend">' + BLENDS.map(b => '<option value="' + b + '"' + (o.blend === b ? ' selected' : '') + '>' + b.replace('-', ' ') + '</option>').join('') + '</select></div>';
+  if (!painted) return '<div class="node"><div class="head"><b>Appearance</b><span>' + KINDNAME[o.kind] + '</span></div>' + opRow + '</div>';
+  return '<div class="node"><div class="head"><b>Appearance</b><span>' + (objs.length > 1 ? objs.length + ' nodes' : KINDNAME[o.kind]) + '</span></div>' +
+    '<div class="row"><span class="lab">Fill</span><select data-ap="fill.type"><option value="solid"' + (grad ? '' : ' selected') + '>Solid</option><option value="grad"' + (grad ? ' selected' : '') + '>Gradient</option></select>' +
+    '<input type="color" data-ap="fill.c" value="' + f.c + '">' + (grad ? '<input type="color" data-ap="fill.c2" value="' + f.c2 + '">' : '') + '</div>' +
+    (grad ? '<div class="row"><span class="lab">Angle</span><input type="number" step="15" data-ap="fill.a" value="' + (f.a || 0) + '"></div>' : '') +
+    '<div class="row"><span class="lab">Stroke</span><input type="color" data-ap="stroke" value="' + (noStroke ? '#000000' : o.stroke) + '"' + (noStroke ? ' style="opacity:.35"' : '') + '><label style="gap:3px"><input type="checkbox" data-ap="strokeoff"' + (noStroke ? ' checked' : '') + '> none</label><input type="number" min="0" step="1" data-ap="sw" value="' + o.sw + '"></div>' +
+    opRow + '</div>';
+}
+function updateHud() {
+  const ae = document.activeElement;
+  if (hudEl.contains(ae) && (ae.tagName === 'INPUT' || ae.tagName === 'SELECT')) return;
+  const chain = ctxChain();
+  let h = '<div class="crumbs"><a data-act="exit-all">Document</a>' + chain.map((o, i) => ' &rsaquo; <a data-act="exit-to" data-i="' + i + '">' + o.name + '</a>').join('') + '</div>';
+  if (builder) {
+    h += '<div class="node act"><div class="head"><b>Shape builder</b><span>' + builder.regions.length + ' regions</span></div><div class="note">Drag across regions to merge them. Alt-drag deletes them. Enter splits every region, Esc cancels.</div></div>';
+    hudEl.innerHTML = h; bindHud(); return;
+  }
+  const objs = selObjs();
+  if (!objs.length) {
+    h += '<div class="note">Nothing selected</div><div class="objs">' + container().map(o => '<div data-sel="' + o.id + '"><span class="n" style="' + (o.hidden ? 'opacity:.4;text-decoration:line-through' : '') + '">' + o.name + '</span><small>' + (o.kind !== 'shape' ? KINDNAME[o.kind] : '') + '</small><small data-lock="' + o.id + '" title="lock">' + (o.locked ? '&#128274;' : '&#9675;') + '</small><small data-hid="' + o.id + '" title="hide">' + (o.hidden ? '&#9711;' : '&#9673;') + '</small></div>').join('') + '</div>';
+    hudEl.innerHTML = h; bindHud(); return;
+  }
+  const one = objs.length === 1, o0 = objs[0], operand = isOperand();
+  if (one && o0.kind === 'bool') {
+    h += '<div class="chain">' + o0.kids.map(k => '<i>' + k.name + '</i>').join(' + ') + ' &rarr; <i class="act">Boolean</i></div>';
+    h += '<div class="node act"><div class="head"><b>Operands</b><span>base first</span></div>' + o0.kids.map((k, i) => '<div class="opr' + (k.hidden ? ' off' : '') + '"><span class="dot" style="background:' + (i === 0 ? MODECOL.base : MODECOL[k.mode || 'add']) + '"></span><span class="nm" data-op="' + k.id + '">' + k.name + '</span>' +
+      (i === 0 ? '<span style="color:#9a9ea8;font-size:11px">base</span>' : '<select data-mode="' + k.id + '">' + Object.keys(MODENAME).map(m => '<option value="' + m + '"' + ((k.mode || 'add') === m ? ' selected' : '') + '>' + MODENAME[m] + '</option>').join('') + '</select>') +
+      '<button data-eye="' + k.id + '" title="skip this operand">' + (k.hidden ? '&#9711;' : '&#9673;') + '</button><button data-up="' + k.id + '">&uarr;</button><button data-dn="' + k.id + '">&darr;</button></div>').join('') +
+      '<div class="chips"><button class="small" data-act="enter">Enter</button><button class="small" data-act="separate">Separate</button><button class="small" data-act="expand">Expand</button><button class="small" data-act="reverse">Reverse order</button></div></div>';
+    if (areaMP(geomLocal(o0)) < 1) h += '<div class="note">The result is empty.</div>';
+  } else if (one && (o0.kind === 'clip' || o0.kind === 'omask')) {
+    h += '<div class="chain"><i>Content &times;' + o0.kids.length + '</i> + <i>Mask</i> &rarr; <i class="act">' + KINDNAME[o0.kind] + '</i></div>';
+    h += '<div class="node act"><div class="head"><b>' + KINDNAME[o0.kind] + '</b><span>' + (o0.kind === 'omask' ? 'luminosity' : 'shape') + '</span></div>' +
+      (o0.kind === 'omask' ? '<div class="row"><label style="gap:4px"><input type="checkbox" data-act="invert"' + (o0.invert ? ' checked' : '') + '> invert mask</label></div><div class="note">White shows, black hides. Enter and give the mask shape a gradient.</div>' : '') +
+      '<div class="chips"><button class="small" data-act="enter">Enter</button><button class="small" data-act="separate">Separate</button></div></div>';
+  } else if (!one) {
+    h += '<div class="chain"><i>' + objs.length + ' nodes</i></div>';
+    h += '<div class="node act"><div class="head"><b>Combine</b><span>top = mask</span></div><div class="chips">' +
+      [['union', 'Union'], ['subtract', 'Subtract'], ['intersect', 'Intersect'], ['exclude', 'Exclude']].map(x => '<button class="small" data-comb="' + x[0] + '">' + x[1] + '</button>').join('') +
+      '<button class="small" data-act="divide">Divide</button><button class="small" data-act="builder">Shape builder</button><button class="small" data-act="clip">Clip</button><button class="small" data-act="omask">Opacity mask</button></div></div>';
+  } else {
+    h += '<div class="chain"><i>' + o0.name + '</i> &rarr; <i class="act">' + (operand ? 'operand' : 'Shape') + '</i></div>';
+  }
+  if (operand) {
+    const mode = o0.mode || 'add', first = lastCtx().kids[0] === o0;
+    h += '<div class="node act"><div class="head"><b>Operand</b><span>' + o0.name + '</span></div>' + (first ? '<div class="note">Base of the Boolean.</div>' : '<div class="row"><span class="lab">Mode</span><select data-mode="' + o0.id + '">' + Object.keys(MODENAME).map(m => '<option value="' + m + '"' + (mode === m ? ' selected' : '') + '>' + MODENAME[m] + '</option>').join('') + '</select></div>') + '<div class="note">Appearance comes from the Boolean node.</div></div>';
+  } else {
+    h += appearanceCard(objs);
+  }
+  hudEl.innerHTML = h; bindHud();
+}
+function bindHud() {
+  hudEl.querySelectorAll('[data-sel]').forEach(el => { el.onclick = () => { sel = [el.dataset.sel]; refresh(); }; });
+  hudEl.querySelectorAll('[data-lock]').forEach(el => { el.onclick = ev => { ev.stopPropagation(); toggleLocked(el.dataset.lock); }; });
+  hudEl.querySelectorAll('[data-hid]').forEach(el => { el.onclick = ev => { ev.stopPropagation(); toggleHidden(el.dataset.hid); }; });
+  hudEl.querySelectorAll('[data-comb]').forEach(el => { el.onclick = () => combine(el.dataset.comb); });
+  hudEl.querySelectorAll('[data-act]').forEach(el => {
+    const a = el.dataset.act;
+    if (a === 'invert') el.onchange = invertMask; else el.onclick = () => runAct(a, el);
+  });
+  hudEl.querySelectorAll('[data-op]').forEach(el => { el.onclick = () => { const id = el.dataset.op, n = selObjs()[0]; ctx = ctx.concat(n.id); sel = [id]; refresh(); }; });
+  hudEl.querySelectorAll('[data-mode]').forEach(el => { el.onchange = () => { setOperandMode(el.dataset.mode, el.value); el.blur(); }; });
+  hudEl.querySelectorAll('[data-eye]').forEach(el => { el.onclick = () => toggleHidden(el.dataset.eye); });
+  hudEl.querySelectorAll('[data-up]').forEach(el => { el.onclick = () => moveOperand(el.dataset.up, -1); });
+  hudEl.querySelectorAll('[data-dn]').forEach(el => { el.onclick = () => moveOperand(el.dataset.dn, 1); });
+  hudEl.querySelectorAll('[data-ap]').forEach(el => {
+    const k = el.dataset.ap;
+    el.onchange = () => {
+      if (k === 'strokeoff') setAp('stroke', el.checked ? 'none' : (hudEl.querySelector('[data-ap=stroke]').value || '#000000'));
+      else if (k === 'op') setAp('op', clamp(parseFloat(el.value) || 0, 0, 100) / 100);
+      else if (k === 'sw' || k === 'fill.a') setAp(k, Math.max(0, parseFloat(el.value) || 0));
+      else setAp(k, el.value);
+      el.blur(); refresh();
+    };
+    el.onkeydown = ev => { ev.stopPropagation(); if (ev.key === 'Enter' || ev.key === 'Escape') el.blur(); };
+  });
+}
+function runAct(a, el) {
+  if (a === 'exit-all') exitTo(0);
+  else if (a === 'exit-to') exitTo(+el.dataset.i + 1);
+  else if (a === 'enter') enterNode();
+  else if (a === 'separate') separateNode();
+  else if (a === 'expand') expandNode();
+  else if (a === 'reverse') reverseOrder();
+  else if (a === 'divide') startBuilder(true);
+  else if (a === 'builder') startBuilder(false);
+  else if (a === 'clip') makeMask('clip');
+  else if (a === 'omask') makeMask('omask');
+}
+
+// ---------- hint bar ----------
+function hintItems() {
+  const m = (k, t, lit) => '<span class="mod"><span class="key' + (lit ? ' lit' : '') + '">' + k + '</span>' + t + '</span>';
+  let tool = 'Select V', main = 'Click to select, drag for a marquee', mods;
+  if (builder) { tool = 'Shape builder B'; main = 'Drag across regions'; mods = [m('Alt', 'delete regions', held.alt), m('Enter', 'split all', false), m('Esc', 'cancel', false)]; }
+  else if (drag && drag.mode === 'move') { main = 'Moving'; mods = [m('Shift', 'lock axis', held.shift)]; }
+  else if (sel.length > 1) { main = sel.length + ' selected'; mods = [m('Space', 'tap: combine ring', false), m('B', 'shape builder', false), m('Ctrl A', 'all', false)]; }
+  else if (sel.length === 1) { main = '1 selected'; mods = [m('R', 'hold: rotate', false), m('S', 'hold: scale', false), m('2×click', 'enter node', false), m('Space', 'tap: ring', false)]; }
+  else mods = [m('Ctrl A', 'select all', false), m('Space', 'tap: ring', false)];
+  return '<span class="tool">' + tool + '</span><span class="main">' + main + '</span><span class="grow"></span>' + mods.join('');
+}
+function updateHint() { hintEl.innerHTML = hintItems(); }
+function refresh() { renderWorld(); drawOverlay(); updateHud(); updateHint(); }
+
+// ---------- pointer ----------
+function hitItem(e) {
+  const els = document.elementsFromPoint(e.clientX, e.clientY), c = container(), pid = ctx[ctx.length - 1];
+  for (const el of els) {
+    if (!svgEl.contains(el)) continue;
+    let n = el.closest('[data-id]');
+    while (n) {
+      const par = n.parentElement && n.parentElement.closest('[data-id]');
+      if ((par ? par.dataset.id : undefined) === pid && c.some(o => o.id === n.dataset.id && !o.locked)) return n.dataset.id;
+      if (!par) break;
+      n = par;
+    }
+  }
+  return null;
+}
+function marqueeRect() { const a = drag.p0, b = drag.cur; return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])]; }
+function marqueeHits() {
+  const r = marqueeRect(), contain = drag.cur[0] >= drag.p0[0], P = ctxMatrix();
+  return container().filter(o => {
+    if (o.locked || o.hidden) return false;
+    const b = aabb(o, P); if (!b) return false;
+    return contain ? (b[0] >= r[0] && b[1] >= r[1] && b[2] <= r[2] && b[3] <= r[3]) : !(b[2] < r[0] || b[0] > r[2] || b[3] < r[1] || b[1] > r[3]);
+  });
+}
+function showBadge(text, p) { badgeEl.textContent = text; badgeEl.style.display = 'block'; badgeEl.style.left = clamp(p[0] + 16, 4, 780) + 'px'; badgeEl.style.top = clamp(p[1] + 16, 4, 530) + 'px'; }
+const hideBadge = () => { badgeEl.style.display = 'none'; };
+
+stage.addEventListener('pointerdown', e => {
+  if (e.target.closest('#hud,#ring,#scrub')) return;
+  const p = localPos(e); cursor = p;
+  if (ring) { closeRing(); refresh(); return; }
+  held.shift = e.shiftKey; held.alt = e.altKey;
+  try { stage.setPointerCapture(e.pointerId); } catch (x) { /* synthetic */ }
+  if (builder) {
+    builder.alt = e.altKey; builder.visited = []; builder.trail = [p];
+    const i = regionAt(p); if (i >= 0) builder.visited.push(i);
+    drag = { mode: 'builder' }; drawOverlay(); return;
+  }
+  const id = hitItem(e);
+  if (id) {
+    if (e.shiftKey) { if (!sel.includes(id)) sel = sel.concat(id); else shiftToggle = id; }
+    else if (!sel.includes(id)) sel = [id];
+    const objs = selObjs();
+    drag = { mode: 'move', p0: p, objs, starts: objs.map(o => o.m.slice()), moved: false, clickId: id, P: ctxMatrix() };
+    refresh(); return;
+  }
+  if (!e.shiftKey) sel = [];
+  drag = { mode: 'marquee', p0: p, cur: p, moved: false, base: e.shiftKey ? sel.slice() : [] };
+  refresh();
+});
+stage.addEventListener('pointermove', e => {
+  const p = localPos(e); cursor = p;
+  held.shift = e.shiftKey; held.alt = e.altKey;
+  if (scrub) { updateScrub(p); return; }
+  if (builder) {
+    builder.alt = e.altKey;
+    if (drag && drag.mode === 'builder') {
+      builder.trail.push(p);
+      const i = regionAt(p); if (i >= 0 && !builder.visited.includes(i)) builder.visited.push(i);
+    } else builder.hover = regionAt(p);
+    drawOverlay(); return;
+  }
+  if (!drag) {
+    const hv = e.target.closest('#hud,#ring,#scrub') ? null : hitItem(e);
+    if (hv !== hover) { hover = hv; drawOverlay(); }
+    return;
+  }
+  const d = drag;
+  if (d.mode === 'marquee') {
+    d.cur = p; if (Math.hypot(p[0] - d.p0[0], p[1] - d.p0[1]) > 3) d.moved = true;
+    if (d.moved) sel = d.base.concat(marqueeHits().map(o => o.id).filter(id => !d.base.includes(id)));
+    drawOverlay(); updateHud(); return;
+  }
+  if (d.mode === 'move') {
+    if (!d.moved && Math.hypot(p[0] - d.p0[0], p[1] - d.p0[1]) < 3) return;
+    if (!d.moved) { d.moved = true; beginEdit(); }
+    let dx = p[0] - d.p0[0], dy = p[1] - d.p0[1];
+    if (e.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0; }
+    applyDelta(d.starts, d.objs, tr(dx, dy), d.P);
+    showBadge('dx ' + Math.round(dx) + '  dy ' + Math.round(dy), p);
+    renderWorld(); drawOverlay(); updateHint();
+  }
+});
+function endDrag(e) {
+  if (!drag) return;
+  const d = drag; drag = null; hideBadge();
+  if (d.mode === 'builder') {
+    const b = builder; b.trail = [];
+    if (b.visited.length) { commitBuilder(b.alt, false); return; }
+    drawOverlay(); return;
+  }
+  if (d.mode === 'move' && !d.moved && shiftToggle) sel = sel.filter(x => x !== shiftToggle);
+  else if (d.mode === 'move' && !d.moved && d.clickId && sel.length > 1 && !(e && e.shiftKey)) sel = [d.clickId];
+  if (d.mode === 'marquee' && !d.moved && !(e && e.shiftKey)) sel = [];
+  shiftToggle = null;
+  endEdit(); refresh();
+}
+stage.addEventListener('pointerup', endDrag);
+stage.addEventListener('pointercancel', endDrag);
+stage.addEventListener('dblclick', e => {
+  if (e.target.closest('#hud,#ring,#scrub') || builder) return;
+  const id = hitItem(e);
+  if (id) { const o = container().find(x => x.id === id); if (o && o.kids) { sel = [id]; enterNode(); } }
+  else if (ctx.length) exitTo(ctx.length - 1);
+});
+
+// ---------- scrub keys ----------
+const SCR = { r: { name: 'Rotate', unit: '°', snap: 15 }, s: { name: 'Scale', unit: '%', snap: 10 } };
+function startScrub(key) {
+  const objs = selObjs(); if (!objs.length) return;
+  const P = ctxMatrix(), pw = centerOf(objs, P); if (!pw) return;
+  beginEdit();
+  scrub = { key, objs, P, starts: objs.map(o => o.m.slice()), y0: cursor[1], x: clamp(cursor[0] + 24, 6, 660), y: clamp(cursor[1] - 40, 6, 440), v: 0, pw };
+  showScrub();
+}
+function updateScrub(pos) {
+  const s = scrub, k = s.key, dy = s.y0 - pos[1];
+  let v = k === 'r' ? dy * 0.5 : (Math.exp(dy * 0.006) - 1) * 100;
+  if (held.shift) v = Math.round(v / SCR[k].snap) * SCR[k].snap;
+  s.v = v;
+  const D = k === 'r' ? about(rotM(v * D2R), s.pw) : about(scl(Math.max(0.02, 1 + v / 100), Math.max(0.02, 1 + v / 100)), s.pw);
+  applyDelta(s.starts, s.objs, D, s.P);
+  renderWorld(); drawOverlay(); showScrub();
+}
+function showScrub() {
+  const s = scrub, k = SCR[s.key];
+  scrubEl.style.display = 'block'; scrubEl.style.left = s.x + 'px'; scrubEl.style.top = s.y + 'px';
+  const pos = 50 + clamp((s.y0 - cursor[1]) / 200, -1, 1) * 50;
+  scrubEl.innerHTML = '<div class="head"><span>' + k.name + ' <span class="key">' + s.key.toUpperCase() + '</span></span><b>' + (s.v > 0 ? '+' : '') + Math.round(s.v * 10) / 10 + k.unit + '</b></div><div class="track"><div class="mid"></div><div class="thumb" style="left:' + pos + '%"></div></div><div class="sub">around the selection centre · up increases · Shift snaps ' + k.snap + k.unit + '</div>';
+}
+function endScrub() { scrub = null; scrubEl.style.display = 'none'; endEdit(); refresh(); }
+function cancelScrub() { if (editBefore !== null) { const j = editBefore; editBefore = null; restore(j); } scrub = null; scrubEl.style.display = 'none'; refresh(); }
+function cancelDrag() { if (editBefore !== null) { const j = editBefore; editBefore = null; restore(j); } drag = null; hideBadge(); refresh(); }
+
+// ---------- ring ----------
+function showRing(pos, title, slots, hubFn, sub) {
+  closeRing();
+  const R = 92, cx = clamp(pos[0], R + 66, 900 - R - 66), cy = clamp(pos[1], R + 30, 560 - R - 50);
+  ring = { el: document.createElement('div'), slots, pos };
+  ring.el.id = 'ring'; ring.el.style.left = cx + 'px'; ring.el.style.top = cy + 'px';
+  ring.el.innerHTML = '<div class="hub' + (hubFn ? ' click' : '') + '">' + title + '<small>' + (sub || '...') + '</small></div>';
+  if (hubFn) { const hb = ring.el.firstChild; hb.onpointerdown = ev => ev.stopPropagation(); hb.onclick = ev => { ev.stopPropagation(); closeRing(); hubFn(); }; }
+  slots.forEach((sl, i) => {
+    const an = (sl.a !== undefined ? sl.a : -90 + i * 360 / slots.length) * Math.PI / 180, el = document.createElement('div');
+    el.className = 'slot' + (sl.on ? '' : ' off');
+    el.style.left = Math.cos(an) * R + 'px'; el.style.top = Math.sin(an) * R + 'px';
+    el.innerHTML = '<span class="key">' + sl.key + '</span>' + sl.label;
+    el.onpointerdown = ev => ev.stopPropagation();
+    el.onclick = ev => { ev.stopPropagation(); runSlot(sl); };
+    ring.el.appendChild(el);
+  });
+  stage.appendChild(ring.el);
+  updateHint();
+}
+function runSlot(sl) { if (!sl.on) return; const pos = ring.pos; closeRing(); sl.fn(pos); refresh(); }
+function closeRing() { if (ring) { ring.el.remove(); ring = null; } }
+function openBlendRing(pos) {
+  const keys = ['N', 'M', 'S', 'O', 'D', 'L', 'F', 'T'];
+  showRing(pos, 'Blend', BLENDS.map((b, i) => ({ key: keys[i], label: b.replace('-', ' '), on: true, fn: () => setBlendAll(b) })), null, 'mode');
+}
+function openRing(pos) {
+  const objs = selObjs(), operand = isOperand();
+  if (builder) return;
+  if (operand && objs.length) {
+    const id = objs[0].id, first = lastCtx().kids[0] === objs[0];
+    showRing(pos, objs.length === 1 ? objs[0].name : objs.length + ' operands', [
+      { key: 'A', label: 'Add', on: !first, fn: () => objs.forEach(o => setOperandMode(o.id, 'add')) },
+      { key: 'S', label: 'Subtract', on: !first, fn: () => objs.forEach(o => setOperandMode(o.id, 'sub')) },
+      { key: 'I', label: 'Intersect', on: !first, fn: () => objs.forEach(o => setOperandMode(o.id, 'int')) },
+      { key: 'X', label: 'Exclude', on: !first, fn: () => objs.forEach(o => setOperandMode(o.id, 'xor')) },
+      { key: 'H', label: objs[0].hidden ? 'Show' : 'Hide', on: true, fn: () => toggleHidden(id) },
+      { key: 'D', label: 'Duplicate', on: true, fn: duplicateSel },
+      { key: 'T', label: 'Delete', on: true, fn: deleteSel },
+      { key: 'E', label: 'Exit node', on: true, fn: () => exitTo(ctx.length - 1) },
+    ], null, 'operand');
+    return;
+  }
+  if (objs.length > 1) {
+    showRing(pos, objs.length + ' shapes', [
+      { key: 'U', label: 'Union', on: true, fn: () => combine('union') },
+      { key: 'S', label: 'Subtract', on: true, fn: () => combine('subtract') },
+      { key: 'I', label: 'Intersect', on: true, fn: () => combine('intersect') },
+      { key: 'E', label: 'Exclude', on: true, fn: () => combine('exclude') },
+      { key: 'D', label: 'Divide', on: true, fn: () => startBuilder(true) },
+      { key: 'C', label: 'Clip', on: true, fn: () => makeMask('clip') },
+      { key: 'O', label: 'Opacity mask', on: true, fn: () => makeMask('omask') },
+      { key: 'B', label: 'Shape builder', on: true, fn: () => startBuilder(false) },
+    ], () => toast('The Combine buttons are in the HUD'), 'Combine…');
+    return;
+  }
+  if (objs.length === 1 && objs[0].kids) {
+    const o = objs[0], isB = o.kind === 'bool';
+    showRing(pos, o.name, [
+      { key: 'E', label: 'Enter', on: true, fn: enterNode },
+      { key: 'S', label: 'Separate', on: true, fn: separateNode },
+      { key: 'X', label: 'Expand', on: isB, fn: expandNode },
+      isB ? { key: 'V', label: 'Reverse', on: true, fn: reverseOrder } : { key: 'V', label: 'Invert' + (o.invert ? '<small>on</small>' : ''), on: o.kind === 'omask', fn: invertMask },
+      { key: 'D', label: 'Duplicate', on: true, fn: duplicateSel },
+      { key: 'T', label: 'Delete', on: true, fn: deleteSel },
+      { key: 'B', label: 'Blend…', on: true, fn: p => openBlendRing(p) },
+      { key: 'H', label: o.hidden ? 'Show' : 'Hide', on: true, fn: () => toggleHidden(o.id) },
+    ], null, KINDNAME[o.kind]);
+    return;
+  }
+  if (objs.length === 1) {
+    const o = objs[0];
+    showRing(pos, o.name, [
+      { key: 'D', label: 'Duplicate', on: true, fn: duplicateSel },
+      { key: 'T', label: 'Delete', on: true, fn: deleteSel },
+      { key: 'F', label: 'To front', on: true, fn: () => arrange('front') },
+      { key: 'K', label: 'To back', on: true, fn: () => arrange('back') },
+      { key: 'B', label: 'Blend…', on: true, fn: p => openBlendRing(p) },
+      { key: 'H', label: o.hidden ? 'Show' : 'Hide', on: true, fn: () => toggleHidden(o.id) },
+      { key: 'L', label: o.locked ? 'Unlock' : 'Lock', on: true, fn: () => toggleLocked(o.id) },
+      { key: 'E', label: 'Exit node', on: ctx.length > 0, fn: () => exitTo(ctx.length - 1) },
+    ], null, 'Shape');
+    return;
+  }
+  showRing(pos, ctx.length ? 'Node' : 'Select', [
+    { key: 'A', label: 'Select all', on: true, fn: selectAll },
+    { key: 'I', label: 'Invert', on: true, fn: invertSel },
+    { key: 'N', label: 'Deselect', on: true, fn: () => { sel = []; } },
+    { key: 'E', label: 'Exit node', on: ctx.length > 0, fn: () => exitTo(ctx.length - 1) },
+    { key: 'O', label: 'Operands<small>' + (document.getElementById('cGhost').checked ? 'on' : 'off') + '</small>', on: true, fn: () => { const c = document.getElementById('cGhost'); c.checked = !c.checked; } },
+    { key: 'Z', label: 'Undo', on: undo.length > 0, fn: doUndo },
+    { key: 'Y', label: 'Redo', on: redo.length > 0, fn: doRedo },
+    { key: 'R', label: 'Reset', on: true, fn: resetDoc },
+  ], null, 'Selection');
+}
+
+// ---------- keyboard ----------
+const isTyping = t => t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.isContentEditable);
+window.addEventListener('keydown', e => {
+  held.shift = e.shiftKey; held.alt = e.altKey;
+  const key = e.key.toLowerCase();
+  if (ring) {
+    if (e.key === 'Escape') { closeRing(); refresh(); return; }
+    const sl = ring.slots.find(x => x.key.toLowerCase() === key);
+    if (sl) { e.preventDefault(); runSlot(sl); }
+    return;
+  }
+  if (isTyping(e.target)) { if (e.key === 'Enter' || e.key === 'Escape') e.target.blur(); return; }
+  const ctrl = e.ctrlKey || e.metaKey;
+  if (ctrl && key === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
+  if (ctrl && key === 'y') { e.preventDefault(); doRedo(); return; }
+  if (ctrl && key === 'a') { e.preventDefault(); selectAll(); return; }
+  if (ctrl && key === 'd') { e.preventDefault(); duplicateSel(); return; }
+  if (e.key === 'Shift' || e.key === 'Alt') { updateHint(); drawOverlay(); return; }
+  if (ctrl || (e.altKey && !builder)) return;
+  if (builder) {
+    if (e.key === 'Escape') { builder = null; refresh(); }
+    else if (e.key === 'Enter') commitBuilder(false, true);
+    return;
+  }
+  if (e.key.startsWith('Arrow') && sel.length) {
+    e.preventDefault();
+    const st = e.shiftKey ? 10 : 1, objs = selObjs(), dx = e.key === 'ArrowLeft' ? -st : e.key === 'ArrowRight' ? st : 0, dy = e.key === 'ArrowUp' ? -st : e.key === 'ArrowDown' ? st : 0;
+    beginEdit(); applyDelta(objs.map(o => o.m.slice()), objs, tr(dx, dy), ctxMatrix()); endEdit(); refresh(); return;
+  }
+  if (e.repeat) return;
+  if (e.key === 'Escape') {
+    if (drag) { cancelDrag(); return; }
+    if (scrub) { cancelScrub(); return; }
+    if (sel.length) { sel = []; refresh(); return; }
+    if (ctx.length) exitTo(ctx.length - 1);
+    return;
+  }
+  if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSel(); return; }
+  if (key === 'b' && sel.length > 1) { startBuilder(false); return; }
+  if (SCR[key] && !scrub && !drag && sel.length) { startScrub(key); return; }
+  if (e.key === ' ') { e.preventDefault(); if (!spaceDown) spaceDown = Date.now(); return; }
+});
+window.addEventListener('keyup', e => {
+  held.shift = e.shiftKey; held.alt = e.altKey;
+  const key = e.key.toLowerCase();
+  if (e.key === ' ') {
+    const had = spaceDown, dt = Date.now() - spaceDown; spaceDown = 0;
+    if (had && dt < 250 && !scrub && !drag && !ring && !isTyping(e.target)) openRing(cursor);
+    return;
+  }
+  if (scrub && key === scrub.key) endScrub();
+  updateHint(); if (builder) drawOverlay();
+});
+
+// ---------- buttons ----------
+document.getElementById('cGhost').onchange = refresh;
+document.getElementById('bUndo').onclick = doUndo;
+document.getElementById('bRedo').onclick = doRedo;
+function resetDoc() { items = initialDoc(); ctx = []; sel = []; undo = []; redo = []; editBefore = null; builder = null; }
+document.getElementById('bReset').onclick = () => { resetDoc(); refresh(); };
+document.getElementById('bSvg').onclick = () => {
+  const body = '<svg xmlns="http://www.w3.org/2000/svg" width="' + ART.w + '" height="' + ART.h + '" viewBox="' + ART.x + ' ' + ART.y + ' ' + ART.w + ' ' + ART.h + '"><rect x="' + ART.x + '" y="' + ART.y + '" width="' + ART.w + '" height="' + ART.h + '" fill="#ffffff"/>' + artMarkup(true).replace(/ data-id="[^"]*"/g, '') + '</svg>';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([body], { type: 'image/svg+xml' })); a.download = 'booleans-test.svg';
+  document.body.appendChild(a); a.click(); a.remove();
+};
+
+refresh();
+</script>
+</body>
+</html>

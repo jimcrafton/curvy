@@ -1,0 +1,709 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curvy overlays</title>
+<style>
+  :root {
+    --bg: #1e1f22; --panel: #26272b; --workspace: #2b2d31; --text: #e6e7ea; --muted: #9a9ea8;
+    --accent: #4c8dff; --amber: #ffb454; --slot: #313338; --slotLine: #4a4d55;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid #000; }
+  header h1 { margin: 0 0 4px; font-size: 15px; }
+  header p { margin: 0; color: var(--muted); max-width: 980px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 18px; padding: 10px 16px; background: #222327; border-bottom: 1px solid #000; align-items: center; }
+  .group { display: flex; align-items: center; gap: 6px; }
+  .group > span { color: var(--muted); margin-right: 4px; }
+  button { background: var(--slot); color: var(--text); border: 1px solid var(--slotLine); border-radius: 14px; padding: 4px 12px; font: inherit; cursor: pointer; }
+  button.on { background: var(--accent); border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: default; }
+  label { color: var(--muted); display: flex; align-items: center; gap: 5px; }
+  #stage { position: relative; width: 900px; height: 560px; margin: 16px auto 8px; background: var(--workspace); border: 1px solid #000; overflow: hidden; cursor: crosshair; user-select: none; touch-action: none; }
+  #svg, #over { position: absolute; left: 0; top: 0; }
+  #over { pointer-events: none; }
+  #badge { position: absolute; display: none; padding: 1px 7px; border-radius: 9px; background: #17181bf0; border: 1px solid #5a5d66; color: var(--amber); font-size: 11px; white-space: nowrap; pointer-events: none; z-index: 6; }
+  #hud { position: absolute; right: 12px; top: 12px; width: 236px; max-height: 516px; overflow: auto; padding: 8px 12px 10px; background: #17181bf0; border: 1px solid #5a5d66; border-radius: 10px; box-shadow: 0 3px 10px #0007; z-index: 4; }
+  #hud .node { border: 1px solid #3a3d43; border-radius: 8px; padding: 6px 8px 7px; margin-bottom: 8px; }
+  #hud .node.act { border-color: var(--amber); }
+  #hud .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  #hud .head b { color: var(--text); }
+  #hud .head span { color: var(--muted); font-size: 11px; }
+  #hud .row { display: flex; align-items: center; gap: 6px; margin: 4px 0; color: var(--muted); font-size: 12px; }
+  #hud .row .lab { width: 60px; flex: none; }
+  #hud input[type=range] { width: 92px; }
+  #hud input[type=number] { width: 62px; background: #2a2c31; color: var(--text); border: 1px solid #4a4d55; border-radius: 6px; padding: 2px 6px; font: inherit; }
+  #hud .mono { font-variant-numeric: tabular-nums; color: var(--text); }
+  #hud .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+  #hud .chips button, #hud button.small { padding: 2px 8px; font-size: 11px; border-radius: 10px; }
+  #hud .note { color: var(--amber); font-size: 11px; margin: 4px 0; }
+  #hint { position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: var(--panel); border-top: 1px solid #000; color: var(--muted); padding: 3px 10px; white-space: nowrap; font-size: 12px; display: flex; align-items: center; gap: 12px; z-index: 3; overflow: hidden; }
+  #hint .tool { color: var(--amber); font-weight: 600; }
+  #hint .main { color: var(--text); }
+  #hint .grow { flex: 1; }
+  .key { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border-radius: 6px; background: #3a3d43; border: 1px solid #5a5d66; color: var(--text); font: 600 11px/18px "Segoe UI"; }
+  .key.lit { background: var(--amber); color: #1b1b1b; border-color: var(--amber); }
+  .mod { display: inline-flex; align-items: center; gap: 4px; }
+  #scrub { position: absolute; display: none; width: 210px; padding: 8px 12px 12px; background: #17181bf0; border: 1px solid #5a5d66; border-radius: 10px; box-shadow: 0 3px 10px #0007; z-index: 6; }
+  #scrub .head { display: flex; justify-content: space-between; margin-bottom: 10px; }
+  #scrub .head b { color: var(--amber); }
+  #scrub .track { position: relative; height: 6px; border-radius: 3px; background: #3a3d43; }
+  #scrub .fill { height: 100%; border-radius: 3px; background: var(--amber); }
+  #scrub .thumb { position: absolute; top: -5px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: var(--amber); border: 2px solid #17181b; }
+  #scrub .sub { margin-top: 10px; color: var(--muted); font-size: 11px; }
+  #ring { position: absolute; width: 0; height: 0; z-index: 8; }
+  #ring .hub { position: absolute; left: -34px; top: -34px; width: 68px; height: 68px; border-radius: 50%; background: #17181bf0; border: 1px solid #5a5d66; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; color: var(--amber); line-height: 1.2; text-align: center; }
+  #ring .hub small { color: var(--muted); }
+  #ring .hub.click:hover { border-color: var(--amber); }
+  #ring .slot { position: absolute; transform: translate(-50%, -50%); min-width: 112px; height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 8px; border-radius: 15px; background: #17181bf0; border: 1px solid #5a5d66; color: var(--text); cursor: pointer; font-size: 12px; white-space: nowrap; }
+  #ring .slot:hover { border-color: var(--amber); background: #2b2d33; }
+  #ring .slot.off { opacity: .35; cursor: default; }
+  #ring .slot small { opacity: .6; font-size: 10px; }
+  #ring .slot .key { height: 18px; min-width: 18px; justify-content: center; }
+  #toast { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); padding: 4px 12px; border-radius: 8px; background: #17181bf0; border: 1px solid #5a5d66; display: none; color: var(--amber); z-index: 12; white-space: nowrap; }
+  #notes { width: 900px; margin: 0 auto 24px; color: var(--muted); }
+  #notes h2 { color: var(--text); font-size: 13px; margin: 14px 0 4px; }
+  #notes li { margin-bottom: 4px; }
+  #notes b { color: var(--text); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Overlays: perspective guides and tracing paper</h1>
+  <p>Overlays help you draw and never reach the export. Two kinds here: a <b>perspective guide</b> (one, two or three vanishing points on a horizon) and a <b>reference layer</b> (an imported or sample image plus reference shapes). Try it: with the Pen tool click to draw lines; hold <b>Shift</b> to lock a segment to the nearest perspective direction, or hold <b>1</b>, <b>2</b>, <b>3</b>, <b>4</b> to pick one. In the Guides tool drag the vanishing points and the horizon. Tap <b>Space</b> for the overlay ring, hold <b>O</b> and move up/down to fade the active overlay, hold <b>H</b> to peek without overlays.</p>
+</header>
+<div class="controls">
+  <div class="group"><span>Tool</span>
+    <button id="tPen" class="on">Pen <span class="key">P</span></button>
+    <button id="tSel">Guides <span class="key">V</span></button>
+  </div>
+  <div class="group"><span>Draw into</span>
+    <button id="dArt" class="on">Art</button>
+    <button id="dRef">Reference</button>
+  </div>
+  <div class="group">
+    <label><input id="cSnap" type="checkbox" checked> snap</label>
+    <label><input id="cPrev" type="checkbox"> preview export</label>
+  </div>
+  <div class="group">
+    <button id="bSample">Sample photo</button>
+    <button id="bImport">Import image&hellip;</button>
+    <button id="bSvg">Download art-only SVG</button>
+  </div>
+  <div class="group">
+    <button id="bUndo">Undo</button>
+    <button id="bRedo">Redo</button>
+    <button id="bClear">Clear art</button>
+    <button id="bReset">Reset</button>
+  </div>
+  <input id="file" type="file" accept="image/*" style="display:none">
+</div>
+
+<div id="stage">
+  <svg id="svg" width="900" height="560" viewBox="0 0 900 560"></svg>
+  <svg id="over" width="900" height="560" viewBox="0 0 900 560"></svg>
+  <div id="hud"></div>
+  <div id="scrub"></div>
+  <div id="badge"></div>
+  <div id="toast"></div>
+  <div id="hint"></div>
+</div>
+
+<div id="notes">
+  <h2>How it works (proposal)</h2>
+  <ul>
+    <li><b>One idea, two kinds.</b> An overlay is something that helps you draw and has the <i>Reference</i> role: it is never exported or printed, and its visibility, opacity and above/below order are its own. <b>Parametric guides</b> (perspective here; isometric grids and symmetry axes would be the same kind) are small nodes with draggable handles that output guide geometry and no artwork. A <b>reference layer</b> holds an image and shapes; the shapes are ordinary paths with the Reference role, so they can be promoted to art ("To art").</li>
+    <li><b>Perspective guide.</b> One, two or three vanishing points. The first two sit on the horizon (drag a point to slide it along it, drag the horizon's amber handle to move it); the third is free. Rays fan out from each point at a chosen step, 2-point can add verticals. In 1- and 2-point perspective the verticals stay vertical, so "vertical" (and in 1-point "horizontal") are extra directions in the picker.</li>
+    <li><b>Constraining the pen.</b> Each new segment starts at the last point. Hold <b>Shift</b> to lock it to the nearest direction (the amber ray shows which one), hold <b>1</b>..<b>4</b> to choose the direction yourself (the keys are listed in the hint bar), or leave <b>soft snap</b> on and a segment within a few degrees of a ray snaps by itself. Without a perspective guide Shift falls back to 45 degrees.</li>
+    <li><b>Snapping to references.</b> Reference shapes, art and the vanishing points are snap sources. On a constrained ray the point lands on the <b>intersection</b> of the ray with a reference or art segment, or on an anchor that sits on the ray; unconstrained it snaps to an anchor, then to the nearest point on a segment, then to an intersection. The badge names what it snapped to. Each overlay has its own snap switch.</li>
+    <li><b>Tracing paper.</b> The reference image sits between the paper and the art (or above everything, per overlay) at an adjustable opacity; when unlocked, drag it in the Guides tool, scale it, flip it, or fit it to the page. "Draw into: Reference" sends the pen's strokes to the reference layer instead of the art, so you can sketch construction lines that later snap and never export. "Sample photo" is a generated street corner whose edges converge on the default vanishing points, so turning the guide on shows the match.</li>
+    <li><b>Export preview.</b> The "preview export" switch (and the download button) shows what the Export node would produce: the page with only art, no guides, no reference image and no reference shapes. Hold <b>H</b> to peek without overlays while drawing.</li>
+    <li><b>Space ring.</b> Tap Space (or the barrel button) for the overlay ring: 1-point, 2-point, 3-point, Image, Draw into (Art / Reference), Snap, Hide overlays, Remove the active overlay. In the document ring this would be the "Rulers &middot; grid" slot becoming <b>Overlays</b>. Hold <b>O</b> and move up/down to change the opacity of the active overlay.</li>
+  </ul>
+  <h2>What this means for the graph and the code</h2>
+  <ul>
+    <li>Overlays are nodes with the Reference role. The snap system asks every visible overlay with snapping on for <b>snap sources</b> (points, segments, rays), the same query that artboards use to snap to each other, and the pen and direct tools use the result. The Export node skips anything with the Reference role, so it needs no special case.</li>
+    <li>The perspective constraint is a direction picker over a list of rays plus a projection of the pointer onto the chosen ray, then a ray-versus-segment intersection test against the snap sources. It is cheap, but a large reference drawing needs a spatial index so the pen stays smooth.</li>
+    <li>Image storage: embedding bloats the SVG and linking breaks when the file moves, so embed by default with a size warning. An image also needs a scale calibration (set two points to a known distance) to match real units; this mockup scales by a slider.</li>
+    <li>Perspective guides pair with the planned <b>deformers</b>: a perspective warp is a deformer node, and onion skin for animation would be another reference overlay.</li>
+  </ul>
+  <h2>Not in this mockup</h2>
+  <ul>
+    <li>Isometric grids and symmetry axes, several perspective guides at once (the data allows it), curved strokes (the pen here makes straight segments), moving or calibrating the image by two points, per-overlay layers in the outline, and the overlay panel inside the document card.</li>
+  </ul>
+</div>
+
+<script>
+// ==LOGIC START
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1]];
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1];
+const unit = v => { const l = Math.hypot(v[0], v[1]) || 1; return [v[0] / l, v[1] / l]; };
+const VPCOL = ['#e5604f', '#4fbf6a', '#4c8dff'];
+const NPTS = { '1pt': 1, '2pt': 2, '3pt': 3 };
+const PAPER = { x: 110, y: 40, w: 430, h: 440 };
+
+function persDirs(p, from) {
+  const out = [], n = NPTS[p.mode];
+  for (let i = 0; i < n; i++) {
+    const v = p.vps[i], d = sub(v, from), l = Math.hypot(d[0], d[1]);
+    if (l < 1e-6) continue;
+    out.push({ id: 'vp' + (i + 1), label: 'VP' + (i + 1), dir: [d[0] / l, d[1] / l], col: VPCOL[i] });
+  }
+  if (p.mode !== '3pt') out.push({ id: 'vert', label: 'vertical', dir: [0, 1], col: '#aab0ba' });
+  if (p.mode === '1pt') out.push({ id: 'horiz', label: 'horizontal', dir: [1, 0], col: '#aab0ba' });
+  return out;
+}
+const angleBetween = (a, b) => Math.acos(clamp(Math.abs(dot(a, b)), 0, 1)) * 180 / Math.PI;
+function pickDir(dirs, v, maxDeg) {
+  let best = null, ba = 1e9;
+  dirs.forEach(d => { const a = angleBetween(d.dir, v); if (a < ba) { ba = a; best = d; } });
+  return best && ba <= maxDeg ? best : null;
+}
+function projectOnDir(from, p, dir) { const t = dot(sub(p, from), dir); return [from[0] + dir[0] * t, from[1] + dir[1] * t]; }
+function nearestOnSeg(p, a, b) {
+  const ab = sub(b, a), l2 = dot(ab, ab);
+  if (l2 < 1e-9) return a;
+  const t = clamp(dot(sub(p, a), ab) / l2, 0, 1);
+  return [a[0] + ab[0] * t, a[1] + ab[1] * t];
+}
+function rayHitSeg(from, dir, a, b) {
+  const e = sub(b, a), den = dir[0] * e[1] - dir[1] * e[0];
+  if (Math.abs(den) < 1e-9) return null;
+  const w = sub(a, from), t = (w[0] * e[1] - w[1] * e[0]) / den, u = (w[0] * dir[1] - w[1] * dir[0]) / den;
+  if (u < 0 || u > 1) return null;
+  return [from[0] + dir[0] * t, from[1] + dir[1] * t];
+}
+function segHitSeg(a, b, c, d) {
+  const r = sub(b, a), s = sub(d, c), den = r[0] * s[1] - r[1] * s[0];
+  if (Math.abs(den) < 1e-9) return null;
+  const w = sub(c, a), t = (w[0] * s[1] - w[1] * s[0]) / den, u = (w[0] * r[1] - w[1] * r[0]) / den;
+  if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+  return [a[0] + r[0] * t, a[1] + r[1] * t];
+}
+function snapPoint(p, ray, src, r) {
+  let best = null;
+  const consider = (c, kind, d, pen) => { const dd = d + (pen || 0); if (d <= r && (!best || dd < best.dd)) best = { p: c, kind, d, dd }; };
+  if (ray) {
+    src.segs.forEach(s => { const h = rayHitSeg(ray.from, ray.dir, s[0], s[1]); if (h) consider(h, 'intersection', dist(h, p)); });
+    src.pts.forEach(q => { const pr = projectOnDir(ray.from, q, ray.dir); if (dist(pr, q) < 5) consider(pr, 'anchor on ray', dist(pr, p), 1); });
+  } else {
+    src.pts.forEach(q => consider(q, 'anchor', dist(q, p)));
+    src.segs.forEach(s => { const n = nearestOnSeg(p, s[0], s[1]); consider(n, 'on segment', dist(n, p), 4); });
+    const sg = src.segs.slice(0, 120);
+    for (let i = 0; i < sg.length; i++) for (let j = i + 1; j < sg.length; j++) { const h = segHitSeg(sg[i][0], sg[i][1], sg[j][0], sg[j][1]); if (h) consider(h, 'intersection', dist(h, p), 2); }
+  }
+  return best;
+}
+function pathSegs(pts, closed) {
+  const out = [];
+  for (let i = 0; i + 1 < pts.length; i++) out.push([pts[i], pts[i + 1]]);
+  if (closed && pts.length > 2) out.push([pts[pts.length - 1], pts[0]]);
+  return out;
+}
+// ==LOGIC END
+
+const stage = document.getElementById('stage'), svg = document.getElementById('svg'), over = document.getElementById('over');
+const hud = document.getElementById('hud'), hintEl = document.getElementById('hint'), badge = document.getElementById('badge');
+const scrubEl = document.getElementById('scrub'), toastEl = document.getElementById('toast'), fileEl = document.getElementById('file');
+const NS = 'http://www.w3.org/2000/svg';
+
+const defPersp = mode => ({ mode, horizon: 250, vps: [[40, 250], [640, 250], [325, 520]], step: 6, verts: false, vis: true, op: 0.5, above: true, snap: true });
+const defRef = () => ({ img: null, scale: 1, cx: PAPER.x + PAPER.w / 2, cy: PAPER.y + PAPER.h / 2, imgOp: 0.55, flip: false, lock: false, shapes: [], vis: true, op: 0.9, above: false, snap: true });
+let persp = defPersp('2pt'), ref = defRef(), art = [];
+const imgs = new Map();
+let nextImg = 1;
+let tool = 'pen', target = 'art', active = 'ref';
+let draw = null, cursor = [300, 250], drag = null, scrub = null, ring = null, spaceDown = 0;
+let hideAll = false, soft = { on: true, deg: 4 }, snapR = 10, preview = false;
+const held = { shift: false, dir: 0, h: false };
+let undo = [], redo = [], editBefore = null;
+let last = null;
+
+const snap = () => JSON.stringify({ persp, ref, art });
+function beginEdit() { if (editBefore === null) editBefore = snap(); }
+function endEdit() {
+  if (editBefore === null) return;
+  if (snap() !== editBefore) { undo.push(editBefore); redo.length = 0; }
+  editBefore = null;
+}
+function restore(json) { const s = JSON.parse(json); persp = s.persp; ref = s.ref; art = s.art; draw = null; }
+function doUndo() { endEdit(); if (!undo.length) return; redo.push(snap()); restore(undo.pop()); refresh(); }
+function doRedo() { endEdit(); if (!redo.length) return; undo.push(snap()); restore(redo.pop()); refresh(); }
+function toast(msg) {
+  toastEl.textContent = msg; toastEl.style.display = 'block';
+  clearTimeout(toast.t); toast.t = setTimeout(() => { toastEl.style.display = 'none'; }, 2200);
+}
+const localPos = e => { const r = stage.getBoundingClientRect(); return [e.clientX - r.left - stage.clientLeft, e.clientY - r.top - stage.clientTop]; };
+
+// ---------- sources and the point under the pen ----------
+function sources() {
+  const pts = [], segs = [];
+  const add = (shape, skipLast) => {
+    const p = shape.pts; p.forEach(q => pts.push(q));
+    pathSegs(p, shape.closed).forEach(s => segs.push(s));
+  };
+  art.forEach(s => add(s));
+  if (ref && ref.vis && ref.snap) ref.shapes.forEach(s => add(s));
+  if (persp && persp.vis && persp.snap) for (let i = 0; i < NPTS[persp.mode]; i++) pts.push(persp.vps[i]);
+  if (draw && draw.pts.length) {
+    const p = draw.pts;
+    for (let i = 0; i + 2 < p.length; i++) segs.push([p[i], p[i + 1]]);
+    if (p.length >= 3) pts.push(p[0]);
+    for (let i = 0; i < p.length - 1; i++) pts.push(p[i]);
+  }
+  return { pts, segs };
+}
+function computePoint(raw) {
+  const prev = draw && draw.pts.length ? draw.pts[draw.pts.length - 1] : null;
+  let p = raw, ray = null, constraint = null;
+  if (prev) {
+    const v = unit(sub(raw, prev));
+    if (persp && !hideAll) {
+      const dirs = persDirs(persp, prev);
+      let pick = null;
+      if (held.dir && dirs[held.dir - 1]) pick = dirs[held.dir - 1];
+      else if (held.shift) pick = pickDir(dirs, v, 90);
+      else if (soft.on) pick = pickDir(dirs, v, soft.deg);
+      if (pick) { ray = { from: prev, dir: pick.dir, col: pick.col }; constraint = pick.label; p = projectOnDir(prev, raw, pick.dir); }
+    } else if (held.shift) {
+      const d = sub(raw, prev), a = Math.round(Math.atan2(d[1], d[0]) / (Math.PI / 4)) * Math.PI / 4, l = Math.hypot(d[0], d[1]);
+      p = [prev[0] + Math.cos(a) * l, prev[1] + Math.sin(a) * l]; constraint = '45°';
+    }
+  }
+  const sn = document.getElementById('cSnap').checked ? snapPoint(p, ray, sources(), snapR) : null;
+  if (sn) p = sn.p;
+  return { p, ray, constraint, snap: sn };
+}
+
+// ---------- rendering ----------
+function perspMarkup(pp) {
+  let h = '<g opacity="' + pp.op + '">';
+  const n = NPTS[pp.mode];
+  for (let i = 0; i < n; i++) {
+    const v = pp.vps[i], c = VPCOL[i];
+    for (let a = 0; a < 180; a += pp.step) {
+      const r = a * Math.PI / 180, dx = Math.cos(r) * 3000, dy = Math.sin(r) * 3000;
+      h += '<line x1="' + (v[0] - dx).toFixed(1) + '" y1="' + (v[1] - dy).toFixed(1) + '" x2="' + (v[0] + dx).toFixed(1) + '" y2="' + (v[1] + dy).toFixed(1) + '" stroke="' + c + '" stroke-width="0.8"/>';
+    }
+  }
+  if (pp.verts && pp.mode !== '3pt') for (let x = 0; x <= 900; x += 40) h += '<line x1="' + x + '" y1="0" x2="' + x + '" y2="560" stroke="#aab0ba" stroke-width="0.6"/>';
+  h += '<line x1="0" y1="' + pp.horizon + '" x2="900" y2="' + pp.horizon + '" stroke="#ffb454" stroke-width="1.4"/></g>';
+  return h;
+}
+function refMarkup(r) {
+  let h = '';
+  if (r.img && imgs.has(r.img.id)) {
+    const w = r.img.w * r.scale, hh = r.img.h * r.scale, x = r.cx - w / 2, y = r.cy - hh / 2;
+    h += '<image href="' + imgs.get(r.img.id) + '" x="' + (r.flip ? -(x + w) : x) + '" y="' + y + '" width="' + w + '" height="' + hh + '" opacity="' + r.imgOp + '" preserveAspectRatio="none"' + (r.flip ? ' transform="scale(-1 1)"' : '') + '/>';
+  }
+  h += '<g opacity="' + r.op + '" fill="none" stroke="#1fb5c9" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">';
+  r.shapes.forEach(s => { h += '<path d="' + pathD(s) + '"/>'; });
+  return h + '</g>';
+}
+const pathD = s => s.pts.length ? 'M' + s.pts.map(p => p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join('L') + (s.closed ? 'Z' : '') : '';
+const artMarkup = () => '<g fill="none" stroke="#1d2a44" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">' + art.map(s => '<path d="' + pathD(s) + '"/>').join('') + '</g>';
+const showOv = () => !preview && !hideAll && !held.h;
+function overlaysMarkup(above) {
+  if (!showOv()) return '';
+  let h = '';
+  if (persp && persp.vis && !!persp.above === above) h += perspMarkup(persp);
+  if (ref && ref.vis && !!ref.above === above) h += refMarkup(ref);
+  return h;
+}
+function renderWorld() {
+  let h = '<defs><clipPath id="pc"><rect x="' + PAPER.x + '" y="' + PAPER.y + '" width="' + PAPER.w + '" height="' + PAPER.h + '"/></clipPath></defs>';
+  h += '<rect x="' + (PAPER.x + 5) + '" y="' + (PAPER.y + 7) + '" width="' + PAPER.w + '" height="' + PAPER.h + '" fill="#000" opacity=".28"/>';
+  h += '<rect x="' + PAPER.x + '" y="' + PAPER.y + '" width="' + PAPER.w + '" height="' + PAPER.h + '" fill="#ffffff"/>';
+  h += overlaysMarkup(false);
+  h += preview ? '<g clip-path="url(#pc)">' + artMarkup() + '</g>' : artMarkup();
+  h += overlaysMarkup(true);
+  svg.innerHTML = h;
+}
+function mk(name, attrs, text) {
+  const e = document.createElementNS(NS, name);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text !== undefined) e.textContent = text;
+  over.appendChild(e);
+  return e;
+}
+function drawOverlay() {
+  over.textContent = '';
+  if (preview) { mk('text', { x: PAPER.x + PAPER.w / 2, y: PAPER.y - 10, 'text-anchor': 'middle', fill: '#ffb454', 'font-size': 12, 'font-family': 'Segoe UI' }, 'Export preview: art only, cropped to the page'); return; }
+  if (showOv() && persp && persp.vis) {
+    for (let i = 0; i < NPTS[persp.mode]; i++) {
+      const v = persp.vps[i];
+      mk('circle', { cx: v[0], cy: v[1], r: 8, fill: VPCOL[i], stroke: '#17181b', 'stroke-width': 2 });
+      mk('text', { x: v[0], y: v[1] - 13, 'text-anchor': 'middle', fill: VPCOL[i], 'font-size': 11, 'font-family': 'Segoe UI', 'font-weight': 600 }, 'VP' + (i + 1));
+    }
+    mk('path', { d: 'M12 ' + (persp.horizon - 7) + 'L22 ' + persp.horizon + 'L12 ' + (persp.horizon + 7) + 'Z', fill: '#ffb454' });
+    mk('text', { x: 28, y: persp.horizon - 6, fill: '#ffb454', 'font-size': 11, 'font-family': 'Segoe UI' }, 'horizon');
+  }
+  if (showOv() && ref && ref.vis && ref.img && !ref.lock && tool === 'sel') {
+    const w = ref.img.w * ref.scale, h = ref.img.h * ref.scale;
+    mk('rect', { x: ref.cx - w / 2, y: ref.cy - h / 2, width: w, height: h, fill: 'none', stroke: '#4c8dff', 'stroke-dasharray': '5 3' });
+  }
+  if (tool === 'pen' && !ring && !scrub && !drag) {
+    const c = computePoint(cursor);
+    if (c.ray) {
+      const d = c.ray.dir;
+      mk('line', { x1: c.ray.from[0] - d[0] * 3000, y1: c.ray.from[1] - d[1] * 3000, x2: c.ray.from[0] + d[0] * 3000, y2: c.ray.from[1] + d[1] * 3000, stroke: '#ffb454', 'stroke-width': 1.2, 'stroke-dasharray': '6 4', opacity: .9 });
+    }
+    if (draw && draw.pts.length) {
+      const pts = draw.pts.concat([c.p]);
+      mk('path', { d: pathD({ pts }), fill: 'none', stroke: draw.target === 'ref' ? '#1fb5c9' : '#1d2a44', 'stroke-width': 2, 'stroke-dasharray': '5 3' });
+      draw.pts.forEach(q => mk('circle', { cx: q[0], cy: q[1], r: 3.5, fill: '#fff', stroke: '#4c8dff', 'stroke-width': 1.5 }));
+    }
+    if (c.snap) {
+      const k = c.snap.kind;
+      if (k === 'intersection') mk('path', { d: 'M' + (c.p[0] - 7) + ' ' + c.p[1] + 'L' + c.p[0] + ' ' + (c.p[1] - 7) + 'L' + (c.p[0] + 7) + ' ' + c.p[1] + 'L' + c.p[0] + ' ' + (c.p[1] + 7) + 'Z', fill: 'none', stroke: '#ffb454', 'stroke-width': 2 });
+      else if (k === 'on segment') mk('circle', { cx: c.p[0], cy: c.p[1], r: 5, fill: 'none', stroke: '#ffb454', 'stroke-width': 2 });
+      else mk('rect', { x: c.p[0] - 6, y: c.p[1] - 6, width: 12, height: 12, fill: 'none', stroke: '#ffb454', 'stroke-width': 2 });
+    } else mk('circle', { cx: c.p[0], cy: c.p[1], r: 3, fill: '#ffb454' });
+    last = c;
+  }
+}
+function updateBadge() {
+  let text = '';
+  if (tool === 'pen' && !ring && !scrub && last) {
+    const parts = [];
+    if (last.constraint) parts.push(last.constraint);
+    if (last.snap) parts.push(last.snap.kind);
+    text = parts.join(' · ');
+  }
+  if (!text) { badge.style.display = 'none'; return; }
+  badge.textContent = text; badge.style.display = 'block';
+  badge.style.left = Math.min(cursor[0] + 16, 640) + 'px'; badge.style.top = (cursor[1] + 16) + 'px';
+}
+
+// ---------- HUD ----------
+function updateHud() {
+  const act = document.activeElement;
+  if (hud.contains(act) && act.tagName === 'INPUT') return;
+  let h = '';
+  const sw = (id, lab, v) => '<label><input type="checkbox" id="' + id + '"' + (v ? ' checked' : '') + '> ' + lab + '</label>';
+  if (persp) {
+    h += '<div class="node' + (active === 'persp' ? ' act' : '') + '" data-ov="persp"><div class="head"><b>Perspective guide</b>' + sw('pvis', 'visible', persp.vis) + '</div>' +
+      '<div class="chips">' + ['1pt', '2pt', '3pt'].map(m => '<button data-mode="' + m + '"' + (persp.mode === m ? ' class="on"' : '') + '>' + m.replace('pt', '-point') + '</button>').join('') + '</div>' +
+      '<div class="row"><span class="lab">horizon y</span><input type="number" id="phor" value="' + Math.round(persp.horizon) + '"></div>' +
+      '<div class="row"><span class="lab">ray step</span><input type="range" id="pstep" min="3" max="15" step="1" value="' + persp.step + '"><span class="mono" id="pstepV">' + persp.step + '°</span></div>' +
+      '<div class="row"><span class="lab">opacity</span><input type="range" id="pop" min="0.05" max="1" step="0.05" value="' + persp.op + '"><span class="mono" id="popV">' + Math.round(persp.op * 100) + '%</span></div>' +
+      (persp.mode !== '3pt' ? '<div class="row">' + sw('pverts', 'verticals', persp.verts) + '</div>' : '') +
+      '<div class="chips"><button data-pabove="1"' + (persp.above ? ' class="on"' : '') + '>above art</button><button data-pabove="0"' + (!persp.above ? ' class="on"' : '') + '>below art</button></div>' +
+      '<div class="row">' + sw('psnap', 'snap source', persp.snap) + '<button class="small" id="pdel" style="margin-left:auto">Remove</button></div></div>';
+  } else h += '<div class="node"><div class="head"><b>Perspective guide</b><span>none</span></div><div class="chips"><button data-add="1pt">+ 1-point</button><button data-add="2pt">+ 2-point</button><button data-add="3pt">+ 3-point</button></div></div>';
+  if (ref) {
+    h += '<div class="node' + (active === 'ref' ? ' act' : '') + '" data-ov="ref"><div class="head"><b>Reference layer</b>' + sw('rvis', 'visible', ref.vis) + '</div>' +
+      '<div class="row"><span class="mono">' + (ref.img ? 'image ' + ref.img.w + ' × ' + ref.img.h : 'no image') + '</span></div>' +
+      '<div class="row"><button class="small" id="rimp">Import…</button><button class="small" id="rsample">Sample photo</button>' + (ref.img ? '<button class="small" id="rrm">Remove</button>' : '') + '</div>' +
+      (ref.img ? '<div class="row"><span class="lab">image</span><input type="range" id="rop" min="0.05" max="1" step="0.05" value="' + ref.imgOp + '"><span class="mono" id="ropV">' + Math.round(ref.imgOp * 100) + '%</span></div>' +
+        '<div class="row"><span class="lab">scale</span><input type="range" id="rsc" min="0.2" max="2" step="0.05" value="' + ref.scale + '"><span class="mono" id="rscV">' + Math.round(ref.scale * 100) + '%</span></div>' +
+        '<div class="row">' + sw('rlock', 'lock', ref.lock) + sw('rflip', 'flip', ref.flip) + '<button class="small" id="rfit" style="margin-left:auto">Fit</button></div>' : '') +
+      '<div class="row"><span class="lab">shapes</span><span class="mono">' + ref.shapes.length + '</span><button class="small" id="rclr">Clear</button><button class="small" id="rart">To art</button></div>' +
+      '<div class="chips"><button data-rabove="1"' + (ref.above ? ' class="on"' : '') + '>above art</button><button data-rabove="0"' + (!ref.above ? ' class="on"' : '') + '>below art</button></div>' +
+      '<div class="row">' + sw('rsnap', 'snap source', ref.snap) + '<button class="small" id="rdel" style="margin-left:auto">Remove</button></div></div>';
+  } else h += '<div class="node"><div class="head"><b>Reference layer</b><span>none</span></div><div class="chips"><button data-addref="1">+ Reference layer</button></div></div>';
+  h += '<div class="node"><div class="head"><b>Snap and pen</b></div>' +
+    '<div class="row">' + sw('ssoft', 'soft snap to rays', soft.on) + '</div>' +
+    '<div class="row"><span class="lab">soft angle</span><input type="range" id="sdeg" min="1" max="10" step="1" value="' + soft.deg + '"><span class="mono" id="sdegV">' + soft.deg + '°</span></div>' +
+    '<div class="row"><span class="lab">radius</span><input type="range" id="srad" min="4" max="20" step="1" value="' + snapR + '"><span class="mono" id="sradV">' + snapR + ' px</span></div>' +
+    '<div class="row"><span class="lab">draws into</span><span class="mono">' + (target === 'art' ? 'Art' : 'Reference') + '</span></div></div>';
+  hud.innerHTML = h;
+  const g = id => hud.querySelector('#' + id);
+  hud.querySelectorAll('[data-ov]').forEach(n => n.onpointerdown = () => { active = n.dataset.ov; });
+  hud.querySelectorAll('[data-add]').forEach(b => b.onclick = () => { setMode(b.dataset.add); });
+  hud.querySelectorAll('[data-addref]').forEach(b => b.onclick = () => { beginEdit(); ref = defRef(); endEdit(); active = 'ref'; refresh(); });
+  if (persp) {
+    const ed = (id, fn) => { g(id).onchange = () => { beginEdit(); fn(g(id)); endEdit(); refresh(); }; };
+    ed('pvis', e => { persp.vis = e.checked; }); ed('pverts', e => { persp.verts = e.checked; }); ed('psnap', e => { persp.snap = e.checked; });
+    ed('phor', e => { persp.horizon = +e.value || 0; persp.vps[0][1] = persp.horizon; persp.vps[1][1] = persp.horizon; });
+    const live = (id, valId, fn, fmt) => { g(id).oninput = () => { beginEdit(); fn(+g(id).value); g(valId).textContent = fmt(+g(id).value); renderWorld(); drawOverlay(); }; g(id).onchange = () => { endEdit(); g(id).blur(); refresh(); }; };
+    live('pstep', 'pstepV', v => { persp.step = v; }, v => v + '°'); live('pop', 'popV', v => { persp.op = v; }, v => Math.round(v * 100) + '%');
+    hud.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => setMode(b.dataset.mode));
+    hud.querySelectorAll('[data-pabove]').forEach(b => b.onclick = () => { beginEdit(); persp.above = b.dataset.pabove === '1'; endEdit(); refresh(); });
+    g('pdel').onclick = () => { beginEdit(); persp = null; endEdit(); refresh(); };
+  }
+  if (ref) {
+    const ed = (id, fn) => { const el = g(id); if (el) el.onchange = () => { beginEdit(); fn(el); endEdit(); refresh(); }; };
+    ed('rvis', e => { ref.vis = e.checked; }); ed('rlock', e => { ref.lock = e.checked; }); ed('rflip', e => { ref.flip = e.checked; }); ed('rsnap', e => { ref.snap = e.checked; });
+    const live = (id, valId, fn, fmt) => { const el = g(id); if (!el) return; el.oninput = () => { beginEdit(); fn(+el.value); g(valId).textContent = fmt(+el.value); renderWorld(); drawOverlay(); }; el.onchange = () => { endEdit(); el.blur(); refresh(); }; };
+    live('rop', 'ropV', v => { ref.imgOp = v; }, v => Math.round(v * 100) + '%'); live('rsc', 'rscV', v => { ref.scale = v; }, v => Math.round(v * 100) + '%');
+    g('rimp').onclick = () => fileEl.click();
+    g('rsample').onclick = () => loadImage(makeSample(), true);
+    if (g('rrm')) g('rrm').onclick = () => { beginEdit(); ref.img = null; endEdit(); refresh(); };
+    if (g('rfit')) g('rfit').onclick = () => { beginEdit(); fitRef(); endEdit(); refresh(); };
+    g('rclr').onclick = () => { beginEdit(); ref.shapes = []; endEdit(); refresh(); };
+    g('rart').onclick = () => { beginEdit(); art = art.concat(ref.shapes); ref.shapes = []; endEdit(); refresh(); toast('Reference shapes promoted to art'); };
+    hud.querySelectorAll('[data-rabove]').forEach(b => b.onclick = () => { beginEdit(); ref.above = b.dataset.rabove === '1'; endEdit(); refresh(); });
+    g('rdel').onclick = () => { beginEdit(); ref = null; endEdit(); refresh(); };
+  }
+  g('ssoft').onchange = () => { soft.on = g('ssoft').checked; refresh(); };
+  g('sdeg').oninput = () => { soft.deg = +g('sdeg').value; g('sdegV').textContent = soft.deg + '°'; };
+  g('srad').oninput = () => { snapR = +g('srad').value; g('sradV').textContent = snapR + ' px'; };
+  g('sdeg').onchange = g('srad').onchange = () => { g('sdeg').blur(); g('srad').blur(); };
+}
+function hintItems() {
+  const m = (k, t, lit) => ({ k, t, lit });
+  let main = '', mods = [];
+  if (scrub) { main = 'release to keep'; }
+  else if (tool === 'pen') {
+    const names = persp && draw && draw.pts.length ? persDirs(persp, draw.pts[draw.pts.length - 1]).map((d, i) => (i + 1) + ' ' + d.label).join(' · ') : '';
+    main = draw && draw.pts.length ? 'click adds a point · double-click or Enter finishes · Esc cancels' + (names ? ' · ' + names : '') : 'click to start a line (' + (target === 'art' ? 'art' : 'reference') + ')';
+    mods = [m('Shift', persp ? 'nearest perspective direction' : '45°', held.shift), m('1-4', 'pick direction', held.dir > 0), m('H', 'hold: hide overlays', held.h), m('O', 'hold: opacity', false), m('Space', 'tap: ring', false)];
+  } else {
+    main = 'drag a vanishing point or the horizon handle · drag the image when unlocked';
+    mods = [m('H', 'hold: hide overlays', held.h), m('O', 'hold: opacity', false), m('Space', 'tap: ring', false)];
+  }
+  return { tool: tool === 'pen' ? 'Pen' : 'Guides', main, mods };
+}
+function updateHint() {
+  const h = hintItems();
+  hintEl.innerHTML = '<span class="tool">' + h.tool + '</span><span class="main">' + h.main + '</span><span class="grow"></span>' +
+    h.mods.map(x => '<span class="mod"><span class="key' + (x.lit ? ' lit' : '') + '">' + x.k + '</span>' + x.t + '</span>').join('') + '<span>' + Math.round(cursor[0]) + ', ' + Math.round(cursor[1]) + '</span>';
+}
+function refresh() {
+  renderWorld(); drawOverlay(); updateHud(); updateHint(); updateBadge();
+  document.getElementById('bUndo').disabled = !undo.length; document.getElementById('bRedo').disabled = !redo.length;
+}
+
+// ---------- images ----------
+function fitRef() {
+  if (!ref || !ref.img) return;
+  ref.scale = Math.min(PAPER.w / ref.img.w, PAPER.h / ref.img.h);
+  ref.cx = PAPER.x + PAPER.w / 2; ref.cy = PAPER.y + PAPER.h / 2;
+}
+function loadImage(url, sample) {
+  const im = new Image();
+  im.onload = () => {
+    beginEdit();
+    if (!ref) ref = defRef();
+    const id = nextImg++;
+    imgs.set(id, url);
+    ref.img = { id, w: im.width, h: im.height };
+    if (sample) { ref.scale = 1; ref.cx = PAPER.x + PAPER.w / 2; ref.cy = PAPER.y + PAPER.h / 2; ref.lock = true; } else { fitRef(); ref.lock = false; }
+    active = 'ref'; endEdit(); refresh();
+    toast(sample ? 'Sample photo placed on the page: turn the perspective guide on to compare' : 'Image placed: drag it with the Guides tool, scale it, then lock it');
+  };
+  im.onerror = () => toast('Could not read that image');
+  im.src = url;
+}
+function makeSample() {
+  const c = document.createElement('canvas'); c.width = PAPER.w; c.height = PAPER.h;
+  const g = c.getContext('2d'), ox = PAPER.x, oy = PAPER.y, V1 = [40, 250], V2 = [640, 250];
+  const X = x => x - ox, Y = y => y - oy;
+  let gr = g.createLinearGradient(0, 0, 0, Y(250)); gr.addColorStop(0, '#8fb8e3'); gr.addColorStop(1, '#e6f0fa');
+  g.fillStyle = gr; g.fillRect(0, 0, PAPER.w, Y(250));
+  gr = g.createLinearGradient(0, Y(250), 0, PAPER.h); gr.addColorStop(0, '#9a9fa6'); gr.addColorStop(1, '#6f747b');
+  g.fillStyle = gr; g.fillRect(0, Y(250), PAPER.w, PAPER.h - Y(250));
+  const yOn = (xa, ya, V, x) => ya + (V[1] - ya) * (x - xa) / (V[0] - xa);
+  const cx = 300, top = 120, bot = 400, xl = 165, xr = 480;
+  const poly = (pts, fill) => { g.beginPath(); pts.forEach((p, i) => i ? g.lineTo(X(p[0]), Y(p[1])) : g.moveTo(X(p[0]), Y(p[1]))); g.closePath(); g.fillStyle = fill; g.fill(); g.strokeStyle = '#3b3d42'; g.lineWidth = 1.5; g.stroke(); };
+  poly([[cx, top], [xl, yOn(cx, top, V1, xl)], [xl, yOn(cx, bot, V1, xl)], [cx, bot]], '#c9a27a');
+  poly([[cx, top], [xr, yOn(cx, top, V2, xr)], [xr, yOn(cx, bot, V2, xr)], [cx, bot]], '#a67f58');
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 4; j++) {
+    const xa = cx + 30 + i * 38, xb = xa + 22, ya = 150 + j * 52, ha = 30;
+    const f = (x, y) => [x, yOn(cx, y, V2, x)];
+    poly([f(xa, ya), f(xb, ya), f(xb, ya + ha), f(xa, ya + ha)].map((p, k) => [p[0], k < 2 ? yOn(cx, ya, V2, p[0]) : yOn(cx, ya + ha, V2, p[0])]), '#dfe9f2');
+  }
+  return c.toDataURL('image/png');
+}
+fileEl.onchange = () => {
+  const f = fileEl.files && fileEl.files[0];
+  if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => loadImage(rd.result, false);
+  rd.readAsDataURL(f);
+  fileEl.value = '';
+};
+
+// ---------- actions ----------
+function setMode(m) {
+  beginEdit();
+  if (!persp) persp = defPersp(m); else persp.mode = m;
+  active = 'persp'; endEdit(); refresh();
+}
+function finishDraw(close) {
+  if (!draw) return;
+  const d = draw; draw = null;
+  if (d.pts.length >= 2) {
+    beginEdit();
+    const shape = { pts: d.pts, closed: !!close };
+    if (d.target === 'ref') { if (!ref) ref = defRef(); ref.shapes.push(shape); active = 'ref'; } else art.push(shape);
+    endEdit();
+  }
+  refresh();
+}
+
+// ---------- pointer ----------
+stage.addEventListener('contextmenu', e => e.preventDefault());
+stage.addEventListener('pointerdown', e => {
+  if (e.target.closest('#hud,#ring,#scrub')) return;
+  const pos = localPos(e); cursor = pos;
+  if (ring) { closeRing(); refresh(); return; }
+  if (e.button === 2) { openOverlayRing(pos); return; }
+  stage.setPointerCapture(e.pointerId);
+  if (tool === 'sel') {
+    if (persp && persp.vis && showOv()) {
+      if (pos[0] < 70 && Math.abs(pos[1] - persp.horizon) < 10) { beginEdit(); active = 'persp'; drag = { type: 'hor' }; return; }
+      for (let i = 0; i < NPTS[persp.mode]; i++) if (dist(pos, persp.vps[i]) < 12) { beginEdit(); active = 'persp'; drag = { type: 'vp', i }; return; }
+    }
+    if (ref && ref.vis && ref.img && !ref.lock) {
+      const w = ref.img.w * ref.scale, h = ref.img.h * ref.scale;
+      if (Math.abs(pos[0] - ref.cx) <= w / 2 && Math.abs(pos[1] - ref.cy) <= h / 2) { beginEdit(); active = 'ref'; drag = { type: 'img', dx: ref.cx - pos[0], dy: ref.cy - pos[1] }; return; }
+    }
+    return;
+  }
+  const c = computePoint(pos);
+  if (!draw) { draw = { pts: [c.p], target }; refresh(); return; }
+  if (e.detail >= 2) { finishDraw(false); return; }
+  const first = draw.pts[0];
+  if (draw.pts.length >= 3 && dist(c.p, first) < 1) { finishDraw(true); return; }
+  if (dist(c.p, draw.pts[draw.pts.length - 1]) < 1) { return; }
+  draw.pts.push(c.p);
+  refresh();
+});
+stage.addEventListener('pointermove', e => {
+  const pos = localPos(e); cursor = pos;
+  if (scrub) { updateScrub(pos); return; }
+  if (drag) {
+    if (drag.type === 'vp') { const v = persp.vps[drag.i]; if (drag.i === 2) { v[0] = pos[0]; v[1] = pos[1]; } else v[0] = clamp(pos[0], -400, 1400); }
+    else if (drag.type === 'hor') { persp.horizon = Math.round(clamp(pos[1], 20, 540)); persp.vps[0][1] = persp.horizon; persp.vps[1][1] = persp.horizon; }
+    else if (drag.type === 'img') { ref.cx = pos[0] + drag.dx; ref.cy = pos[1] + drag.dy; }
+    refresh(); return;
+  }
+  drawOverlay(); updateBadge(); updateHint();
+});
+stage.addEventListener('pointerup', () => { if (drag) { drag = null; endEdit(); refresh(); } });
+
+// ---------- ring ----------
+function showRing(pos, title, slots, hubFn, sub) {
+  closeRing();
+  const R = 90, cx = clamp(pos[0], R + 66, 900 - R - 66), cy = clamp(pos[1], R + 30, 560 - R - 50);
+  ring = { el: document.createElement('div'), slots };
+  ring.el.id = 'ring'; ring.el.style.left = cx + 'px'; ring.el.style.top = cy + 'px';
+  ring.el.innerHTML = '<div class="hub' + (hubFn ? ' click' : '') + '">' + title + '<small>' + (sub || '...') + '</small></div>';
+  if (hubFn) { const hb = ring.el.firstChild; hb.onpointerdown = ev => ev.stopPropagation(); hb.onclick = ev => { ev.stopPropagation(); closeRing(); hubFn(); }; }
+  slots.forEach((sl, i) => {
+    const an = (sl.a !== undefined ? sl.a : -90 + i * 45) * Math.PI / 180, el = document.createElement('div');
+    el.className = 'slot' + (sl.on ? '' : ' off');
+    el.style.left = Math.cos(an) * R + 'px'; el.style.top = Math.sin(an) * R + 'px';
+    el.innerHTML = '<span class="key">' + sl.key + '</span>' + sl.label;
+    el.onpointerdown = ev => ev.stopPropagation();
+    el.onclick = ev => { ev.stopPropagation(); runSlot(sl); };
+    ring.el.appendChild(el);
+  });
+  stage.appendChild(ring.el);
+  refresh();
+}
+function runSlot(sl) { if (!sl.on) return; closeRing(); sl.fn(); }
+function closeRing() { if (ring) { ring.el.remove(); ring = null; } }
+function openOverlayRing(pos) {
+  const m = persp ? persp.mode : null;
+  showRing(pos, 'Overlays', [
+    { key: '1', label: '1-point' + (m === '1pt' ? '<small>on</small>' : ''), on: true, fn: () => setMode('1pt') },
+    { key: '2', label: '2-point' + (m === '2pt' ? '<small>on</small>' : ''), on: true, fn: () => setMode('2pt') },
+    { key: '3', label: '3-point' + (m === '3pt' ? '<small>on</small>' : ''), on: true, fn: () => setMode('3pt') },
+    { key: 'I', label: 'Image…', on: true, fn: () => fileEl.click() },
+    { key: 'R', label: 'Draw into<small>' + (target === 'art' ? 'Art' : 'Reference') + '</small>', on: true, fn: () => setTarget(target === 'art' ? 'ref' : 'art') },
+    { key: 'S', label: 'Snap<small>' + (document.getElementById('cSnap').checked ? 'on' : 'off') + '</small>', on: true, fn: () => { const c = document.getElementById('cSnap'); c.checked = !c.checked; refresh(); } },
+    { key: 'H', label: hideAll ? 'Show overlays' : 'Hide overlays', on: true, fn: () => { hideAll = !hideAll; refresh(); } },
+    { key: 'X', label: 'Remove active', on: !!(active === 'persp' ? persp : ref), fn: () => { beginEdit(); if (active === 'persp') persp = null; else ref = null; endEdit(); refresh(); } },
+  ], () => toast('The overlay panel is the box at the right'), 'Overlays…');
+}
+function setTarget(t) {
+  target = t;
+  document.getElementById('dArt').classList.toggle('on', t === 'art');
+  document.getElementById('dRef').classList.toggle('on', t === 'ref');
+  refresh();
+}
+
+// ---------- scrub opacity ----------
+function startScrub() {
+  const o = active === 'persp' ? persp : ref;
+  if (!o) { toast('No active overlay'); return; }
+  beginEdit();
+  const key = active === 'persp' ? 'op' : (ref.img ? 'imgOp' : 'op');
+  scrub = { o, key, y0: cursor[1], v0: o[key], x: clamp(cursor[0] + 24, 6, 600), y: clamp(cursor[1] - 40, 6, 440), name: active === 'persp' ? 'Perspective guide' : (ref.img ? 'Reference image' : 'Reference shapes') };
+  showScrub();
+}
+function updateScrub(pos) { scrub.o[scrub.key] = +clamp(scrub.v0 + (scrub.y0 - pos[1]) * 0.004, 0.05, 1).toFixed(2); refresh(); showScrub(); }
+function showScrub() {
+  const v = scrub.o[scrub.key];
+  scrubEl.style.display = 'block'; scrubEl.style.left = scrub.x + 'px'; scrubEl.style.top = scrub.y + 'px';
+  scrubEl.innerHTML = '<div class="head"><span>Opacity <span class="key">O</span></span><b>' + Math.round(v * 100) + '%</b></div><div class="track"><div class="fill" style="width:' + v * 100 + '%"></div><div class="thumb" style="left:' + v * 100 + '%"></div></div><div class="sub">' + scrub.name + ' · move up to show more</div>';
+}
+function endScrub() { scrub = null; scrubEl.style.display = 'none'; endEdit(); refresh(); }
+
+// ---------- keyboard ----------
+const isTyping = t => t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.isContentEditable);
+window.addEventListener('keydown', e => {
+  if (e.key === 'Shift') held.shift = true;
+  const key = e.key.toLowerCase();
+  if (ring) {
+    if (e.key === 'Escape') { closeRing(); refresh(); return; }
+    const sl = ring.slots.find(x => x.key.toLowerCase() === key);
+    if (sl) { e.preventDefault(); runSlot(sl); }
+    return;
+  }
+  if (isTyping(e.target)) { if (e.key === 'Enter' || e.key === 'Escape') e.target.blur(); return; }
+  if ((e.ctrlKey || e.metaKey) && key === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
+  if ((e.ctrlKey || e.metaKey) && key === 'y') { e.preventDefault(); doRedo(); return; }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (/^[1-4]$/.test(e.key)) { held.dir = +e.key; refresh(); return; }
+  if (e.repeat) return;
+  if (e.key === 'Escape') { draw = null; refresh(); return; }
+  if (e.key === 'Enter') { finishDraw(false); return; }
+  if (e.key === 'Backspace' && draw) { e.preventDefault(); draw.pts.pop(); if (!draw.pts.length) draw = null; refresh(); return; }
+  if (key === 'p') { setTool('pen'); return; }
+  if (key === 'v') { setTool('sel'); return; }
+  if (key === 'h') { held.h = true; refresh(); return; }
+  if (key === 'o' && !scrub && !drag) { startScrub(); return; }
+  if (e.key === ' ') { e.preventDefault(); if (!spaceDown) spaceDown = Date.now(); return; }
+});
+window.addEventListener('keyup', e => {
+  if (e.key === 'Shift') held.shift = false;
+  const key = e.key.toLowerCase();
+  if (/^[1-4]$/.test(e.key) && held.dir === +e.key) { held.dir = 0; refresh(); }
+  if (key === 'h' && held.h) { held.h = false; refresh(); }
+  if (e.key === ' ') {
+    const had = spaceDown, dt = Date.now() - spaceDown; spaceDown = 0;
+    if (had && dt < 250 && !scrub && !drag && !ring && !isTyping(e.target)) openOverlayRing(cursor);
+    return;
+  }
+  if (scrub && key === 'o') endScrub();
+  updateHint();
+});
+
+function setTool(t) {
+  tool = t; if (t !== 'pen') draw = null;
+  document.getElementById('tPen').classList.toggle('on', t === 'pen');
+  document.getElementById('tSel').classList.toggle('on', t === 'sel');
+  stage.style.cursor = t === 'pen' ? 'crosshair' : 'default';
+  refresh();
+}
+document.getElementById('tPen').onclick = () => setTool('pen');
+document.getElementById('tSel').onclick = () => setTool('sel');
+document.getElementById('dArt').onclick = () => setTarget('art');
+document.getElementById('dRef').onclick = () => setTarget('ref');
+document.getElementById('cSnap').onchange = refresh;
+document.getElementById('cPrev').onchange = () => { preview = document.getElementById('cPrev').checked; refresh(); };
+document.getElementById('bSample').onclick = () => loadImage(makeSample(), true);
+document.getElementById('bImport').onclick = () => fileEl.click();
+document.getElementById('bUndo').onclick = doUndo;
+document.getElementById('bRedo').onclick = doRedo;
+document.getElementById('bClear').onclick = () => { beginEdit(); art = []; draw = null; endEdit(); refresh(); };
+document.getElementById('bReset').onclick = () => { persp = defPersp('2pt'); ref = defRef(); art = []; draw = null; undo = []; redo = []; imgs.clear(); setTarget('art'); refresh(); };
+document.getElementById('bSvg').onclick = () => {
+  const body = '<svg xmlns="http://www.w3.org/2000/svg" width="' + PAPER.w + '" height="' + PAPER.h + '" viewBox="' + PAPER.x + ' ' + PAPER.y + ' ' + PAPER.w + ' ' + PAPER.h + '"><rect x="' + PAPER.x + '" y="' + PAPER.y + '" width="' + PAPER.w + '" height="' + PAPER.h + '" fill="#ffffff"/>' + artMarkup() + '</svg>';
+  const url = URL.createObjectURL(new Blob([body], { type: 'image/svg+xml' })), a = document.createElement('a');
+  a.href = url; a.download = 'art-only.svg'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+  toast('art-only.svg: ' + art.length + ' path' + (art.length === 1 ? '' : 's') + ', no guides, no reference');
+};
+
+refresh();
+</script>
+</body>
+</html>

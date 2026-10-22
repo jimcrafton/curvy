@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curvy node graph at scale</title>
+<style>
+  :root { --bg: #1e1f22; --panel: #26272b; --workspace: #2b2d31; --text: #e6e7ea; --muted: #9a9ea8; --accent: #4c8dff; --amber: #ffb454; --slot: #313338; --slotLine: #4a4d55; --glass: #17181b99; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid #000; }
+  header h1 { margin: 0 0 4px; font-size: 15px; }
+  header p { margin: 0; color: var(--muted); max-width: 980px; }
+  #stage { position: relative; width: 1180px; height: 700px; margin: 16px auto 8px; background: var(--workspace); border: 1px solid #000; overflow: hidden; user-select: none; }
+  button { background: var(--slot); color: var(--text); border: 1px solid var(--slotLine); border-radius: 14px; padding: 3px 11px; font: inherit; cursor: pointer; }
+  button.on { background: var(--accent); border-color: var(--accent); }
+  input[type=text] { background: #00000055; border: 1px solid #ffffff2a; border-radius: 12px; color: var(--text); padding: 3px 10px; font: inherit; width: 190px; outline: none; }
+  .glass { background: var(--glass); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); border: 1px solid #ffffff2a; }
+  #left { position: absolute; left: 0; top: 0; bottom: 28px; width: 400px; border-right: 1px solid #000; background: #202125; }
+  #art { position: absolute; left: 0; top: 0; width: 400px; height: 400px; background: #EFDAC4; }
+  #info { position: absolute; left: 0; top: 400px; right: 0; bottom: 0; padding: 10px 12px; overflow: auto; font-size: 12px; }
+  #info h4 { margin: 8px 0 3px; font-size: 10px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  #info b { color: var(--text); }
+  #info .stat { display: flex; justify-content: space-between; color: var(--muted); }
+  #info .stat span:last-child { color: var(--text); font-variant-numeric: tabular-nums; }
+  #gpane { position: absolute; left: 400px; right: 0; top: 0; bottom: 28px; background: #1a1b1e; overflow: hidden; }
+  #tb { position: absolute; left: 0; right: 0; top: 0; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 10px; z-index: 3; border-width: 0 0 1px 0; }
+  #crumb { color: var(--muted); }
+  #crumb a { color: var(--text); cursor: pointer; text-decoration: underline dotted; }
+  svg#g { position: absolute; left: 0; top: 36px; width: 100%; height: calc(100% - 36px); cursor: grab; }
+  #mini { position: absolute; right: 10px; bottom: 10px; width: 180px; height: 120px; z-index: 3; border-radius: 8px; overflow: hidden; }
+  #mini svg { width: 100%; height: 100%; }
+  #stat { position: absolute; left: 10px; bottom: 8px; z-index: 3; padding: 4px 10px; border-radius: 8px; font-size: 12px; color: var(--muted); }
+  #bar { position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: var(--panel); border-top: 1px solid #000; color: var(--muted); padding: 4px 10px; white-space: nowrap; font-size: 12px; z-index: 6; }
+  .card { fill: #26272b; stroke: #5a5d66; stroke-width: 1; vector-effect: non-scaling-stroke; }
+  .node { cursor: pointer; }
+  .node.sel .card { stroke: var(--amber); stroke-width: 2.5; }
+  .node.hit .card { stroke: #4cd9a0; stroke-width: 2.5; }
+  .node.dim { opacity: .22; }
+  .t1 { fill: #e6e7ea; font: 600 11px "Segoe UI"; }
+  .t2 { fill: #9a9ea8; font: 9px "Segoe UI"; }
+  .t3 { fill: #e6e7ea; font: 700 15px "Segoe UI"; }
+  .port { fill: #17181b; stroke: #fff; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .wire { fill: none; stroke: #8a8e98; stroke-width: 1.2; vector-effect: non-scaling-stroke; opacity: .55; }
+  .wire.on { stroke: var(--amber); opacity: 1; stroke-width: 2; }
+  .lod0 .lbl, .lod0 .port { display: none; }
+  .lod1 .sub { display: none; }
+  .lod0 .wire { opacity: .3; }
+  .notes { width: 1180px; margin: 0 auto 28px; color: var(--muted); }
+  .notes h3 { color: var(--text); margin: 14px 0 4px; font-size: 13px; }
+  .notes ul { margin: 0; padding-left: 18px; }
+  .notes li { margin: 2px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>The node graph at a realistic size</h1>
+  <p>The graph is how the document is stored; the canvas, the node view, the property boxes are all views of it. This page shows one document
+  at a realistic size: an illustration with 341 shapes, 5434 points and 56 fill colours, so about 416 nodes as an artist would have built it. The
+  source SVG is flat and only supplies the shapes, so the grouping (night sky, hair, birds, face and so on) is a guess at how someone would have
+  organised it while drawing. Switch between <b>Flat</b> (every node at once) and <b>Grouped</b> (subnets; double-click one to enter it). Scroll to
+  zoom, drag the background to pan, type to filter. Click a node to see its shapes in the artwork.</p>
+</header>
+
+<div id="stage">
+  <div id="left">
+    <svg id="art" viewBox="0 0 30038 30038"></svg>
+    <div id="info"></div>
+  </div>
+  <div id="gpane">
+    <div id="tb" class="glass">
+      <button id="mFlat" class="on">Flat (all nodes)</button>
+      <button id="mGroup">Grouped (subnets)</button>
+      <span id="crumb"></span>
+      <span style="flex:1"></span>
+      <input type="text" id="q" placeholder="Filter: hair, #FFCC00, fil55, ...">
+      <button id="fit">Fit</button>
+      <span class="muted" id="zl" style="color:var(--muted);width:60px;text-align:right"></span>
+    </div>
+    <svg id="g"><defs id="gd"></defs><g id="world"><g id="wires"></g><g id="nodes"></g></g></svg>
+    <div id="stat" class="glass"></div>
+    <div id="mini" class="glass"><svg id="msv"></svg></div>
+  </div>
+  <div id="bar">Scroll zooms, drag pans, click selects (the artwork shows the selection), double-click a group to enter it, Fit frames everything</div>
+</div>
+
+<div class="notes">
+  <h3>What this shows about scale</h3>
+  <ul>
+    <li><b>Flat is a hairball, and expected to be.</b> Zoomed out the individual nodes stop being readable, so they drop to their thumbnails (no text, no ports). A graph that big is something to <i>search and select</i>, not read.</li>
+    <li><b>Grouping has to happen as the user works.</b> Every shape drawn adds nodes, so Group, layers and "make a subnet" are what keep the graph readable: ten group nodes with a thumbnail, a count and a colour strip give an overview you can take in, and entering one shows its paths and the Fill nodes they feed. Grouping should be as cheap as in a drawing program (select, press a key), and a layer or group in a loaded file becomes a subnet.</li>
+    <li><b>Every node is its own thumbnail.</b> Because nodes carry geometry, a card shows what it makes, which is the main way to recognise one among hundreds.</li>
+    <li><b>Selection works both ways.</b> Selecting a node highlights its shapes in the artwork (everything else dims), and filter text does the same for matches; picking on the canvas should likewise select the node.</li>
+    <li><b>Navigation tools needed:</b> Fit, a minimap, breadcrumbs, and the filter box. The graph panel needs more room than a drawer once graphs look like this, so it would use the lens (hold N) or a large floating window, with the drawer kept for small graphs.</li>
+    <li>Not shown: layout is a simple column layout here, so real auto-layout, collapsing a chain into one node, and a palette node feeding many Fill nodes would all reduce the node and wire count further.</li>
+  </ul>
+</div>
+
+<script src="nodes-girl-data.js"></script>
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const NS = 'http://www.w3.org/2000/svg';
+const S = GIRL.shapes, GROUPS = GIRL.groups;
+const el = (tag, a, parent) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, a[k]); parent && parent.appendChild(e); return e; };
+const fillOf = c => GIRL.fills[c] || '#888';
+const hexOf = c => { const f = fillOf(c); return f === 'white' ? '#FFFFFF' : f.startsWith('#') ? f.toUpperCase() : 'gradient'; };
+
+/* artwork */
+const art = $('#art');
+art.insertAdjacentHTML('afterbegin', '<defs>' + GIRL.grads.join('') + '</defs>');
+$('#gd').innerHTML = GIRL.grads.join('');
+const artEls = S.map(s => el('path', { d: s.d, fill: fillOf(s.c) }, art));
+
+/* model */
+const byGroup = {};
+GROUPS.forEach(g => byGroup[g.name] = { name: g.name, shapes: [], buckets: new Map() });
+S.forEach((s, i) => { const G = byGroup[s.g]; G.shapes.push(i); if (!G.buckets.has(s.c)) G.buckets.set(s.c, []); G.buckets.get(s.c).push(i); });
+Object.values(byGroup).forEach(G => {
+  G.bucketList = [...G.buckets.entries()].sort((a, b) => b[1].length - a[1].length);
+  const bb = G.shapes.map(i => S[i].b);
+  G.bbox = [Math.min(...bb.map(b => b[0])), Math.min(...bb.map(b => b[1])), Math.max(...bb.map(b => b[2])), Math.max(...bb.map(b => b[3]))];
+  G.points = G.shapes.reduce((a, i) => a + S[i].n, 0);
+});
+const totalFill = Object.values(byGroup).reduce((a, G) => a + G.bucketList.length, 0);
+
+const NODE = { path: { w: 76, h: 58 }, fill: { w: 104, h: 46 }, merge: { w: 84, h: 38 }, group: { w: 250, h: 96 }, out: { w: 90, h: 40 } };
+function layoutBlock(G, ox, oy) {
+  const items = [], wires = [], n = G.shapes.length;
+  const cols = Math.max(3, Math.ceil(Math.sqrt(n * 1.4))), rows = Math.ceil(n / cols), CW = 88, CH = 68;
+  const gridW = cols * CW, gridH = rows * CH, fx = ox + gridW + 70, bl = G.bucketList;
+  const fh = bl.length * 58, H = Math.max(gridH, fh);
+  let k = 0;
+  bl.forEach(([c, idx], bi) => {
+    const fid = 'f:' + G.name + ':' + c;
+    items.push({ id: fid, kind: 'fill', g: G.name, c, shapes: idx, x: fx, y: oy + (H - fh) / 2 + bi * 58, label: hexOf(c), sub: c + ' x' + idx.length });
+    idx.forEach(i => {
+      items.push({ id: 'p:' + i, kind: 'path', shape: i, shapes: [i], g: G.name, x: ox + (k % cols) * CW, y: oy + (H - gridH) / 2 + Math.floor(k / cols) * CH, label: 'Path ' + i, sub: S[i].n + ' pts' });
+      wires.push(['p:' + i, fid]); k++;
+    });
+    wires.push([fid, 'm:' + G.name]);
+  });
+  items.push({ id: 'm:' + G.name, kind: 'merge', g: G.name, shapes: G.shapes, x: fx + 170, y: oy + H / 2 - 19, label: 'Merge', sub: bl.length + ' in' });
+  return { items, wires, H, right: fx + 170 + NODE.merge.w };
+}
+function build() {
+  let items = [], wires = [];
+  const allShapes = S.map((_, i) => i);
+  if (view.mode === 'flat') {
+    let y = 0, right = 0;
+    GROUPS.forEach(g => { const L = layoutBlock(byGroup[g.name], 0, y); items.push(...L.items); wires.push(...L.wires); y += L.H + 60; right = Math.max(right, L.right); });
+    items.push({ id: 'rm', kind: 'merge', shapes: allShapes, x: right + 160, y: y / 2 - 19, label: 'Merge all', sub: GROUPS.length + ' in' });
+    items.push({ id: 'out', kind: 'out', shapes: allShapes, x: right + 330, y: y / 2 - 20, label: 'Output', sub: '' });
+    GROUPS.forEach(g => wires.push(['m:' + g.name, 'rm'])); wires.push(['rm', 'out']);
+  } else if (!view.group) {
+    GROUPS.forEach((g, i) => { const G = byGroup[g.name]; items.push({ id: 'g:' + g.name, kind: 'group', g: g.name, shapes: G.shapes, x: 0, y: i * 114, label: g.name, sub: G.shapes.length + ' paths · ' + G.bucketList.length + ' colours · ' + G.points + ' pts' }); wires.push(['g:' + g.name, 'rm']); });
+    const h = GROUPS.length * 114;
+    items.push({ id: 'rm', kind: 'merge', shapes: allShapes, x: 400, y: h / 2 - 19, label: 'Merge all', sub: GROUPS.length + ' in' });
+    items.push({ id: 'out', kind: 'out', shapes: allShapes, x: 560, y: h / 2 - 20, label: 'Output', sub: '' });
+    wires.push(['rm', 'out']);
+  } else {
+    const G = byGroup[view.group], L = layoutBlock(G, 0, 0);
+    items.push(...L.items); wires.push(...L.wires);
+    items.push({ id: 'out', kind: 'out', shapes: G.shapes, x: L.right + 120, y: L.H / 2 - 20, label: 'Subnet output', sub: '' });
+    wires.push(['m:' + G.name, 'out']);
+  }
+  return { items, wires };
+}
+
+/* rendering */
+const view = { mode: 'flat', group: null }, cam = { z: 1, x: 0, y: 0 };
+let cur = null, nodeEls = new Map(), wireEls = [], selected = null, query = '';
+const gsvg = $('#g'), world = $('#world');
+
+function thumb(parent, idxs, box, tx, ty, tw, th) {
+  el('rect', { x: tx, y: ty, width: tw, height: th, rx: 4, fill: '#7a7e87' }, parent);
+  const w = Math.max(1, box[2] - box[0]), h = Math.max(1, box[3] - box[1]), k = Math.min(tw / w, th / h);
+  const g = el('g', { transform: `translate(${tx + (tw - w * k) / 2 - box[0] * k} ${ty + (th - h * k) / 2 - box[1] * k}) scale(${k})` }, parent);
+  idxs.forEach(i => el('path', { d: S[i].d, fill: fillOf(S[i].c) }, g));
+}
+function render() {
+  cur = build();
+  $('#wires').innerHTML = ''; $('#nodes').innerHTML = ''; nodeEls = new Map(); wireEls = [];
+  const pos = new Map(cur.items.map(n => [n.id, n]));
+  cur.items.forEach(n => { const d = NODE[n.kind]; n.w = d.w; n.h = d.h; });
+  cur.wires.forEach(([a, b]) => {
+    const A = pos.get(a), B = pos.get(b), x1 = A.x + A.w, y1 = A.y + A.h / 2, x2 = B.x, y2 = B.y + B.h / 2, dx = Math.max(30, (x2 - x1) / 2);
+    const p = el('path', { class: 'wire', d: `M${x1} ${y1} C${x1 + dx} ${y1} ${x2 - dx} ${y2} ${x2} ${y2}` }, $('#wires')); wireEls.push({ p, a, b });
+  });
+  cur.items.forEach(n => {
+    const g = el('g', { class: 'node', transform: `translate(${n.x} ${n.y})` }, $('#nodes'));
+    el('rect', { class: 'card', width: n.w, height: n.h, rx: 7 }, g);
+    if (n.kind === 'path') {
+      thumb(g, [n.shape], S[n.shape].b, 8, 6, 60, 34);
+      el('text', { class: 'lbl t1', x: 8, y: 51 }, g).textContent = n.label;
+      el('text', { class: 'lbl sub t2', x: 50, y: 51 }, g).textContent = n.sub;
+    } else if (n.kind === 'fill') {
+      el('rect', { x: 8, y: 13, width: 20, height: 20, rx: 4, fill: fillOf(n.c), stroke: '#fff4', 'stroke-width': 1 }, g);
+      el('text', { class: 'lbl t1', x: 36, y: 22 }, g).textContent = 'Fill ' + n.label;
+      el('text', { class: 'lbl sub t2', x: 36, y: 36 }, g).textContent = n.sub;
+    } else if (n.kind === 'merge') {
+      el('text', { class: 'lbl t1', x: 10, y: 17 }, g).textContent = n.label;
+      el('text', { class: 'lbl sub t2', x: 10, y: 30 }, g).textContent = n.sub;
+    } else if (n.kind === 'out') {
+      el('rect', { width: n.w, height: 16, rx: 7, fill: '#4c8dff' }, g);
+      el('text', { class: 'lbl t1', x: 8, y: 12 }, g).textContent = n.label;
+    } else if (n.kind === 'group') {
+      const G = byGroup[n.g];
+      thumb(g, G.shapes, G.bbox, 8, 8, 80, 80);
+      el('text', { class: 'lbl t3', x: 98, y: 28 }, g).textContent = n.label;
+      el('text', { class: 'lbl sub t2', x: 98, y: 44 }, g).textContent = n.sub;
+      G.bucketList.slice(0, 14).forEach(([c], i) => el('rect', { x: 98 + i * 11, y: 54, width: 9, height: 9, rx: 2, fill: fillOf(c) }, g));
+      el('text', { class: 'lbl sub t2', x: 98, y: 82 }, g).textContent = 'double-click to enter';
+    }
+    if (n.kind !== 'path' || true) {
+      if (n.kind !== 'group' || true) { el('circle', { class: 'port', cx: 0, cy: n.h / 2, r: 4.5 }, g); el('circle', { class: 'port', cx: n.w, cy: n.h / 2, r: 4.5 }, g); }
+    }
+    g.addEventListener('pointerdown', e => { e.stopPropagation(); select(n.id); });
+    g.addEventListener('dblclick', e => { e.stopPropagation(); if (n.kind === 'group') enter(n.g); });
+    g.addEventListener('pointerenter', () => paintArt(n.shapes));
+    g.addEventListener('pointerleave', () => paintArt(null));
+    nodeEls.set(n.id, { g, n });
+  });
+  applyFilter(); paintSel();
+  const L = cur.items.length;
+  $('#stat').textContent = `${L} nodes, ${cur.wires.length} wires in this view`;
+  paintCrumb(); paintMini(); fit();
+}
+
+function bounds() {
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  cur.items.forEach(n => { x0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y); x1 = Math.max(x1, n.x + n.w); y1 = Math.max(y1, n.y + n.h); });
+  return [x0, y0, x1, y1];
+}
+function fit() {
+  const r = gsvg.getBoundingClientRect(), b = bounds(), w = b[2] - b[0], h = b[3] - b[1];
+  cam.z = Math.min((r.width - 40) / w, (r.height - 40) / h, 2);
+  cam.x = (r.width - w * cam.z) / 2 - b[0] * cam.z; cam.y = (r.height - h * cam.z) / 2 - b[1] * cam.z;
+  applyCam();
+}
+function applyCam() {
+  world.setAttribute('transform', `translate(${cam.x} ${cam.y}) scale(${cam.z})`);
+  gsvg.setAttribute('class', cam.z < .22 ? 'lod0' : cam.z < .7 ? 'lod1' : 'lod2');
+  $('#zl').textContent = Math.round(cam.z * 100) + '%';
+  paintView();
+}
+gsvg.addEventListener('wheel', e => {
+  e.preventDefault(); const r = gsvg.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, f = Math.pow(1.0015, -e.deltaY);
+  const nz = Math.max(.04, Math.min(4, cam.z * f)); cam.x = mx - (mx - cam.x) * nz / cam.z; cam.y = my - (my - cam.y) * nz / cam.z; cam.z = nz; applyCam();
+}, { passive: false });
+gsvg.addEventListener('pointerdown', e => {
+  const sx = e.clientX, sy = e.clientY, ox = cam.x, oy = cam.y; let moved = false;
+  const mv = ev => { moved = true; cam.x = ox + ev.clientX - sx; cam.y = oy + ev.clientY - sy; applyCam(); };
+  const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); if (!moved) select(null); };
+  window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+});
+
+/* selection, filter, artwork link */
+function paintArt(shapes) {
+  const set = shapes && shapes.length ? new Set(shapes) : (selected ? new Set(nodeEls.get(selected).n.shapes) : (matchShapes || null));
+  artEls.forEach((e, i) => e.setAttribute('opacity', !set || set.has(i) ? 1 : .08));
+}
+let matchShapes = null;
+function select(id) { selected = id; paintSel(); paintArt(null); paintInfo(); }
+function paintSel() {
+  nodeEls.forEach(({ g }, id) => g.classList.toggle('sel', id === selected));
+  wireEls.forEach(w => w.p.classList.toggle('on', selected && (w.a === selected || w.b === selected)));
+}
+function applyFilter() {
+  const q = query.trim().toLowerCase(); matchShapes = null;
+  nodeEls.forEach(({ g, n }) => {
+    const text = (n.label + ' ' + (n.g || '') + ' ' + (n.c || '') + ' ' + (n.sub || '')).toLowerCase();
+    const hit = q && text.includes(q); g.classList.toggle('hit', !!hit); g.classList.toggle('dim', !!q && !hit);
+  });
+  if (q) {
+    matchShapes = new Set();
+    S.forEach((s, i) => { const t = (s.g + ' ' + s.c + ' ' + hexOf(s.c)).toLowerCase(); if (t.includes(q)) matchShapes.add(i); });
+  }
+  paintArt(null); paintInfo();
+}
+$('#q').addEventListener('input', e => { query = e.target.value; applyFilter(); });
+
+function enter(g) { view.mode = 'group'; view.group = g; selected = null; modeButtons(); render(); }
+function modeButtons() { $('#mFlat').classList.toggle('on', view.mode === 'flat'); $('#mGroup').classList.toggle('on', view.mode !== 'flat'); }
+$('#mFlat').onclick = () => { view.mode = 'flat'; view.group = null; selected = null; modeButtons(); render(); };
+$('#mGroup').onclick = () => { view.mode = 'group'; view.group = null; selected = null; modeButtons(); render(); };
+$('#fit').onclick = fit;
+function paintCrumb() {
+  const c = $('#crumb');
+  c.innerHTML = view.mode === 'flat' ? 'Root (all nodes)' : view.group ? '<a id="up">Root</a> › <b style="color:var(--text)">' + view.group + '</b>' : 'Root';
+  const up = $('#up'); if (up) up.onclick = () => { view.group = null; selected = null; render(); };
+}
+function paintInfo() {
+  const sel = selected && nodeEls.get(selected), n = sel && sel.n, info = $('#info');
+  const nFlat = S.length + totalFill + GROUPS.length + 2;
+  let h = '<h4>The document as a graph (estimate)</h4>' +
+    `<div class="stat"><span>Shapes (path nodes)</span><span>${S.length}</span></div><div class="stat"><span>Points</span><span>${S.reduce((a, s) => a + s.n, 0)}</span></div>` +
+    `<div class="stat"><span>Fill nodes (one per colour per group)</span><span>${totalFill}</span></div><div class="stat"><span>Nodes, flat</span><span>${nFlat}</span></div>` +
+    `<div class="stat"><span>Nodes at the top level, grouped</span><span>${GROUPS.length + 2}</span></div>`;
+  h += '<h4>Selection</h4>';
+  if (n) {
+    const pts = n.shapes.reduce((a, i) => a + S[i].n, 0);
+    h += `<div><b>${n.kind === 'group' ? n.label : n.kind === 'out' ? n.label : n.label}</b> <span class="muted">(${n.kind}${n.g ? ', ' + n.g : ''})</span></div>` +
+      `<div class="stat"><span>Shapes</span><span>${n.shapes.length}</span></div><div class="stat"><span>Points</span><span>${pts}</span></div>`;
+  } else h += '<div class="muted">Nothing selected. Click a node.</div>';
+  if (query.trim()) h += `<h4>Filter</h4><div class="stat"><span>Matching shapes</span><span>${matchShapes ? matchShapes.size : 0}</span></div>`;
+  info.innerHTML = h;
+}
+
+/* minimap */
+function paintMini() {
+  const m = $('#msv'); m.innerHTML = '';
+  const b = bounds(), w = b[2] - b[0], h = b[3] - b[1], k = Math.min(172 / w, 112 / h);
+  m.setAttribute('viewBox', `0 0 180 120`);
+  const ox = (180 - w * k) / 2, oy = (120 - h * k) / 2, g = el('g', { transform: `translate(${ox} ${oy}) scale(${k}) translate(${-b[0]} ${-b[1]})` }, m);
+  cur.items.forEach(n => el('rect', { x: n.x, y: n.y, width: n.w, height: n.h, fill: n.kind === 'fill' ? fillOf(n.c) : n.kind === 'path' ? fillOf(S[n.shape].c) : '#9a9ea8', opacity: .85 }, g));
+  const v = el('rect', { id: 'mv', fill: 'none', stroke: '#ffb454', 'stroke-width': 1.5 }, m);
+  m._map = { ox, oy, k, b };
+  m.onpointerdown = e => {
+    const set = ev => {
+      const r = m.getBoundingClientRect(), s = 180 / r.width, px = ((ev.clientX - r.left) * s - ox) / k + b[0], py = ((ev.clientY - r.top) * s - oy) / k + b[1], gr = gsvg.getBoundingClientRect();
+      cam.x = gr.width / 2 - px * cam.z; cam.y = gr.height / 2 - py * cam.z; applyCam();
+    };
+    set(e); m.setPointerCapture(e.pointerId); m.onpointermove = set; m.onpointerup = () => { m.onpointermove = null; };
+  };
+}
+function paintView() {
+  const m = $('#msv'), v = $('#mv'); if (!m || !v || !m._map) return;
+  const { ox, oy, k, b } = m._map, gr = gsvg.getBoundingClientRect();
+  const x = (-cam.x / cam.z - b[0]) * k + ox, y = (-cam.y / cam.z - b[1]) * k + oy;
+  v.setAttribute('x', x); v.setAttribute('y', y); v.setAttribute('width', gr.width / cam.z * k); v.setAttribute('height', gr.height / cam.z * k);
+}
+window.addEventListener('resize', () => applyCam());
+const hv = decodeURIComponent(location.hash.slice(1));
+if (hv === 'grouped') { view.mode = 'group'; modeButtons(); }
+else if (byGroup[hv]) { view.mode = 'group'; view.group = hv; modeButtons(); }
+render(); paintInfo();
+</script>
+</body>
+</html>

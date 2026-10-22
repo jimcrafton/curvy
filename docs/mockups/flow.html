@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curvy workflow storyboard</title>
+<style>
+  :root {
+    --bg: #1b1c1f; --panel: #26272b; --text: #e6e7ea; --muted: #9a9ea8; --amber: #ffb454; --accent: #4c8dff; --line: #3a3d43;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 64px; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", system-ui, sans-serif; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  header.top { padding: 28px 24px 8px; max-width: 1080px; margin: 0 auto; }
+  header.top h1 { margin: 0 0 6px; font-size: 24px; }
+  header.top p { margin: 0 0 8px; color: var(--muted); max-width: 820px; }
+  #nav { position: sticky; top: 0; z-index: 10; background: #1b1c1fee; border-bottom: 1px solid #000; padding: 8px 24px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; backdrop-filter: blur(6px); }
+  #nav a { color: var(--muted); padding: 3px 12px; border-radius: 14px; border: 1px solid var(--line); font-size: 12px; }
+  #nav a.on { background: var(--amber); color: #1b1b1b; border-color: var(--amber); }
+  #nav a:hover { text-decoration: none; border-color: var(--amber); }
+  #glance { max-width: 1080px; margin: 12px auto 4px; padding: 0 24px; display: flex; flex-wrap: wrap; gap: 6px 4px; align-items: center; }
+  #glance a { display: inline-flex; gap: 5px; align-items: center; padding: 2px 9px 2px 3px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 12px; }
+  #glance a b { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: #3a3d43; font-size: 11px; }
+  #glance a:hover { text-decoration: none; border-color: var(--amber); }
+  #glance i { font-style: normal; color: #5a5d66; }
+  #glance .ph { flex-basis: 100%; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; margin-top: 8px; }
+  main { max-width: 1080px; margin: 0 auto; padding: 8px 24px 80px; }
+  .phase { margin: 44px 0 0; display: flex; align-items: center; gap: 12px; color: var(--amber); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
+  .phase::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .step { position: relative; display: grid; grid-template-columns: 56px 1fr; gap: 0 12px; padding: 22px 0 8px; }
+  .step .rail { position: relative; }
+  .step .rail b { position: sticky; top: 76px; display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: var(--amber); color: #1b1b1b; font-size: 16px; }
+  .step .rail::after { content: ""; position: absolute; left: 20px; top: 46px; bottom: -30px; width: 2px; background: linear-gradient(var(--line), transparent); }
+  .step h2 { margin: 2px 0 2px; font-size: 19px; }
+  .step .trigger { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 10px; color: var(--muted); font-size: 12px; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 9px; border-radius: 12px; background: #2d2f35; border: 1px solid #4a4d55; color: var(--text); font-size: 12px; }
+  .chip.opt { border-style: dashed; color: var(--muted); }
+  .cap { display: inline-block; padding: 0 6px; height: 20px; border-radius: 6px; background: #3a3d43; border: 1px solid #5a5d66; font: 600 11px/18px "Segoe UI"; color: var(--text); }
+  .screen { display: block; width: 100%; height: auto; border: 1px solid #000; border-radius: 6px; background: #2b2d31; box-shadow: 0 4px 18px #0006; }
+  .info { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 28px; margin: 12px 0 6px; }
+  .info h3 { margin: 0 0 3px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+  .info ul { margin: 0; padding-left: 18px; }
+  .info li { margin: 2px 0; }
+  .links { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+  .links a { margin-right: 14px; }
+  @media (max-width: 760px) { .info { grid-template-columns: 1fr; } .step { grid-template-columns: 36px 1fr; } .step .rail b { width: 30px; height: 30px; font-size: 13px; } .step .rail::after { left: 14px; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>Curvy: the workflow, top to bottom</h1>
+  <p>One pass through the whole editor, from an empty window to exported files. Each step shows the screen at that moment, what the pen and keyboard do, and what the document does underneath. The pictures are storyboards drawn from the design in <code>docs/ui-design.md</code>; every step links to the interactive bench where that part can be tried. The same few surfaces appear again and again: the canvas, the one-line hint bar, the radial ring (tap <span class="cap">Space</span> or press the pen's barrel button), the translucent HUD card, and hold-a-key scrubbing.</p>
+</header>
+<nav id="nav"></nav>
+<div id="glance"></div>
+<main id="steps"></main>
+
+<script>
+"use strict";
+const W = 960, H = 500;
+const C = { bg: '#2b2d31', paper: '#f6f7f9', panel: '#26272b', card: '#17181b', line: '#5a5d66', text: '#e6e7ea', muted: '#9a9ea8', amber: '#ffb454', accent: '#4c8dff', red: '#e5527a', green: '#3ec3a0', violet: '#8e6bff' };
+const FONT = '"Segoe UI", system-ui, sans-serif';
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+const at = o => Object.entries(o).filter(([k, v]) => v !== undefined && v !== null).map(([k, v]) => k + '="' + v + '"').join(' ');
+const T = (x, y, s, o = {}) => '<text ' + at({ x, y, fill: o.fill || C.text, 'font-size': o.size || 12, 'text-anchor': o.anchor, 'font-weight': o.weight, 'font-family': o.family, opacity: o.op, 'font-style': o.style, 'letter-spacing': o.ls, style: 'white-space:pre' }) + '>' + esc(s) + '</text>';
+const R = (x, y, w, h, o = {}) => '<rect ' + at({ x, y, width: w, height: h, rx: o.rx, fill: o.fill || 'none', stroke: o.stroke, 'stroke-width': o.sw, 'stroke-dasharray': o.dash, opacity: o.op, transform: o.tf }) + '/>';
+const L = (x1, y1, x2, y2, o = {}) => '<line ' + at({ x1, y1, x2, y2, stroke: o.stroke || C.line, 'stroke-width': o.sw || 1, 'stroke-dasharray': o.dash, opacity: o.op, 'stroke-linecap': o.cap }) + '/>';
+const Ci = (cx, cy, r, o = {}) => '<circle ' + at({ cx, cy, r, fill: o.fill || 'none', stroke: o.stroke, 'stroke-width': o.sw, 'stroke-dasharray': o.dash, opacity: o.op }) + '/>';
+const E = (cx, cy, rx, ry, o = {}) => '<ellipse ' + at({ cx, cy, rx, ry, fill: o.fill || 'none', stroke: o.stroke, 'stroke-width': o.sw, 'stroke-dasharray': o.dash, opacity: o.op, transform: o.tf }) + '/>';
+const P = (d, o = {}) => '<path ' + at({ d, fill: o.fill || 'none', stroke: o.stroke, 'stroke-width': o.sw, 'stroke-dasharray': o.dash, opacity: o.op, 'stroke-linecap': o.cap || 'round', 'stroke-linejoin': 'round', 'fill-rule': o.rule }) + '/>';
+const G = (inner, o = {}) => '<g ' + at({ transform: o.tf, opacity: o.op, mask: o.mask, 'clip-path': o.clip }) + '>' + inner + '</g>';
+const star = (cx, cy, ro, ri, n, rot) => { const pts = []; for (let i = 0; i < n * 2; i++) { const a = (rot || -90) * Math.PI / 180 + i * Math.PI / n, r = i % 2 ? ri : ro; pts.push((cx + Math.cos(a) * r).toFixed(1) + ',' + (cy + Math.sin(a) * r).toFixed(1)); } return pts.join(' '); };
+const poly = (pts, o = {}) => '<polygon ' + at({ points: pts, fill: o.fill || 'none', stroke: o.stroke, 'stroke-width': o.sw, opacity: o.op, 'stroke-linejoin': 'round', 'stroke-dasharray': o.dash }) + '/>';
+
+const kw = s => Math.max(18, s.length * 7 + 10);
+function K(x, y, label, lit) { const w = kw(label); return R(x, y - 14, w, 20, { rx: 6, fill: lit ? C.amber : '#3a3d43', stroke: lit ? C.amber : '#5a5d66' }) + T(x + w / 2, y, label, { size: 11, weight: 600, anchor: 'middle', fill: lit ? '#1b1b1b' : C.text }); }
+function pen(x, y, o = {}) {
+  let s = '';
+  if (o.hover) s += Ci(x, y, 9, { stroke: C.amber, sw: 1.4, dash: '3 3' });
+  if (o.contact) s += Ci(x, y, 3.5, { fill: C.amber });
+  s += G(R(-4.5, -78, 9, 66, { rx: 4, fill: '#d9dce3', stroke: '#6a6d76' }) + poly('-4.5,-12 4.5,-12 0,0', { fill: '#454851', stroke: '#6a6d76' }) + (o.barrel ? R(-5.5, -52, 11, 8, { rx: 3, fill: C.amber }) : '') , { tf: 'translate(' + x + ',' + y + ') rotate(24)' });
+  return s;
+}
+function card(x, y, w, h, o = {}) { return R(x, y, w, h, { rx: 10, fill: '#17181b', stroke: C.line, op: o.op }); }
+function hintBar(tool, main, items) {
+  let s = R(0, H - 26, W, 26, { fill: C.panel }) + L(0, H - 26, W, H - 26, { stroke: '#000' }) + T(12, H - 9, tool, { fill: C.amber, weight: 600, size: 12 }) + T(12 + tool.length * 7.2 + 14, H - 9, main, { size: 12 });
+  let x = 470;
+  (items || []).forEach(it => { s += K(x, H - 8, it[0], false); x += kw(it[0]) + 5; s += T(x, H - 9, it[1], { fill: C.muted, size: 12 }); x += it[1].length * 6.1 + 16; });
+  return s;
+}
+function base(o = {}) {
+  let s = R(0, 0, W, H, { fill: o.bg || C.bg });
+  s += R(0, 0, W, 30, { fill: C.panel }) + L(0, 30, W, 30, { stroke: '#000' });
+  s += R(10, 7, 16, 16, { rx: 5, fill: C.amber }) + P('M13 19 C14 11 20 11 22 14', { stroke: '#1b1b1b', sw: 1.8 }) + T(34, 20, 'curvy', { weight: 600, size: 13 });
+  if (o.name) s += T(100, 20, o.name, { fill: C.muted, size: 12 });
+  if (o.right) s += T(W - 12, 20, o.right, { fill: C.muted, size: 11, anchor: 'end' });
+  (o.arts || []).forEach(a => {
+    s += R(a.x + 3, a.y + 4, a.w, a.h, { fill: '#0006' }) + R(a.x, a.y, a.w, a.h, { fill: a.fill || C.paper });
+    if (a.label) s += T(a.x, a.y - 6, a.label, { fill: C.muted, size: 11 });
+  });
+  if (o.rulers) {
+    s += R(0, 30, W, 16, { fill: '#202226' }) + R(0, 30, 16, H - 56, { fill: '#202226' });
+    for (let x = 40; x < W; x += 50) s += L(x, 40, x, 46, { stroke: '#6a6d76' }) + T(x + 3, 40, String((x - 40) * 2), { size: 7, fill: '#6a6d76' });
+    for (let y = 70; y < H - 26; y += 50) s += L(10, y, 16, y, { stroke: '#6a6d76' });
+  }
+  return s;
+}
+const obox = (x, y, k) => R(x, y, 18 * (k || 1), 15 * (k || 1), { rx: 3 * (k || 1), stroke: C.amber, sw: 1.5 * (k || 1) }) + R(x, y, 18 * (k || 1), 4.5 * (k || 1), { rx: 2 * (k || 1), fill: C.amber });
+function ring(cx, cy, title, sub, slots, o = {}) {
+  const n = slots.length, Rr = o.R || 112;
+  let s = o.dim ? R(0, 30, W, H - 56, { fill: '#0007' }) : '';
+  s += Ci(cx, cy, 36, { fill: '#17181b', stroke: C.line }) + T(cx, cy - 2, title, { fill: C.amber, size: 12, anchor: 'middle' }) + T(cx, cy + 12, sub || '...', { fill: C.muted, size: 10, anchor: 'middle' });
+  slots.forEach((sl, i) => {
+    const ang = (-90 + i * 360 / n) * Math.PI / 180, x = cx + Math.cos(ang) * Rr * 1.12, y = cy + Math.sin(ang) * Rr, w = sl.label.length * 6.6 + 46 + (sl.opt ? 26 : 0), hi = o.hi === i;
+    const left = Math.cos(ang) < -0.2, ox = left && sl.opt ? 26 : 0;
+    s += R(x - w / 2, y - 15, w, 30, { rx: 15, fill: hi ? '#3a3320' : '#17181b', stroke: hi ? C.amber : C.line, sw: hi ? 1.6 : 1, op: sl.off ? 0.4 : 1 });
+    s += R(x - w / 2 + 7 + ox, y - 9, 18, 18, { rx: 5, fill: '#3a3d43', stroke: '#5a5d66' }) + T(x - w / 2 + 16 + ox, y + 4, sl.key, { size: 10, weight: 600, anchor: 'middle' });
+    s += T(x - w / 2 + 32 + ox, y + 4, sl.label, { size: 12, fill: sl.off ? C.muted : C.text });
+    if (sl.opt) s += obox(left ? x - w / 2 + 9 : x + w / 2 - 25, y - 6.5, .9);
+  });
+  return s;
+}
+function hud(x, y, w, title, sub, rows) {
+  let h = 34; rows.forEach(r => { h += ({ kv: 20, chain: 30, swatch: 22, slider: 24, note: 18, chips: 26, sp: 8 })[r.t] || 20; });
+  let s = card(x, y, w, h + 6) + T(x + 12, y + 20, title, { weight: 600, size: 13 }) + (sub ? T(x + w - 12, y + 20, sub, { fill: C.muted, size: 11, anchor: 'end' }) : '');
+  let cy = y + 34;
+  rows.forEach(r => {
+    if (r.t === 'kv') { s += T(x + 12, cy + 12, r.k, { fill: C.muted, size: 12 }) + T(x + w - 12, cy + 12, r.v, { size: 12, anchor: 'end', fill: r.hl ? C.amber : C.text }); cy += 20; }
+    else if (r.t === 'chain') {
+      let px = x + 12;
+      r.nodes.forEach((n, i) => { const nw = n.length * 6.3 + 14; s += R(px, cy + 2, nw, 20, { rx: 8, fill: 'none', stroke: i === r.act ? C.amber : '#4a4d55' }) + T(px + 7, cy + 16, n, { size: 11, fill: i === r.act ? C.amber : C.text }); px += nw; if (i < r.nodes.length - 1) { s += T(px + 3, cy + 16, '›', { fill: C.muted, size: 12 }); px += 12; } });
+      cy += 30;
+    } else if (r.t === 'swatch') { s += T(x + 12, cy + 14, r.k, { fill: C.muted, size: 12 }) + R(x + w - 46, cy + 2, 34, 18, { rx: 5, fill: r.c, stroke: '#6a6d76' }) + (r.v ? T(x + w - 54, cy + 15, r.v, { size: 12, anchor: 'end' }) : ''); cy += 22; }
+    else if (r.t === 'slider') { s += T(x + 12, cy + 14, r.k, { fill: C.muted, size: 12 }) + R(x + 74, cy + 9, Math.max(40, w - 146), 4, { rx: 2, fill: '#3a3d43' }) + R(x + 74, cy + 9, Math.max(40, w - 146) * r.v, 4, { rx: 2, fill: C.amber }) + Ci(x + 74 + Math.max(40, w - 146) * r.v, cy + 11, 6, { fill: C.amber, stroke: '#17181b', sw: 2 }) + T(x + w - 12, cy + 14, r.txt, { size: 12, anchor: 'end' }); cy += 24; }
+    else if (r.t === 'note') { s += T(x + 12, cy + 12, r.txt, { fill: r.fill || C.amber, size: 11 }); cy += 18; }
+    else if (r.t === 'chips') { let px = x + 12; r.items.forEach((c, i) => { const cw = c.length * 6.2 + 16; s += R(px, cy + 2, cw, 20, { rx: 10, fill: i === r.on ? C.accent : '#313338', stroke: i === r.on ? C.accent : '#4a4d55' }) + T(px + 8, cy + 16, c, { size: 11 }); px += cw + 5; }); cy += 26; }
+    else cy += 8;
+  });
+  return s;
+}
+function callout(x, y, txt, tx, ty, o = {}) {
+  const anchor = o.anchor || 'start', w = txt.length * 6.9;
+  let lx = x;
+  if (anchor === 'start' && x + w > W - 10) lx = W - 10 - w;
+  if (anchor === 'end' && x - w < 10) lx = 10 + w;
+  const lo = anchor === 'end' ? lx - w : lx, sx = Math.min(Math.max(tx, lo + 6), lo + w - 6), sy = ty < y ? y - 15 : y + 4;
+  return L(sx, sy, tx, ty, { stroke: C.amber, sw: 1, op: .5 }) + Ci(tx, ty, 3, { fill: C.amber }) + '<text ' + at({ x: lx, y, fill: C.amber, 'font-size': 12, 'text-anchor': anchor, 'font-weight': 600, stroke: '#17181b', 'stroke-width': 3.5, 'paint-order': 'stroke', 'stroke-linejoin': 'round', style: 'white-space:pre' }) + '>' + esc(txt) + '</text>';
+}
+function arrowV(x, y1, y2, col) { return L(x, y1, x, y2, { stroke: col || C.amber, sw: 1.6 }) + poly(x + ',' + (y1 - 6) + ' ' + (x - 4) + ',' + (y1 + 2) + ' ' + (x + 4) + ',' + (y1 + 2), { fill: col || C.amber }) + poly(x + ',' + (y2 + 6) + ' ' + (x - 4) + ',' + (y2 - 2) + ' ' + (x + 4) + ',' + (y2 - 2), { fill: col || C.amber }); }
+function handles(x0, y0, x1, y1) {
+  let s = R(x0, y0, x1 - x0, y1 - y0, { stroke: C.accent, sw: 1.3 });
+  [[x0, y0], [(x0 + x1) / 2, y0], [x1, y0], [x1, (y0 + y1) / 2], [x1, y1], [(x0 + x1) / 2, y1], [x0, y1], [x0, (y0 + y1) / 2]].forEach((p, i) => { s += i % 2 ? R(p[0] - 4, p[1] - 4, 8, 8, { rx: 4, fill: '#17181b', stroke: C.accent, sw: 1.5 }) : R(p[0] - 5, p[1] - 5, 10, 10, { rx: 1, fill: '#fff', stroke: C.accent, sw: 1.5 }); });
+  return s;
+}
+const A = { x: 90, y: 62, w: 520, h: 380, label: 'Untitled-1' };
+const defsOf = (id, inner) => '<defs>' + inner + '</defs>';
+
+// ---------- scenes ----------
+const scenes = {};
+scenes.empty = () => base({ name: '', hint: 1 }) +
+  T(480, 236, 'Nothing open', { size: 22, anchor: 'middle', fill: '#6a6d76' }) + T(480, 262, 'Tap Space, or press the pen’s barrel button', { size: 13, anchor: 'middle', fill: '#6a6d76' }) +
+  pen(480, 320, { hover: true, barrel: true }) +
+  callout(26, 140, 'No toolbar, no palette, no panels', 14, 120) + callout(150, 62, 'Top row: logo and document name (empty)', 70, 20, {}) +
+  hintBar('Nothing open', '', [['Space', 'new document'], ['Ctrl O', 'open']]);
+scenes.newring = () => base({}) +
+  ring(480, 245, 'Create', 'Create...', [
+    { key: '1', label: 'Letter' }, { key: '2', label: 'A4' }, { key: '3', label: 'Full HD' }, { key: '4', label: 'Square 1080' }, { key: 'O', label: 'Open…' }, { key: 'R', label: 'Recent' },
+  ], { dim: true, hi: 2, R: 118 }) + pen(480, 245, {}) +
+  callout(690, 112, 'Flick toward a slot without waiting and the ring never draws', 612, 150, {}) + callout(60, 432, 'The hub opens the full New Document dialog', 450, 262, {}) +
+  hintBar('New', 'pick a size', [['1-4', 'size'], ['O', 'open'], ['Esc', 'cancel']]);
+scenes.dialog = () => base({}) + R(0, 30, W, H - 56, { fill: '#0007' }) + card(190, 52, 580, 390) +
+  T(214, 82, 'New Document', { size: 16, weight: 600 }) + T(214, 110, 'Name', { fill: C.muted }) + R(300, 94, 250, 26, { rx: 6, fill: '#2a2c31', stroke: '#4a4d55' }) + T(310, 112, 'Untitled-1') +
+  T(214, 146, 'Preset', { fill: C.muted }) + ['Letter', 'A4', 'Full HD', 'Square 1080', 'Custom'].map((p, i) => R(300 + i * 86 - (i > 3 ? 8 : 0), 130, p.length * 6.6 + 18, 24, { rx: 12, fill: i === 2 ? C.accent : '#313338', stroke: i === 2 ? C.accent : '#4a4d55' }) + T(300 + i * 86 - (i > 3 ? 8 : 0) + 9, 146, p, { size: 12 })).join('') +
+  T(214, 184, 'Size', { fill: C.muted }) + R(300, 168, 80, 26, { rx: 6, fill: '#2a2c31', stroke: '#4a4d55' }) + T(310, 186, '1920') + T(388, 186, '×', { fill: C.muted }) + R(402, 168, 80, 26, { rx: 6, fill: '#2a2c31', stroke: '#4a4d55' }) + T(412, 186, '1080') + R(492, 168, 56, 26, { rx: 6, fill: '#2a2c31', stroke: '#4a4d55' }) + T(502, 186, 'px  ▾') +
+  T(214, 224, 'Orientation', { fill: C.muted }) + R(300, 208, 28, 22, { rx: 4, stroke: C.accent, sw: 1.6 }) + R(338, 204, 22, 28, { rx: 4, stroke: '#6a6d76' }) +
+  T(214, 262, 'Artboards', { fill: C.muted }) + R(300, 246, 56, 26, { rx: 6, fill: '#2a2c31', stroke: '#4a4d55' }) + T(310, 264, '1') +
+  T(214, 300, 'Background', { fill: C.muted }) + R(300, 284, 110, 26, { rx: 6, fill: '#2a2c31', stroke: '#4a4d55' }) + T(310, 302, 'White  ▾') +
+  T(214, 338, 'Colour mode', { fill: C.muted }) + R(300, 322, 110, 26, { rx: 6, fill: '#2a2c31', stroke: '#4a4d55' }) + T(310, 340, 'RGB  ▾') +
+  R(590, 100, 150, 100, { fill: C.paper, stroke: '#6a6d76' }) + T(665, 218, '1920 × 1080 px', { size: 11, anchor: 'middle', fill: C.muted }) +
+  R(214, 394, 90, 30, { rx: 15, fill: C.accent }) + T(259, 413, 'Create', { anchor: 'middle', weight: 600 }) + R(314, 394, 90, 30, { rx: 15, fill: '#313338', stroke: '#4a4d55' }) + T(359, 413, 'Cancel', { anchor: 'middle' }) +
+  callout(560, 380, 'Rarely needed: the ring’s four sizes cover most starts', 560, 340, { anchor: 'start' }) +
+  hintBar('New Document', '', [['Enter', 'create'], ['Esc', 'cancel']]);
+scenes.doc = () => base({ name: 'Untitled-1 — 1920 × 1080 px', rulers: true, arts: [A] }) + pen(360, 260, { hover: true }) +
+  callout(640, 128, 'The artboard is centred and fitted', 612, 150, {}) + callout(640, 170, 'Rulers on by default (Ctrl R)', 616, 140, {}) + callout(560, 466, 'The hint bar says which keys do something right now', 420, 482, { anchor: 'start' }) +
+  hintBar('Select V', 'nothing selected', [['Space', 'create'], ['Ctrl Z', 'undo'], ['Tab', 'hide UI']]);
+scenes.createring = () => base({ name: 'Untitled-1', rulers: true, arts: [A] }) +
+  ring(350, 252, 'Create', 'Create...', [
+    { key: 'R', label: 'Rectangle' }, { key: 'E', label: 'Ellipse' }, { key: 'P', label: 'Polygon' }, { key: 'S', label: 'Star' }, { key: 'L', label: 'Line' }, { key: 'B', label: 'Freehand' }, { key: 'T', label: 'Text' }, { key: 'F', label: 'File' },
+  ], { dim: true, hi: 1 }) + pen(350, 252, { barrel: true }) +
+  callout(640, 110, 'Keys are printed on the slots, so the ring teaches the shortcuts', 520, 150, {}) + callout(640, 420, 'Once you know a key, hold it and drag without opening the ring', 520, 380, {}) +
+  hintBar('Create', 'pick a shape', [['R E P S L B T', 'direct'], ['Esc', 'close']]);
+scenes.draw = () => base({ name: 'Untitled-1', rulers: true, arts: [A] }) +
+  E(280, 250, 82, 82, { fill: C.accent, op: .35, stroke: C.accent, sw: 1.5 }) + R(198, 168, 164, 164, { stroke: C.accent, sw: 1, dash: '5 3' }) + L(198, 168, 362, 332, { stroke: C.amber, sw: 1, dash: '3 3' }) +
+  R(372, 346, 112, 22, { rx: 11, fill: '#17181b', stroke: C.line }) + T(428, 361, 'W 164   H 164', { size: 11, anchor: 'middle', fill: C.amber }) + pen(362, 332, { contact: true }) +
+  K(24, 410, 'E', true) + T(54, 410, 'held', { fill: C.amber }) + callout(640, 120, 'Hold E and drag: no ring needed', 460, 160) + callout(640, 160, 'Shift: perfect circle · Alt: from centre', 470, 200) +
+  hintBar('Drawing Ellipse', 'drag to size', [['Shift', 'circle'], ['Alt', 'from centre'], ['Esc', 'cancel']]);
+scenes.live = () => base({ name: 'Untitled-1', rulers: true, arts: [A] }) +
+  E(280, 250, 82, 82, { fill: C.accent, stroke: '#ffffff', sw: 4 }) + handles(198, 168, 362, 332) + pen(420, 300, { hover: true }) +
+  hud(650, 56, 296, 'Live Ellipse', 'selected', [
+    { t: 'chain', nodes: ['Ellipse', 'Transform', 'Fill', 'Stroke'], act: 0 }, { t: 'kv', k: 'X', v: '198' }, { t: 'kv', k: 'Y', v: '168' }, { t: 'kv', k: 'W / H', v: '164 / 164' },
+    { t: 'swatch', k: 'Fill', c: C.accent }, { t: 'swatch', k: 'Stroke', c: '#ffffff', v: '4 px' }, { t: 'sp' }, { t: 'note', txt: 'Tab pins this to the right edge · Esc dismisses' },
+  ]) + callout(640, 400, 'The shape is a chain of nodes; the HUD is its parameter list', 520, 280, { anchor: 'start' }) +
+  hintBar('Select V', 'Live Ellipse', [['W', 'hold: stroke'], ['C', 'hold: colour'], ['Space', 'ring']]);
+scenes.pen = () => {
+  const pts = [[140, 360], [230, 170], [330, 300], [430, 150], [520, 262]];
+  const d = 'M140 360 C150 300 190 170 230 170 S 290 300 330 300 S 390 150 430 150 S 500 262 520 262';
+  let s = base({ name: 'Untitled-1', rulers: true, arts: [A] }) + P(d, { stroke: '#2a2c31', sw: 4 }) + poly('160,420 210,404 270,408 330,392 400,396 470,382 470,386 400,402 330,398 270,414 210,410', { fill: '#7a4cff' });
+  pts.forEach((p, i) => { s += i === 0 ? R(p[0] - 5, p[1] - 5, 10, 10, { fill: '#fff', stroke: C.accent, sw: 1.6 }) : Ci(p[0], p[1], 5, { fill: i === 3 ? C.accent : '#fff', stroke: C.accent, sw: 1.6 }); });
+  s += L(430, 150, 480, 150, { stroke: C.accent }) + L(430, 150, 380, 150, { stroke: C.accent }) + Ci(480, 150, 3.5, { fill: C.accent }) + Ci(380, 150, 3.5, { fill: C.accent });
+  s += L(520, 262, 580, 330, { stroke: C.amber, sw: 1.2, dash: '4 3' }) + R(552, 350, 76, 20, { rx: 10, fill: '#17181b', stroke: C.line }) + T(590, 364, 'Add point', { size: 11, fill: C.amber, anchor: 'middle' }) + pen(580, 330, { hover: true });
+  s += hud(650, 56, 296, 'Path', 'bezierPath', [
+    { t: 'chain', nodes: ['fitCurve', 'bezierPath', 'Fill', 'Stroke'], act: 1 }, { t: 'kv', k: 'Anchors', v: '5' }, { t: 'kv', k: 'Closed', v: 'no' }, { t: 'slider', k: 'Smooth', v: .4, txt: '3.2' }, { t: 'slider', k: 'Corner', v: .6, txt: '50°' }, { t: 'sp' }, { t: 'note', txt: 'Pressure and tilt live on the anchors' }, { t: 'note', txt: 'The Stroke node maps pressure to width', fill: C.muted },
+  ]);
+  return s + callout(160, 466, 'Freehand: raw samples fitted to curves; pressure becomes the variable width', 200, 408, { anchor: 'start' }) + callout(640, 300, 'Click = corner, drag = smooth', 540, 180, {}) +
+    hintBar('Pen P', 'adding a point', [['Shift', '45°'], ['Alt', 'cusp'], ['Space', 'move anchor'], ['Enter', 'finish']]);
+};
+scenes.docked = () => {
+  const AR = { x: 70, y: 62, w: 640, h: 380, label: 'Untitled-1' };
+  let s = base({ name: 'Untitled-1 — 1920 × 1080 px', rulers: true, arts: [AR] }) + E(300, 250, 82, 82, { fill: C.accent, stroke: '#fff', sw: 4 }) + handles(218, 168, 382, 332) + R(430, 150, 190, 90, { rx: 10, fill: C.green }) + poly(star(540, 330, 50, 21, 5), { fill: '#ffb454' });
+  const tools = [['V', '⬉'], ['A', '▷'], 0, ['P', '✎'], ['B', '🖌'], 0, ['R', '▭'], ['E', '◯'], ['S', '☆'], ['T', 'T'], 0, ['G', '◧'], ['I', '💧'], ['Z', '🔍']];
+  s += R(0, 30, 46, H - 56, { fill: '#17181b', op: .6 }) + L(46, 30, 46, H - 26, { stroke: '#ffffff2a' });
+  let ty = 38; tools.forEach((t, i) => {
+    if (!t) { s += L(10, ty + 2, 36, ty + 2, { stroke: '#ffffff2a' }); ty += 7; return; }
+    s += R(6, ty, 34, 29, { rx: 7, fill: i === 0 ? '#4c8dff' : 'none', stroke: i === 0 ? '#4c8dff' : '#ffffff22' }) + T(22, ty + 20, t[1], { size: 14, anchor: 'middle', fill: C.text }) + T(37, ty + 26, t[0], { size: 7, anchor: 'end', fill: i === 0 ? '#fff' : C.muted, weight: 600 }); ty += 32;
+  });
+  const px = 728, pw = 232;
+  s += R(px, 30, pw, H - 56, { fill: '#17181b', op: .6 }) + L(px, 30, px, H - 26, { stroke: '#ffffff2a' });
+  const box = (y, h, title, sel) => R(px + 10, y, pw - 20, h, { rx: 8, fill: '#26272b', op: .55, stroke: sel ? C.amber : '#ffffff1f' }) + T(px + 20, y + 16, title, { weight: 600, size: 12 });
+  const sl = (y, lab, v, val) => T(px + 20, y + 4, lab, { size: 11, fill: C.muted }) + R(px + 70, y - 2, 90, 4, { rx: 2, fill: '#3a3d43' }) + R(px + 70, y - 2, 90 * v, 4, { rx: 2, fill: C.amber }) + Ci(px + 70 + 90 * v, y, 5, { fill: C.amber, stroke: '#17181b', sw: 2 }) + T(px + pw - 20, y + 4, val, { size: 11, anchor: 'end' });
+  const num = (x, y, lab, v) => R(x, y, 88, 20, { rx: 5, fill: '#2a2c31', stroke: '#4a4d55' }) + T(x + 6, y + 14, lab, { size: 10, fill: C.muted }) + T(x + 82, y + 14, v, { size: 11, anchor: 'end' });
+  let y = 38;
+  s += box(y, 76, 'Transform') + num(px + 20, y + 22, 'X', '218') + num(px + 116, y + 22, 'Y', '168') + num(px + 20, y + 46, 'W', '164') + num(px + 116, y + 46, 'H', '164'); y += 82;
+  s += box(y, 68, 'Fill', true) + R(px + 20, y + 22, 34, 18, { rx: 5, fill: C.accent, stroke: '#6a6d76' }) + T(px + 62, y + 35, '#4C8DFF', { size: 11, fill: C.muted }) + sl(y + 54, 'Hue', .6, '218'); y += 74;
+  s += box(y, 70, 'Stroke') + sl(y + 32, 'Width', .25, '4 px') + ['Butt', 'Round', 'Sq'].map((c, i) => R(px + 20 + i * 52, y + 42, 46, 20, { rx: 10, fill: i === 1 ? C.accent : '#313338', stroke: i === 1 ? C.accent : '#4a4d55' }) + T(px + 43 + i * 52, y + 56, c, { size: 10, anchor: 'middle' })).join(''); y += 76;
+  s += box(y, 42, 'Opacity') + sl(y + 32, 'All', 1, '100'); y += 48;
+  s += box(y, 64, 'Live ellipse') + sl(y + 32, 'Radius X', .5, '82') + sl(y + 50, 'Radius Y', .5, '82'); y += 70;
+  s += box(y, 64, 'Effects') + sl(y + 32, 'Shadow', .2, '8 px') + sl(y + 50, 'Blur', 0, '0 px');
+  s += pen(430, 400, { hover: true });
+  return s + callout(60, 464, 'Off by default: settings ring switches', 24, 120, {}) + callout(340, 464, 'Translucent: the canvas keeps its full size', 780, 330, {}) + callout(300, 110, 'Same values as the popups: edit either', 760, 90, {}) +
+    hintBar('Select V', 'Live Ellipse', [['Settings ring', 'Toolbar · Properties · Blur']]);
+};
+scenes.toolopts = () => {
+  let s = base({ name: 'Untitled-1' });
+  s += R(0, 30, 480, H - 56, { fill: C.bg }) + R(482, 30, 478, H - 56, { fill: C.bg }) + L(481, 30, 481, H - 26, { stroke: '#000', sw: 3 });
+  s += T(240, 52, 'Toolbar on: double-click a tool', { anchor: 'middle', fill: C.muted, size: 12 }) + T(721, 52, 'Ring only (the default): hold a slot', { anchor: 'middle', fill: C.muted, size: 12 });
+  s += R(70, 70, 360, 380, { fill: C.paper }) + poly(star(330, 150, 56, 22, 7), { fill: '#ffb454', op: .9 }) + R(120, 300, 150, 90, { rx: 10, fill: C.accent, op: .85 });
+  const tools = [['V', '\u2b09', 1], ['A', '\u25b7', 1], 0, ['P', '\u270e', 1], ['B', '\ud83d\udd8c', 1], 0, ['R', '\u25ad', 1], ['E', '\u25ef', 1], ['S', '\u2606', 1], ['T', 'T', 1], 0, ['G', '\u25e7', 1], ['I', '\ud83d\udca7', 1], ['Z', '\ud83d\udd0d', 0]];
+  s += R(0, 30, 46, H - 56, { fill: '#17181b', op: .6 }) + L(46, 30, 46, H - 26, { stroke: '#ffffff2a' });
+  let ty = 38, starY = 0;
+  tools.forEach(t => {
+    if (!t) { s += L(10, ty + 2, 36, ty + 2, { stroke: '#ffffff2a' }); ty += 7; return; }
+    const act = t[0] === 'S';
+    if (act) starY = ty;
+    s += R(6, ty, 34, 29, { rx: 7, fill: act ? '#4c8dff' : 'none', stroke: act ? '#4c8dff' : '#ffffff22' }) + T(22, ty + 20, t[1], { size: 14, anchor: 'middle', fill: C.text }) + T(37, ty + 26, t[0], { size: 7, anchor: 'end', fill: act ? '#fff' : C.muted, weight: 600 }) + (t[2] ? Ci(36, ty + 6, 2.5, { fill: C.amber }) : '');
+    ty += 32;
+  });
+  const cyS = starY + 14, cx0 = 58, cy0 = starY - 60;
+  s += Ci(23, cyS, 15, { stroke: C.amber, sw: 1.6 }) + Ci(23, cyS, 23, { stroke: C.amber, sw: 1.2, dash: '3 3', op: .8 });
+  s += R(cx0, cy0, 224, 150, { rx: 10, fill: '#17181b', stroke: C.line }) + poly((cx0 - 8) + ',' + cyS + ' ' + cx0 + ',' + (cyS - 6) + ' ' + cx0 + ',' + (cyS + 6), { fill: '#17181b', stroke: C.line });
+  s += T(cx0 + 12, cy0 + 20, 'Star options', { weight: 600, size: 13 }) + T(cx0 + 212, cy0 + 20, 'next star', { size: 11, fill: C.muted, anchor: 'end' });
+  [['Points', .55, '7'], ['Inner radius', .4, '40%']].forEach((r, i) => { const y = cy0 + 48 + i * 26; s += T(cx0 + 12, y + 4, r[0], { size: 11, fill: C.muted }) + R(cx0 + 90, y, 78, 4, { rx: 2, fill: '#3a3d43' }) + R(cx0 + 90, y, 78 * r[1], 4, { rx: 2, fill: C.amber }) + Ci(cx0 + 90 + 78 * r[1], y + 2, 6, { fill: C.amber, stroke: '#17181b', sw: 2 }) + T(cx0 + 212, y + 4, r[2], { size: 11, anchor: 'end' }); });
+  s += T(cx0 + 12, cy0 + 112, 'A selected star is edited in the HUD', { size: 10, fill: C.amber }) + R(cx0 + 12, cy0 + 122, 90, 20, { rx: 10, fill: '#313338', stroke: '#4a4d55' }) + T(cx0 + 57, cy0 + 136, 'Reset', { size: 10, anchor: 'middle' });
+  s += callout(60, 470, 'Amber dot: the tool has options; no dot: nothing opens', 20, 330, {});
+  const cx = 722, cy = 232;
+  s += ring(cx, cy, 'Create', 'Create...', [
+    { key: 'R', label: 'Rectangle', opt: true }, { key: 'E', label: 'Ellipse', opt: true }, { key: 'P', label: 'Polygon', opt: true }, { key: 'S', label: 'Star', opt: true }, { key: 'L', label: 'Line' }, { key: 'B', label: 'Freehand', opt: true }, { key: 'T', label: 'Text', opt: true }, { key: 'F', label: 'File' },
+  ], { hi: 3, R: 104 });
+  const a = 45 * Math.PI / 180, sx = cx + Math.cos(a) * 104 * 1.12, sy = cy + Math.sin(a) * 104;
+  s += Ci(sx, sy, 24, { stroke: C.amber, sw: 2, dash: '34 8', op: .9 }) + pen(sx, sy + 2, { contact: true, barrel: true });
+  s += R(700, 352, 250, 100, { rx: 10, fill: '#17181b', stroke: C.line }) + poly(sx + ',' + (sy + 17) + ' ' + (sx - 6) + ',352 ' + (sx + 6) + ',352', { fill: '#17181b', stroke: C.line });
+  s += T(712, 372, 'Star options', { weight: 600, size: 13 });
+  [['Points', .55, '7'], ['Inner radius', .4, '40%']].forEach((r, i) => { const y = 392 + i * 22; s += T(712, y + 4, r[0], { size: 11, fill: C.muted }) + R(790, y, 92, 4, { rx: 2, fill: '#3a3d43' }) + R(790, y, 92 * r[1], 4, { rx: 2, fill: C.amber }) + Ci(790 + 92 * r[1], y + 2, 6, { fill: C.amber, stroke: '#17181b', sw: 2 }) + T(938, y + 4, r[2], { size: 11, anchor: 'end' }); });
+  s += callout(492, 70, 'Option box at the outer end: tap it', 600, 130, {}) + callout(940, 470, 'Or hold the slot, barrel button, or Shift + the key', 900, 456, { anchor: 'end' });
+  return s + hintBar('Tool options', 'Star', [['2\u00d7click', 'toolbar'], ['tap box', 'ring'], ['hold slot', 'ring'], ['Esc', 'close']]);
+};
+scenes.scrub = () => base({ name: 'Untitled-1', rulers: true, arts: [A] }) +
+  E(280, 250, 82, 82, { fill: C.accent, stroke: C.amber, sw: 12 }) + pen(356, 250, { contact: true }) + arrowV(392, 200, 300, C.amber) +
+  card(404, 140, 214, 84) + T(416, 164, 'Stroke width', { weight: 600 }) + K(500, 164, 'W', true) + T(606, 164, '12 px', { anchor: 'end', fill: C.amber, weight: 600 }) + R(416, 182, 190, 6, { rx: 3, fill: '#3a3d43' }) + R(416, 182, 90, 6, { rx: 3, fill: C.amber }) + Ci(506, 185, 8, { fill: C.amber, stroke: '#17181b', sw: 2 }) + T(416, 210, 'up = thicker · Shift snaps 1 2 4 8 16 32', { size: 10, fill: C.muted }) +
+  callout(640, 112, 'The part under the pen is outlined; its keys follow from it', 560, 190, {}) + callout(640, 380, 'Release to keep: one undo step', 520, 280, {}) +
+  hintBar('Scrubbing', 'outline width', [['↑ ↓', 'drag'], ['Shift', 'snap'], ['[ ]', 'step']]);
+scenes.colour = () => {
+  let s = base({ name: 'Untitled-1', rulers: true, arts: [A] }) + E(280, 250, 82, 82, { fill: '#ff8a3d', stroke: '#fff', sw: 4 });
+  const cx = 470, cy = 250;
+  s += card(cx - 100, cy - 118, 200, 250);
+  for (let i = 0; i < 36; i++) { const a0 = i * 10 * Math.PI / 180, a1 = (i * 10 + 10.5) * Math.PI / 180; s += P('M' + (cx + Math.cos(a0) * 62) + ' ' + (cy - 8 + Math.sin(a0) * 62) + ' A62 62 0 0 1 ' + (cx + Math.cos(a1) * 62) + ' ' + (cy - 8 + Math.sin(a1) * 62), { stroke: 'hsl(' + i * 10 + ',80%,55%)', sw: 12, cap: 'butt' }); }
+  s += defsOf('c', '<linearGradient id="cw"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#ff7a00"/></linearGradient><linearGradient id="cb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000"/></linearGradient>') +
+    R(cx - 36, cy - 44, 72, 72, { fill: 'url(#cw)' }) + R(cx - 36, cy - 44, 72, 72, { fill: 'url(#cb)' }) + Ci(cx + 14, cy - 14, 5, { stroke: '#fff', sw: 2 }) + Ci(cx + 62 * 0.9, cy - 8 - 62 * 0.2, 7, { stroke: '#fff', sw: 2 });
+  s += R(cx - 88, cy + 52, 80, 22, { rx: 6, fill: '#ff8a3d' }) + R(cx - 8, cy + 52, 80, 22, { rx: 6, fill: '#ff7a00' }) + T(cx - 48, cy + 88, 'old', { size: 10, fill: C.muted, anchor: 'middle' }) + T(cx + 32, cy + 88, 'new', { size: 10, fill: C.muted, anchor: 'middle' });
+  ['#e5527a', '#ffb454', '#3ec3a0', '#4c8dff', '#8e6bff', '#ffffff', '#222', '#ff8a3d'].forEach((c, i) => { s += R(cx - 92 + i * 23, cy + 98, 18, 18, { rx: 5, fill: c, stroke: '#6a6d76' }) + T(cx - 83 + i * 23, cy + 130, String(i + 1), { size: 9, fill: C.muted, anchor: 'middle' }); });
+  return s + pen(cx + 62 * 0.9, cy - 8 - 62 * 0.2, { contact: true }) + K(24, 410, 'C', true) + T(54, 410, 'held', { fill: C.amber }) +
+    callout(640, 120, 'Hue ring + saturation/brightness square, at the pen', 570, 150, {}) + callout(640, 160, 'Keys 1-8: recent colours · Space: fill ↔ stroke · I: sample', 575, 345, {}) + callout(640, 420, 'Gradients are edited on the shape itself (hold G)', 330, 300, {}) +
+    hintBar('Colour', 'fill', [['1-8', 'recent'], ['Space', 'fill/stroke'], ['I', 'sample']]);
+};
+scenes.transform = () => {
+  let s = base({ name: 'Untitled-1', rulers: true, arts: [A] }) +
+    R(130, 340, 70, 60, { rx: 6, fill: C.green, op: .85 }) + poly(star(440, 330, 48, 20, 5), { fill: '#ffb454', op: .9 }) +
+    G(R(150, 120, 150, 90, { rx: 10, fill: C.accent, stroke: '#fff', sw: 4 }), { tf: 'rotate(-14 225 165)' }) + G(E(400, 160, 64, 64, { fill: C.red }), {});
+  s += L(150, 40, 150, 440, { stroke: C.amber, sw: 1 }) + L(30, 250, 600, 250, { stroke: C.amber, sw: 1, op: .0 });
+  s += R(136, 96, 330, 130, { stroke: C.accent, sw: 1.3 }) + [[136, 96], [301, 96], [466, 96], [466, 161], [466, 226], [301, 226], [136, 226], [136, 161]].map((p, i) => i % 2 ? R(p[0] - 4, p[1] - 4, 8, 8, { rx: 4, fill: '#17181b', stroke: C.accent, sw: 1.5 }) : R(p[0] - 5, p[1] - 5, 10, 10, { fill: '#fff', stroke: C.accent, sw: 1.5 })).join('') +
+    Ci(301, 161, 6, { stroke: C.amber, sw: 1.5 }) + L(292, 161, 310, 161, { stroke: C.amber }) + L(301, 152, 301, 170, { stroke: C.amber }) +
+    P('M486 82 A28 28 0 0 1 500 110', { stroke: C.amber, sw: 1.8 }) + poly('500,110 494,104 502,102', { fill: C.amber }) + R(506, 76, 54, 20, { rx: 10, fill: '#17181b', stroke: C.line }) + T(533, 90, '32°', { size: 11, anchor: 'middle', fill: C.amber });
+  s += R(110, 270, 160, 100, { stroke: C.accent, sw: 1, dash: '5 3', fill: '#4c8dff22' }) + pen(110, 270, { contact: true });
+  return s + callout(640, 100, 'Drag a corner to scale, just outside a corner to rotate', 470, 96, {}) + callout(640, 142, 'Ctrl-drag an edge: skew · Ctrl-drag the crosshair: pivot', 301, 161, {}) +
+    callout(640, 184, 'Amber lines: smart guides snap to other objects', 150, 340, {}) + callout(640, 226, 'Marquee: left→right contains, right→left touches', 270, 330, {}) +
+    hintBar('Select V', '2 selected', [['Shift', 'proportions'], ['Alt', 'copy'], ['R S K', 'hold: rotate scale skew'], ['Ctrl D', 'duplicate again']]);
+};
+scenes.objring = () => base({ name: 'Untitled-1', rulers: true, arts: [A] }) + E(280, 250, 82, 82, { fill: C.accent, stroke: '#fff', sw: 4 }) + handles(198, 168, 362, 332) +
+  ring(340, 252, 'Ellipse', 'Transform...', [
+    { key: 'G', label: 'Group' }, { key: 'D', label: 'Duplicate' }, { key: 'X', label: 'Delete' }, { key: 'H', label: 'Flip ↔' }, { key: 'V', label: 'Flip ↕' }, { key: 'A', label: 'Align…' }, { key: 'O', label: 'Arrange…' }, { key: 'B', label: 'Bake' },
+  ], { dim: true, hi: 5 }) + pen(340, 252, { barrel: true }) +
+  callout(640, 110, 'Sub-rings: Align (T R B L M C + space H/V), Arrange (front, back…)', 560, 160, {}) + callout(640, 420, 'Over a group the last slot becomes Enter group; inside, Exit', 520, 380, {}) +
+  hintBar('Ring', 'Ellipse', [['G D X H V A O B', 'slot keys']]);
+scenes.bool = () => base({ name: 'Untitled-1', rulers: true, arts: [A] }) +
+  Ci(220, 250, 78, { fill: C.accent, op: .95 }) + Ci(320, 250, 78, { fill: C.red, op: .95 }) +
+  ring(270, 252, '2 shapes', 'Combine...', [
+    { key: 'U', label: 'Union' }, { key: 'S', label: 'Subtract' }, { key: 'I', label: 'Intersect' }, { key: 'E', label: 'Exclude' }, { key: 'D', label: 'Divide' }, { key: 'C', label: 'Clip' }, { key: 'O', label: 'Opacity mask' }, { key: 'B', label: 'Shape builder' },
+  ], { dim: true, hi: 1, R: 118 }) + pen(270, 252, { barrel: true }) +
+  card(650, 56, 296, 210) + T(662, 76, 'Result: live Boolean', { weight: 600, size: 13 }) + defsOf('b', '<mask id="bm"><rect x="0" y="0" width="960" height="500" fill="#fff"/><circle cx="830" cy="170" r="62" fill="#000"/></mask>') + G(Ci(775, 170, 62, { fill: C.accent }), { mask: 'url(#bm)' }) + Ci(830, 170, 62, { stroke: '#ff6b6b', sw: 1.6, dash: '5 3' }) + Ci(775, 170, 62, { stroke: '#cfd3dc', sw: 1, dash: '5 3', op: .6 }) + T(798, 250, 'operands shown as ghosts', { size: 10, fill: C.muted, anchor: 'middle' }) +
+  hud(650, 276, 296, 'Operands', 'base first', [{ t: 'kv', k: '● Circle A', v: 'base' }, { t: 'kv', k: '● Circle B', v: 'Subtract ▾', hl: true }]) +
+  callout(40, 470, 'Move an operand inside the node and the result follows; Separate puts them back', 150, 440, { anchor: 'start' }) +
+  hintBar('Combine', 'Subtract', [['U S I E', 'live'], ['D B', 'destructive'], ['C O', 'masks']]);
+scenes.mask = () => {
+  let s = base({ name: 'Untitled-1', rulers: true, arts: [A] }) + defsOf('m', '<linearGradient id="mg"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#000"/></linearGradient><mask id="mm"><rect x="0" y="0" width="960" height="500" fill="#000"/><circle cx="330" cy="250" r="110" fill="url(#mg)"/></mask>');
+  let bars = ''; for (let i = 0; i < 9; i++) bars += R(130 + i * 46, 130, 26, 240, { fill: i % 2 ? C.violet : '#ffb454' });
+  s += G(bars, { op: .22 }) + G(bars, { mask: 'url(#mm)' }) + Ci(330, 250, 110, { stroke: C.amber, sw: 1.4, dash: '6 3' }) + pen(380, 300, { hover: true });
+  return s + hud(650, 56, 296, 'Opacity mask', 'luminosity', [
+    { t: 'chain', nodes: ['Content ×9', 'Mask', 'Opacity mask'], act: 2 }, { t: 'kv', k: 'Invert mask', v: 'off' }, { t: 'note', txt: 'White shows, black hides, grey fades' }, { t: 'sp' }, { t: 'chips', items: ['Enter', 'Separate'], on: -1 },
+  ]) + callout(640, 240, 'Clip works the same with a hard shape edge', 560, 300, {}) + callout(640, 280, 'Inside the node: faded content, orange mask outline', 380, 140, {}) +
+    hintBar('Select V', 'Opacity mask', [['2×click', 'enter'], ['Space', 'ring']]);
+};
+scenes.text = () => {
+  let s = base({ name: 'Untitled-1', rulers: true, arts: [A] }) + defsOf('t', '<path id="tp" d="M120 330 C200 150 360 150 560 320"/>');
+  s += P('M120 330 C200 150 360 150 560 320', { stroke: C.accent, sw: 1, dash: '4 3' }) + '<text font-size="64" font-family="Georgia, serif" font-style="italic" fill="#232a4a"><textPath href="#tp" startOffset="6%">Curvy type</textPath></text>' +
+    L(120, 346, 560, 346, { stroke: C.accent, sw: 1, op: .0 }) + R(398, 236, 2, 40, { fill: C.accent }) + pen(430, 380, { hover: true });
+  s += card(650, 56, 296, 392) + T(664, 78, 'Fonts', { weight: 600, size: 13 }) + K(722, 78, 'F', true) + R(664, 90, 268, 24, { rx: 6, fill: '#2a2c31', stroke: '#4a4d55' }) + T(674, 107, 'Search fonts', { fill: C.muted });
+  ['Document', 'Recent', 'Serif', 'Sans', 'Mono', 'Script'].forEach((c, i) => { s += R(664 + (i % 3) * 90, 124 + Math.floor(i / 3) * 26, 82, 20, { rx: 10, fill: i === 2 ? C.accent : '#313338', stroke: i === 2 ? C.accent : '#4a4d55' }) + T(664 + (i % 3) * 90 + 41, 138 + Math.floor(i / 3) * 26, c, { size: 11, anchor: 'middle' }); });
+  [['Georgia', 'Georgia, serif'], ['Palatino', '"Palatino Linotype", serif'], ['Cambria', 'Cambria, serif'], ['Times New Roman', '"Times New Roman", serif'], ['Constantia', 'Constantia, serif'], ['Garamond', 'Garamond, serif']].forEach((f, i) => { s += (i === 0 ? R(664, 186 + i * 36, 268, 32, { rx: 6, fill: '#3a3320', stroke: C.amber }) : '') + T(676, 210 + i * 36, f[0], { size: 17, family: f[1] }); });
+  return s + callout(40, 460, 'Hold F and move vertically to step through fonts, live on the text', 120, 400, { anchor: 'start' }) + callout(640, 470, 'S size · K tracking · L leading, as hold-key scrubs', 560, 360, { anchor: 'end' }) +
+    hintBar('Text T', 'on a path', [['F', 'fonts'], ['S K L', 'hold: size, kern, lead'], ['Space', 'text ring']]);
+};
+scenes.overlay = () => {
+  let s = base({ name: 'Untitled-1', rulers: true, arts: [A] }) + defsOf('o', '<linearGradient id="og" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7aa7d8"/><stop offset="1" stop-color="#2f3f5a"/></linearGradient>');
+  s += G(R(110, 100, 480, 300, { fill: 'url(#og)' }) + R(170, 170, 90, 200, { fill: '#1b2638' }) + R(430, 190, 110, 180, { fill: '#243049' }), { op: .38 }) + R(110, 100, 480, 300, { stroke: C.amber, sw: 1, dash: '6 3' });
+  const hy = 240; s += defsOf('p', '<clipPath id="pc"><rect x="16" y="46" width="944" height="428"/></clipPath>') + '<g clip-path="url(#pc)">' + L(20, hy, 940, hy, { stroke: C.green, sw: 1.2 });
+  [[60, hy], [660, hy]].forEach(v => { for (let a = -70; a <= 70; a += 14) { const r = Math.tan(a * Math.PI / 180); s += L(v[0], v[1], v[0] + (v[0] < 300 ? 600 : -600), v[1] + (v[0] < 300 ? 600 : -600) * r * (v[0] < 300 ? 1 : -1), { stroke: C.green, sw: 1, op: .22 }); } s += Ci(v[0], v[1], 7, { fill: C.green }); });
+  s += '</g>';
+  s += poly('230,300 330,276 330,160 230,170', { stroke: '#232a4a', sw: 2.2 }) + poly('330,276 430,300 430,170 330,160', { stroke: '#232a4a', sw: 2.2 }) + L(230, 300, 430, 300, { stroke: '#232a4a', sw: 2.2, op: 0 }) +
+    L(430, 170, 540, 130, { stroke: C.amber, sw: 1.8 }) + R(546, 150, 138, 20, { rx: 10, fill: '#17181b', stroke: C.line }) + T(615, 164, 'ray 2 · snaps to ref', { size: 11, fill: C.amber, anchor: 'middle' }) + pen(540, 130, { contact: true });
+  return s + hud(700, 56, 246, 'Overlays', 'never exported', [
+    { t: 'kv', k: '◉ Perspective 2-point', v: '' }, { t: 'slider', k: 'Opacity', v: .6, txt: '60%' }, { t: 'kv', k: '◉ Reference image', v: '' }, { t: 'slider', k: 'Opacity', v: .38, txt: '38%' }, { t: 'sp' }, { t: 'note', txt: 'Draw into: Art / Reference' },
+  ]) + callout(40, 470, 'Shift locks the segment to the nearest ray; 1-4 chooses one', 340, 230, { anchor: 'start' }) + callout(640, 400, 'Hold H to peek without overlays; O scrubs their opacity', 580, 120, { anchor: 'end' }) +
+    hintBar('Pen P', 'perspective', [['Shift', 'nearest ray'], ['1-4', 'pick ray'], ['H', 'hold: hide'], ['O', 'hold: fade']]);
+};
+scenes.outline = () => {
+  const rows = [[0, '▾ Layer 1', '', 1], [1, '▾ Group  Face', '', 1], [2, 'Eye L', C.accent, 0], [2, 'Eye R', C.accent, 0], [2, 'Mouth', C.red, 0], [1, 'Star', '#ffb454', 0], [0, '▾ Layer 2', '', 0], [1, 'Background', '#3ec3a0', 0], [1, 'Sun', '#ff8a3d', 0]];
+  let s = base({ name: 'Untitled-1', rulers: false, arts: [{ x: 290, y: 62, w: 380, h: 380, label: 'Untitled-1' }] }) + G(Ci(480, 220, 70, { fill: '#ffce6a' }) + Ci(455, 205, 8, { fill: C.accent }) + Ci(505, 205, 8, { fill: C.accent }) + P('M450 245 Q480 270 510 245', { stroke: C.red, sw: 4 }) + poly(star(590, 360, 44, 18, 5), { fill: '#ffb454' }), {});
+  s += card(12, 44, 250, 420) + T(26, 68, 'Outline', { weight: 600, size: 13 }) + K(88, 68, 'L', true) + R(26, 80, 222, 22, { rx: 6, fill: '#2a2c31', stroke: '#4a4d55' }) + T(36, 95, 'Filter: name, colour, group', { fill: C.muted, size: 11 });
+  rows.forEach((r, i) => { const y = 112 + i * 34; if (i === 4) s += R(20, y - 2, 236, 30, { rx: 6, fill: '#3a3320', stroke: C.amber }); s += (r[2] ? R(30 + r[0] * 16, y + 4, 18, 18, { rx: 4, fill: r[2] }) : '') + T(30 + r[0] * 16 + (r[2] ? 26 : 0), y + 18, r[1], { size: 12 }) + T(212, y + 18, '◉', { fill: C.muted, size: 12 }) + T(230, y + 18, i % 3 ? '○' : '🔒', { fill: C.muted, size: 11 }); });
+  s += card(690, 150, 48, 160) + [C.accent, C.green, '#ffb454', C.red].map((c, i) => Ci(714, 176 + i * 36, 11, { fill: c, stroke: i === 0 ? '#fff' : 'none', sw: 2 })).join('') + T(714, 330, 'layers', { size: 9, anchor: 'middle', fill: C.muted });
+  return s + callout(280, 470, 'Click a row to select it; click the artwork to find its row; hover previews it', 130, 252, { anchor: 'start' }) + callout(750, 200, 'Layer strip while drawing:', 738, 176, { anchor: 'start' }) + T(750, 218, 'hold L and move up/down', { fill: C.amber, size: 12 }) +
+    hintBar('Outline', 'Mouth selected', [['L', 'toggle'], ['Tab', 'hide all UI']]);
+};
+scenes.graph = () => {
+  const nodes = [[60, 110, 'Star', C.amber], [230, 110, 'Transform', C.accent], [400, 110, 'Copy × 6', C.accent], [570, 110, 'Merge', C.accent], [400, 250, 'Fill', C.red], [570, 250, 'Stroke', C.green], [740, 180, 'Display', C.amber]];
+  let s = base({ name: 'Untitled-1', rulers: false, arts: [{ x: 90, y: 62, w: 520, h: 380 }] }) + R(0, 30, W, H - 56, { fill: '#000a' });
+  [[0, 1], [1, 2], [2, 3], [4, 3], [5, 3], [3, 6]].forEach(e => { const a = nodes[e[0]], b = nodes[e[1]]; s += P('M' + (a[0] + 130) + ' ' + (a[1] + 30) + ' C' + (a[0] + 170) + ' ' + (a[1] + 30) + ' ' + (b[0] - 40) + ' ' + (b[1] + 30) + ' ' + b[0] + ' ' + (b[1] + 30), { stroke: '#6a6d76', sw: 1.6 }); });
+  nodes.forEach(n => { s += R(n[0], n[1], 130, 60, { rx: 10, fill: '#17181b', stroke: n[3] === C.amber ? C.amber : C.line }) + R(n[0], n[1], 6, 60, { rx: 3, fill: n[3] }) + T(n[0] + 16, n[1] + 24, n[2], { weight: 600 }) + T(n[0] + 16, n[1] + 44, n[2] === 'Display' ? 'shown on canvas' : 'params · fx · key', { fill: C.muted, size: 10 }) + Ci(n[0], n[1] + 30, 4, { fill: '#6a6d76' }) + Ci(n[0] + 130, n[1] + 30, 4, { fill: '#6a6d76' }); });
+  s += poly(star(125, 400, 40, 16, 5), { fill: C.amber }) + G(poly(star(125, 400, 40, 16, 5), { fill: C.amber }), {}) + K(24, 470, 'N', true) + T(54, 470, 'held', { fill: C.amber });
+  return s + callout(560, 340, 'The graph is the document; the canvas, outline and HUD are views of it', 560, 245, {}) + callout(560, 400, 'Release N and it goes away. A pinned drawer or window is the alternative', 740, 240, {}) +
+    hintBar('Graph lens', 'Star > Transform > Copy', [['N', 'hold: lens'], ['2×click', 'enter subnet']]);
+};
+scenes.card = () => {
+  let s = base({ name: 'Untitled-1', rulers: false, arts: [A] }) + R(0, 30, W, H - 56, { fill: '#0007' }) + card(150, 50, 660, 390);
+  ['Document', 'Swatches', 'Library', 'Fonts'].forEach((t, i) => { s += R(170 + i * 110, 66, 100, 26, { rx: 13, fill: i === 1 ? C.accent : '#313338', stroke: i === 1 ? C.accent : '#4a4d55' }) + T(220 + i * 110, 84, t, { anchor: 'middle', size: 12 }); });
+  const cols = ['#e5527a', '#ff8a3d', '#ffb454', '#ffe29a', '#3ec3a0', '#4c8dff', '#8e6bff', '#222', '#e8e8ea', '#f6f7f9', '#7a4cff', '#2f3f5a', '#5ad6c9', '#f2a1b8', '#c0392b', '#1abc9c'];
+  cols.forEach((c, i) => { s += R(172 + (i % 8) * 50, 116 + Math.floor(i / 8) * 50, 42, 42, { rx: 8, fill: c, stroke: i === 0 ? C.amber : '#4a4d55', sw: i === 0 ? 2 : 1 }); });
+  s += T(172, 250, '55 colours in use', { fill: C.muted }) + T(172, 270, 'Gradients', { weight: 600 }) + R(172, 280, 130, 38, { rx: 8, fill: '#7a4cff' }) + R(310, 280, 130, 38, { rx: 8, fill: '#ffb454' }) +
+    T(172, 346, 'Symbols · Patterns · Styles · Brushes live in the Library tab', { fill: C.muted, size: 12 });
+  s += card(590, 106, 200, 170, { op: 1 }) + R(604, 120, 44, 44, { rx: 8, fill: '#e5527a' }) + T(660, 138, '#E5527A', { weight: 600 }) + T(660, 156, 'used by 12 shapes', { fill: C.muted, size: 11 }) + T(604, 188, 'in 3 groups', { fill: C.muted, size: 11 }) + R(604, 204, 100, 24, { rx: 12, fill: '#313338', stroke: '#4a4d55' }) + T(654, 220, 'Select them', { anchor: 'middle', size: 11 });
+  return s + callout(40, 470, 'Reached from the “...” under the document ring; metadata lives here so the canvas stays clear', 600, 430, { anchor: 'start' }) + callout(600, 330, 'Editing a swatch recolours every shape that uses it', 740, 190, {}) +
+    hintBar('Document', 'Swatches', [['Esc', 'close']]);
+};
+scenes.artboards = () => {
+  const a = [{ x: 40, y: 110, w: 150, h: 150, label: 'App icon' }, { x: 214, y: 110, w: 260, h: 130, label: 'Banner' }, { x: 498, y: 100, w: 150, h: 230, label: 'Poster' }];
+  let s = base({ name: 'Untitled-1 — 3 artboards', rulers: true, arts: a });
+  s += Ci(115, 185, 52, { fill: C.accent }) + poly(star(115, 185, 28, 12, 5), { fill: '#fff' }) + R(228, 128, 232, 92, { rx: 10, fill: C.violet }) + Ci(470, 190, 40, { fill: '#ffb454' }) + R(512, 120, 120, 190, { rx: 6, fill: C.red }) + E(572, 205, 78, 30, { fill: C.green, op: .8 });
+  s += R(220, 345, 230, 70, { fill: '#7a4cff55', stroke: '#7a4cff', dash: '4 3' }) + T(335, 384, 'artwork outside any artboard: not exported', { anchor: 'middle', size: 11, fill: C.muted });
+  s += hud(690, 56, 256, 'Artboard', 'Banner', [{ t: 'kv', k: 'X / Y', v: '214 / 110' }, { t: 'kv', k: 'W / H', v: '1280 / 640' }, { t: 'chips', items: ['Phone', 'Web', 'Print'], on: 1 }, { t: 'kv', k: 'Background', v: 'White' }, { t: 'kv', k: 'Bleed', v: '0' }, { t: 'sp' }, { t: 'note', txt: 'Order = PDF page order' }]);
+  return s + callout(40, 470, 'Artboards are crops: artwork is shared, an Artboard node decides what each export contains', 120, 262, { anchor: 'start' }) + callout(690, 270, 'Hold W or H over an artboard and move to scrub its size', 470, 190, {}) +
+    hintBar('Artboard O', 'Banner', [['drag', 'create / move'], ['Alt', 'duplicate with art'], ['W H', 'hold: size']]);
+};
+scenes.docring = () => {
+  const a = [{ x: 60, y: 80, w: 220, h: 200 }, { x: 300, y: 80, w: 220, h: 200 }];
+  return base({ name: 'Untitled-1', rulers: true, arts: a }) + G(Ci(170, 180, 60, { fill: C.accent }), { op: .7 }) +
+    ring(630, 290, 'Document', 'Setup...', [
+      { key: 'A', label: 'New artboard' }, { key: 'N', label: 'New document' }, { key: 'O', label: 'Open' }, { key: 'S', label: 'Save' }, { key: 'E', label: 'Export' }, { key: 'I', label: 'Place image' }, { key: '0', label: 'Fit' }, { key: 'R', label: 'Rulers · grid' },
+    ], { dim: true, hi: 4, R: 118 }) + pen(630, 290, { barrel: true }) +
+    callout(40, 470, 'Over the grey workspace (outside every artboard) the ring is about the document, not an object', 100, 300, { anchor: 'start' }) + callout(40, 440, 'The same ring from the barrel button, or Space tap', 100, 270, { anchor: 'start' }) +
+    hintBar('Document', 'Export', [['A N O S E I 0 R', 'slot keys']]);
+};
+scenes.timeline = () => {
+  let s = base({ name: 'Untitled-1 — frame 18', rulers: false, arts: [{ x: 140, y: 42, w: 680, h: 240 }] });
+  s += P('M200 200 C300 80 420 80 520 200 S 700 240 760 120', { stroke: '#6a6d76', sw: 1.4, dash: '3 4' });
+  [[250, 150, 26, 36, .18], [330, 112, 34, 28, .3], [410, 120, 38, 24, .5]].forEach(g => { s += E(g[0], g[1], g[2], g[3], { fill: C.accent, op: g[4] }); });
+  s += E(500, 190, 38, 22, { fill: C.accent, stroke: '#fff', sw: 3 }) + E(494, 186, 4, 5, { fill: '#fff' }) + E(510, 186, 4, 5, { fill: '#fff' }) + P('M486 200 Q500 208 514 200', { stroke: '#fff', sw: 2 });
+  s += R(0, 296, W, 178, { fill: '#202226' }) + L(0, 296, W, 296, { stroke: '#000' });
+  ['▶ Play', '◆ Key', '◐ Onion', '● Auto-key'].forEach((t, i) => { s += R(12 + i * 88, 304, 80, 22, { rx: 11, fill: i === 2 ? C.accent : '#313338', stroke: i === 2 ? C.accent : '#4a4d55' }) + T(52 + i * 88, 319, t, { anchor: 'middle', size: 11 }); });
+  s += K(380, 320, 'T', true) + T(404, 320, 'hold + sideways: scrub time', { fill: C.amber, size: 11 });
+  for (let f = 0; f <= 48; f += 6) s += L(160 + f * 15, 336, 160 + f * 15, 342, { stroke: '#6a6d76' }) + T(160 + f * 15, 334, String(f), { size: 9, anchor: 'middle', fill: C.muted });
+  const rows = ['Ball · position', 'Ball · squash', 'Face · switch', 'Bird · drawings'];
+  rows.forEach((r, i) => { const y = 350 + i * 28; s += T(14, y + 17, r, { size: 12, fill: C.muted }) + L(160, y + 26, 900, y + 26, { stroke: '#2c2e33' }); });
+  [[0, 0], [12, 0], [24, 0], [36, 0], [48, 0], [6, 1], [18, 1], [30, 1]].forEach(k => { s += poly((160 + k[0] * 15) + ',' + (356 + k[1] * 28) + ' ' + (166 + k[0] * 15) + ',' + (362 + k[1] * 28) + ' ' + (160 + k[0] * 15) + ',' + (368 + k[1] * 28) + ' ' + (154 + k[0] * 15) + ',' + (362 + k[1] * 28), { fill: C.amber }); });
+  [[0, 12, '1'], [12, 30, '2'], [30, 48, '1']].forEach(b => { s += R(160 + b[0] * 15, 406, (b[1] - b[0]) * 15, 20, { rx: 4, fill: '#2d3a59', stroke: C.accent }) + T(160 + (b[0] + b[1]) * 7.5, 420, b[2], { size: 11, anchor: 'middle' }); });
+  [[6, 18, '1'], [18, 30, '3'], [30, 48, '2']].forEach(b => { s += R(160 + b[0] * 15, 434, (b[1] - b[0]) * 15 - 4, 20, { rx: 4, fill: '#3a2d59', stroke: C.violet }) + T(160 + b[0] * 15 + 8, 448, 'Bird ' + b[2], { size: 10 }); });
+  s += L(160 + 18 * 15, 340, 160 + 18 * 15, 470, { stroke: C.amber, sw: 1.6 }) + poly((160 + 18 * 15 - 6) + ',336 ' + (160 + 18 * 15 + 6) + ',336 ' + (160 + 18 * 15) + ',346', { fill: C.amber });
+  return s + callout(560, 70, 'Onion skin: neighbouring frames as ghosts', 410, 120, {}) + callout(560, 112, 'Trajectory is a view of the position channel', 700, 250, {}) + hintBar('Timeline', 'frame 18', [['K', 'key'], ['← →', 'step'], ['Enter', 'play'], ['Tab', 'full dopesheet']]);
+};
+scenes.xsheet = () => {
+  let s = base({ name: 'Untitled-1 — Dopesheet', rulers: false, arts: [] });
+  s += R(40, 46, 580, 420, { rx: 6, fill: '#202226', stroke: '#000' });
+  const cols = ['Frame', 'Ball · y', 'Ball · squash', 'Face', 'Bird'], xs = [48, 118, 238, 358, 458];
+  cols.forEach((c, i) => { s += T(xs[i] + 8, 68, c, { size: 11, fill: C.muted, weight: 600 }); });
+  for (let f = 0; f < 15; f++) {
+    const y = 80 + f * 25; s += L(44, y + 24, 616, y + 24, { stroke: '#2c2e33' }) + T(xs[0] + 8, y + 17, String(f + 1), { size: 11, fill: C.muted });
+    const key = [0, 5, 11, 14].includes(f), v = [0, 28, 48, 60, 62, 55, 38, 18, 6, 0, 8, 22, 18, 6, 0][f];
+    s += (key ? R(xs[1] + 2, y + 2, 112, 21, { rx: 3, fill: '#3a3320', stroke: C.amber }) : '') + T(xs[1] + 10, y + 17, String(v), { size: 11, fill: key ? C.amber : C.text });
+    s += T(xs[2] + 10, y + 17, (1 + (f % 6) * 0.04).toFixed(2), { size: 11, fill: f === 5 || f === 11 ? C.amber : C.text });
+    s += R(xs[3] + 2, y + 2, 96, 21, { rx: 3, fill: f < 6 ? '#2d3a59' : f < 12 ? '#3a2d59' : '#2d4a3a' }) + (f === 0 || f === 6 || f === 12 ? T(xs[3] + 10, y + 17, ['smile', 'open', 'shut'][f / 6], { size: 11 }) : '');
+    s += R(xs[4] + 2, y + 2, 150, 21, { rx: 3, fill: f < 8 ? '#3a2d59' : '#2d3a59' }) + (f === 0 || f === 8 ? T(xs[4] + 10, y + 17, f === 0 ? 'Bird 1 · 2s' : 'Bird 2 · 2s', { size: 11 }) : '');
+  }
+  s += R(640, 46, 306, 200, { rx: 6, fill: C.paper, stroke: '#000' }) + E(790, 150, 40, 34, { fill: C.accent }) + E(784, 140, 4, 5, { fill: '#fff' }) + E(798, 140, 4, 5, { fill: '#fff' }) + T(792, 236, 'live preview', { size: 10, anchor: 'middle', fill: C.muted }) +
+    hud(640, 262, 306, 'Selection', 'frame 6', [{ t: 'kv', k: 'Ball · y', v: '28', hl: true }, { t: 'kv', k: 'Ease', v: 'smooth ▾' }, { t: 'chips', items: ['Dope', 'Xsheet'], on: 1 }]);
+  return s + callout(640, 450, 'Same selection model in both orientations; type a value into any cell', 560, 150, { anchor: 'start' }) + hintBar('Dopesheet', 'Xsheet', [['Tab', 'back to canvas'], ['G', 'hold: move'], ['E', 'hold: scale']]);
+};
+scenes.rig = () => {
+  let s = base({ name: 'Untitled-1 — rig', rulers: false, arts: [{ x: 60, y: 50, w: 560, h: 400 }] });
+  s += defsOf('r', '<linearGradient id="hm" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3a63ff"/><stop offset=".5" stop-color="#3adf7a"/><stop offset="1" stop-color="#ff4d3a"/></linearGradient>');
+  s += Ci(340, 120, 38, { fill: '#f3c9a5', stroke: '#c79a77' }) + R(298, 164, 84, 128, { rx: 30, fill: C.accent, op: .85 }) + G(R(380, 176, 110, 30, { rx: 15, fill: 'url(#hm)' }), { tf: 'rotate(25 380 190)' }) + R(250, 290, 36, 120, { rx: 16, fill: C.violet, op: .8 }) + R(394, 290, 36, 120, { rx: 16, fill: C.violet, op: .8 });
+  const J = [[340, 120], [340, 176], [340, 282], [388, 186], [450, 224], [498, 270], [284, 186], [244, 250], [214, 310], [268, 290], [268, 410], [412, 290], [412, 410]];
+  [[0, 1], [1, 2], [1, 3], [3, 4], [4, 5], [1, 6], [6, 7], [7, 8], [2, 9], [9, 10], [2, 11], [11, 12]].forEach(b => { s += L(J[b[0]][0], J[b[0]][1], J[b[1]][0], J[b[1]][1], { stroke: C.amber, sw: 2.4 }); });
+  J.forEach(j => { s += Ci(j[0], j[1], 5, { fill: '#17181b', stroke: C.amber, sw: 2 }); });
+  s += Ci(498, 270, 14, { stroke: C.green, sw: 2 }) + Ci(412, 410, 14, { stroke: C.green, sw: 2 }) + pen(498, 270, { contact: true });
+  s += card(640, 56, 306, 250) + T(654, 78, 'Head turn', { weight: 600, size: 13 }) + Ci(740, 160, 48, { fill: 'none', stroke: '#6a6d76', sw: 2 }) + L(740, 160, 765, 128, { stroke: C.amber, sw: 3 }) + Ci(740, 160, 5, { fill: C.amber }) + T(740, 232, '+18°', { anchor: 'middle', fill: C.amber, weight: 600 }) +
+    T(654, 262, 'drives head, neck, 5-face switch', { fill: C.muted, size: 11 });
+  s += hud(640, 322, 306, 'Right arm', 'IK', [{ t: 'slider', k: 'IK amount', v: .7, txt: '70%' }, { t: 'chips', items: ['FK', 'IK', 'To FK'], on: 1 }]);
+  return s + callout(40, 470, 'Pressure-painted weights: heat map blue 0 → red 1; B + vertical = brush size', 420, 190, { anchor: 'start' }) + callout(660, 440, 'Drag a green ring and the limb switches to IK, no pop', 498, 285, { anchor: 'start' }) +
+    hintBar('Rig', 'pose mode', [['B', 'hold: brush'], ['K', 'key pose'], ['Space', 'rig ring']]);
+};
+scenes.export = () => {
+  let s = base({ name: 'Untitled-1', rulers: false, arts: [A] }) + R(0, 30, W, H - 56, { fill: '#0007' }) + card(110, 46, 740, 400);
+  s += T(130, 76, 'Export', { weight: 600, size: 16 }) + T(130, 104, 'Artboards', { fill: C.muted, size: 11, weight: 600 });
+  [['App icon', 1], ['Banner', 1], ['Poster', 0]].forEach((a, i) => { s += R(130, 112 + i * 26, 16, 16, { rx: 4, fill: a[1] ? C.accent : 'none', stroke: a[1] ? C.accent : '#6a6d76' }) + (a[1] ? T(133, 125 + i * 26, '✓', { size: 11 }) : '') + T(154, 125 + i * 26, a[0]); });
+  s += T(130, 208, 'Outputs', { fill: C.muted, size: 11, weight: 600 });
+  [['SVG', 'responsive · embed graph'], ['PNG', '2× · transparent'], ['EXR sequence', '1–120 · beauty + motion + id']].forEach((o, i) => { s += R(130, 216 + i * 36, 330, 30, { rx: 8, fill: '#2a2c31', stroke: i === 2 ? C.amber : '#4a4d55' }) + T(142, 236 + i * 36, o[0], { weight: 600 }) + T(240, 236 + i * 36, o[1], { fill: C.muted, size: 11 }); });
+  s += T(130, 342, 'Name', { fill: C.muted, size: 11, weight: 600 }) + R(130, 350, 330, 26, { rx: 6, fill: '#2a2c31', stroke: '#4a4d55' }) + T(140, 368, '{doc}_{artboard}_{n}@{scale}', { fill: C.text, size: 12 });
+  s += T(490, 104, 'Files', { fill: C.muted, size: 11, weight: 600 });
+  [['Untitled-1_icon.svg', '4 KB'], ['Untitled-1_icon@2x.png', '38 KB'], ['Untitled-1_banner.svg', '9 KB'], ['Untitled-1_banner@2x.png', '112 KB'], ['Untitled-1_banner.0001–0120.exr', '86 MB']].forEach((f, i) => { s += R(490, 112 + i * 40, 340, 34, { rx: 8, fill: '#2a2c31' }) + R(498, 118 + i * 40, 22, 22, { rx: 4, fill: [C.accent, C.violet, C.accent, C.violet, C.amber][i] }) + T(528, 134 + i * 40, f[0], { size: 12 }) + T(820, 134 + i * 40, f[1], { size: 11, fill: C.muted, anchor: 'end' }); });
+  s += R(610, 396, 110, 30, { rx: 15, fill: '#313338', stroke: '#4a4d55' }) + T(665, 415, 'Save one', { anchor: 'middle' }) + R(730, 396, 110, 30, { rx: 15, fill: C.accent }) + T(785, 415, 'Export 5 files', { anchor: 'middle', weight: 600 });
+  return s + callout(130, 470, 'The settings are an Export node in the document: reopen the file and Quick export repeats it', 300, 380, { anchor: 'start' }) + hintBar('Export', '', [['Ctrl E', 'open'], ['Enter', 'export all']]);
+};
+scenes.close = () => base({ name: '' }) + T(480, 236, 'Nothing open', { size: 22, anchor: 'middle', fill: '#6a6d76' }) +
+  ring(480, 262, 'Create', 'Create...', [
+    { key: '1', label: 'Letter' }, { key: '2', label: 'A4' }, { key: '3', label: 'Full HD' }, { key: '4', label: 'Square 1080' }, { key: 'O', label: 'Open…' }, { key: 'R', label: 'Recent' },
+  ], { dim: true, hi: 5, R: 118 }) + card(700, 170, 230, 118) + T(714, 192, 'Recent', { weight: 600 }) + R(710, 202, 210, 28, { rx: 6, fill: '#3a3320', stroke: C.amber }) + T(720, 221, 'Untitled-1 · saved', { size: 12 }) + T(720, 256, 'Illustration-2', { size: 12, fill: C.muted }) + T(720, 276, 'Logo-draft', { size: 12, fill: C.muted }) +
+  callout(40, 470, 'Close (document ring) returns here: the same empty workspace, and the loop starts again', 300, 300, { anchor: 'start' }) + hintBar('Nothing open', '', [['Space', 'new or recent']]);
+
+// ---------- step list ----------
+const PH = ['Start', 'Create', 'Style', 'Edit', 'Combine', 'Type', 'Guides', 'Structure', 'Pages', 'Animate', 'Output'];
+const steps = [
+  { ph: 0, id: 'empty', title: 'An empty window', gesture: [['cap', 'Space'], 'or the pen’s barrel button'], does: ['Start with no document and nothing else on screen', 'The only chrome is the thin top row, rulers (once a document exists) and the hint bar'], happens: ['No toolbar, no palette: every command is a ring, a held key or a HUD card', 'Pen + keyboard are both always live'], links: [['main.html', 'main states'], ['hints.html', 'hint bar']] },
+  { ph: 0, id: 'newring', title: 'Tap Space: the New ring', gesture: [['cap', 'Space'], 'tap, no pen drag, under ~250 ms'], does: ['Pick a size with one tap: Letter, A4, Full HD, Square 1080', 'Or Open / Recent'], happens: ['Flicking in a direction without waiting never draws the ring (marking-menu behaviour)', 'The hub “Create...” opens the full dialog'], links: [['main.html', 'main.html state 3c'], ['artboards.html', 'artboards bench']] },
+  { ph: 0, id: 'dialog', title: 'Optional: the full New Document dialog', opt: true, gesture: [['cap', 'tap hub'], 'Create...'], does: ['Name, preset or custom size, orientation, artboard count, background, colour mode, preview'], happens: ['One dialog for the rare case; the ring covers the common one', 'The same dialog is behind the New document slot of the document ring'], links: [['artboards.html', 'artboards bench']] },
+  { ph: 0, id: 'doc', title: 'The document opens', gesture: [['chip', 'automatic']], does: ['The artboard is centred and fitted; Select (V) is the default tool'], happens: ['Rulers on by default (Ctrl R); drag out of a ruler to pull a guide', 'The hint bar lists keys that work right now; Tab hides every overlay'], links: [['main.html', 'main states'], ['hints.html', 'hint bar']] },
+  { ph: 1, id: 'createring', title: 'Tap Space on blank canvas: the creation ring', gesture: [['cap', 'Space'], 'tap over empty canvas'], does: ['Choose Rectangle, Ellipse, Polygon, Star, Line, Freehand, Text or File'], happens: ['Same ring from the barrel button; its slots change with what is under the pen (object, point, segment, text, live shape)', 'The keys are printed on the slots'], links: [['main.html', 'main.html state 3a']] },
+  { ph: 1, id: 'draw', title: 'Hold the key and drag: draw without the ring', gesture: [['cap', 'hold E'], 'drag with the pen'], does: ['Drag to size; Shift for a circle or square, Alt to draw from the centre'], happens: ['Releasing creates the shape as one undo step', 'Once a key is learned the ring is never opened for that shape; retiring hints fade out with use'], links: [['scrub2.html', 'hold-key bench'], ['hints.html', 'hints']] },
+  { ph: 1, id: 'live', title: 'The shape and its HUD', gesture: [['chip', 'select'], 'automatic after drawing'], does: ['Edit the live shape’s parameters (radius, points) and X / Y / W / H'], happens: ['A shape is a node chain: Ellipse › Transform › Fill › Stroke. The HUD is the parameter list of the selected node', 'Tab pins the HUD to the edge, Esc dismisses it'], links: [['nodes.html', 'node views'], ['transform.html', 'transform bench']] },
+  { ph: 1, id: 'pen', title: 'Pen paths and freehand', gesture: [['cap', 'P'], 'or', ['cap', 'B'], 'for freehand'], does: ['Click for a corner, drag for a smooth point; with paths present the same tool adds and deletes points', 'Freehand keeps raw samples and fits curves; hold F to re-fit live'], happens: ['A path is one bezierPath node; pressure and tilt are point attributes, and the Stroke node turns them into width', 'Joining, closing and the point and segment rings are all on the pen tool'], links: [['pen.html', 'pen bench']] },
+  { ph: 2, id: 'docked', title: 'Optional: toolbar and property boxes', opt: true, gesture: [['chip', 'settings ring'], 'Toolbar and Properties switches'], does: ['Dock a toolbar on the left (icons with their key letters) and stacked property boxes on the right', 'Use them with a mouse, or alongside the pen and keys, and switch either off again at any time'], happens: ['Both are translucent over the artwork with an optional blur, so the canvas never shrinks; the property text size is adjustable for pen displays', 'The boxes show exactly the values the popups and scrubs edit: Transform, Fill, Stroke, Opacity, the live shape’s parameters, Effects'], links: [['appearance.html', 'appearance bench (switches in its header)']] },
+  { ph: 2, id: 'toolopts', title: 'Optional: tool options (double-click a tool, tap a slot’s option box)', opt: true, gesture: [['chip', 'toolbar'], 'double-click a tool', ['chip', 'ring'], 'tap the option box on a slot'], does: ['Open the tool’s own defaults: Star points and inner radius, Rectangle corner radius, Polygon sides, Freehand smoothing, Pen rubber band, Text size, Eyedropper sample', 'Line and Zoom have none, so nothing opens'], happens: ['The values are defaults for the next shape; a shape that is already selected is edited in the HUD', 'Toolbar: an amber dot marks tools that have options; double-click the tool. Ring: an option box (a small dialog glyph with a heavier top edge, as in Maya) at the outer end of the slot marks it and is a tap target; holding the slot, the barrel button on it, or Shift + its key also work. A plain tap or flick on the slot still picks the tool'], links: [['tooloptions.html', 'tool options bench'], ['appearance.html', 'appearance bench']] },
+  { ph: 2, id: 'scrub', title: 'Hold a key, move the pen: property scrubbing', gesture: [['cap', 'hold W'], 'then move up / down'], does: ['Change stroke width live; O opacity, H hue and L lightness work the same way'], happens: ['The part under the pen is outlined and decides which keys apply (outline, fill, gradient, text spacing)', 'One property at a time; Shift snaps, [ ] steps; release is one undo step', 'Vertical by default (kind to pens), horizontal is a setting'], links: [['scrub2.html', 'scrub bench']] },
+  { ph: 2, id: 'colour', title: 'Colour, gradient and stroke editing', gesture: [['cap', 'hold C'], 'at the pen'], does: ['Pick hue and saturation / brightness; 1-8 recalls recent colours; Space switches fill and stroke'], happens: ['Gradient stops, lines and points are edited on the shape and stored in its own coordinate space, so they follow transforms', 'Stroke profiles (taper, swell, pressure), caps, joins and dashes live in the stroke card (hold W)'], links: [['appearance.html', 'appearance bench']] },
+  { ph: 3, id: 'transform', title: 'Select and transform', gesture: [['cap', 'V'], 'click, marquee, drag handles'], does: ['Scale from handles, rotate outside a corner, Ctrl-drag an edge to skew, Ctrl-drag the crosshair to move the pivot', 'Hold R / S / K and move vertically to rotate, scale or skew without handles'], happens: ['A transform is a node holding one matrix; a drag is a delta matrix applied to each object’s start matrix, so Esc cancels cleanly', 'Smart guides, Ctrl+D (duplicate and repeat the last transform), align and distribute'], links: [['transform.html', 'transform bench']] },
+  { ph: 3, id: 'objring', title: 'The object ring', gesture: [['cap', 'Space'], 'over a selected object'], does: ['Group, Duplicate, Delete, Flip, Align…, Arrange…, Bake'], happens: ['The last slot is contextual: Enter group when a group is selected, Exit group inside one', 'Align and Arrange open sub-rings, so a ring never exceeds eight slots'], links: [['transform.html', 'transform bench']] },
+  { ph: 4, id: 'bool', title: 'Combine: booleans as live nodes', gesture: [['chip', 'select two or more'], ['cap', 'Space'], 'then pick'], does: ['Union, Subtract, Intersect and Exclude make a live Boolean node', 'Divide and Shape builder (B) cut shapes into plain regions'], happens: ['The node has ordered operands, each with a mode; move one and the result follows', 'Separate gives the operands back; Expand bakes a plain path'], links: [['booleans.html', 'booleans bench']] },
+  { ph: 4, id: 'mask', title: 'Clip and opacity masks', gesture: [['chip', 'select content + mask on top'], ['cap', 'Space'], 'then Clip or Opacity mask'], does: ['The top-most shape becomes the mask; opacity masks use luminosity, with a gradient for a soft fade'], happens: ['Entering shows the faded content and the mask outline', 'Blend mode and opacity are per node; the mask applies first'], links: [['booleans.html', 'booleans bench']] },
+  { ph: 5, id: 'text', title: 'Text, on a path, with fonts', gesture: [['cap', 'T'], 'click, drag or click a curve', ['cap', 'F'], 'for fonts'], does: ['Point text, area text, or text on a curve; tap F for the font card, hold F and move to step through fonts'], happens: ['Text is a node chain (Text › Glyphs › Fill); kerning is an attribute you can set by key, scrub or the kerning view', 'Convert to outlines is a bake; Blend2D shaping is a known risk'], links: [['text.html', 'text bench']] },
+  { ph: 6, id: 'overlay', title: 'Perspective guides and tracing paper', gesture: [['cap', 'Space'], 'then Overlays', ['cap', 'Shift'], 'while drawing'], does: ['Add a 1-, 2- or 3-point perspective guide; lock pen strokes to its rays', 'Import a reference image and draw over it'], happens: ['Overlays have the Reference role: they never export or print', 'Snapping prefers reference shapes, art and vanishing points, with a badge naming the match'], links: [['overlays.html', 'overlays bench']] },
+  { ph: 7, id: 'outline', title: 'Structure: the outline and layers', gesture: [['cap', 'L'], 'toggles; hold L and move to change layer'], does: ['Layers, groups and shapes as a familiar tree, with eye, lock, filter and thumbnails'], happens: ['The tree is the graph’s grouping seen as a list; a layer or group is a subnet', 'While drawing, only a layer strip and the L scrub are needed'], links: [['structure.html', 'structure bench']] },
+  { ph: 7, id: 'graph', title: 'The graph is always one gesture away', gesture: [['cap', 'hold N'], 'for the lens'], does: ['See the chain behind a shape; edit parameters, keys and expressions'], happens: ['Canvas, outline, HUD and graph are four views of the same document; the graph is never a separate mode', 'Real documents (hundreds of nodes) lean on subnets, thumbnails, search and a minimap'], links: [['nodes.html', 'nodes bench'], ['nodes-girl.html', 'a real file'], ['nodes-experiments.html', 'placements']] },
+  { ph: 7, id: 'card', title: 'The document card: swatches, library, fonts', gesture: [['cap', 'tap hub'], 'on the document ring'], does: ['Metadata, swatches, symbols, patterns, styles, brushes and fonts as tabs'], happens: ['A swatch is a colour node that Fill nodes reference; editing it recolours every shape', 'A symbol is a subnet and each copy an instance node'], links: [['structure.html', 'structure bench']] },
+  { ph: 8, id: 'artboards', title: 'Artboards', gesture: [['cap', 'O'], 'drag the workspace'], does: ['Make several artboards; resize by handles or by scrubbing W / H'], happens: ['Artboards are crops: artwork is shared on one canvas and each Artboard node decides what an export contains', 'Order is the PDF page order'], links: [['artboards.html', 'artboards bench']] },
+  { ph: 8, id: 'docring', title: 'The document ring', gesture: [['cap', 'Space'], 'over the grey workspace'], does: ['New artboard, New document, Open, Save, Export, Place image, Fit, Rulers · grid'], happens: ['The same slots as the very first rings: one vocabulary from start to finish', 'The hub opens Document Setup and the document card'], links: [['main.html', 'main.html state 3b']] },
+  { ph: 9, id: 'timeline', title: 'Animation: keys on the timeline', gesture: [['cap', 'T'], 'toggles; hold T and move sideways to scrub time'], does: ['Key any parameter, set easing, add squash / bend / wave deformers', 'Switch layers swap drawings; Drawings nodes cycle on 1s to 4s'], happens: ['Every parameter is keyable because everything is a node parameter; stepped keys drive switches', 'Onion skin and trajectories are views of the selection'], links: [['animation.html', 'animation bench']] },
+  { ph: 9, id: 'xsheet', title: 'The full dopesheet and xsheet', gesture: [['cap', 'Tab'], 'with the timeline open'], does: ['A dopesheet or a vertical xsheet over the same selection model: box-select keys, retime, ripple, type values'], happens: ['G moves and E scales selected keys (hold-and-move, like the scrubs)', 'Exposure of drawn frames can be baked to manual cells and edited'], links: [['animation.html', 'animation bench']] },
+  { ph: 9, id: 'rig', title: 'Rigging: bones, weights, IK, drivers', gesture: [['chip', 'Bone tool'], 'then pose with the pen'], does: ['Add bones, bind rigid or smooth, paint weights with pen pressure, drag IK rings', 'A Head-turn dial drives rotation and a stepped face switch'], happens: ['A skeleton is transform nodes; Bind, IK and Driver are nodes; posing is keying controls, so the dopesheet works unchanged', 'The rig can be a reusable group with published controls'], links: [['rig.html', 'rig bench'], ['skeletal.html', 'skeletal strokes']] },
+  { ph: 10, id: 'export', title: 'Export', gesture: [['cap', 'Ctrl E'], 'or the Export slot'], does: ['Pick artboards and outputs: SVG, PNG, JPG, WebP, PDF, EXR sequences with AOV layers'], happens: ['Settings are an Export node in the document, so Quick export repeats them', 'Reference overlays never export; EXR frames carry beauty plus node-made AOVs'], links: [['artboards.html', 'export card'], ['animation.html', 'EXR output']] },
+  { ph: 10, id: 'close', title: 'Save, close, and back to the start', gesture: [['cap', 'Space'], 'over the workspace → Save, then close'], does: ['Close returns to the empty workspace; Recent reopens the document'], happens: ['The same empty window as step 1: the loop is closed', 'Everything between was the same small set of surfaces: rings, held keys, HUD cards'], links: [['main.html', 'main states']] },
+];
+
+// ---------- build ----------
+const navEl = document.getElementById('nav'), stepsEl = document.getElementById('steps'), glanceEl = document.getElementById('glance');
+function gest(g) { return g.map(x => Array.isArray(x) ? '<span class="cap">' + esc(x[1]) + '</span>' : (typeof x === 'string' ? '<span>' + esc(x) + '</span>' : '')).join(' '); }
+let html = '', lastPh = -1, glance = '', gp = -1;
+steps.forEach((st, i) => {
+  const n = i + 1;
+  if (st.ph !== lastPh) { html += '<div class="phase" id="ph' + st.ph + '">' + PH[st.ph] + '</div>'; lastPh = st.ph; }
+  const g = st.gesture.map(x => Array.isArray(x) ? (x[0] === 'cap' ? '<span class="cap">' + esc(x[1]) + '</span>' : '<span class="chip">' + esc(x[1]) + '</span>') : '<span>' + esc(x) + '</span>').join(' ');
+  html += '<section class="step" id="s' + n + '" data-ph="' + st.ph + '"><div class="rail"><b>' + n + '</b></div><div class="body"><h2>' + esc(st.title) + '</h2><div class="trigger">' + (st.opt ? '<span class="chip opt">optional branch</span>' : '') + g + '</div>' +
+    '<svg class="screen" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(st.title) + '" font-family=\'' + FONT + '\'>' + scenes[st.id]() + '</svg>' +
+    '<div class="info"><div><h3>You do</h3><ul>' + st.does.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul></div><div><h3>What happens</h3><ul>' + st.happens.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul></div></div>' +
+    '<div class="links">Try it: ' + st.links.map(l => '<a href="' + l[0] + '">' + esc(l[1]) + '</a>').join('') + '</div></div></section>';
+  if (st.ph !== gp) { glance += '<div class="ph">' + PH[st.ph] + '</div>'; gp = st.ph; } else glance += '<i>›</i>';
+  glance += '<a href="#s' + n + '"><b>' + n + '</b>' + esc(st.title.replace(/^.*?: /, '')) + '</a>';
+});
+stepsEl.innerHTML = html;
+glanceEl.innerHTML = glance;
+navEl.innerHTML = PH.map((p, i) => '<a href="#ph' + i + '" data-ph="' + i + '">' + p + '</a>').join('');
+const navLinks = [...navEl.querySelectorAll('a')];
+const io = new IntersectionObserver(es => { es.forEach(e => { if (e.isIntersecting) { const p = e.target.dataset.ph; navLinks.forEach(a => a.classList.toggle('on', a.dataset.ph === p)); } }); }, { rootMargin: '-45% 0px -50% 0px' });
+document.querySelectorAll('.step').forEach(s => io.observe(s));
+</script>
+</body>
+</html>

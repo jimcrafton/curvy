@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curvy scrubbing properties</title>
+<style>
+  :root {
+    --bg: #1e1f22; --panel: #26272b; --workspace: #2b2d31; --paper: #f4f4f2; --text: #e6e7ea; --muted: #9a9ea8;
+    --accent: #4c8dff; --amber: #ffb454; --slot: #313338; --slotLine: #4a4d55;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid #000; }
+  header h1 { margin: 0 0 4px; font-size: 15px; }
+  header p { margin: 0; color: var(--muted); max-width: 920px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 18px; padding: 10px 16px; background: #222327; border-bottom: 1px solid #000; }
+  .group { display: flex; align-items: center; gap: 6px; }
+  .group span { color: var(--muted); margin-right: 4px; }
+  button { background: var(--slot); color: var(--text); border: 1px solid var(--slotLine); border-radius: 14px; padding: 4px 12px; font: inherit; cursor: pointer; }
+  button.on { background: var(--accent); border-color: var(--accent); }
+  #stage { position: relative; width: 900px; height: 520px; margin: 16px auto 8px; background: var(--workspace); border: 1px solid #000; overflow: hidden; cursor: none; user-select: none; }
+  #paper { position: absolute; left: 150px; top: 60px; width: 600px; height: 400px; background: var(--paper); box-shadow: 0 2px 12px #0008; }
+  #shape { position: absolute; left: 400px; top: 150px; width: 200px; height: 130px; border-radius: 50%; border-style: solid; }
+  #shape2 { position: absolute; left: 220px; top: 300px; width: 130px; height: 90px; background: #f3c9a8; border: 2px solid #b36b3a; }
+  #hand { position: absolute; width: 260px; height: 120px; border-radius: 60px; background: #ff5a5a1c; border: 1px dashed #ff5a5a77; transform-origin: 0 50%; display: none; }
+  #cross { position: absolute; width: 0; height: 0; }
+  #cross::before { content: ""; position: absolute; left: -9px; top: -1px; width: 18px; height: 2px; background: #111; box-shadow: 0 0 0 1px #fff8; }
+  #cross::after { content: ""; position: absolute; top: -9px; left: -1px; height: 18px; width: 2px; background: #111; box-shadow: 0 0 0 1px #fff8; }
+  #over { position: absolute; left: 0; top: 0; }
+  #over > * { position: absolute; }
+  .tag { color: var(--text); background: #17181bf0; border-radius: 6px; padding: 2px 8px; font-size: 12px; white-space: nowrap; border: 1px solid #5a5d66; }
+  .tag b { color: var(--amber); }
+  .key { display: inline-block; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 6px; background: #3a3d43; border: 1px solid #5a5d66; color: var(--text); font: 600 11px/20px "Segoe UI"; text-align: center; }
+  .key.lit { background: var(--amber); color: #1b1b1b; border-color: var(--amber); }
+  .track { height: 6px; border-radius: 3px; background: #3a3d43; }
+  .fill { height: 100%; border-radius: 3px; background: var(--amber); }
+  .thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--amber); border: 2px solid #17181b; }
+  .card { background: #17181bf0; border: 1px solid #5a5d66; border-radius: 10px; padding: 8px 10px; box-shadow: 0 3px 10px #0007; }
+  .row { display: flex; align-items: center; gap: 8px; height: 26px; color: var(--muted); font-size: 12px; }
+  .row.act { color: var(--text); }
+  .row .track { width: 110px; }
+  .row .val { width: 54px; text-align: right; }
+  .tick { width: 1px; background: #6a6d76; }
+  .tick.snap { background: var(--amber); }
+  #bar { position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: var(--panel); border-top: 1px solid #000; color: var(--muted); padding: 5px 10px; white-space: nowrap; font-size: 12px; }
+  #bar b { color: var(--text); margin-right: 10px; }
+  #notes { width: 900px; margin: 0 auto 24px; color: var(--muted); }
+  #notes li { margin-bottom: 4px; }
+  #notes h2 { color: var(--text); font-size: 13px; margin: 14px 0 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Scrubbing properties, ZBrush style</h1>
+  <p>This one is live. Move the mouse over the canvas, then <b>hold W, O or H</b> and move sideways to scrub width, opacity or hue of the two shapes; <b>Shift</b> snaps to preset values; <b>[</b> and <b>]</b> step the width. Release the key to keep the value. Each variation shows the same gesture differently.</p>
+</header>
+<div class="controls">
+  <div class="group"><span>Variation</span>
+    <button data-variant="1" class="on">1 Pop-up slider</button>
+    <button data-variant="2">2 Quiet readout</button>
+    <button data-variant="3">3 Cursor as nib</button>
+    <button data-variant="4">4 Quick strip</button>
+    <button data-variant="5">5 Detent ruler</button>
+  </div>
+  <div class="group"><span>Hardware</span>
+    <button data-hw="display" class="on">Pen display</button>
+    <button data-hw="tablet">Separate tablet</button>
+  </div>
+  <div class="group"><span>Hand</span>
+    <button data-hand="right" class="on">Right</button>
+    <button data-hand="left">Left</button>
+  </div>
+</div>
+
+<div id="stage" tabindex="0">
+  <div id="paper"></div>
+  <div id="shape"></div>
+  <div id="shape2"></div>
+  <div id="hand"></div>
+  <div id="over"></div>
+  <div id="cross"></div>
+  <div id="bar"></div>
+</div>
+
+<ul id="notes">
+  <li><b>Click the canvas first</b> so it has the keyboard, then hold a key and move the mouse.</li>
+  <h2>What this borrows from ZBrush</h2>
+  <li><b>Key pops a slider at the cursor.</b> In ZBrush a hotkey on a slider (S for Draw Size, U for Z Intensity, O for Focal Shift) shows it under the cursor, so nothing is hunted for in a panel. (1)</li>
+  <li><b>Hold and sweep.</b> Community plugins add hold-a-key-and-move-sideways, with the value shown live and the old tool restored on release. (2, 4)</li>
+  <li><b>The cursor is the readout.</b> ZBrush's brush circle is the draw size and the inner ring the focal shift. For us the nib circle is the stroke width. (3)</li>
+  <li><b>Shift snaps, bracket keys step.</b> ZBrush snaps Draw Size to whole numbers and Focal Shift to -100, 0, 100 with Shift; Draw Size has increment keys. (5)</li>
+  <li><b>Not copied:</b> ZBrush uses S for size. Here S is Star, so width is W. Every letter can be re-bound, with conflicts replaced as ZBrush does.</li>
+  <li><b>Each tool remembers its own values</b>, as ZBrush keeps separate sizes for painting and sculpting. Nothing here shows that, but the real app should.</li>
+</ul>
+
+<script>
+  const stage = document.getElementById('stage');
+  const $ = id => document.getElementById(id);
+  const st = { variant: '1', hw: 'display', hand: 'right', x: 450, y: 330, shift: false, active: null, startX: 0, startValue: 0 };
+  const props = {
+    W: { name: 'Width',   unit: ' px', min: 0.5, max: 40,  rate: 0.08, value: 4.5, snaps: [1, 2, 4, 8, 16, 32], digits: 1 },
+    O: { name: 'Opacity', unit: '%',   min: 0,   max: 100, rate: 0.4,  value: 100, snaps: [0, 25, 50, 75, 100],   digits: 0 },
+    H: { name: 'Hue',     unit: '°', min: 0, max: 360, rate: 1.0,  value: 215, snaps: [0, 60, 120, 180, 240, 300, 360], digits: 0 }
+  };
+
+  const sideX = () => st.hw === 'display' ? (st.hand === 'right' ? -1 : 1) : 1;
+  const sideY = () => st.hw === 'display' ? -1 : 1;
+  const fmt = (p, v) => v.toFixed(p.digits) + p.unit;
+  const pct = p => (p.value - p.min) / (p.max - p.min);
+
+  function nearest(list, v) { return list.reduce((a, b) => Math.abs(b - v) < Math.abs(a - v) ? b : a); }
+  function put(x, y, html, cls, style) {
+    return '<div class="' + (cls || '') + '" style="left:' + Math.round(x) + 'px;top:' + Math.round(y) + 'px;' + (style || '') + '">' + html + '</div>';
+  }
+  function tagPos(w, h) {
+    return [st.x + (sideX() < 0 ? -22 - w : 22), st.y + (sideY() < 0 ? -22 - h : 22)];
+  }
+
+  function applyToShapes() {
+    const hue = props.H.value, a = props.O.value / 100, w = props.W.value;
+    const s1 = $('shape').style;
+    s1.borderWidth = w + 'px';
+    s1.borderColor = 'hsl(' + hue + ',65%,42%)';
+    s1.background = 'hsl(' + hue + ',80%,88%)';
+    s1.opacity = a;
+    $('shape2').style.opacity = 1;
+  }
+
+  function overlay() {
+    const act = st.active ? props[st.active] : null;
+    let out = '';
+    if (!act) {
+      const [x, y] = tagPos(200, 22);
+      return put(x, y, 'hold <b>W</b> <b>O</b> <b>H</b> and move sideways', 'tag');
+    }
+    if (st.variant === '1') {
+      // The slider appears under the cursor, with its thumb at the current value, so the pen is already on it.
+      const w = 240, sy = sideY();
+      const left = st.x - pct(act) * w;
+      const top = st.y + (sy < 0 ? -64 : 30);
+      out += put(left - 12, top, '<div class="card" style="width:' + (w + 24) + 'px"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span>' + act.name + '</span><b style="color:#ffb454">' + fmt(act, act.value) + '</b></div><div class="track" style="margin:0 12px"><div class="fill" style="width:' + pct(act) * 100 + '%"></div></div></div>');
+      out += put(st.x - 8, top + 36, '', 'thumb');
+    } else if (st.variant === '2') {
+      const [x, y] = tagPos(170, 22);
+      out += put(x, y, act.name + ' <b>' + fmt(act, act.value) + '</b>  ◀ ▶', 'tag');
+    } else if (st.variant === '3') {
+      // The cursor itself: a circle at the real stroke width, in the current hue and opacity.
+      const w = props.W.value, hue = props.H.value, a = props.O.value / 100;
+      out += put(st.x - w / 2, st.y - w / 2, '', '', 'width:' + w + 'px;height:' + w + 'px;border-radius:50%;background:hsla(' + hue + ',65%,42%,' + a + ');border:1px solid #fff');
+      out += put(st.x - w / 2 - 6, st.y - w / 2 - 6, '', '', 'width:' + (w + 12) + 'px;height:' + (w + 12) + 'px;border-radius:50%;border:1px dashed #0006');
+      const [x, y] = tagPos(150, 22);
+      out += put(x + (sideX() < 0 ? 0 : w / 2), y - (sideY() < 0 ? w / 2 : 0), act.name + ' <b>' + fmt(act, act.value) + '</b>', 'tag');
+    } else if (st.variant === '4') {
+      // All three quick properties, the held one lit.
+      const rows = ['W', 'O', 'H'].map(k => {
+        const p = props[k];
+        return '<div class="row' + (k === st.active ? ' act' : '') + '"><span class="key' + (k === st.active ? ' lit' : '') + '">' + k + '</span><span style="width:52px">' + p.name + '</span><div class="track"><div class="fill" style="width:' + pct(p) * 100 + '%;background:' + (k === st.active ? '#ffb454' : '#6a6d76') + '"></div></div><span class="val">' + fmt(p, p.value) + '</span></div>';
+      }).join('');
+      const w = 300, h = 98;
+      const x = st.x + (sideX() < 0 ? -26 - w : 26), y = st.y + (sideY() < 0 ? -26 - h : 26);
+      out += put(x, y, '<div class="card" style="width:' + w + 'px">' + rows + '</div>');
+    } else if (st.variant === '5') {
+      // A ruler of detents with the preset values marked; Shift jumps between them.
+      const w = 300, y = st.y + (sideY() < 0 ? -58 : 30), left = st.x - pct(act) * w;
+      let ticks = '';
+      for (let i = 0; i <= 30; ++i) {
+        const v = act.min + (act.max - act.min) * i / 30;
+        ticks += put(left + i * w / 30, y + 18, '', 'tick', 'height:' + (i % 5 === 0 ? 12 : 7) + 'px');
+      }
+      act.snaps.forEach(s => {
+        const px = left + (s - act.min) / (act.max - act.min) * w;
+        ticks += put(px, y + 14, '', 'tick snap', 'height:18px;width:2px');
+        ticks += put(px - 12, y + 34, act.digits ? s : s, '', 'font-size:10px;color:#ffb454;width:24px;text-align:center');
+      });
+      out += put(left - 10, y - 8, '<div style="width:' + (w + 20) + 'px;height:62px;background:#17181bf0;border:1px solid #5a5d66;border-radius:8px"></div>');
+      out += ticks;
+      out += put(st.x - 1, y + 10, '', '', 'width:2px;height:26px;background:#fff');
+      out += put(st.x - 40, y - 4, act.name + ' <b>' + fmt(act, act.value) + '</b>' + (st.shift ? ' <b>snap</b>' : ''), 'tag', 'width:auto');
+    }
+    return out;
+  }
+
+  function render() {
+    $('cross').style.left = st.x + 'px';
+    $('cross').style.top = st.y + 'px';
+    const hand = $('hand');
+    hand.style.display = st.hw === 'display' ? 'block' : 'none';
+    if (st.hw === 'display') {
+      hand.style.left = st.x + 'px';
+      hand.style.top = (st.y - 60) + 'px';
+      hand.style.transform = 'rotate(' + (st.hand === 'right' ? 45 : 135) + 'deg)';
+    }
+    applyToShapes();
+    $('over').innerHTML = overlay();
+    const a = st.active ? props[st.active] : null;
+    $('bar').innerHTML = '<b>' + (a ? a.name + ' ' + fmt(a, a.value) : 'Select') + '</b>' + (a ? 'move sideways - Shift snap - release to keep' : 'hold W width - O opacity - H hue and move sideways - [ ] step width');
+  }
+
+  stage.addEventListener('mousemove', e => {
+    const r = stage.getBoundingClientRect();
+    st.x = e.clientX - r.left; st.y = e.clientY - r.top;
+    st.shift = e.shiftKey;
+    if (st.active) {
+      const p = props[st.active];
+      let v = st.startValue + (st.x - st.startX) * p.rate;
+      if (st.shift) { v = nearest(p.snaps, v); }
+      p.value = Math.min(p.max, Math.max(p.min, v));
+    }
+    render();
+  });
+  stage.addEventListener('mousedown', () => stage.focus());
+  document.addEventListener('keydown', e => {
+    const k = e.key.toUpperCase();
+    if (props[k] && !e.repeat) {
+      st.active = k; st.startX = st.x; st.startValue = props[k].value;
+      e.preventDefault(); render();
+    } else if (e.key === '[' || e.key === ']') {
+      const p = props.W;
+      p.value = Math.min(p.max, Math.max(p.min, p.value + (e.key === ']' ? 0.5 : -0.5)));
+      render();
+    }
+  });
+  document.addEventListener('keyup', e => {
+    if (e.key.toUpperCase() === st.active) { st.active = null; render(); }
+  });
+  window.addEventListener('blur', () => { st.active = null; render(); });
+
+  document.querySelectorAll('button').forEach(btn => btn.addEventListener('click', () => {
+    const key = btn.dataset.variant ? 'variant' : btn.dataset.hw ? 'hw' : 'hand';
+    st[key] = btn.dataset[key];
+    document.querySelectorAll('button[data-' + key + ']').forEach(b => b.classList.toggle('on', b === btn));
+    render();
+  }));
+  render();
+</script>
+</body>
+</html>

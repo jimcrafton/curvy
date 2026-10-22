@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>curvy workspace shell</title>
+<style>
+  :root { --bg: #1e1f22; --bar: #232428; --canvas: #2b2d31; --line: #4a4d55; --text: #e6e7ea; --dim: #9a9ea8; --accent: #4c8dff; --accent2: #ffb454; }
+  body { width: 1360px; height: 860px; display: flex; flex-direction: column; background: var(--bg); color: var(--text); font-family: "Segoe UI", sans-serif; font-size: 12px; }
+  #topBar { white-space: nowrap; display: flex; flex-direction: row; align-items: center; gap: 10px; height: 32px; padding: 0 12px; background: var(--bar); border-bottom: 1px solid var(--line); }
+  #appName { font-size: 13px; font-weight: 600; color: var(--text); }
+  #documentName { color: var(--dim); }
+  #topBarSpace { flex-grow: 1; }
+  #canvas { flex-grow: 1; background: var(--canvas); }
+  #hintBar { white-space: nowrap; display: flex; flex-direction: row; align-items: center; gap: 18px; height: 28px; padding: 0 14px; background: var(--bar); border-top: 1px solid var(--line); color: var(--dim); }
+  #hintTool { color: var(--accent2); font-weight: 600; }
+  #hintKeys { color: var(--dim); flex-grow: 1; }
+  #hintInfo { color: var(--dim); width: 170px; text-align: right; }
+</style>
+</head>
+<body>
+  <div id="topBar">
+    <span id="appLogo" style="color:#4c8dff;font-size:16px;font-weight:700">~</span>
+    <span id="appName">curvy</span>
+    <span id="documentName"></span>
+    <span id="topBarSpace"></span>
+  </div>
+  <canvas id="canvas" data-newui-type="CanvasView"></canvas>
+  <div id="hintBar">
+    <span id="hintTool">Nothing open</span>
+    <span id="hintKeys">Tap Space to start</span>
+    <span id="hintInfo"></span>
+  </div>
+</body>
+</html>
