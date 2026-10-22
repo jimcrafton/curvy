@@ -25,6 +25,7 @@ namespace curvy {
                 checkRingsAndHoldKeys();
                 checkScrub();
                 checkPanAndBarrel();
+                checkDocks();
                 checkTheme();
                 std::printf("%d failure(s)\n", failures_);
                 return failures_;
@@ -138,6 +139,47 @@ namespace curvy {
                 expect(w_.menu().isOpen(), "the barrel button (right press) opens a ring");
                 key(newui::vkEscape);
                 expect(!w_.menu().isOpen(), "Esc closes the ring");
+            }
+
+            void checkDocks() {
+                DockController* dock = &w_.dock();
+                expect(dock->toolDock() != nullptr && dock->propertyDock() != nullptr, "both dock layouts loaded");
+                expect(!dock->toolDock()->isVisible() && !dock->propertyDock()->isVisible(), "both docks are off by default");
+                auto* toolbarToggle = dynamic_cast<newui::Button*>(w_.frame().rootView().findView("toolbarToggle"));
+                auto* propertiesToggle = dynamic_cast<newui::Button*>(w_.frame().rootView().findView("propertiesToggle"));
+                expect(toolbarToggle != nullptr && propertiesToggle != nullptr, "the top bar has both toggles");
+
+                toolbarToggle->onClick(*toolbarToggle);
+                expect(model_->toolbarVisible() && dock->toolDock()->isVisible() && !dock->propertyDock()->isVisible(), "the Tools toggle shows the toolbar only");
+                const newui::Rect tools = dock->toolDock()->bounds();
+                const newui::Rect client = canvas_->getClientBounds();
+                expect(tools.left() == canvas_->rulerSize() && tools.top() == canvas_->rulerSize() && tools.height() == client.height() - canvas_->rulerSize(), "the toolbar sits flush left under the ruler, full height");
+                expect(dock->toolButton(SketchTool::Select) != nullptr && dock->toolButton(SketchTool::Select)->isChecked(), "Select is the checked tool button");
+
+                dock->toolButton(SketchTool::Star)->onClick(*dock->toolButton(SketchTool::Star));
+                expect(canvas_->tool() == SketchTool::Star && dock->toolButton(SketchTool::Star)->isChecked() && !dock->toolButton(SketchTool::Select)->isChecked(), "clicking a tool button picks the tool");
+                key(newui::vkEscape);
+                expect(canvas_->tool() == SketchTool::Select && dock->toolButton(SketchTool::Select)->isChecked(), "the buttons follow the tool when it changes elsewhere");
+
+                propertiesToggle->onClick(*propertiesToggle);
+                const newui::Rect props = dock->propertyDock()->bounds();
+                expect(model_->propertiesVisible() && dock->propertyDock()->isVisible() && props.left() + props.width() == client.width(), "the Panels toggle shows the property dock flush right");
+
+                doc_->setSelection({doc_->hitTest(BLPoint(375, 170), 2.0)->id()});
+                auto* width = dynamic_cast<newui::TextField*>(w_.frame().rootView().findView("transformWField"));
+                expect(width != nullptr && width->text() == L"150", "the Transform box follows the selection");
+
+                w_.runCommand("view.toolbar");
+                w_.runCommand("view.properties");
+                expect(!dock->toolDock()->isVisible() && !dock->propertyDock()->isVisible() && !toolbarToggle->isChecked(), "the View ring commands turn them off and the toggles follow");
+                move(at(-60, 400));
+                tapSpace();
+                expect(w_.menu().isOpen() && w_.menu().ring().title == "Document", "over the pasteboard the Document ring opens");
+                key(newui::vkLetterV);
+                expect(w_.menu().isOpen() && w_.menu().ring().title == "View", "V in the Document ring opens the View ring");
+                key(newui::vkLetterT);
+                expect(model_->toolbarVisible() && dock->toolDock()->isVisible(), "T in the View ring turns the toolbar on");
+                w_.runCommand("view.toolbar");
             }
 
             void checkTheme() {

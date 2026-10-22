@@ -1,6 +1,7 @@
 #pragma once
 
 #include "curvy/canvasview.h"
+#include "curvy/dockcontroller.h"
 #include "curvy/holdscrub.h"
 #include "curvy/radialmenu.h"
 #include "curvy/sketchcommands.h"
@@ -36,7 +37,7 @@ namespace curvy {
     class WorkspaceController : public newui::Controller {
     public:
         WorkspaceController(newui::Frame& frame, SketchDocument& document);
-        ~WorkspaceController() override = default;
+        ~WorkspaceController() override;
         WorkspaceController(const WorkspaceController&) = delete;
         WorkspaceController& operator=(const WorkspaceController&) = delete;
 
@@ -52,6 +53,7 @@ namespace curvy {
         WorkspaceModel& workspace() { return *model_; }
         CanvasView& canvas() { return *canvas_; }
         RadialMenu& menu() { return *menu_; }
+        DockController& dock() { return *dock_; }
         SketchCommandController& commands() { return *commands_; }
         SketchDocumentController& files() { return *files_; }
         const HoldScrub& scrub() const { return scrub_; }
@@ -98,6 +100,7 @@ namespace curvy {
         WorkspaceModel* model_ = nullptr;   // owned by the Controller base (setModel)
         std::unique_ptr<SketchDocumentController> files_;
         std::unique_ptr<SketchCommandController> commands_;
+        std::unique_ptr<DockController> dock_;
         HoldScrub scrub_;
         std::string scrubKey_;
 

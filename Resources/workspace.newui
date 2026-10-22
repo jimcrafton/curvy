@@ -1,7 +1,7 @@
 {
   meta: {
     author: "",
-    date: "2026-10-18",
+    date: "2026-10-21",
     copyright: "",
     version: "0.1.0.900"
   },
@@ -25,7 +25,7 @@
     layout: { type: "FlexLayout", orientation: "Vertical" },
     style: {
       type: "ViewStyle",
-      backgroundFill: { type: "Fill", kind: "Color", color: "#1e1f22" }
+      backgroundFill: { type: "Fill", kind: "Color", color: "#121212" }
     },
     childViews: [
       {
@@ -46,7 +46,7 @@
         },
         style: {
           type: "ViewStyle",
-          backgroundFill: { type: "Fill", kind: "Color", color: "#232428" }
+          backgroundFill: { type: "Fill", kind: "Color", color: "#1e1e1e" }
         },
         desiredSize: { type: "Size", width: 1360, height: 32 },
         desiredSizeOverride: true,
@@ -66,7 +66,7 @@
               text: "~",
               wordWrap: false,
               font: { type: "Font", name: "Segoe UI", size: 16, bold: true, italic: false, strikeThrough: false, underlined: false },
-              textColor: "#4c8dff",
+              textColor: "#3a86ff",
               textAlignment: "Left"
             }
           },
@@ -85,7 +85,7 @@
               text: "curvy",
               wordWrap: false,
               font: { type: "Font", name: "Segoe UI", size: 13, bold: true, italic: false, strikeThrough: false, underlined: false },
-              textColor: "#e6e7ea",
+              textColor: "#f0f0f0",
               textAlignment: "Left"
             }
           },
@@ -104,7 +104,7 @@
               text: "",
               wordWrap: false,
               font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
-              textColor: "#9a9ea8",
+              textColor: "#a0a0a0",
               textAlignment: "Left"
             }
           },
@@ -115,7 +115,7 @@
             bounds: {
               type: "Rect",
               pos: { type: "Point", x: 91, y: 7 },
-              size: { type: "Size", width: 1263, height: 17 }
+              size: { type: "Size", width: 1093, height: 17 }
             },
             name: "topBarSpace",
             layoutParams: { type: "FlexLayoutParams", weight: 1 },
@@ -124,9 +124,41 @@
               text: "",
               wordWrap: false,
               font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
-              textColor: "#e6e7ea",
+              textColor: "#f0f0f0",
               textAlignment: "Left"
             }
+          },
+          {
+            type: "Button",
+            text: "Tools",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 1194, y: 5 },
+              size: { type: "Size", width: 75, height: 22 }
+            },
+            name: "toolbarToggle",
+            style: {
+              type: "ThemedButtonStyle",
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+            },
+            desiredSize: { type: "Size", width: 75, height: 22 },
+            desiredSizeOverride: true
+          },
+          {
+            type: "Button",
+            text: "Panels",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 1279, y: 5 },
+              size: { type: "Size", width: 75, height: 22 }
+            },
+            name: "propertiesToggle",
+            style: {
+              type: "ThemedButtonStyle",
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+            },
+            desiredSize: { type: "Size", width: 75, height: 22 },
+            desiredSizeOverride: true
           }
         ]
       },
@@ -158,7 +190,7 @@
         },
         style: {
           type: "ViewStyle",
-          backgroundFill: { type: "Fill", kind: "Color", color: "#232428" }
+          backgroundFill: { type: "Fill", kind: "Color", color: "#1e1e1e" }
         },
         desiredSize: { type: "Size", width: 1360, height: 28 },
         desiredSizeOverride: true,
@@ -198,7 +230,7 @@
               text: "Tap Space to start",
               wordWrap: false,
               font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
-              textColor: "#9a9ea8",
+              textColor: "#a0a0a0",
               textAlignment: "Left"
             }
           },
@@ -217,7 +249,7 @@
               text: "",
               wordWrap: false,
               font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
-              textColor: "#9a9ea8",
+              textColor: "#a0a0a0",
               textAlignment: "Right"
             },
             desiredSize: { type: "Size", width: 170, height: 17 },

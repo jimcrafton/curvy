@@ -183,6 +183,9 @@ namespace curvy {
 
         void paint(BLContext& ctx) override;
 
+    // The thickness of the rulers (0 when hidden): what the docks leave clear.
+        float rulerSize() const { return showRulers_ ? kRulerThickness : 0.0f; }
+
     private:
         int pasteCount_ = 0;
         static constexpr float kRulerThickness = 20.0f;
@@ -192,7 +195,6 @@ namespace curvy {
         static constexpr float kMaxZoom = 64.0f;
 
         void paintRulers(BLContext& ctx, const newui::Rect& client) const;
-        float rulerSize() const { return showRulers_ ? kRulerThickness : 0.0f; }
 
         newui::SyncReturn handleMouseDown(newui::View& sender, const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys);
         newui::SyncReturn handleMouseMove(newui::View& sender, const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys);

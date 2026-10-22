@@ -43,6 +43,12 @@ namespace curvy {
         ScrubAxis scrubAxis() const { return axis_; }
         void setScrubAxis(ScrubAxis axis);
 
+        // The optional docks (both off by default).
+        bool toolbarVisible() const { return toolbarVisible_; }
+        void setToolbarVisible(bool visible);
+        bool propertiesVisible() const { return propertiesVisible_; }
+        void setPropertiesVisible(bool visible);
+
         void setRing(const std::string& title);   // "" when no ring is open
         void setSpaceDown(bool down);
         void setSelectionCount(std::size_t count);
@@ -71,6 +77,7 @@ namespace curvy {
         const ScrubProp* scrubProp_ = nullptr;
         double scrubValue_ = 0.0, anchorX_ = 0.0, anchorY_ = 0.0;
         ScrubAxis axis_ = ScrubAxis::Vertical;
+        bool toolbarVisible_ = false, propertiesVisible_ = false;
         std::string ring_;
         bool spaceDown_ = false;
         std::size_t selectionCount_ = 0;

@@ -47,6 +47,16 @@ namespace curvy {
         touch();
     }
 
+    void WorkspaceModel::setToolbarVisible(bool visible) {
+        toolbarVisible_ = visible;
+        touch();
+    }
+
+    void WorkspaceModel::setPropertiesVisible(bool visible) {
+        propertiesVisible_ = visible;
+        touch();
+    }
+
     void WorkspaceModel::setRing(const std::string& title) {
         ring_ = title;
         touch();

@@ -1,5 +1,6 @@
 #include "curvy/workspacecontroller.h"
 #include "curvy/theme.h"
+#include "curvy/dockcontroller.h"
 
 #include <newui/font.h>
 #include <newui/fontmanager.h>
@@ -42,7 +43,12 @@ namespace curvy {
         RadialRing documentRing() {
             return {"Document", "Setup...", "dialog.setup", {
                 {"New artboard", "A", "doc.newArtboard"}, {"New document", "N", "ring.new"}, {"Open", "O", "file.open"}, {"Save", "S", "file.save"},
-                {"Export", "E", "file.exportImage"}, {"Place image", "I", "file.placeImage"}, {"Fit", "0", "view.fitPage"}, {"Rulers", "G", "view.toggleRulers"}}};
+                {"Export", "E", "file.exportImage"}, {"Place image", "I", "file.placeImage"}, {"View", "V", "ring.view"}}};
+        }
+        RadialRing viewRing() {
+            return {"View", "Back", "ring.document", {
+                {"Toolbar", "T", "view.toolbar"}, {"Properties", "P", "view.properties"}, {"Rulers", "G", "view.toggleRulers"}, {"Fit page", "0", "view.fitPage"},
+                {"Theme", "L", "view.theme"}}};
         }
         RadialRing objectRing() {
             return {"Object", "Properties...", "dialog.object", {
@@ -133,6 +139,9 @@ namespace curvy {
         text(hintKeys_, theme.textMuted);
         text(hintInfo_, theme.textMuted);
         canvas_->setPasteboardColor(Theme::argb(theme.bgCanvas));
+        if (dock_ != nullptr) {
+            dock_->restyle();
+        }
         frame_.rootView().refreshThemes();
         frame_.rootView().style().markDirty();
         canvas_->style().markDirty();
@@ -161,6 +170,7 @@ namespace curvy {
         menu_ = new RadialMenu();
         canvas_->addChild(menu_);
         bindViews();
+        dock_ = std::make_unique<DockController>(frame_, *canvas_, *model_, document_);
     }
 
     void WorkspaceController::bindViews() {
@@ -181,6 +191,8 @@ namespace curvy {
         document_.onSelectionChanged.add(this, &WorkspaceController::handleSelectionChanged);
         files_->onDocumentReplaced.add(this, &WorkspaceController::handleDocumentReplaced);
     }
+
+    WorkspaceController::~WorkspaceController() = default;
 
     void WorkspaceController::start(const std::string& path) {
         model_->setDocument(false, std::string());
@@ -271,6 +283,10 @@ namespace curvy {
         if (command == "ring.document") { menu_->open(documentRing(), at, false); model_->setRing("Document"); }
         else if (command == "ring.new") { menu_->open(newRing(), at, false); model_->setRing("New"); }
         else if (command == "ring.object") { menu_->open(objectRing(), at, false); model_->setRing("Object"); }
+        else if (command == "ring.view") { menu_->open(viewRing(), at, false); model_->setRing("View"); }
+        else if (command == "view.toolbar") { model_->setToolbarVisible(!model_->toolbarVisible()); model_->say(model_->toolbarVisible() ? "Toolbar on" : "Toolbar off"); }
+        else if (command == "view.properties") { model_->setPropertiesVisible(!model_->propertiesVisible()); model_->say(model_->propertiesVisible() ? "Properties on" : "Properties off"); }
+        else if (command == "view.theme") { setDarkTheme(!Theme::current().isDark); model_->say(Theme::current().isDark ? "Dark theme" : "Light theme"); }
         else if (command == "ring.arrange") { menu_->open(arrangeRing(), at, false); model_->setRing("Arrange"); }
         else if (command == "doc.newArtboard") {
             const BLPoint world = canvas_->toDocument(at);
@@ -311,6 +327,9 @@ namespace curvy {
 
     SyncReturn WorkspaceController::handleToolChanged(CanvasView&) {
         model_->setTool(toolName(canvas_->tool()), heldToolKey_);
+        if (dock_ != nullptr) {
+            dock_->syncTool();
+        }
         return SyncReturn::Handled;
     }
 

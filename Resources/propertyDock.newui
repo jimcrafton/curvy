@@ -1,0 +1,401 @@
+{
+  meta: {
+    author: "",
+    date: "2026-10-21",
+    copyright: "",
+    version: "0.1.0.900"
+  },
+  type: "SubView",
+  bounds: {
+    type: "Rect",
+    pos: { type: "Point", x: 0, y: 0 },
+    size: { type: "Size", width: 268, height: 700 }
+  },
+  visible: true,
+  name: "propertyDock",
+  childViews: [
+    {
+      type: "SubView",
+      bounds: {
+        type: "Rect",
+        pos: { type: "Point", x: 0, y: 0 },
+        size: { type: "Size", width: 268, height: 122 }
+      },
+      visible: true,
+      name: "propertyDockBox",
+      layout: { type: "FlexLayout", orientation: "Vertical" },
+      style: {
+        type: "ViewStyle",
+        backgroundFill: { type: "Fill", kind: "Color", color: "#1e1e1e99" }
+      },
+      childViews: [
+        {
+          type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 0 },
+            size: { type: "Size", width: 268, height: 122 }
+          },
+          visible: true,
+          name: "transformPanel",
+          layout: { type: "FlexLayout", orientation: "Vertical" },
+          desiredSize: { type: "Size", width: 268, height: 122 },
+          desiredSizeOverride: true,
+          childViews: [
+            {
+              type: "SubView",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 0, y: 0 },
+                size: { type: "Size", width: 268, height: 24 }
+              },
+              visible: true,
+              name: "transformPanelHeaderBar",
+              layout: {
+                type: "FlexLayout",
+                orientation: "Horizontal",
+                crossAxisAlignment: "Center",
+                spacing: 6,
+                padding: 4
+              },
+              style: {
+                type: "ViewStyle",
+                backgroundFill: { type: "Fill", kind: "Color", color: "#2e2e2e99" }
+              },
+              desiredSize: { type: "Size", width: 268, height: 24 },
+              desiredSizeOverride: true,
+              childViews: [
+                {
+                  type: "Label",
+                  text: "Transform",
+                  textAlignment: "Left",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 4, y: 3 },
+                    size: { type: "Size", width: 168, height: 17 }
+                  },
+                  name: "transformPanelHeader",
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                  style: {
+                    type: "LabelStyle",
+                    text: "Transform",
+                    wordWrap: true,
+                    font: { type: "Font", name: "Segoe UI", size: 12, bold: true, italic: false, strikeThrough: false, underlined: false },
+                    textColor: "#f0f0f0",
+                    textAlignment: "Left"
+                  }
+                },
+                {
+                  type: "Label",
+                  text: "",
+                  textAlignment: "Right",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 178, y: 3 },
+                    size: { type: "Size", width: 86, height: 17 }
+                  },
+                  name: "transformPanelHeaderInfo",
+                  style: {
+                    type: "LabelStyle",
+                    text: "",
+                    wordWrap: true,
+                    font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                    textColor: "#a0a0a0",
+                    textAlignment: "Right"
+                  },
+                  desiredSize: { type: "Size", width: 86, height: 17 },
+                  desiredSizeOverride: true
+                }
+              ]
+            },
+            {
+              type: "SubView",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 0, y: 24 },
+                size: { type: "Size", width: 268, height: 94 }
+              },
+              visible: true,
+              name: "transformPanelBody",
+              layout: {
+                type: "FlexLayout",
+                orientation: "Vertical",
+                spacing: 4,
+                padding: 7
+              },
+              childViews: [
+                {
+                  type: "SubView",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 7, y: 7 },
+                    size: { type: "Size", width: 254, height: 24 }
+                  },
+                  visible: true,
+                  name: "transformPosRow",
+                  layout: {
+                    type: "FlexLayout",
+                    orientation: "Horizontal",
+                    crossAxisAlignment: "Center",
+                    spacing: 6
+                  },
+                  desiredSize: { type: "Size", width: 254, height: 24 },
+                  desiredSizeOverride: true,
+                  childViews: [
+                    {
+                      type: "Label",
+                      text: "X",
+                      textAlignment: "Left",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 0, y: 3 },
+                        size: { type: "Size", width: 14, height: 17 }
+                      },
+                      name: "transformXLabel",
+                      style: {
+                        type: "LabelStyle",
+                        text: "X",
+                        wordWrap: true,
+                        font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                        textColor: "#a0a0a0",
+                        textAlignment: "Left"
+                      },
+                      desiredSize: { type: "Size", width: 14, height: 17 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "TextField",
+                      text: "0",
+                      font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                      textColor: "#f0f0f0",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 20, y: 2 },
+                        size: { type: "Size", width: 70, height: 20 }
+                      },
+                      name: "transformXField",
+                      desiredSize: { type: "Size", width: 70, height: 20 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "Label",
+                      text: "Y",
+                      textAlignment: "Left",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 96, y: 3 },
+                        size: { type: "Size", width: 14, height: 17 }
+                      },
+                      name: "transformYLabel",
+                      style: {
+                        type: "LabelStyle",
+                        text: "Y",
+                        wordWrap: true,
+                        font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                        textColor: "#a0a0a0",
+                        textAlignment: "Left"
+                      },
+                      desiredSize: { type: "Size", width: 14, height: 17 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "TextField",
+                      text: "0",
+                      font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                      textColor: "#f0f0f0",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 116, y: 2 },
+                        size: { type: "Size", width: 70, height: 20 }
+                      },
+                      name: "transformYField",
+                      desiredSize: { type: "Size", width: 70, height: 20 },
+                      desiredSizeOverride: true
+                    }
+                  ]
+                },
+                {
+                  type: "SubView",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 7, y: 35 },
+                    size: { type: "Size", width: 254, height: 24 }
+                  },
+                  visible: true,
+                  name: "transformSizeRow",
+                  layout: {
+                    type: "FlexLayout",
+                    orientation: "Horizontal",
+                    crossAxisAlignment: "Center",
+                    spacing: 6
+                  },
+                  desiredSize: { type: "Size", width: 254, height: 24 },
+                  desiredSizeOverride: true,
+                  childViews: [
+                    {
+                      type: "Label",
+                      text: "W",
+                      textAlignment: "Left",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 0, y: 3 },
+                        size: { type: "Size", width: 14, height: 17 }
+                      },
+                      name: "transformWLabel",
+                      style: {
+                        type: "LabelStyle",
+                        text: "W",
+                        wordWrap: true,
+                        font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                        textColor: "#a0a0a0",
+                        textAlignment: "Left"
+                      },
+                      desiredSize: { type: "Size", width: 14, height: 17 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "TextField",
+                      text: "0",
+                      font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                      textColor: "#f0f0f0",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 20, y: 2 },
+                        size: { type: "Size", width: 70, height: 20 }
+                      },
+                      name: "transformWField",
+                      desiredSize: { type: "Size", width: 70, height: 20 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "Label",
+                      text: "H",
+                      textAlignment: "Left",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 96, y: 3 },
+                        size: { type: "Size", width: 14, height: 17 }
+                      },
+                      name: "transformHLabel",
+                      style: {
+                        type: "LabelStyle",
+                        text: "H",
+                        wordWrap: true,
+                        font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                        textColor: "#a0a0a0",
+                        textAlignment: "Left"
+                      },
+                      desiredSize: { type: "Size", width: 14, height: 17 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "TextField",
+                      text: "0",
+                      font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                      textColor: "#f0f0f0",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 116, y: 2 },
+                        size: { type: "Size", width: 70, height: 20 }
+                      },
+                      name: "transformHField",
+                      desiredSize: { type: "Size", width: 70, height: 20 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "ToolbarButton",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 192, y: 0 },
+                        size: { type: "Size", width: 24, height: 24 }
+                      },
+                      name: "linkAspectButton",
+                      desiredSize: { type: "Size", width: 24, height: 24 },
+                      desiredSizeOverride: true
+                    }
+                  ]
+                },
+                {
+                  type: "SubView",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 7, y: 63 },
+                    size: { type: "Size", width: 254, height: 24 }
+                  },
+                  visible: true,
+                  name: "transformAngleRow",
+                  layout: {
+                    type: "FlexLayout",
+                    orientation: "Horizontal",
+                    crossAxisAlignment: "Center",
+                    spacing: 6
+                  },
+                  desiredSize: { type: "Size", width: 254, height: 24 },
+                  desiredSizeOverride: true,
+                  childViews: [
+                    {
+                      type: "Label",
+                      text: "Angle",
+                      textAlignment: "Left",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 0, y: 3 },
+                        size: { type: "Size", width: 44, height: 17 }
+                      },
+                      name: "transformAngleLabel",
+                      style: {
+                        type: "LabelStyle",
+                        text: "Angle",
+                        wordWrap: true,
+                        font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                        textColor: "#a0a0a0",
+                        textAlignment: "Left"
+                      },
+                      desiredSize: { type: "Size", width: 44, height: 17 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "TextField",
+                      text: "0",
+                      font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                      textColor: "#f0f0f0",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 50, y: 2 },
+                        size: { type: "Size", width: 70, height: 20 }
+                      },
+                      name: "transformAngleField",
+                      desiredSize: { type: "Size", width: 70, height: 20 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "Label",
+                      text: "deg",
+                      textAlignment: "Left",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 126, y: 3 },
+                        size: { type: "Size", width: 30, height: 17 }
+                      },
+                      name: "transformAngleUnit",
+                      style: {
+                        type: "LabelStyle",
+                        text: "deg",
+                        wordWrap: true,
+                        font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                        textColor: "#a0a0a0",
+                        textAlignment: "Left"
+                      },
+                      desiredSize: { type: "Size", width: 30, height: 17 },
+                      desiredSizeOverride: true
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -59,6 +59,7 @@ add_executable(curvy
     src/holdscrub.cpp
     src/workspacemodel.cpp
     src/workspacecontroller.cpp
+    src/dockcontroller.cpp
     src/workspacechecks.cpp
     src/sketchdocument.cpp
     src/documentlive.cpp
