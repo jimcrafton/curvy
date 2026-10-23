@@ -218,6 +218,15 @@ namespace curvy {
         };
         canvas_->onPressFilter = [this](const Point& pt, std::uint32_t buttons, std::uint32_t keys) { return filterPress(pt, buttons, keys); };
         canvas_->onKeyFilter = [this](std::uint32_t mask, std::uint32_t vk) { return filterKey(mask, vk); };
+        canvas_->onToolDefaultsChanged += [this](CanvasView&) { toolDefaultsChanged(); return SyncReturn::Handled; };
+        for (const char* name : {"topBar", "toolbarToggle", "propertiesToggle", "hintBar"}) {
+            if (View* chrome = frame_.rootView().findView(name)) {
+                chrome->onMouseDown += [this](View&, const Point&, std::uint32_t, std::uint32_t) {
+                    dismissWelcome();   // a press anywhere outside the canvas closes the first-run card too
+                    return SyncReturn::Ignored;
+                };
+            }
+        }
         canvas_->onPaintTop = [this](BLContext& ctx) { paintTop(ctx); };
         canvas_->onKeyUp.add(this, &WorkspaceController::handleKeyUp);
         canvas_->onMouseMove.add(this, &WorkspaceController::handleMouseMove);
@@ -327,6 +336,9 @@ namespace curvy {
             if (edited.rulersVisible != before.rulersVisible) {
                 canvas_->setShowRulers(edited.rulersVisible);
             }
+            if (edited.toolDefaultsInDocument && model_->documentOpen() && files_->document().toolDefaults().polygonSides <= 0) {
+                toolDefaultsChanged();   // switching to the document starts it off with the values in use
+            }
             edited.save(Settings::defaultPath());
             showWelcomeOnce();   // when the Welcome button asked for it
             model_->say("Settings saved");
@@ -347,11 +359,41 @@ namespace curvy {
         canvas_->setSmartGuides(settings_.snapGuides);
         if (files_ != nullptr) {
             files_->setMaxRecent(std::size_t(settings_.recentLength));
+            files_->setExportFolder(settings_.exportFolder);
         }
+        applyToolDefaults();
         if (themeChanged) {
             setDarkTheme(settings_.darkTheme());
         } else {
             restyle();
+        }
+    }
+
+    // Polygon sides and star points: the document's when the user keeps tool defaults there and it has them, else the per-user ones.
+    void WorkspaceController::applyToolDefaults() {
+        int sides = settings_.polygonSides;
+        int points = settings_.starPoints;
+        if (settings_.toolDefaultsInDocument && files_ != nullptr && model_->documentOpen()) {
+            const SketchDocument::ToolDefaults& stored = files_->document().toolDefaults();
+            sides = stored.polygonSides > 0 ? stored.polygonSides : sides;
+            points = stored.starPoints > 0 ? stored.starPoints : points;
+        }
+        applyingToolDefaults_ = true;
+        canvas_->setPolygonSides(sides);
+        canvas_->setStarPoints(points);
+        applyingToolDefaults_ = false;
+    }
+
+    void WorkspaceController::toolDefaultsChanged() {
+        if (applyingToolDefaults_) {
+            return;
+        }
+        if (settings_.toolDefaultsInDocument && files_ != nullptr && model_->documentOpen()) {
+            files_->document().setToolDefaults({canvas_->polygonSides(), canvas_->starPointCount()});
+        } else {
+            settings_.polygonSides = canvas_->polygonSides();
+            settings_.starPoints = canvas_->starPointCount();
+            settings_.save(Settings::defaultPath());
         }
     }
 
@@ -501,6 +543,7 @@ namespace curvy {
         model_->setDocument(true, controller.displayName());
         canvas_->setShowPages(true);
         canvas_->setShowRulers(settings_.rulersVisible);
+        applyToolDefaults();
         frame_.setTitle("curvy - " + controller.displayName());
         canvas_->zoomToFit();
         return SyncReturn::Handled;

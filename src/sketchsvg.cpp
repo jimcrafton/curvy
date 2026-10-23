@@ -295,6 +295,34 @@ namespace curvy {
             return text + "\"";
         }
 
+        // The tool defaults as the root's data-tools attribute ("polygon=6 star=8"); nothing is written while the document keeps none.
+        std::string toolsAttr(const SketchDocument& document) {
+            const SketchDocument::ToolDefaults& tools = document.toolDefaults();
+            if (tools.polygonSides <= 0 && tools.starPoints <= 0) {
+                return std::string();
+            }
+            return " data-tools=\"polygon=" + std::to_string(tools.polygonSides) + " star=" + std::to_string(tools.starPoints) + "\"";
+        }
+
+        SketchDocument::ToolDefaults parseToolDefaults(const std::string& text) {
+            SketchDocument::ToolDefaults tools;
+            std::istringstream in(text);
+            std::string token;
+            while (in >> token) {
+                const std::size_t equals = token.find('=');
+                if (equals == std::string::npos) {
+                    continue;
+                }
+                const int value = std::atoi(token.c_str() + equals + 1);
+                if (token.compare(0, equals, "polygon") == 0) {
+                    tools.polygonSides = value;
+                } else if (token.compare(0, equals, "star") == 0) {
+                    tools.starPoints = value;
+                }
+            }
+            return tools;
+        }
+
         std::vector<std::string> parseSwatches(const std::string& text) {
             std::vector<std::string> swatches;
             std::istringstream in(text);
@@ -2257,7 +2285,7 @@ namespace curvy {
         out << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << num(all.x1 - all.x0) << "pt\" height=\"" << num(all.y1 - all.y0)
             << "pt\" viewBox=\"" << num(all.x0) << " " << num(all.y0) << " " << num(all.x1 - all.x0) << " " << num(all.y1 - all.y0) << "\" data-ppi=\"" << num(document.ppi())
             << "\" data-color-mode=\"" << (document.colorMode() == ColorSpace::CMYK ? "cmyk" : "rgb")
-            << "\" data-page-background=\"" << (document.pageBackground() ? nativeColor(*document.pageBackground()) : std::string("none")) << "\"" << artboardAttr(document) << guideAttr(document) << layerAttr(document) << swatchAttr(document) << ">\n";
+            << "\" data-page-background=\"" << (document.pageBackground() ? nativeColor(*document.pageBackground()) : std::string("none")) << "\"" << artboardAttr(document) << guideAttr(document) << layerAttr(document) << swatchAttr(document) << toolsAttr(document) << ">\n";
         std::string defsText = defs.str();
         // The symbol library: each definition's artwork as a nested <svg> of its own (written by this same function).
         for (const std::shared_ptr<const SymbolDef>& def : document.symbols()) {
@@ -2408,6 +2436,7 @@ namespace curvy {
         document.setGuides(root->attr("data-guides") != nullptr ? parseGuides(*root->attr("data-guides")) : std::vector<Guide>());
         document.setLayers(root->attr("data-layers") != nullptr ? parseLayers(*root->attr("data-layers")) : std::vector<Layer>());
         document.setSwatches(root->attr("data-swatches") != nullptr ? parseSwatches(*root->attr("data-swatches")) : defaultSwatches());
+        document.setToolDefaults(root->attr("data-tools") != nullptr ? parseToolDefaults(*root->attr("data-tools")) : SketchDocument::ToolDefaults());
         {
             // The symbol library comes first: the instances are resolved against it as they are read.
             std::vector<std::shared_ptr<const SymbolDef>> library, patterns;

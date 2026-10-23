@@ -556,6 +556,15 @@ namespace curvy {
         // becomes the look new shapes are drawn with. False when nothing is under the point.
         bool sampleLook(const BLPoint& at, double tolerance);
 
+        // The Polygon and Star tool settings when the user keeps them in the document (Settings::toolDefaultsInDocument); 0 = not stored.
+        // Saved as data-tools; setting them marks the document modified.
+        struct ToolDefaults {
+            int polygonSides = 0;
+            int starPoints = 0;
+        };
+        const ToolDefaults& toolDefaults() const { return toolDefaults_; }
+        void setToolDefaults(const ToolDefaults& defaults) { toolDefaults_ = defaults; onChanged(*this); }
+
         // ---- Ruler guides (documentguides.cpp): saved with the document; objects, drawing and pen points snap to them ----
         const std::vector<Guide>& guides() const { return guides_; }
         // Each is one undo step. addGuide returns the new guide's index; moveGuide / removeGuide are false for a bad index (or no change).
@@ -816,6 +825,7 @@ namespace curvy {
 
         std::vector<Artboard> artboards_{Artboard{"Artboard 1", 0.0, 0.0, 612.0, 792.0}};
         std::size_t activeArtboard_ = 0;
+        ToolDefaults toolDefaults_;
         std::vector<std::shared_ptr<const SymbolDef>> symbols_;
         std::vector<std::shared_ptr<const SymbolDef>> patterns_;
         std::size_t activeSymbol_ = 0;

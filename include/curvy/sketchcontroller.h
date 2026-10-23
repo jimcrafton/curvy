@@ -64,6 +64,8 @@ namespace curvy {
         static constexpr std::size_t kMaxRecent = 8;
         const std::vector<std::string>& recentFiles() const { return recent_; }
         void setMaxRecent(std::size_t count);
+        // Where the export dialogs start; empty leaves it to Windows.
+        void setExportFolder(const std::string& folder) { exportFolder_ = folder; }
         void clearRecentFiles();
         // Where the list is kept (for tests); loads the list from there.
         void setRecentFilesPath(const std::string& path);
@@ -103,6 +105,7 @@ namespace curvy {
         void saveRecent() const;
         std::vector<std::string> recent_;
         std::size_t maxRecent_ = kMaxRecent;
+        std::string exportFolder_;
         std::string recentPath_;
     };
 

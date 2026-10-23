@@ -117,7 +117,6 @@ namespace curvy {
                     [this] { return working_.toolDefaultsInDocument ? 1 : 0; }, [this](int v) { working_.toolDefaultsInDocument = v == 1; });
 
                 toggle("canvasFollowsTheme", working_.canvasFollowsTheme);
-                toggle("blurPanels", working_.blurPanels);
                 toggle("toolbarVisible", working_.toolbarVisible);
                 toggle("propertiesVisible", working_.propertiesVisible);
                 toggle("rulersVisible", working_.rulersVisible);
@@ -130,7 +129,6 @@ namespace curvy {
                 slider("scrubSensitivity", "scrubSensitivityValue", 25, 400, working_.scrubSensitivity);
 
                 number("recentLength", 0, 50, [this](double v) { working_.recentLength = int(v); }, [this] { return double(working_.recentLength); });
-                number("holdDelay", 100, 2000, [this](double v) { working_.holdDelayMs = int(v); }, [this] { return double(working_.holdDelayMs); });
                 number("spaceTap", 100, 1000, [this](double v) { working_.spaceTapMs = int(v); }, [this] { return double(working_.spaceTapMs); });
                 number("gridSize", 0.1, 1000, [this](double v) { working_.gridSize = v; }, [this] { return working_.gridSize; });
                 number("autosaveMinutes", 1, 120, [this](double v) { working_.autosaveMinutes = int(v); }, [this] { return double(working_.autosaveMinutes); });
@@ -382,7 +380,7 @@ namespace curvy {
         auto* rulers = dynamic_cast<Toggle*>(find("rulersVisible"));
         auto* size = dynamic_cast<Slider*>(find("propertyTextSize"));
         auto* sizeText = dynamic_cast<TextField*>(find("propertyTextSizeValue"));
-        auto* hold = dynamic_cast<TextField*>(find("holdDelay"));
+        auto* hold = dynamic_cast<TextField*>(find("spaceTap"));
         auto* navPen = dynamic_cast<Button*>(find("navPen"));
         auto* reset = dynamic_cast<Button*>(find("settingsReset"));
         expect(theme && rulers && size && sizeText && hold && navPen && reset, "all settings controls found");
@@ -411,21 +409,21 @@ namespace curvy {
         }
         hold->setText(L"650");
         hold->onReturnPressed(*hold);
-        expect(working.holdDelayMs == 650, "typed hold delay is taken");
+        expect(working.spaceTapMs == 650, "typed tap threshold is taken");
         hold->setText(L"5");
         hold->onReturnPressed(*hold);
-        expect(working.holdDelayMs == 400 || working.holdDelayMs == 650, "out-of-range delay is refused");
-        expect(narrow(hold->text()) == std::to_string(working.holdDelayMs), "the box goes back to the kept value");
+        expect(working.spaceTapMs == 300 || working.spaceTapMs == 650, "out-of-range threshold is refused");
+        expect(narrow(hold->text()) == std::to_string(working.spaceTapMs), "the box goes back to the kept value");
 
         reset->onClick(*reset);
-        expect(working.holdDelayMs == 400 && working.theme == Settings::ThemeChoice::Light, "Reset page only resets the shown page");
+        expect(working.spaceTapMs == 300 && working.theme == Settings::ThemeChoice::Light, "Reset page only resets the shown page");
 
         Settings roundTrip;
         roundTrip.fromText(working.toText());
         expect(roundTrip.toText() == working.toText(), "settings text round-trips");
         Settings junk;
-        junk.fromText("holdDelayMs=99999\nunknown=1\nscrubAxis=x\ntheme=2\n");
-        expect(junk.holdDelayMs == 400 && junk.theme == Settings::ThemeChoice::FollowWindows && junk.scrubAxis == WorkspaceModel::ScrubAxis::Vertical,
+        junk.fromText("spaceTapMs=99999\nunknown=1\nscrubAxis=x\ntheme=2\n");
+        expect(junk.spaceTapMs == 300 && junk.theme == Settings::ThemeChoice::FollowWindows && junk.scrubAxis == WorkspaceModel::ScrubAxis::Vertical,
             "bad values are skipped, good ones kept");
         return failures;
     }

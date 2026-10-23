@@ -20,12 +20,18 @@ from newui_guitest import AppTestCase
 class CurvyCase(AppTestCase):
     """The workspace's vocabulary, shared by the tests below."""
 
+    first_run = False                                              # True: no settings file, so the welcome card shows
+
     def setUp(self):
         # A settings folder of its own per test, so saving settings in one test (or a leftover autosave) never reaches another or the user's own.
         self._appdata = tempfile.TemporaryDirectory()
         self.addCleanup(self._appdata.cleanup)
         previous = os.environ.get("APPDATA")
         os.environ["APPDATA"] = self._appdata.name
+        if not self.first_run:
+            os.makedirs(os.path.join(self._appdata.name, "curvy"))
+            with open(os.path.join(self._appdata.name, "curvy", "settings.ini"), "w") as f:
+                f.write("welcomeShown=1\n")
         self.addCleanup(lambda: os.environ.__setitem__("APPDATA", previous) if previous is not None else os.environ.pop("APPDATA", None))
         super().setUp()
 
@@ -187,6 +193,33 @@ class SettingsDialog(CurvyCase):
         self.app.click("toolbarVisible")
         self.app.click("settingsOk")
         self.app.wait_until(lambda: self.app.prop("toolbarToggle", "checked"), "the toolbar to show after OK")
+
+
+class Welcome(CurvyCase):
+    first_run = True
+
+    def card_showing(self):
+        canvas = self.app.find("canvas")
+        red, _, _ = self.app.screenshot().pixel(canvas.x + 12, canvas.y + 12)   # the card dims everything round it
+        return red < 0x26
+
+    def start_with_card(self):
+        self.app.wait_until(self.card_showing, "the welcome card to show")
+
+    def test_a_press_on_the_top_bar_closes_the_card(self):
+        self.start_with_card()
+        self.app.click("toolbarToggle")
+        self.app.wait_until(lambda: not self.card_showing(), "the card to close")
+
+    def test_a_press_on_the_canvas_closes_the_card(self):
+        self.start_with_card()
+        self.focus_canvas()
+        self.app.wait_until(lambda: not self.card_showing(), "the card to close")
+
+    def test_a_key_closes_the_card(self):
+        self.start_with_card()
+        self.app.key("a")
+        self.app.wait_until(lambda: not self.card_showing(), "the card to close")
 
 
 if __name__ == "__main__":

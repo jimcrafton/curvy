@@ -119,6 +119,7 @@ namespace curvy {
         void setPolygonSides(int sides);
         int starPointCount() const { return starPoints_; }
         void setStarPoints(int points);
+        newui::Delegate<CanvasView> onToolDefaultsChanged;   // the polygon sides or star points changed
         double arcSweep() const { return arcSweep_; }
         void setArcSweep(double radians);
         // Guides: lines dragged out of the rulers that things snap to (the document keeps them). Dragging a guide with the Select tool moves it

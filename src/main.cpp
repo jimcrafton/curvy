@@ -35,6 +35,8 @@
 
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
+#include <filesystem>
 #include <string>
 #include <typeinfo>
 
@@ -116,6 +118,11 @@ int main(int argc, char** argv) {
     const Options options = parseOptions(argc, argv);
     if (options.check || options.checkTools || options.checkWorkspace || options.checkNewDocument) {
         std::setvbuf(stdout, nullptr, _IONBF, 0);   // a crash in a check then still shows how far it got
+        // The checks start from defaults: an empty settings folder, so neither the user's settings nor their autosaves are read or changed.
+        const std::filesystem::path scratch = std::filesystem::temp_directory_path() / "curvy_check";
+        std::filesystem::remove_all(scratch);
+        std::filesystem::create_directories(scratch);
+        _putenv_s("APPDATA", scratch.string().c_str());
     }
 
     curvy::WorkspaceController::applyTheme(true);

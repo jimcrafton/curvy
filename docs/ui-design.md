@@ -302,11 +302,7 @@ Test bench with a live Boolean node, shape builder, clip and opacity masks, blen
 The default stays the plain canvas, but two switches (both **off by default**, in the settings ring and in the mockup's header) bring back a
 conventional layout: a **toolbar** docked flush to the left edge, full height (tool icons with their key letters printed on them) and **property boxes** docked flush to the right
 edge, full height and scrollable (Transform, Fill, Stroke, Opacity, the live shape's parameters, Effects; same style as the popups). Both are
-always translucent over the artwork, so the canvas keeps its full size, with a slight blur behind them that a **Blur** switch (on by default)
-turns off. The chosen look is the mockup's: panel colour bgSurface (`#1E1E1E` in the dark theme) at 60% opacity with a 2 px blur behind. Blur stays on by
-default and the switch remains as the fallback: Blend2D has no built-in blur, so the real version needs a software blur of the region behind each
-panel (a small box blur of a cached copy of the canvas, refreshed when the canvas changes), which should be checked for cost while panning and
-zooming before it is promised. The property boxes' text size is adjustable (10-20 px in the mockup, default 11) and the panel width scales with it, for pen displays where the
+always translucent over the artwork (panel colour bgSurface at 60% opacity), so the canvas keeps its full size. A blur behind them is not done: Blend2D has no built-in blur, and a software box blur of a cached copy of the canvas would need its cost checked while panning and zooming first. The property boxes' text size is adjustable (10-20 px in the mockup, default 11) and the panel width scales with it, for pen displays where the
 default is too small to hit. They show the same values the popups edit, so both routes always agree. This serves mouse users and anyone who prefers visible controls without changing the pen workflow. The same switches apply to any later
 toolbars and panels, not only these.
 
@@ -406,9 +402,7 @@ rings, cards, pasteboard) reads `Theme::current()`. Not yet: a ring slot or sett
 ### Settings / Preferences dialog (needed soon)
 Nothing has a home yet and the list is growing, so a settings dialog is the next piece of chrome to design (as an HTML mockup first, then converted). Settings the design already promises or the code
 already hard-codes, to start from: theme (dark / light, `WorkspaceController::setDarkTheme`), canvas background independent of the UI theme, dock defaults (toolbar and property boxes on or off at
-start), property text size (10-20, default 11) and the blur switch, scrub axis (vertical default, horizontal option; `WorkspaceModel::ScrubAxis`), scrub sensitivity, hold-slot delay for tool options
-(default 0.4 s), Space tap threshold (300 ms in `WorkspaceController`), whether hints fade after three uses, pen options (eraser end, barrel button meaning), tool-option defaults (profile or document is
-still undecided), snapping and guides defaults, recent files length. Reached from the Document ring's hub ("Setup...") and a View ring slot; stored per user, with the document-level ones kept in the file.
+start), property text size (10-20, default 11), scrub axis (vertical default, horizontal option; `WorkspaceModel::ScrubAxis`), scrub sensitivity, Space tap threshold (300 ms in `WorkspaceController`), whether hints fade after three uses, pen options (eraser end, barrel button meaning), tool-option defaults (polygon sides and star points; kept per user, or in the document as `data-tools` when the Drawing page says so), snapping and guides defaults, recent files length. Reached from the Document ring's hub ("Setup...") and a View ring slot; stored per user, with the document-level ones kept in the file.
 
 ### Docks (implemented)
 `DockController` builds the optional docks from the mockups `docs/mockups/toolDock.html` and `propertyDock.html` (converted to `Resources/toolDock.newui` and `propertyDock.newui`
@@ -416,7 +410,7 @@ with the html-mockup-to-newui skill; the top bar's two toggle buttons are in `wo
 tool and the buttons follow the tool when it changes elsewhere. The property dock hosts the existing Transform panel (one box so far; the other boxes follow the same way). Both docks
 are off by default, flush to the edges under the rulers, full height, translucent (bgSurface at 60%, retaken from `Theme::current()` when the theme changes), and are switched by the
 **Tools** and **Panels** buttons in the top bar or by the **View** ring (Toolbar T, Properties P, Rulers G, Fit page 0, Theme L), which replaces the Document ring's Fit and Rulers
-slots. Blur behind the panels is not done (Blend2D has none). Headless checks: `curvy --check-workspace`; real-input tests: `tests/gui/test_curvy_gui.py` (see the newui-gui-driver skill).
+slots. Blur behind the panels is not done (see above). Headless checks: `curvy --check-workspace`; real-input tests: `tests/gui/test_curvy_gui.py` (see the newui-gui-driver skill).
 
 ### Implemented so far (WorkspaceController)
 `Resources/workspace.newui` is the window; `WorkspaceController` (MVC: `WorkspaceModel` holds the shell state and the hint bar text, the canvas, ring and labels follow it,
@@ -454,6 +448,5 @@ ring's Fill / Stroke slots, touch, rotate/scale/skew scrub keys. Checked by `cur
 ## First run
 
 On the first start (`Settings::welcomeShown` false, no file given on the command line, no autosaved copy to recover) a card is centred over the canvas: a
-stylised keyboard with the Space bar lit, and three lines on how Space opens the ring menu (tap), pans (hold and move) and starts a document. Any click or key
-closes it (Esc just closes; Space closes it and carries on, so the first tap opens the ring). The flag is saved when the card is shown, so it appears once.
+stylised keyboard with the Space bar lit, and three lines on how Space opens the ring menu (tap), pans (hold and move) and starts a document. Any key, or a press anywhere (the canvas, the top bar, the hint bar), closes it (Esc just closes; Space closes it and carries on, so the first tap opens the ring). The flag is saved when the card is shown, so it appears once.
 It is a newui `Overlay` (`WelcomeOverlay`) built from `newui::shapes`: the keyboard is rounded-rect shapes with blue outlines (roughly opposite the amber accent) and the lit Space bar has a small glow plus an amber focus ring.

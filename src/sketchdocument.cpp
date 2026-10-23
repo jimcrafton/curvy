@@ -128,6 +128,7 @@ namespace curvy {
         }
         resetLayers();
         swatches_ = defaultSwatches();
+        toolDefaults_ = ToolDefaults();
         symbols_.clear();
         patterns_.clear();
         brushes_.clear();

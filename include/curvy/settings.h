@@ -21,7 +21,6 @@ namespace curvy {
         std::uint32_t canvasBackground = 0x2A2A2A;
         bool canvasFollowsTheme = true;
         int propertyTextSize = 11;
-        bool blurPanels = false;
 
         bool toolbarVisible = false;
         bool propertiesVisible = false;
@@ -31,7 +30,6 @@ namespace curvy {
 
         WorkspaceModel::ScrubAxis scrubAxis = WorkspaceModel::ScrubAxis::Vertical;
         int scrubSensitivity = 100;
-        int holdDelayMs = 400;
         int spaceTapMs = 300;
         PenButton barrelButton = PenButton::Rings;
         EraserAction eraserEnd = EraserAction::Erase;
@@ -40,6 +38,8 @@ namespace curvy {
         double gridSize = 10.0;
         bool snapGuides = true;
         bool toolDefaultsInDocument = false;
+        int polygonSides = 5;   // the tool defaults kept per user (in the document instead when toolDefaultsInDocument)
+        int starPoints = 5;
 
         bool welcomeShown = false;   // the first-run overlay has been shown
         bool autosave = true;

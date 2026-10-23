@@ -71,6 +71,8 @@ namespace curvy {
         // Runs the settings dialog; its changes apply live, OK saves them for the next run, Cancel puts them back.
         void openSettings();
         void applySettings(const Settings& settings);
+        void applyToolDefaults();
+        void toolDefaultsChanged();
 
         // Opens the ring for what is at the pointer (the canvas centre when the pointer has not been seen).
         void openRing(bool byPress);
@@ -125,6 +127,7 @@ namespace curvy {
         Settings settings_;
         std::string scrubKey_;
         bool cursorHidden_ = false;
+        bool applyingToolDefaults_ = false;
         long cursorBeforeX_ = 0, cursorBeforeY_ = 0;
 
         newui::Point pointer_;

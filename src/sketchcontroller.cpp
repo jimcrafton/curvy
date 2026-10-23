@@ -205,6 +205,7 @@ namespace curvy {
         options.defaultExtension = "png";
         std::string stem = document_.hasFilePath() ? std::filesystem::path(document_.filePath()).stem().string() : untitledName_;
         options.defaultFileName = stem + ".png";
+        options.initialDirectory = exportFolder_;
         std::string path;
         newui::Dialog::showSaveFile(frame_.frameHandle(), options, path);
         if (path.empty()) {
@@ -225,6 +226,7 @@ namespace curvy {
         options.defaultExtension = "pdf";
         std::string stem = document_.hasFilePath() ? std::filesystem::path(document_.filePath()).stem().string() : untitledName_;
         options.defaultFileName = stem + ".pdf";
+        options.initialDirectory = exportFolder_;
         std::string path;
         newui::Dialog::showSaveFile(frame_.frameHandle(), options, path);
         if (path.empty()) {
@@ -246,6 +248,7 @@ namespace curvy {
         options.defaultExtension = "png";
         std::string stem = document_.hasFilePath() ? std::filesystem::path(document_.filePath()).stem().string() : untitledName_;
         options.defaultFileName = stem + ".png";
+        options.initialDirectory = exportFolder_;
         std::string path;
         newui::Dialog::showSaveFile(frame_.frameHandle(), options, path);
         if (path.empty()) {

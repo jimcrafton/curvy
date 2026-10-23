@@ -88,7 +88,7 @@ namespace curvy {
                                  "Tap Space now to start your first document."}) {
             lines_.push_back(addText(text, 13.0f, false, theme.textPrimary));
         }
-        note_ = addText("Press any key or click the canvas to close. This is shown once.", 12.0f, false, theme.textMuted);
+        note_ = addText("Press any key or click anywhere to close. This is shown once.", 12.0f, false, theme.textMuted);
     }
 
     shapes::Text* WelcomeOverlay::addText(const std::string& text, float size, bool bold, std::uint32_t rgb) {

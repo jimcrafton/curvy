@@ -34,8 +34,12 @@ namespace curvy {
     }
 
     void CanvasView::setPolygonSides(int sides) {
+        const int before = polygonSides_;
         polygonSides_ = std::max(3, std::min(60, sides));
         style().markDirty();
+        if (polygonSides_ != before) {
+            onToolDefaultsChanged(*this);
+        }
     }
 
     void CanvasView::setArcSweep(double radians) {
@@ -44,8 +48,12 @@ namespace curvy {
     }
 
     void CanvasView::setStarPoints(int points) {
+        const int before = starPoints_;
         starPoints_ = std::max(3, std::min(40, points));
         style().markDirty();
+        if (starPoints_ != before) {
+            onToolDefaultsChanged(*this);
+        }
     }
 
     // A new object gets the document's default look (a path with no fill and no stroke would be invisible, so

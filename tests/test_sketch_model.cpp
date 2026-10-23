@@ -6367,7 +6367,7 @@ TEST(DockContext, AGroupShowsOnlyTransformAndOpacity) {
 TEST(Settings, RoundTripsThroughText) {
     curvy::Settings settings;
     settings.theme = curvy::Settings::ThemeChoice::Light;
-    settings.holdDelayMs = 650;
+    settings.spaceTapMs = 650;
     settings.exportFolder = "C:\out";
     curvy::Settings loaded;
     loaded.fromText(settings.toText());
@@ -6376,9 +6376,28 @@ TEST(Settings, RoundTripsThroughText) {
 
 TEST(Settings, BadValuesAreSkippedAndPagesReset) {
     curvy::Settings settings;
-    settings.fromText("holdDelayMs=99999\nunknown=1\nspaceTapMs=250\n");
-    EXPECT_EQ(settings.holdDelayMs, 400);
-    EXPECT_EQ(settings.spaceTapMs, 250);
+    settings.fromText("spaceTapMs=99999\nunknown=1\nscrubSensitivity=250\n");
+    EXPECT_EQ(settings.spaceTapMs, 300);
+    EXPECT_EQ(settings.scrubSensitivity, 250);
     settings.resetPage(curvy::SettingsPage::Pen);
     EXPECT_EQ(settings.spaceTapMs, 300);
+}
+
+TEST(SketchSvg, ToolDefaultsRoundTripAndAreOmittedWhenUnset) {
+    SketchDocument doc;
+    EXPECT_EQ(svgFromDocument(doc).find("data-tools"), std::string::npos);
+    doc.setToolDefaults({7, 9});
+    SketchDocument loaded;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), loaded));
+    EXPECT_EQ(loaded.toolDefaults().polygonSides, 7);
+    EXPECT_EQ(loaded.toolDefaults().starPoints, 9);
+}
+
+TEST(Settings, ToolDefaultsAreRangeCheckedAndReset) {
+    curvy::Settings settings;
+    settings.fromText("polygonSides=99\nstarPoints=6\n");
+    EXPECT_EQ(settings.polygonSides, 5);
+    EXPECT_EQ(settings.starPoints, 6);
+    settings.resetPage(curvy::SettingsPage::Drawing);
+    EXPECT_EQ(settings.starPoints, 5);
 }

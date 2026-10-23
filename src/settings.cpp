@@ -19,7 +19,6 @@ namespace curvy {
                 canvasBackground = defaults.canvasBackground;
                 canvasFollowsTheme = defaults.canvasFollowsTheme;
                 propertyTextSize = defaults.propertyTextSize;
-                blurPanels = defaults.blurPanels;
                 break;
             case SettingsPage::Workspace:
                 toolbarVisible = defaults.toolbarVisible;
@@ -31,7 +30,6 @@ namespace curvy {
             case SettingsPage::Pen:
                 scrubAxis = defaults.scrubAxis;
                 scrubSensitivity = defaults.scrubSensitivity;
-                holdDelayMs = defaults.holdDelayMs;
                 spaceTapMs = defaults.spaceTapMs;
                 barrelButton = defaults.barrelButton;
                 eraserEnd = defaults.eraserEnd;
@@ -41,6 +39,8 @@ namespace curvy {
                 gridSize = defaults.gridSize;
                 snapGuides = defaults.snapGuides;
                 toolDefaultsInDocument = defaults.toolDefaultsInDocument;
+                polygonSides = defaults.polygonSides;
+                starPoints = defaults.starPoints;
                 break;
             case SettingsPage::Files:
                 autosave = defaults.autosave;
@@ -70,7 +70,6 @@ namespace curvy {
             << "canvasBackground=" << canvasBackground << "\n"
             << "canvasFollowsTheme=" << canvasFollowsTheme << "\n"
             << "propertyTextSize=" << propertyTextSize << "\n"
-            << "blurPanels=" << blurPanels << "\n"
             << "toolbarVisible=" << toolbarVisible << "\n"
             << "propertiesVisible=" << propertiesVisible << "\n"
             << "rulersVisible=" << rulersVisible << "\n"
@@ -78,7 +77,6 @@ namespace curvy {
             << "recentLength=" << recentLength << "\n"
             << "scrubAxis=" << int(scrubAxis) << "\n"
             << "scrubSensitivity=" << scrubSensitivity << "\n"
-            << "holdDelayMs=" << holdDelayMs << "\n"
             << "spaceTapMs=" << spaceTapMs << "\n"
             << "barrelButton=" << int(barrelButton) << "\n"
             << "eraserEnd=" << int(eraserEnd) << "\n"
@@ -86,6 +84,8 @@ namespace curvy {
             << "gridSize=" << gridSize << "\n"
             << "snapGuides=" << snapGuides << "\n"
             << "toolDefaultsInDocument=" << toolDefaultsInDocument << "\n"
+            << "polygonSides=" << polygonSides << "\n"
+            << "starPoints=" << starPoints << "\n"
             << "welcomeShown=" << welcomeShown << "\n"
             << "autosave=" << autosave << "\n"
             << "autosaveMinutes=" << autosaveMinutes << "\n"
@@ -142,7 +142,6 @@ namespace curvy {
         }
         flag("canvasFollowsTheme", canvasFollowsTheme);
         integer("propertyTextSize", propertyTextSize, 10, 20);
-        flag("blurPanels", blurPanels);
         flag("toolbarVisible", toolbarVisible);
         flag("propertiesVisible", propertiesVisible);
         flag("rulersVisible", rulersVisible);
@@ -152,7 +151,6 @@ namespace curvy {
         integer("scrubAxis", choice, 0, 1);
         scrubAxis = WorkspaceModel::ScrubAxis(choice);
         integer("scrubSensitivity", scrubSensitivity, 25, 400);
-        integer("holdDelayMs", holdDelayMs, 100, 2000);
         integer("spaceTapMs", spaceTapMs, 100, 1000);
         choice = int(barrelButton);
         integer("barrelButton", choice, 0, 2);
@@ -169,6 +167,8 @@ namespace curvy {
             }
         }
         flag("snapGuides", snapGuides);
+        integer("polygonSides", polygonSides, 3, 60);
+        integer("starPoints", starPoints, 3, 40);
         flag("toolDefaultsInDocument", toolDefaultsInDocument);
         flag("welcomeShown", welcomeShown);
         flag("autosave", autosave);
