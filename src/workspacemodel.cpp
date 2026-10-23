@@ -87,7 +87,7 @@ namespace curvy {
 
     bool WorkspaceModel::fresh(const std::string& feature) const {
         const auto it = uses_.find(feature);
-        return it == uses_.end() || it->second < 3;
+        return !hintsFade_ || it == uses_.end() || it->second < 3;
     }
 
     void WorkspaceModel::used(const std::string& feature) {
@@ -142,7 +142,7 @@ namespace curvy {
             return "drag to pan, or release for the menu";
         }
         if (tool_ != "Select") {
-            return heldKey_.empty() ? "drag to draw - Esc to cancel" : "drag to draw - Shift square - Alt from center - release " + heldKey_ + " to stop";
+            return heldKey_.empty() ? "drag to draw - V or Esc for Select" : "drag to draw - Shift square - Alt from center - release " + heldKey_ + " to stop";
         }
         const std::string hint = idleHint();
         return !message_.empty() && selectionCount_ == 0 && hover_.part == ScrubPart::None ? message_ + "  |  " + hint : hint;

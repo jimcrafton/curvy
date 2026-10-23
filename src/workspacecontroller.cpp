@@ -1,8 +1,15 @@
 #include "curvy/workspacecontroller.h"
 #include "curvy/theme.h"
 #include "curvy/dockcontroller.h"
+#include "curvy/settingsdialog.h"
+#include "curvy/sketchsvg.h"
+#include "curvy/welcomeoverlay.h"
 
+#include <newui/application.h>
+#include <newui/bundle.h>
+#include <newui/dialogs.h>
 #include <newui/font.h>
+#include <newui/runloop.h>
 #include <newui/fontmanager.h>
 #include <newui/keyboard_constants.h>
 #include <newui/mouse_constants.h>
@@ -12,15 +19,28 @@
 #include <newui/uiinputmanager.h>
 
 #include <algorithm>
+#include <chrono>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#define NOMINMAX
+#include <windows.h>
 #include <cmath>
 #include <stdexcept>
+#include <vector>
 
 namespace curvy {
+
+    namespace {
+        std::filesystem::path recoveryFolder() {
+            const char* base = std::getenv("APPDATA");
+            return std::filesystem::path(base != nullptr ? base : ".") / "curvy" / "autosave";
+        }
+    }
 
     using namespace newui;
 
     namespace {
-        constexpr auto kTapLimit = std::chrono::milliseconds(300);
 
         BLRgba32 rgb(std::uint32_t value) { return BLRgba32(Theme::argb(value)); }
         BLRgba32 card() { return BLRgba32(Theme::argb(Theme::current().bgSurface, 0xF2)); }
@@ -33,12 +53,12 @@ namespace curvy {
         RadialRing newRing() {
             return {"New", "Create...", "dialog.new", {
                 {"Letter", "1", "new.letter"}, {"A4", "2", "new.a4"}, {"Full HD", "3", "new.fullhd"}, {"Square", "4", "new.square"},
-                {"Open", "O", "file.open"}}};
+                {"Open", "O", "file.open"}, {"Settings", "S", "dialog.settings"}}};
         }
         RadialRing createRing() {
             return {"Create", "Shape options...", "dialog.shape", {
                 {"Rectangle", "R", "tool.rect"}, {"Ellipse", "E", "tool.ellipse"}, {"Polygon", "P", "tool.polygon"}, {"Star", "S", "tool.star"},
-                {"Line", "L", "tool.line"}, {"Freehand", "B", "tool.pencil"}, {"Text", "T", "tool.text"}, {"File", "F", "ring.document"}}};
+                {"Line", "L", "tool.line"}, {"Freehand", "B", "tool.pencil"}, {"Text", "T", "tool.text"}, {"Select", "V", "tool.select"}}};
         }
         RadialRing documentRing() {
             return {"Document", "Setup...", "dialog.setup", {
@@ -48,7 +68,7 @@ namespace curvy {
         RadialRing viewRing() {
             return {"View", "Back", "ring.document", {
                 {"Toolbar", "T", "view.toolbar"}, {"Properties", "P", "view.properties"}, {"Rulers", "G", "view.toggleRulers"}, {"Fit page", "0", "view.fitPage"},
-                {"Theme", "L", "view.theme"}}};
+                {"Theme", "L", "view.theme"}, {"Settings", "S", "dialog.settings"}}};
         }
         RadialRing objectRing() {
             return {"Object", "Properties...", "dialog.object", {
@@ -73,7 +93,7 @@ namespace curvy {
             SketchTool tool;
         };
         const ToolCommand kToolCommands[] = {
-            {"tool.rect", SketchTool::Rectangle}, {"tool.ellipse", SketchTool::Ellipse}, {"tool.polygon", SketchTool::Polygon}, {"tool.star", SketchTool::Star},
+            {"tool.select", SketchTool::Select}, {"tool.rect", SketchTool::Rectangle}, {"tool.ellipse", SketchTool::Ellipse}, {"tool.polygon", SketchTool::Polygon}, {"tool.star", SketchTool::Star},
             {"tool.line", SketchTool::Line}, {"tool.pencil", SketchTool::Pencil}, {"tool.text", SketchTool::Text}};
 
         // The keys held to draw: R E P S L.
@@ -138,7 +158,7 @@ namespace curvy {
         text(hintTool_, theme.highlight);
         text(hintKeys_, theme.textMuted);
         text(hintInfo_, theme.textMuted);
-        canvas_->setPasteboardColor(Theme::argb(theme.bgCanvas));
+        canvas_->setPasteboardColor(Theme::argb(settings_.canvasFollowsTheme ? theme.bgCanvas : settings_.canvasBackground));
         if (dock_ != nullptr) {
             dock_->restyle();
         }
@@ -181,6 +201,21 @@ namespace curvy {
         menu_->setBounds(Rect(0.0f, 0.0f, canvas_->bounds().size().width, canvas_->bounds().size().height));
         menu_->onCommand.add(this, &WorkspaceController::handleRingCommand);
 
+        document_.onModifiedChanged += [this](Document&) {
+            if (!document_.isModified()) {
+                clearRecovery();
+            }
+            return SyncReturn::Handled;
+        };
+        frame_.onClosed += [this](Frame&) {
+            clearRecovery();
+            return SyncReturn::Handled;
+        };
+        // Closing the window (X, Alt+F4) asks to save a modified document; Cancel keeps it open.
+        frame_.onClosing += [this](Frame&, bool& canClose) {
+            canClose = files_->canClose();
+            return SyncReturn::Handled;
+        };
         canvas_->onPressFilter = [this](const Point& pt, std::uint32_t buttons, std::uint32_t keys) { return filterPress(pt, buttons, keys); };
         canvas_->onKeyFilter = [this](std::uint32_t mask, std::uint32_t vk) { return filterKey(mask, vk); };
         canvas_->onPaintTop = [this](BLContext& ctx) { paintTop(ctx); };
@@ -192,9 +227,138 @@ namespace curvy {
         files_->onDocumentReplaced.add(this, &WorkspaceController::handleDocumentReplaced);
     }
 
+    // The autosave timer is not cancelled here: the run loop has already ended and kills its timers itself.
     WorkspaceController::~WorkspaceController() = default;
 
+    void WorkspaceController::startAutosave() {
+        autosaveTimer_ = Application::instance().runLoop().postDelayed(std::chrono::seconds(30), [this] {
+            autosaveTick();
+            return false;
+        });
+    }
+
+    // The copy is only needed after a crash, so it goes as soon as the document is saved, replaced or the window closes.
+    void WorkspaceController::clearRecovery() {
+        if (!recoveryFile_.empty()) {
+            std::error_code ignored;
+            std::filesystem::remove(std::filesystem::u8path(recoveryFile_), ignored);
+            recoveryFile_.clear();
+        }
+    }
+
+    bool WorkspaceController::offerRecovery() {
+        std::error_code ignored;
+        std::vector<std::filesystem::directory_entry> found;
+        for (const auto& entry : std::filesystem::directory_iterator(recoveryFolder(), ignored)) {
+            if (entry.is_regular_file(ignored) && entry.path().extension() == ".svg") {
+                found.push_back(entry);
+            }
+        }
+        std::sort(found.begin(), found.end(), [&](const auto& a, const auto& b) { return a.last_write_time(ignored) > b.last_write_time(ignored); });
+        for (const auto& entry : found) {
+            const std::string name = entry.path().stem().string();
+            const DialogResult answer = Dialog::showMessageBox(frame_.frameHandle(),
+                "curvy closed before \"" + name + "\" was saved. Recover the autosaved copy?\n\nYes recovers it, No throws it away, Cancel asks again next time.",
+                "curvy", MessageBoxButtons::YesNoCancel, MessageBoxIcon::Question);
+            if (answer == DialogResult::Cancel) {
+                return false;
+            }
+            if (answer == DialogResult::Yes && files_->recoverFrom(entry.path().string(), name)) {
+                std::filesystem::remove(entry.path(), ignored);
+                return true;
+            }
+            std::filesystem::remove(entry.path(), ignored);
+        }
+        return false;
+    }
+
+    void WorkspaceController::showWelcomeOnce() {
+        if (settings_.welcomeShown || frame_.rootView().overlay() != nullptr) {
+            return;
+        }
+        frame_.rootView().setOverlay(std::make_unique<WelcomeOverlay>());
+        frame_.rootView().markDirty();
+        settings_.welcomeShown = true;
+        settings_.save(Settings::defaultPath());
+    }
+
+    void WorkspaceController::dismissWelcome() {
+        if (frame_.rootView().overlay() != nullptr) {
+            frame_.rootView().setOverlay(nullptr);
+            frame_.rootView().markDirty();
+            focusCanvas();
+        }
+    }
+
+    // A recovery copy beside the settings; the user's own file is only ever written by Save.
+    void WorkspaceController::autosaveTick() {
+        const auto now = std::chrono::steady_clock::now();
+        if (!settings_.autosave || !model_->documentOpen() || !document_.isModified() ||
+            now - lastAutosave_ < std::chrono::minutes(settings_.autosaveMinutes)) {
+            return;
+        }
+        lastAutosave_ = now;
+        const std::filesystem::path folder = recoveryFolder();
+        std::error_code ignored;
+        std::filesystem::create_directories(folder, ignored);
+        const std::string stem = document_.hasFilePath() ? std::filesystem::path(document_.filePath()).stem().string() : files_->untitledName();
+        const std::filesystem::path file = folder / (stem + ".svg");
+        std::ofstream out(file, std::ios::binary | std::ios::trunc);
+        if (out << svgFromDocument(document_)) {
+            recoveryFile_ = file.string();
+            model_->say("Autosaved " + stem);
+        }
+    }
+
+    void WorkspaceController::openSettings() {
+        Settings edited = settings_;
+        edited.toolbarVisible = model_->toolbarVisible();   // these three show how things are now, whatever was saved
+        edited.propertiesVisible = model_->propertiesVisible();
+        edited.rulersVisible = canvas_->showRulers();
+        const Settings before = edited;
+        if (SettingsDialog::run(frame_, edited, [this](const Settings& live) { applySettings(live); })) {
+            applySettings(edited);
+            if (edited.toolbarVisible != before.toolbarVisible) {
+                model_->setToolbarVisible(edited.toolbarVisible);
+            }
+            if (edited.propertiesVisible != before.propertiesVisible) {
+                model_->setPropertiesVisible(edited.propertiesVisible);
+            }
+            if (edited.rulersVisible != before.rulersVisible) {
+                canvas_->setShowRulers(edited.rulersVisible);
+            }
+            edited.save(Settings::defaultPath());
+            showWelcomeOnce();   // when the Welcome button asked for it
+            model_->say("Settings saved");
+        }
+        focusCanvas();
+    }
+
+    void WorkspaceController::applySettings(const Settings& settings) {
+        const bool themeChanged = settings.darkTheme() != Theme::current().isDark;
+        settings_ = settings;
+        model_->setScrubAxis(settings_.scrubAxis);
+        model_->setHintsFade(settings_.hintsFade);
+        if (dock_ != nullptr) {
+            dock_->setPropertyTextSize(settings_.propertyTextSize);
+        }
+        canvas_->setSnapToGrid(settings_.snapGrid);
+        canvas_->setGridSpacing(float(settings_.gridSize));
+        canvas_->setSmartGuides(settings_.snapGuides);
+        if (files_ != nullptr) {
+            files_->setMaxRecent(std::size_t(settings_.recentLength));
+        }
+        if (themeChanged) {
+            setDarkTheme(settings_.darkTheme());
+        } else {
+            restyle();
+        }
+    }
+
     void WorkspaceController::start(const std::string& path) {
+        applySettings(Settings::load(Settings::defaultPath()));
+        model_->setToolbarVisible(settings_.toolbarVisible);
+        model_->setPropertiesVisible(settings_.propertiesVisible);
         model_->setDocument(false, std::string());
         canvas_->setShowPages(false);
         canvas_->setShowRulers(false);
@@ -215,10 +379,31 @@ namespace curvy {
     }
 
     SyncReturn WorkspaceController::modelChanged(Model&) {
-        if (hintTool_ != nullptr) { hintTool_->setText(model_->hintTool()); }
-        if (hintKeys_ != nullptr) { hintKeys_->setText(model_->hintKeys()); }
-        if (hintInfo_ != nullptr) { hintInfo_->setText(model_->hintInfo()); }
-        if (documentName_ != nullptr) { documentName_->setText(model_->documentName()); }
+        // A label sizes itself when the bar is laid out, so new text needs a layout pass or it is clipped to the old width
+        // (the document name started empty and showed as a sliver beside the title).
+        std::vector<View*> bars;   // the bars whose layout has to run again
+        auto show = [&bars](Label* label, const std::string& text, bool fitWidth) {
+            if (label != nullptr && label->text() != text) {
+                label->setText(text);
+                if (fitWidth) {   // flex does not measure text, so these two are sized to it here
+                    if (auto* style = dynamic_cast<LabelStyle*>(&label->style())) {
+                        label->setDesiredSize(Size(std::ceil(style->font().measureText(text).width) + 4.0f, label->bounds().size().height));
+                    }
+                }
+                if (std::find(bars.begin(), bars.end(), label->parent()) == bars.end()) {
+                    bars.push_back(label->parent());
+                }
+            }
+        };
+        show(hintTool_, model_->hintTool(), true);
+        show(hintKeys_, model_->hintKeys(), false);
+        show(hintInfo_, model_->hintInfo(), false);
+        show(documentName_, model_->documentName(), true);
+        for (View* bar : bars) {
+            if (bar != nullptr) {
+                bar->updateLayout();
+            }
+        }
         return SyncReturn::Handled;
     }
 
@@ -276,7 +461,7 @@ namespace curvy {
         for (const ToolCommand& tool : kToolCommands) {
             if (command == tool.command) {
                 armTool(tool.tool, true, std::string());
-                model_->say(std::string(toolName(tool.tool)) + " tool armed");
+                model_->say(tool.tool == SketchTool::Select ? std::string("Select") : std::string(toolName(tool.tool)) + " tool armed");
                 return;
             }
         }
@@ -299,6 +484,7 @@ namespace curvy {
             model_->say("New artboard at the pen");
         }
         else if (command == "dialog.new") { files_->newDocument(); }
+        else if (command == "dialog.settings") { openSettings(); }
         else if (command == "dialog.setup") { commands_->run("file.documentSetup"); }
         else if (command.compare(0, 7, "dialog.") == 0) { model_->say("The " + command.substr(7) + " dialog is not built yet"); }
         else if (commands_->has(command)) {
@@ -314,7 +500,7 @@ namespace curvy {
     SyncReturn WorkspaceController::handleDocumentReplaced(SketchDocumentController& controller) {
         model_->setDocument(true, controller.displayName());
         canvas_->setShowPages(true);
-        canvas_->setShowRulers(true);
+        canvas_->setShowRulers(settings_.rulersVisible);
         frame_.setTitle("curvy - " + controller.displayName());
         canvas_->zoomToFit();
         return SyncReturn::Handled;
@@ -339,7 +525,33 @@ namespace curvy {
         pointer_ = pt;
         pointerKnown_ = true;
         shiftDown_ = (keys & kmShift) != 0;
+        dismissWelcome();
+        const PenState& pen = frame_.rootView().penState();
+        if (pen.eraser && (buttons & mbmLeftButton) != 0) {
+            if (model_->documentOpen() && !menu_->isOpen()) {
+                if (settings_.eraserEnd == Settings::EraserAction::Erase) {
+                    if (SketchObject* hit = document_.hitTest(canvas_->toDocument(pt), 4.0 / double(canvas_->zoom()))) {
+                        document_.setSelection({hit->id()});
+                        model_->used("delete");
+                        commands_->run("edit.delete");
+                    }
+                } else if (settings_.eraserEnd == Settings::EraserAction::Undo) {
+                    commands_->run("edit.undo");
+                }
+            }
+            return true;
+        }
         if ((buttons & mbmRightButton) != 0) {
+            if (pen.barrel && !menu_->isOpen() && settings_.barrelButton != Settings::PenButton::Rings) {
+                if (settings_.barrelButton == Settings::PenButton::Pan && model_->documentOpen()) {
+                    panning_ = true;
+                    panFrom_ = pt;
+                    panStartX_ = canvas_->panX();
+                    panStartY_ = canvas_->panY();
+                    model_->used("pan");
+                }
+                return true;
+            }
             openRing(true);
             return true;
         }
@@ -425,6 +637,12 @@ namespace curvy {
     }
 
     bool WorkspaceController::filterKey(std::uint32_t mask, std::uint32_t vk) {
+        if (frame_.rootView().overlay() != nullptr) {
+            dismissWelcome();   // any key closes it; Space then carries on as usual and opens the ring
+            if (vk == vkEscape) {
+                return true;
+            }
+        }
         if ((mask & (kmCtrl | kmAlt)) != 0) {
             return false;
         }
@@ -473,6 +691,11 @@ namespace curvy {
         if (key == heldToolKey_) {
             return true;   // auto-repeat of the key being held
         }
+        if (key == "V") {
+            armTool(SketchTool::Select, false, std::string());
+            model_->say("Select");
+            return true;
+        }
         if (canvas_->tool() == SketchTool::Select && model_->hover().part != ScrubPart::None && startScrub(key[0])) {
             return true;
         }
@@ -498,7 +721,7 @@ namespace curvy {
             spaceDown_ = false;
             panning_ = false;
             model_->setSpaceDown(false);
-            if (!spaceUsed_ && std::chrono::steady_clock::now() - spaceStart_ < kTapLimit && !menu_->isOpen()) {
+            if (!spaceUsed_ && std::chrono::steady_clock::now() - spaceStart_ < std::chrono::milliseconds(settings_.spaceTapMs) && !menu_->isOpen()) {
                 openRing(false);
             }
             return SyncReturn::Handled;
@@ -516,7 +739,8 @@ namespace curvy {
     // ---- Scrubbing ----
 
     double WorkspaceController::scrubTravel(const Point& pt) const {
-        return model_->scrubAxis() == WorkspaceModel::ScrubAxis::Vertical ? -double(pt.y) : double(pt.x);
+        const double sensitivity = double(settings_.scrubSensitivity) / 100.0;
+        return sensitivity * (model_->scrubAxis() == WorkspaceModel::ScrubAxis::Vertical ? -double(pt.y) : double(pt.x));
     }
 
     bool WorkspaceController::startScrub(char key) {
@@ -525,12 +749,25 @@ namespace curvy {
             return false;
         }
         scrubKey_ = std::string(1, key);
+        // Hidden while the card is up; put back where it was so the pointer is not left wherever the scrub ended.
+        POINT cursor{};
+        cursorHidden_ = ::GetCursorPos(&cursor) != FALSE;
+        cursorBeforeX_ = cursor.x;
+        cursorBeforeY_ = cursor.y;
+        if (cursorHidden_) {
+            ::ShowCursor(FALSE);
+        }
         model_->setScrub(true, hover.part, &scrub_.prop(), scrub_.value(), double(pointer_.x), double(pointer_.y));
         return true;
     }
 
     void WorkspaceController::endScrub(bool keep) {
         scrub_.finish(document_, keep);
+        if (cursorHidden_) {
+            ::SetCursorPos(cursorBeforeX_, cursorBeforeY_);
+            ::ShowCursor(TRUE);
+            cursorHidden_ = false;
+        }
         model_->used("scrub." + scrubKey_);
         model_->setScrub(false, ScrubPart::None, nullptr, 0.0, 0.0, 0.0);
         model_->say(keep ? "Kept" : "Cancelled");

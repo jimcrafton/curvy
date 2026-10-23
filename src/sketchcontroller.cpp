@@ -46,7 +46,7 @@ namespace curvy {
         }
         std::ifstream in(std::filesystem::u8path(recentPath_));
         std::string line;
-        while (std::getline(in, line) && recent_.size() < kMaxRecent) {
+        while (std::getline(in, line) && recent_.size() < maxRecent_) {
             while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) {
                 line.pop_back();
             }
@@ -68,14 +68,22 @@ namespace curvy {
         }
     }
 
+    void SketchDocumentController::setMaxRecent(std::size_t count) {
+        maxRecent_ = count;
+        if (recent_.size() > maxRecent_) {
+            recent_.resize(maxRecent_);
+            saveRecent();
+        }
+    }
+
     void SketchDocumentController::remember(const std::string& path) {
         if (path.empty()) {
             return;
         }
         recent_.erase(std::remove(recent_.begin(), recent_.end(), path), recent_.end());
         recent_.insert(recent_.begin(), path);
-        if (recent_.size() > kMaxRecent) {
-            recent_.resize(kMaxRecent);
+        if (recent_.size() > maxRecent_) {
+            recent_.resize(maxRecent_);
         }
         saveRecent();
         onRecentChanged(*this);
@@ -151,6 +159,19 @@ namespace curvy {
         }
         remember(document_.filePath());
         onStatus(*this, "Opened " + document_.filePath());
+        onDocumentReplaced(*this);
+        onStateChanged(*this);
+        return true;
+    }
+
+    bool SketchDocumentController::recoverFrom(const std::string& path, const std::string& name) {
+        if (!openInto(document_, path)) {
+            return false;
+        }
+        document_.reset();   // keeps the content, drops the recovery file as its path
+        document_.markModified();
+        untitledName_ = name;
+        onStatus(*this, "Recovered " + name);
         onDocumentReplaced(*this);
         onStateChanged(*this);
         return true;
@@ -313,8 +334,12 @@ namespace curvy {
             background = PageBackground::CurrentFill;
         }
         settings.loadSetup(document_.pageWidth(), document_.pageHeight(), document_.ppi(), document_.colorMode(), background);
-        if (!NewDocumentDialog::runSetup(frame_, settings)) {
+        settings.setName(document_.hasFilePath() ? std::filesystem::path(document_.filePath()).filename().string() : untitledName_);
+        if (!NewDocumentDialog::runSetup(frame_, settings, !document_.hasFilePath())) {
             return false;
+        }
+        if (!document_.hasFilePath() && !settings.name().empty()) {
+            untitledName_ = settings.name();
         }
         document_.setPageSize(float(settings.widthPoints()), float(settings.heightPoints()));
         document_.setPpi(float(settings.ppi()));

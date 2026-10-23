@@ -16,6 +16,8 @@
 #include "curvy/holdscrub.h"
 #include "curvy/workspacemodel.h"
 #include "curvy/theme.h"
+#include "curvy/dockcontext.h"
+#include "curvy/settings.h"
 
 #include <newui/keyboard_constants.h>
 #include <newui/mouse_constants.h>
@@ -6319,4 +6321,64 @@ TEST(Theme, TokensMeetTheContrastTargetsOfTheDarkModeNotes) {
     }
     EXPECT_NE(curvy::Theme::dark().bgApp, 0x000000u);
     EXPECT_NE(curvy::Theme::dark().textPrimary, 0xFFFFFFu);
+}
+
+// ---- Which property boxes the dock shows ----
+
+TEST(DockContext, NothingSelectedShowsDefaultsForADrawingToolAndANoteOtherwise) {
+    curvy::SketchDocument doc;
+    const curvy::DockBoxes drawing = curvy::DockContext::boxesFor(doc, curvy::SketchTool::Star);
+    EXPECT_TRUE(drawing.colour && drawing.stroke && drawing.opacity && !drawing.transform);
+    EXPECT_EQ(drawing.caption, "New shapes");
+    const curvy::DockBoxes select = curvy::DockContext::boxesFor(doc, curvy::SketchTool::Select);
+    EXPECT_FALSE(select.any());
+    EXPECT_EQ(select.caption, "Nothing selected");
+    EXPECT_FALSE(curvy::DockContext::boxesFor(doc, curvy::SketchTool::Hand).any());
+}
+
+TEST(DockContext, ASelectedShapeShowsTransformColourStrokeAndOpacity) {
+    curvy::SketchDocument doc;
+    const std::size_t id = doc.addUndoable(curvy::SketchObject::makeRect(0, 0, 10, 10), "Draw").id();
+    doc.setSelection({id});
+    const curvy::DockBoxes boxes = curvy::DockContext::boxesFor(doc, curvy::SketchTool::Select);
+    EXPECT_TRUE(boxes.transform && boxes.colour && boxes.stroke && boxes.opacity);
+    EXPECT_TRUE(boxes.caption.empty());
+    EXPECT_EQ(boxes, curvy::DockContext::boxesFor(doc, curvy::SketchTool::Star));   // a selection wins over the armed tool
+}
+
+TEST(DockContext, ATextOnlySelectionLeavesOutStroke) {
+    curvy::SketchDocument doc;
+    const std::size_t id = doc.addUndoable(curvy::SketchObject::makeText("Hi", "Segoe UI", 24.0, BLPoint(0, 20)), "Text").id();
+    doc.setSelection({id});
+    const curvy::DockBoxes boxes = curvy::DockContext::boxesFor(doc, curvy::SketchTool::Select);
+    EXPECT_TRUE(boxes.transform && boxes.colour && boxes.opacity && !boxes.stroke);
+}
+
+TEST(DockContext, AGroupShowsOnlyTransformAndOpacity) {
+    curvy::SketchDocument doc;
+    const std::size_t a = doc.addUndoable(curvy::SketchObject::makeRect(0, 0, 10, 10), "Draw").id();
+    const std::size_t b = doc.addUndoable(curvy::SketchObject::makeRect(20, 0, 10, 10), "Draw").id();
+    doc.setSelection({a, b});
+    ASSERT_TRUE(doc.groupSelection());
+    const curvy::DockBoxes boxes = curvy::DockContext::boxesFor(doc, curvy::SketchTool::Select);
+    EXPECT_TRUE(boxes.transform && boxes.opacity && !boxes.colour && !boxes.stroke);
+}
+
+TEST(Settings, RoundTripsThroughText) {
+    curvy::Settings settings;
+    settings.theme = curvy::Settings::ThemeChoice::Light;
+    settings.holdDelayMs = 650;
+    settings.exportFolder = "C:\out";
+    curvy::Settings loaded;
+    loaded.fromText(settings.toText());
+    EXPECT_EQ(loaded.toText(), settings.toText());
+}
+
+TEST(Settings, BadValuesAreSkippedAndPagesReset) {
+    curvy::Settings settings;
+    settings.fromText("holdDelayMs=99999\nunknown=1\nspaceTapMs=250\n");
+    EXPECT_EQ(settings.holdDelayMs, 400);
+    EXPECT_EQ(settings.spaceTapMs, 250);
+    settings.resetPage(curvy::SettingsPage::Pen);
+    EXPECT_EQ(settings.spaceTapMs, 300);
 }

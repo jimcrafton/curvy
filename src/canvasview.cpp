@@ -69,14 +69,14 @@ namespace curvy {
     BLPoint CanvasView::toDocument(const Point& viewPoint) const {
         Rect client = getClientBounds();
         double rs = rulerSize();
-        return BLPoint((double(viewPoint.x) - client.left() - rs - double(panX_)) / double(zoom_),
+        return BLPoint((double(viewPoint.x) - client.left() - leftInset_ - rs - double(panX_)) / double(zoom_),
             (double(viewPoint.y) - client.top() - rs - double(panY_)) / double(zoom_));
     }
 
     BLPoint CanvasView::toView(const BLPoint& documentPoint) const {
         Rect client = getClientBounds();
         double rs = rulerSize();
-        return BLPoint(client.left() + rs + double(panX_) + documentPoint.x * double(zoom_),
+        return BLPoint(client.left() + leftInset_ + rs + double(panX_) + documentPoint.x * double(zoom_),
             client.top() + rs + double(panY_) + documentPoint.y * double(zoom_));
     }
 
@@ -1900,7 +1900,7 @@ namespace curvy {
             pageHeight_ = document_->pageHeight();
         }
         Rect client = getClientBounds();
-        float availW = client.width() - rulerSize() - 40.0f;
+        float availW = client.width() - leftInset_ - rulerSize() - 40.0f;
         float availH = client.height() - rulerSize() - 40.0f;
         if (availW <= 0.0f || availH <= 0.0f) {
             return;
@@ -1919,7 +1919,7 @@ namespace curvy {
         }
         const Artboard& board = document_->activeArtboardRect();
         Rect client = getClientBounds();
-        float availW = client.width() - rulerSize() - 40.0f;
+        float availW = client.width() - leftInset_ - rulerSize() - 40.0f;
         float availH = client.height() - rulerSize() - 40.0f;
         if (availW <= 0.0f || availH <= 0.0f) {
             return;
@@ -1927,7 +1927,7 @@ namespace curvy {
         float fit = std::min(availW / float(board.width), availH / float(board.height));
         centered_ = false;
         setZoom(fit < kMinZoom ? kMinZoom : (fit > kMaxZoom ? kMaxZoom : fit));
-        float w = client.width() - rulerSize(), h = client.height() - rulerSize();
+        float w = client.width() - leftInset_ - rulerSize(), h = client.height() - rulerSize();
         setPan((w - float(board.width) * zoom_) * 0.5f - float(board.x) * zoom_, (h - float(board.height) * zoom_) * 0.5f - float(board.y) * zoom_);
     }
 
@@ -1966,8 +1966,8 @@ namespace curvy {
         float rulerSize = this->rulerSize();
 
         ctx.save();
-        ctx.clip_to_rect(BLRect(client.left() + rulerSize, client.top() + rulerSize,
-            client.width() - rulerSize, client.height() - rulerSize));
+        ctx.clip_to_rect(BLRect(client.left() + leftInset_ + rulerSize, client.top() + rulerSize,
+            client.width() - leftInset_ - rulerSize, client.height() - rulerSize));
 
         // Pasteboard.
         ctx.set_fill_style(BLRgba32(pasteboardColor_));
@@ -1977,7 +1977,7 @@ namespace curvy {
         // (vertically only when they fit, else a fixed top margin).
         BLBox all = document_ != nullptr ? document_->artboardsBounds() : BLBox(0, 0, pageWidth_, pageHeight_);
         if (centered_) {
-            float availW = client.width() - rulerSize;
+            float availW = client.width() - leftInset_ - rulerSize;
             float availH = client.height() - rulerSize;
             float w = float(all.x1 - all.x0) * zoom_;
             float h = float(all.y1 - all.y0) * zoom_;
@@ -1986,7 +1986,7 @@ namespace curvy {
         }
 
         // Document (0, 0) sits at the pan offset from the drawing area's corner; each artboard is a page at its own place.
-        double pageLeft = client.left() + rulerSize + double(panX_);
+        double pageLeft = client.left() + leftInset_ + rulerSize + double(panX_);
         double pageTop = client.top() + rulerSize + double(panY_);
         Font labelFont = FontManager::getSystemFont(SystemUIFont::Status);
         labelFont.setSize(10.0f);
@@ -2081,27 +2081,28 @@ namespace curvy {
 
         ctx.save();
         ctx.set_fill_style(face);
-        ctx.fill_rect(BLRect(client.left(), client.top(), client.width(), kRulerThickness));
-        ctx.fill_rect(BLRect(client.left(), client.top(), kRulerThickness, client.height()));
+        const double left = client.left() + leftInset_;
+        ctx.fill_rect(BLRect(left, client.top(), client.width() - leftInset_, kRulerThickness));
+        ctx.fill_rect(BLRect(left, client.top(), kRulerThickness, client.height()));
         ctx.set_stroke_style(edge);
         ctx.set_stroke_width(1.0);
         BLPath edges;
-        edges.move_to(client.left(), client.top() + kRulerThickness - 0.5);
+        edges.move_to(left, client.top() + kRulerThickness - 0.5);
         edges.line_to(client.left() + client.width(), client.top() + kRulerThickness - 0.5);
-        edges.move_to(client.left() + kRulerThickness - 0.5, client.top());
-        edges.line_to(client.left() + kRulerThickness - 0.5, client.top() + client.height());
+        edges.move_to(left + kRulerThickness - 0.5, client.top());
+        edges.line_to(left + kRulerThickness - 0.5, client.top() + client.height());
         ctx.stroke_path(edges);
 
         Font font = FontManager::getSystemFont(SystemUIFont::Status);
         font.setSize(9.0f);  // rulers are chrome, not content - keep the numerals small
         BLFont* blFont = font.blFont();
-        double originX = client.left() + kRulerThickness + double(panX_);
+        double originX = left + kRulerThickness + double(panX_);
         double originY = client.top() + kRulerThickness + double(panY_);
         double step = 100.0 * double(zoom_);
         if (blFont != nullptr && blFont->is_valid() && step >= 20.0) {
             ctx.set_fill_style(text);
             BLPath ticks;
-            int firstX = int(std::ceil((client.left() + kRulerThickness - originX) / step));
+            int firstX = int(std::ceil((left + kRulerThickness - originX) / step));
             for (int i = firstX; ; ++i) {
                 double x = originX + double(i) * step;
                 if (x > client.left() + client.width()) {
@@ -2119,9 +2120,9 @@ namespace curvy {
                     break;
                 }
                 std::string label = std::to_string(i * 100);
-                ticks.move_to(client.left() + 12.0, std::floor(y) + 0.5);
-                ticks.line_to(client.left() + kRulerThickness, std::floor(y) + 0.5);
-                ctx.fill_utf8_text(BLPoint(client.left() + 2.0, y + 11.0), *blFont, label.c_str(), label.size());
+                ticks.move_to(left + 12.0, std::floor(y) + 0.5);
+                ticks.line_to(left + kRulerThickness, std::floor(y) + 0.5);
+                ctx.fill_utf8_text(BLPoint(left + 2.0, y + 11.0), *blFont, label.c_str(), label.size());
             }
             ctx.set_stroke_style(edge);
             ctx.stroke_path(ticks);

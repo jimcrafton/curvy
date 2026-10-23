@@ -1,0 +1,103 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>curvy settings</title>
+<!-- Settings / Preferences dialog (docs/ui-design.md, "Settings / Preferences dialog"). Modal, 720x520: category list on the left that scrolls the right
+     side to its section, one scrolling column of sections on the right (no tabs, so a search box can later filter rows), Reset / Cancel / OK in the footer.
+     OK is the default button and Esc cancels (needs newui's default/cancel button support, newui/todo.txt). Settings that belong to the document rather than the
+     user carry the "Document" tag. Theme tokens (include/curvy/theme.h): bgSurface for the dialog, bgApp for fields, textMuted for captions/help, border for lines,
+     accent for the default button.
+     Convert: python .claude/skills/html-mockup-to-newui/scripts/html2newui.py docs/mockups/settings.html -o Resources/settings.newui --name settings -->
+<style>
+  body { width: 720px; height: 520px; margin: 0; display: flex; flex-direction: column; font-family: "Segoe UI", sans-serif; font-size: 12px; color: #F0F0F0; }
+  #settingsBox { flex-grow: 1; display: flex; flex-direction: column; background: #1E1E1E; }
+  #settingsMain { display: flex; flex-direction: row; flex-grow: 1; }
+  #settingsNav { display: flex; flex-direction: column; gap: 2px; width: 150px; padding: 10px 8px; background: #181818; border-right: 1px solid #4A4A4A; }
+  #settingsSearch { height: 24px; background: #121212; color: #F0F0F0; }
+  .navButton { height: 28px; }
+  #settingsPages { display: flex; flex-direction: column; flex-grow: 1; }
+  .section { display: flex; flex-direction: column; gap: 6px; padding: 12px 16px; }
+  .sectionTitle { font-size: 14px; font-weight: 700; height: 22px; border-bottom: 1px solid #4A4A4A; }
+  .row { display: flex; flex-direction: row; align-items: center; gap: 8px; height: 26px; }
+  .label { width: 190px; }
+  .help { color: #A0A0A0; height: 16px; padding: 0 0 0 198px; }
+  .tag { color: #A0A0A0; width: 64px; text-align: right; }
+  .field { width: 70px; height: 22px; background: #121212; color: #F0F0F0; }
+  .wide { width: 200px; height: 24px; }
+  .well { width: 22px; height: 22px; border: 1px solid #4A4A4A; }
+  .slider { width: 160px; height: 24px; }
+  .unit { color: #A0A0A0; width: 40px; }
+  #settingsFooter { display: flex; flex-direction: row; align-items: center; justify-content: flex-end; gap: 8px; height: 46px; padding: 0 16px; background: #181818; border-top: 1px solid #4A4A4A; }
+  #settingsFooterNote { flex-grow: 1; color: #A0A0A0; }
+  .wideButton { width: 120px; height: 26px; }
+  .footButton { width: 88px; height: 28px; }
+</style>
+</head>
+<body>
+  <div id="settingsBox">
+    <div id="settingsMain">
+      <div id="settingsNav">
+        <input id="settingsSearch" type="text" placeholder="Search settings">
+        <button id="navAppearance" class="navButton">Appearance</button>
+        <button id="navWorkspace" class="navButton">Workspace</button>
+        <button id="navPen" class="navButton">Pen and input</button>
+        <button id="navDrawing" class="navButton">Drawing</button>
+        <button id="navFiles" class="navButton">Files</button>
+      </div>
+      <div id="settingsPages">
+
+        <div id="pageAppearance" class="section">
+          <span class="sectionTitle">Appearance</span>
+          <div class="row"><span class="label">Theme</span><select id="themeChoice" class="wide"><option>Dark</option><option>Light</option><option>Follow Windows</option></select></div>
+          <div class="row"><span class="label">Canvas background</span><canvas id="canvasBackgroundWell" class="well" data-newui-type="SubView"></canvas><input id="canvasBackgroundHex" class="field" type="text" value="#2A2A2A"><input id="canvasFollowsTheme" type="checkbox" checked><span>Follow the theme</span></div>
+          <div class="row"><span class="label">Property text size</span><input id="propertyTextSize" class="slider" type="range"><input id="propertyTextSizeValue" class="field" type="text" value="11"><span class="unit">pt</span></div>
+          <div class="row"><span class="label">Blur behind panels</span><input id="blurPanels" type="checkbox"><span>Needs a newer renderer; off for now</span></div>
+        </div>
+
+        <div id="pageWorkspace" class="section">
+          <span class="sectionTitle">Workspace</span>
+          <div class="row"><span class="label">Toolbar</span><input id="toolbarVisible" type="checkbox"><span>Show the left toolbar</span></div>
+          <div class="row"><span class="label">Property boxes</span><input id="propertiesVisible" type="checkbox"><span>Show the right-hand boxes</span></div>
+          <div class="row"><span class="label">Rulers</span><input id="rulersVisible" type="checkbox" checked><span>Show rulers</span></div>
+          <div class="row"><span class="label">Hints</span><input id="hintsFade" type="checkbox" checked><span>Fade a hint after it has been used 3 times</span></div>
+          <div class="row"><span class="label">Welcome</span><button id="showWelcome" class="wideButton">Show welcome</button><span>Shown again after OK</span></div>
+          <div class="row"><span class="label">Recent files</span><input id="recentLength" class="field" type="text" value="10"><span class="unit">files</span></div>
+        </div>
+
+        <div id="pagePen" class="section">
+          <span class="sectionTitle">Pen and input</span>
+          <div class="row"><span class="label">Scrub direction</span><select id="scrubAxis" class="wide"><option>Vertical</option><option>Horizontal</option></select></div>
+          <div class="row"><span class="label">Scrub sensitivity</span><input id="scrubSensitivity" class="slider" type="range"><input id="scrubSensitivityValue" class="field" type="text" value="100"><span class="unit">%</span></div>
+          <div class="row"><span class="label">Hold delay for tool options</span><input id="holdDelay" class="field" type="text" value="400"><span class="unit">ms</span></div>
+          <div class="row"><span class="label">Space tap threshold</span><input id="spaceTap" class="field" type="text" value="300"><span class="unit">ms</span></div>
+          <span class="help">A Space press shorter than this opens the rings; longer is a pan.</span>
+          <div class="row"><span class="label">Barrel button</span><select id="barrelButton" class="wide"><option>Open the rings</option><option>Pan</option><option>Nothing</option></select></div>
+          <div class="row"><span class="label">Eraser end</span><select id="eraserEnd" class="wide"><option>Erase</option><option>Undo</option><option>Nothing</option></select></div>
+        </div>
+
+        <div id="pageDrawing" class="section">
+          <span class="sectionTitle">Drawing</span>
+          <div class="row"><span class="label">Snap to grid</span><input id="snapGrid" type="checkbox"><input id="gridSize" class="field" type="text" value="10"><span class="unit">pt</span><span class="tag">Document</span></div>
+          <div class="row"><span class="label">Snap to guides and objects</span><input id="snapGuides" type="checkbox" checked><span class="tag">Document</span></div>
+          <div class="row"><span class="label">Tool option defaults</span><select id="toolDefaultsScope" class="wide"><option>Remember per user</option><option>Store in the document</option></select></div>
+          <div class="row"><span class="label">New shape style</span><canvas id="defaultFillWell" class="well" data-newui-type="SubView"></canvas><canvas id="defaultStrokeWell" class="well" data-newui-type="SubView"></canvas><span>Edited from the property boxes</span></div>
+        </div>
+
+        <div id="pageFiles" class="section">
+          <span class="sectionTitle">Files</span>
+          <div class="row"><span class="label">Autosave</span><input id="autosave" type="checkbox" checked><input id="autosaveMinutes" class="field" type="text" value="5"><span class="unit">min</span></div>
+          <div class="row"><span class="label">Default export folder</span><input id="exportFolder" class="wide" type="text" value=""><button id="exportFolderBrowse" class="footButton">Browse...</button></div>
+        </div>
+
+      </div>
+    </div>
+    <div id="settingsFooter">
+      <span id="settingsFooterNote">Changes apply as you make them; Cancel puts them back.</span>
+      <button id="settingsReset" class="footButton">Reset page</button>
+      <button id="settingsCancel" class="footButton">Cancel</button>
+      <button id="settingsOk" class="footButton">OK</button>
+    </div>
+  </div>
+</body>
+</html>

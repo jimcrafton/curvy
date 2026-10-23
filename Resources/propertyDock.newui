@@ -19,7 +19,7 @@
       bounds: {
         type: "Rect",
         pos: { type: "Point", x: 0, y: 0 },
-        size: { type: "Size", width: 268, height: 122 }
+        size: { type: "Size", width: 268, height: 486 }
       },
       visible: true,
       name: "propertyDockBox",
@@ -34,6 +34,19 @@
           bounds: {
             type: "Rect",
             pos: { type: "Point", x: 0, y: 0 },
+            size: { type: "Size", width: 268, height: 22 }
+          },
+          visible: true,
+          name: "dockCaption",
+          desiredSize: { type: "Size", width: 268, height: 22 },
+          desiredSizeOverride: true,
+          childViews: []
+        },
+        {
+          type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 22 },
             size: { type: "Size", width: 268, height: 122 }
           },
           visible: true,
@@ -387,6 +400,798 @@
                         textAlignment: "Left"
                       },
                       desiredSize: { type: "Size", width: 30, height: 17 },
+                      desiredSizeOverride: true
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 144 },
+            size: { type: "Size", width: 268, height: 150 }
+          },
+          visible: true,
+          name: "colorPanel",
+          layout: { type: "FlexLayout", orientation: "Vertical" },
+          desiredSize: { type: "Size", width: 268, height: 150 },
+          desiredSizeOverride: true,
+          childViews: [
+            {
+              type: "SubView",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 0, y: 0 },
+                size: { type: "Size", width: 268, height: 24 }
+              },
+              visible: true,
+              name: "colorPanelHeaderBar",
+              layout: {
+                type: "FlexLayout",
+                orientation: "Horizontal",
+                crossAxisAlignment: "Center",
+                spacing: 6,
+                padding: 4
+              },
+              style: {
+                type: "ViewStyle",
+                backgroundFill: { type: "Fill", kind: "Color", color: "#2e2e2e99" }
+              },
+              desiredSize: { type: "Size", width: 268, height: 24 },
+              desiredSizeOverride: true,
+              childViews: [
+                {
+                  type: "Label",
+                  text: "Colour",
+                  textAlignment: "Left",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 4, y: 3 },
+                    size: { type: "Size", width: 168, height: 17 }
+                  },
+                  name: "colorPanelHeader",
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                  style: {
+                    type: "LabelStyle",
+                    text: "Colour",
+                    wordWrap: true,
+                    font: { type: "Font", name: "Segoe UI", size: 12, bold: true, italic: false, strikeThrough: false, underlined: false },
+                    textColor: "#f0f0f0",
+                    textAlignment: "Left"
+                  }
+                },
+                {
+                  type: "Label",
+                  text: "Fill",
+                  textAlignment: "Right",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 178, y: 3 },
+                    size: { type: "Size", width: 86, height: 17 }
+                  },
+                  name: "colorPanelHeaderInfo",
+                  style: {
+                    type: "LabelStyle",
+                    text: "Fill",
+                    wordWrap: true,
+                    font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                    textColor: "#a0a0a0",
+                    textAlignment: "Right"
+                  },
+                  desiredSize: { type: "Size", width: 86, height: 17 },
+                  desiredSizeOverride: true
+                }
+              ]
+            },
+            {
+              type: "SubView",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 0, y: 24 },
+                size: { type: "Size", width: 268, height: 122 }
+              },
+              visible: true,
+              name: "colorPanelBody",
+              layout: {
+                type: "FlexLayout",
+                orientation: "Vertical",
+                spacing: 4,
+                padding: 7
+              },
+              childViews: [
+                {
+                  type: "SubView",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 7, y: 7 },
+                    size: { type: "Size", width: 254, height: 24 }
+                  },
+                  visible: true,
+                  layout: {
+                    type: "FlexLayout",
+                    orientation: "Horizontal",
+                    crossAxisAlignment: "Center",
+                    spacing: 6
+                  },
+                  desiredSize: { type: "Size", width: 254, height: 24 },
+                  desiredSizeOverride: true,
+                  childViews: [
+                    {
+                      type: "SubView",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 0, y: 3 },
+                        size: { type: "Size", width: 18, height: 18 }
+                      },
+                      visible: true,
+                      name: "fillWell",
+                      style: {
+                        type: "ViewStyle",
+                        backgroundFill: { type: "Fill", kind: "Color", color: "#8080801a" },
+                        borderWidth: 1,
+                        borderFill: "#4a4a4a"
+                      },
+                      desiredSize: { type: "Size", width: 18, height: 18 },
+                      desiredSizeOverride: true,
+                      childViews: []
+                    },
+                    {
+                      type: "SubView",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 24, y: 3 },
+                        size: { type: "Size", width: 18, height: 18 }
+                      },
+                      visible: true,
+                      name: "strokeWell",
+                      style: {
+                        type: "ViewStyle",
+                        backgroundFill: { type: "Fill", kind: "Color", color: "#8080801a" },
+                        borderWidth: 1,
+                        borderFill: "#4a4a4a"
+                      },
+                      desiredSize: { type: "Size", width: 18, height: 18 },
+                      desiredSizeOverride: true,
+                      childViews: []
+                    },
+                    {
+                      type: "TextField",
+                      text: "#000000",
+                      font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                      textColor: "#f0f0f0",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 48, y: 2 },
+                        size: { type: "Size", width: 70, height: 20 }
+                      },
+                      name: "hexField",
+                      desiredSize: { type: "Size", width: 70, height: 20 },
+                      desiredSizeOverride: true
+                    }
+                  ]
+                },
+                {
+                  type: "SubView",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 7, y: 35 },
+                    size: { type: "Size", width: 254, height: 24 }
+                  },
+                  visible: true,
+                  layout: {
+                    type: "FlexLayout",
+                    orientation: "Horizontal",
+                    crossAxisAlignment: "Center",
+                    spacing: 6
+                  },
+                  desiredSize: { type: "Size", width: 254, height: 24 },
+                  desiredSizeOverride: true,
+                  childViews: [
+                    {
+                      type: "Label",
+                      text: "H",
+                      textAlignment: "Left",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 0, y: 3 },
+                        size: { type: "Size", width: 14, height: 17 }
+                      },
+                      name: "comp0SliderCaption",
+                      style: {
+                        type: "LabelStyle",
+                        text: "H",
+                        wordWrap: true,
+                        font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                        textColor: "#a0a0a0",
+                        textAlignment: "Left"
+                      },
+                      desiredSize: { type: "Size", width: 14, height: 17 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "Slider",
+                      value: 0,
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 20, y: 0 },
+                        size: { type: "Size", width: 184, height: 24 }
+                      },
+                      name: "comp0Slider",
+                      layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                      desiredSize: { type: "Size", width: 184, height: 24 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "TextField",
+                      text: "0",
+                      font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                      textColor: "#f0f0f0",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 210, y: 2 },
+                        size: { type: "Size", width: 44, height: 20 }
+                      },
+                      name: "comp0SliderValue",
+                      desiredSize: { type: "Size", width: 44, height: 20 },
+                      desiredSizeOverride: true
+                    }
+                  ]
+                },
+                {
+                  type: "SubView",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 7, y: 63 },
+                    size: { type: "Size", width: 254, height: 24 }
+                  },
+                  visible: true,
+                  layout: {
+                    type: "FlexLayout",
+                    orientation: "Horizontal",
+                    crossAxisAlignment: "Center",
+                    spacing: 6
+                  },
+                  desiredSize: { type: "Size", width: 254, height: 24 },
+                  desiredSizeOverride: true,
+                  childViews: [
+                    {
+                      type: "Label",
+                      text: "S",
+                      textAlignment: "Left",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 0, y: 3 },
+                        size: { type: "Size", width: 14, height: 17 }
+                      },
+                      name: "comp1SliderCaption",
+                      style: {
+                        type: "LabelStyle",
+                        text: "S",
+                        wordWrap: true,
+                        font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                        textColor: "#a0a0a0",
+                        textAlignment: "Left"
+                      },
+                      desiredSize: { type: "Size", width: 14, height: 17 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "Slider",
+                      value: 0,
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 20, y: 0 },
+                        size: { type: "Size", width: 184, height: 24 }
+                      },
+                      name: "comp1Slider",
+                      layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                      desiredSize: { type: "Size", width: 184, height: 24 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "TextField",
+                      text: "0",
+                      font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                      textColor: "#f0f0f0",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 210, y: 2 },
+                        size: { type: "Size", width: 44, height: 20 }
+                      },
+                      name: "comp1SliderValue",
+                      desiredSize: { type: "Size", width: 44, height: 20 },
+                      desiredSizeOverride: true
+                    }
+                  ]
+                },
+                {
+                  type: "SubView",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 7, y: 91 },
+                    size: { type: "Size", width: 254, height: 24 }
+                  },
+                  visible: true,
+                  layout: {
+                    type: "FlexLayout",
+                    orientation: "Horizontal",
+                    crossAxisAlignment: "Center",
+                    spacing: 6
+                  },
+                  desiredSize: { type: "Size", width: 254, height: 24 },
+                  desiredSizeOverride: true,
+                  childViews: [
+                    {
+                      type: "Label",
+                      text: "B",
+                      textAlignment: "Left",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 0, y: 3 },
+                        size: { type: "Size", width: 14, height: 17 }
+                      },
+                      name: "comp2SliderCaption",
+                      style: {
+                        type: "LabelStyle",
+                        text: "B",
+                        wordWrap: true,
+                        font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                        textColor: "#a0a0a0",
+                        textAlignment: "Left"
+                      },
+                      desiredSize: { type: "Size", width: 14, height: 17 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "Slider",
+                      value: 0,
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 20, y: 0 },
+                        size: { type: "Size", width: 184, height: 24 }
+                      },
+                      name: "comp2Slider",
+                      layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                      desiredSize: { type: "Size", width: 184, height: 24 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "TextField",
+                      text: "0",
+                      font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                      textColor: "#f0f0f0",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 210, y: 2 },
+                        size: { type: "Size", width: 44, height: 20 }
+                      },
+                      name: "comp2SliderValue",
+                      desiredSize: { type: "Size", width: 44, height: 20 },
+                      desiredSizeOverride: true
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 294 },
+            size: { type: "Size", width: 268, height: 130 }
+          },
+          visible: true,
+          name: "strokePanel",
+          layout: { type: "FlexLayout", orientation: "Vertical" },
+          desiredSize: { type: "Size", width: 268, height: 130 },
+          desiredSizeOverride: true,
+          childViews: [
+            {
+              type: "SubView",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 0, y: 0 },
+                size: { type: "Size", width: 268, height: 24 }
+              },
+              visible: true,
+              name: "strokePanelHeaderBar",
+              layout: {
+                type: "FlexLayout",
+                orientation: "Horizontal",
+                crossAxisAlignment: "Center",
+                spacing: 6,
+                padding: 4
+              },
+              style: {
+                type: "ViewStyle",
+                backgroundFill: { type: "Fill", kind: "Color", color: "#2e2e2e99" }
+              },
+              desiredSize: { type: "Size", width: 268, height: 24 },
+              desiredSizeOverride: true,
+              childViews: [
+                {
+                  type: "Label",
+                  text: "Stroke",
+                  textAlignment: "Left",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 4, y: 3 },
+                    size: { type: "Size", width: 260, height: 17 }
+                  },
+                  name: "strokePanelHeader",
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                  style: {
+                    type: "LabelStyle",
+                    text: "Stroke",
+                    wordWrap: true,
+                    font: { type: "Font", name: "Segoe UI", size: 12, bold: true, italic: false, strikeThrough: false, underlined: false },
+                    textColor: "#f0f0f0",
+                    textAlignment: "Left"
+                  }
+                }
+              ]
+            },
+            {
+              type: "SubView",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 0, y: 24 },
+                size: { type: "Size", width: 268, height: 94 }
+              },
+              visible: true,
+              name: "strokePanelBody",
+              layout: {
+                type: "FlexLayout",
+                orientation: "Vertical",
+                spacing: 4,
+                padding: 7
+              },
+              childViews: [
+                {
+                  type: "SubView",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 7, y: 7 },
+                    size: { type: "Size", width: 254, height: 24 }
+                  },
+                  visible: true,
+                  layout: {
+                    type: "FlexLayout",
+                    orientation: "Horizontal",
+                    crossAxisAlignment: "Center",
+                    spacing: 6
+                  },
+                  desiredSize: { type: "Size", width: 254, height: 24 },
+                  desiredSizeOverride: true,
+                  childViews: [
+                    {
+                      type: "Label",
+                      text: "Width",
+                      textAlignment: "Left",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 0, y: 3 },
+                        size: { type: "Size", width: 44, height: 17 }
+                      },
+                      name: "strokeWeightLabel",
+                      style: {
+                        type: "LabelStyle",
+                        text: "Width",
+                        wordWrap: true,
+                        font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                        textColor: "#a0a0a0",
+                        textAlignment: "Left"
+                      },
+                      desiredSize: { type: "Size", width: 44, height: 17 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "TextField",
+                      text: "1",
+                      font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                      textColor: "#f0f0f0",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 50, y: 2 },
+                        size: { type: "Size", width: 70, height: 20 }
+                      },
+                      name: "strokeWeightField",
+                      desiredSize: { type: "Size", width: 70, height: 20 },
+                      desiredSizeOverride: true
+                    }
+                  ]
+                },
+                {
+                  type: "SubView",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 7, y: 35 },
+                    size: { type: "Size", width: 254, height: 24 }
+                  },
+                  visible: true,
+                  layout: {
+                    type: "FlexLayout",
+                    orientation: "Horizontal",
+                    crossAxisAlignment: "Center",
+                    spacing: 6
+                  },
+                  desiredSize: { type: "Size", width: 254, height: 24 },
+                  desiredSizeOverride: true,
+                  childViews: [
+                    {
+                      type: "Label",
+                      text: "Cap",
+                      textAlignment: "Left",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 0, y: 3 },
+                        size: { type: "Size", width: 44, height: 17 }
+                      },
+                      style: {
+                        type: "LabelStyle",
+                        text: "Cap",
+                        wordWrap: true,
+                        font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                        textColor: "#a0a0a0",
+                        textAlignment: "Left"
+                      },
+                      desiredSize: { type: "Size", width: 44, height: 17 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "ToolbarButton",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 50, y: -1 },
+                        size: { type: "Size", width: 26, height: 26 }
+                      },
+                      name: "capButtButton",
+                      desiredSize: { type: "Size", width: 26, height: 26 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "ToolbarButton",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 82, y: -1 },
+                        size: { type: "Size", width: 26, height: 26 }
+                      },
+                      name: "capRoundButton",
+                      desiredSize: { type: "Size", width: 26, height: 26 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "ToolbarButton",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 114, y: -1 },
+                        size: { type: "Size", width: 26, height: 26 }
+                      },
+                      name: "capSquareButton",
+                      desiredSize: { type: "Size", width: 26, height: 26 },
+                      desiredSizeOverride: true
+                    }
+                  ]
+                },
+                {
+                  type: "SubView",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 7, y: 63 },
+                    size: { type: "Size", width: 254, height: 24 }
+                  },
+                  visible: true,
+                  layout: {
+                    type: "FlexLayout",
+                    orientation: "Horizontal",
+                    crossAxisAlignment: "Center",
+                    spacing: 6
+                  },
+                  desiredSize: { type: "Size", width: 254, height: 24 },
+                  desiredSizeOverride: true,
+                  childViews: [
+                    {
+                      type: "Label",
+                      text: "Corner",
+                      textAlignment: "Left",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 0, y: 3 },
+                        size: { type: "Size", width: 44, height: 17 }
+                      },
+                      style: {
+                        type: "LabelStyle",
+                        text: "Corner",
+                        wordWrap: true,
+                        font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                        textColor: "#a0a0a0",
+                        textAlignment: "Left"
+                      },
+                      desiredSize: { type: "Size", width: 44, height: 17 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "ToolbarButton",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 50, y: -1 },
+                        size: { type: "Size", width: 26, height: 26 }
+                      },
+                      name: "joinMiterButton",
+                      desiredSize: { type: "Size", width: 26, height: 26 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "ToolbarButton",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 82, y: -1 },
+                        size: { type: "Size", width: 26, height: 26 }
+                      },
+                      name: "joinRoundButton",
+                      desiredSize: { type: "Size", width: 26, height: 26 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "ToolbarButton",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 114, y: -1 },
+                        size: { type: "Size", width: 26, height: 26 }
+                      },
+                      name: "joinBevelButton",
+                      desiredSize: { type: "Size", width: 26, height: 26 },
+                      desiredSizeOverride: true
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 424 },
+            size: { type: "Size", width: 268, height: 62 }
+          },
+          visible: true,
+          name: "opacityPanel",
+          layout: { type: "FlexLayout", orientation: "Vertical" },
+          desiredSize: { type: "Size", width: 268, height: 62 },
+          desiredSizeOverride: true,
+          childViews: [
+            {
+              type: "SubView",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 0, y: 0 },
+                size: { type: "Size", width: 268, height: 24 }
+              },
+              visible: true,
+              name: "opacityPanelHeaderBar",
+              layout: {
+                type: "FlexLayout",
+                orientation: "Horizontal",
+                crossAxisAlignment: "Center",
+                spacing: 6,
+                padding: 4
+              },
+              style: {
+                type: "ViewStyle",
+                backgroundFill: { type: "Fill", kind: "Color", color: "#2e2e2e99" }
+              },
+              desiredSize: { type: "Size", width: 268, height: 24 },
+              desiredSizeOverride: true,
+              childViews: [
+                {
+                  type: "Label",
+                  text: "Opacity",
+                  textAlignment: "Left",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 4, y: 3 },
+                    size: { type: "Size", width: 260, height: 17 }
+                  },
+                  name: "opacityPanelHeader",
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                  style: {
+                    type: "LabelStyle",
+                    text: "Opacity",
+                    wordWrap: true,
+                    font: { type: "Font", name: "Segoe UI", size: 12, bold: true, italic: false, strikeThrough: false, underlined: false },
+                    textColor: "#f0f0f0",
+                    textAlignment: "Left"
+                  }
+                }
+              ]
+            },
+            {
+              type: "SubView",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 0, y: 24 },
+                size: { type: "Size", width: 268, height: 38 }
+              },
+              visible: true,
+              name: "opacityPanelBody",
+              layout: {
+                type: "FlexLayout",
+                orientation: "Vertical",
+                spacing: 4,
+                padding: 7
+              },
+              childViews: [
+                {
+                  type: "SubView",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 7, y: 7 },
+                    size: { type: "Size", width: 254, height: 24 }
+                  },
+                  visible: true,
+                  layout: {
+                    type: "FlexLayout",
+                    orientation: "Horizontal",
+                    crossAxisAlignment: "Center",
+                    spacing: 6
+                  },
+                  desiredSize: { type: "Size", width: 254, height: 24 },
+                  desiredSizeOverride: true,
+                  childViews: [
+                    {
+                      type: "Label",
+                      text: "All",
+                      textAlignment: "Left",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 0, y: 3 },
+                        size: { type: "Size", width: 30, height: 17 }
+                      },
+                      name: "opacitySliderCaption",
+                      style: {
+                        type: "LabelStyle",
+                        text: "All",
+                        wordWrap: true,
+                        font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                        textColor: "#a0a0a0",
+                        textAlignment: "Left"
+                      },
+                      desiredSize: { type: "Size", width: 30, height: 17 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "Slider",
+                      value: 0,
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 36, y: 0 },
+                        size: { type: "Size", width: 168, height: 24 }
+                      },
+                      name: "opacitySlider",
+                      layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                      desiredSize: { type: "Size", width: 168, height: 24 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "TextField",
+                      text: "100",
+                      font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                      textColor: "#f0f0f0",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 210, y: 2 },
+                        size: { type: "Size", width: 44, height: 20 }
+                      },
+                      name: "opacitySliderValue",
+                      desiredSize: { type: "Size", width: 44, height: 20 },
                       desiredSizeOverride: true
                     }
                   ]

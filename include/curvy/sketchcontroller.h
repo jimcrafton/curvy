@@ -35,6 +35,8 @@ namespace curvy {
         bool open(const std::string& path = std::string());
         bool save();
         bool saveAs();
+        // Opens an autosaved copy as a new, unsaved, modified document called `name` (Save then asks where).
+        bool recoverFrom(const std::string& path, const std::string& name);
         // File > Document Setup: change the page size, resolution, color mode and background of this document
         // (the color mode converts the artwork, as one undo step).
         bool documentSetup();
@@ -61,6 +63,7 @@ namespace curvy {
         // user's roaming data folder between runs. A file that cannot be opened is dropped from the list.
         static constexpr std::size_t kMaxRecent = 8;
         const std::vector<std::string>& recentFiles() const { return recent_; }
+        void setMaxRecent(std::size_t count);
         void clearRecentFiles();
         // Where the list is kept (for tests); loads the list from there.
         void setRecentFilesPath(const std::string& path);
@@ -99,6 +102,7 @@ namespace curvy {
         void loadRecent();
         void saveRecent() const;
         std::vector<std::string> recent_;
+        std::size_t maxRecent_ = kMaxRecent;
         std::string recentPath_;
     };
 

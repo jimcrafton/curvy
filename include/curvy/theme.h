@@ -18,18 +18,18 @@ namespace curvy {
         std::uint32_t textPrimary;
         std::uint32_t textMuted;
         std::uint32_t iconNeutral;
-        std::uint32_t accent;        // active tool, hot ring slot, selection
+        std::uint32_t accent;        // the one accent: active tool, hot ring slot, selection, values and "this is being changed"
         std::uint32_t accentHover;
         std::uint32_t onAccent;      // text on an accent fill
-        std::uint32_t highlight;     // the amber of values, the ring hub and "this is being changed"
+        std::uint32_t highlight;     // same amber as accent (kept as its own token for text and the ring hub)
         bool isDark;
 
         static const Theme& dark() {
-            static const Theme theme{0x121212, 0x1E1E1E, 0x2A2A2A, 0x2E2E2E, 0x4A4A4A, 0xF0F0F0, 0xA0A0A0, 0xC5C5C5, 0x3A86FF, 0x5C9DFF, 0x101010, 0xFFB454, true};
+            static const Theme theme{0x121212, 0x1E1E1E, 0x2A2A2A, 0x2E2E2E, 0x4A4A4A, 0xF0F0F0, 0xA0A0A0, 0xC5C5C5, 0xFFB454, 0xFFC77A, 0x101010, 0xFFB454, true};
             return theme;
         }
         static const Theme& light() {
-            static const Theme theme{0xF5F5F5, 0xFFFFFF, 0xEAEAEA, 0xF0F0F0, 0xC8C8C8, 0x1A1A1A, 0x636363, 0x4A4A4A, 0x0056D2, 0x0043A4, 0xFFFFFF, 0xB35C00, false};
+            static const Theme theme{0xF5F5F5, 0xFFFFFF, 0xEAEAEA, 0xF0F0F0, 0xC8C8C8, 0x1A1A1A, 0x636363, 0x4A4A4A, 0xB35C00, 0x8F4A00, 0xFFFFFF, 0xB35C00, false};
             return theme;
         }
         static const Theme*& currentPointer() {

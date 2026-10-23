@@ -58,6 +58,7 @@ namespace curvy {
         // A hint shows until the user has done its thing a few times.
         bool fresh(const std::string& feature) const;
         void used(const std::string& feature);
+        void setHintsFade(bool value) { hintsFade_ = value; touch(); }
 
         std::string hintTool() const;
         std::string hintKeys() const;
@@ -85,6 +86,7 @@ namespace curvy {
         double pointerX_ = 0.0, pointerY_ = 0.0, zoomPercent_ = 100.0;
         std::string message_ = "Tap Space to start";
         std::map<std::string, int> uses_;
+        bool hintsFade_ = true;
     };
 
 }

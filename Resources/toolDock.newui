@@ -1,7 +1,7 @@
 {
   meta: {
     author: "",
-    date: "2026-10-21",
+    date: "2026-10-22",
     copyright: "",
     version: "0.1.0.900"
   },
@@ -9,7 +9,7 @@
   bounds: {
     type: "Rect",
     pos: { type: "Point", x: 0, y: 0 },
-    size: { type: "Size", width: 86, height: 700 }
+    size: { type: "Size", width: 74, height: 700 }
   },
   visible: true,
   name: "toolDock",
@@ -19,7 +19,7 @@
       bounds: {
         type: "Rect",
         pos: { type: "Point", x: 0, y: 0 },
-        size: { type: "Size", width: 86, height: 560 }
+        size: { type: "Size", width: 74, height: 512 }
       },
       visible: true,
       name: "toolDockBox",
@@ -39,7 +39,7 @@
           bounds: {
             type: "Rect",
             pos: { type: "Point", x: 6, y: 6 },
-            size: { type: "Size", width: 35, height: 548 }
+            size: { type: "Size", width: 29, height: 500 }
           },
           visible: true,
           name: "toolColumn1",
@@ -49,7 +49,7 @@
             crossAxisAlignment: "Center",
             spacing: 2
           },
-          desiredSize: { type: "Size", width: 35, height: 548 },
+          desiredSize: { type: "Size", width: 29, height: 500 },
           desiredSizeOverride: true,
           childViews: [
             {
@@ -57,36 +57,36 @@
               bounds: {
                 type: "Rect",
                 pos: { type: "Point", x: 0, y: 0 },
-                size: { type: "Size", width: 36, height: 32 }
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "selectTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 34 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 31 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "directSelectTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "SubView",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 4, y: 68 },
-                size: { type: "Size", width: 28, height: 1 }
+                pos: { type: "Point", x: 2, y: 62 },
+                size: { type: "Size", width: 25, height: 1 }
               },
               visible: true,
               style: {
                 type: "ViewStyle",
                 backgroundFill: { type: "Fill", kind: "Color", color: "#4a4a4a" }
               },
-              desiredSize: { type: "Size", width: 28, height: 1 },
+              desiredSize: { type: "Size", width: 25, height: 1 },
               desiredSizeOverride: true,
               childViews: []
             },
@@ -94,103 +94,103 @@
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 71 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 65 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "rectangleTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 105 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 96 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "ellipseTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 139 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 127 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "circleTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 173 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 158 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "roundRectTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 207 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 189 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "polygonTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 241 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 220 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "starTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 275 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 251 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "arcTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 309 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 282 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "lineTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "SubView",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 4, y: 343 },
-                size: { type: "Size", width: 28, height: 1 }
+                pos: { type: "Point", x: 2, y: 313 },
+                size: { type: "Size", width: 25, height: 1 }
               },
               visible: true,
               style: {
                 type: "ViewStyle",
                 backgroundFill: { type: "Fill", kind: "Color", color: "#4a4a4a" }
               },
-              desiredSize: { type: "Size", width: 28, height: 1 },
+              desiredSize: { type: "Size", width: 25, height: 1 },
               desiredSizeOverride: true,
               childViews: []
             },
@@ -198,66 +198,66 @@
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 346 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 316 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "penTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 380 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 347 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "pencilTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 414 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 378 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "paintbrushTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 448 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 409 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "textTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 482 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 440 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "gradientTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 516 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 471 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "widthTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             }
           ]
@@ -266,8 +266,8 @@
           type: "SubView",
           bounds: {
             type: "Rect",
-            pos: { type: "Point", x: 45, y: 6 },
-            size: { type: "Size", width: 35, height: 548 }
+            pos: { type: "Point", x: 39, y: 6 },
+            size: { type: "Size", width: 29, height: 500 }
           },
           visible: true,
           name: "toolColumn2",
@@ -277,7 +277,7 @@
             crossAxisAlignment: "Center",
             spacing: 2
           },
-          desiredSize: { type: "Size", width: 35, height: 548 },
+          desiredSize: { type: "Size", width: 29, height: 500 },
           desiredSizeOverride: true,
           childViews: [
             {
@@ -285,58 +285,58 @@
               bounds: {
                 type: "Rect",
                 pos: { type: "Point", x: 0, y: 0 },
-                size: { type: "Size", width: 36, height: 32 }
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "scissorsTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 34 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 31 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "knifeTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 68 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 62 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "eraserTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 102 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 93 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "shapeBuilderTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "SubView",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 4, y: 136 },
-                size: { type: "Size", width: 28, height: 1 }
+                pos: { type: "Point", x: 2, y: 124 },
+                size: { type: "Size", width: 25, height: 1 }
               },
               visible: true,
               style: {
                 type: "ViewStyle",
                 backgroundFill: { type: "Fill", kind: "Color", color: "#4a4a4a" }
               },
-              desiredSize: { type: "Size", width: 28, height: 1 },
+              desiredSize: { type: "Size", width: 25, height: 1 },
               desiredSizeOverride: true,
               childViews: []
             },
@@ -344,59 +344,59 @@
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 139 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 127 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "eyedropperTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 173 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 158 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "magicWandTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 207 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 189 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "lassoTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 241 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 220 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "artboardTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "SubView",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 4, y: 275 },
-                size: { type: "Size", width: 28, height: 1 }
+                pos: { type: "Point", x: 2, y: 251 },
+                size: { type: "Size", width: 25, height: 1 }
               },
               visible: true,
               style: {
                 type: "ViewStyle",
                 backgroundFill: { type: "Fill", kind: "Color", color: "#4a4a4a" }
               },
-              desiredSize: { type: "Size", width: 28, height: 1 },
+              desiredSize: { type: "Size", width: 25, height: 1 },
               desiredSizeOverride: true,
               childViews: []
             },
@@ -404,48 +404,48 @@
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 278 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 254 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "rotateTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 312 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 285 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "scaleTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 346 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 316 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "reflectTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "SubView",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 4, y: 380 },
-                size: { type: "Size", width: 28, height: 1 }
+                pos: { type: "Point", x: 2, y: 347 },
+                size: { type: "Size", width: 25, height: 1 }
               },
               visible: true,
               style: {
                 type: "ViewStyle",
                 backgroundFill: { type: "Fill", kind: "Color", color: "#4a4a4a" }
               },
-              desiredSize: { type: "Size", width: 28, height: 1 },
+              desiredSize: { type: "Size", width: 25, height: 1 },
               desiredSizeOverride: true,
               childViews: []
             },
@@ -453,22 +453,22 @@
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 383 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 350 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "handTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             },
             {
               type: "ToolbarButton",
               bounds: {
                 type: "Rect",
-                pos: { type: "Point", x: 0, y: 417 },
-                size: { type: "Size", width: 36, height: 32 }
+                pos: { type: "Point", x: 0, y: 381 },
+                size: { type: "Size", width: 29, height: 29 }
               },
               name: "zoomTool",
-              desiredSize: { type: "Size", width: 36, height: 32 },
+              desiredSize: { type: "Size", width: 29, height: 29 },
               desiredSizeOverride: true
             }
           ]

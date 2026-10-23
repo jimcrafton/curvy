@@ -69,6 +69,9 @@ namespace curvy {
                 expect(canvas_->showPages() && canvas_->showRulers(), "the page and rulers appear with the document");
                 expect(doc_->pageWidth() == 595.0f && doc_->pageHeight() == 842.0f, "A4 page size");
                 expect(model_->hintTool() == "Select", "tool is Select");
+                auto* name = dynamic_cast<newui::Label*>(w_.frame().rootView().findView("documentName"));
+                w_.frame().rootView().updateLayout();
+                expect(name != nullptr && !name->text().empty() && name->bounds().size().width >= 16.0f, "the title bar's document name is wide enough to show");
             }
 
             void checkRingsAndHoldKeys() {
@@ -141,6 +144,13 @@ namespace curvy {
                 expect(!w_.menu().isOpen(), "Esc closes the ring");
             }
 
+            void armed() {
+                w_.runCommand("tool.rect");
+                expect(canvas_->tool() == SketchTool::Rectangle, "a ring tool command arms the tool");
+                w_.runCommand("tool.select");
+                expect(canvas_->tool() == SketchTool::Select, "the ring's Select slot goes back to selecting");
+            }
+
             void checkDocks() {
                 DockController* dock = &w_.dock();
                 expect(dock->toolDock() != nullptr && dock->propertyDock() != nullptr, "both dock layouts loaded");
@@ -153,7 +163,7 @@ namespace curvy {
                 expect(model_->toolbarVisible() && dock->toolDock()->isVisible() && !dock->propertyDock()->isVisible(), "the Tools toggle shows the toolbar only");
                 const newui::Rect tools = dock->toolDock()->bounds();
                 const newui::Rect client = canvas_->getClientBounds();
-                expect(tools.left() == canvas_->rulerSize() && tools.top() == canvas_->rulerSize() && tools.height() == client.height() - canvas_->rulerSize(), "the toolbar sits flush left under the ruler, full height");
+                expect(tools.left() == 0.0f && tools.top() == 0.0f && tools.height() == client.height() && canvas_->leftInset() == tools.width(), "the toolbar sits at the extreme left, full height, and the ruler starts to its right");
                 expect(dock->toolButton(SketchTool::Select) != nullptr && dock->toolButton(SketchTool::Select)->isChecked(), "Select is the checked tool button");
 
                 dock->toolButton(SketchTool::Star)->onClick(*dock->toolButton(SketchTool::Star));
@@ -169,6 +179,18 @@ namespace curvy {
                 auto* width = dynamic_cast<newui::TextField*>(w_.frame().rootView().findView("transformWField"));
                 expect(width != nullptr && width->text() == L"150", "the Transform box follows the selection");
 
+                auto shown = [&](const char* name) { return dock->propertyDock()->findView(name)->isVisible(); };
+                expect(shown("transformPanel") && shown("colorPanel") && shown("strokePanel") && shown("opacityPanel"), "a selected shape shows Transform, Colour, Stroke and Opacity");
+                doc_->clearSelection();
+                expect(!shown("transformPanel") && !shown("colorPanel") && shown("dockCaption"), "Select tool with nothing selected shows only the note");
+                key(newui::vkLetterS);
+                expect(canvas_->tool() == SketchTool::Star && !shown("transformPanel") && shown("colorPanel") && shown("strokePanel") && shown("opacityPanel"), "an armed drawing tool shows the colour boxes for new shapes");
+                keyUp(newui::vkLetterS);
+                key(newui::vkLetterE);
+                key(newui::vkLetterV);
+                expect(canvas_->tool() == SketchTool::Select && model_->heldToolKey().empty(), "V goes back to the Select tool from a held drawing tool");
+                keyUp(newui::vkLetterE);
+                armed();
                 w_.runCommand("view.toolbar");
                 w_.runCommand("view.properties");
                 expect(!dock->toolDock()->isVisible() && !dock->propertyDock()->isVisible() && !toolbarToggle->isChecked(), "the View ring commands turn them off and the toggles follow");

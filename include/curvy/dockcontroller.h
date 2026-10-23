@@ -1,6 +1,10 @@
 #pragma once
 
+#include <map>
+
 #include "curvy/canvasview.h"
+#include "curvy/dockcontext.h"
+#include "curvy/stylepanel.h"
 #include "curvy/sketchdocument.h"
 #include "curvy/transformpanel.h"
 #include "curvy/workspacemodel.h"
@@ -35,10 +39,14 @@ namespace curvy {
 
         // Visibility and checked state from the model, and bounds from the canvas (below its rulers, full height).
         void sync();
-        // The tool the canvas now has, shown on the buttons.
+        // The tool the canvas now has, shown on the buttons; and the boxes that apply to it and the selection (dockcontext.h).
         void syncTool();
+        void refreshContext();
+        const DockBoxes& boxes() const { return boxes_; }
         // Colours from Theme::current().
         void restyle();
+        // The property boxes' text (the file's sizes stand for 11) and the panel width, scaled together.
+        void setPropertyTextSize(int points);
 
         newui::SubView* toolDock() const { return toolDock_; }
         newui::SubView* propertyDock() const { return propertyDock_; }
@@ -62,9 +70,14 @@ namespace curvy {
         newui::Button* toolbarToggle_ = nullptr;
         newui::Button* propertiesToggle_ = nullptr;
         std::vector<ToolButton> tools_;
+        std::map<newui::View*, float> baseFontSizes_;
+        float basePropertyWidth_ = 0.0f;
+        int propertyTextSize_ = 11;
         bool shownTools_ = false, shownProperties_ = false;
         float shownRuler_ = -1.0f;
         std::unique_ptr<TransformPanel> transformPanel_;
+        std::unique_ptr<StylePanel> stylePanel_;
+        DockBoxes boxes_;
     };
 
 }

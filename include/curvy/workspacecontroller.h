@@ -4,6 +4,7 @@
 #include "curvy/dockcontroller.h"
 #include "curvy/holdscrub.h"
 #include "curvy/radialmenu.h"
+#include "curvy/settings.h"
 #include "curvy/sketchcommands.h"
 #include "curvy/sketchcontroller.h"
 #include "curvy/sketchdocument.h"
@@ -14,6 +15,7 @@
 #include <newui/frame.h>
 
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -38,6 +40,13 @@ namespace curvy {
     public:
         WorkspaceController(newui::Frame& frame, SketchDocument& document);
         ~WorkspaceController() override;
+        // Checks the document every 30 s and writes a recovery copy when the Autosave interval has passed; call on the loop thread.
+        void startAutosave();
+        // Autosaved copies left by a session that did not end cleanly: asks whether to recover each, newest first, and
+        // stops after the first one recovered (returns true then, false when nothing was recovered). Call on the loop thread, not in the headless checks.
+        bool offerRecovery();
+        // The first-run overlay: a keyboard with the Space bar lit and how it opens the ring menu. Shown once (Settings::welcomeShown).
+        void showWelcomeOnce();
         WorkspaceController(const WorkspaceController&) = delete;
         WorkspaceController& operator=(const WorkspaceController&) = delete;
 
@@ -57,6 +66,11 @@ namespace curvy {
         SketchCommandController& commands() { return *commands_; }
         SketchDocumentController& files() { return *files_; }
         const HoldScrub& scrub() const { return scrub_; }
+
+        const Settings& settings() const { return settings_; }
+        // Runs the settings dialog; its changes apply live, OK saves them for the next run, Cancel puts them back.
+        void openSettings();
+        void applySettings(const Settings& settings);
 
         // Opens the ring for what is at the pointer (the canvas centre when the pointer has not been seen).
         void openRing(bool byPress);
@@ -102,7 +116,16 @@ namespace curvy {
         std::unique_ptr<SketchCommandController> commands_;
         std::unique_ptr<DockController> dock_;
         HoldScrub scrub_;
+        void autosaveTick();
+        void clearRecovery();
+        void dismissWelcome();
+        std::string recoveryFile_;
+        std::uintptr_t autosaveTimer_ = 0;
+        std::chrono::steady_clock::time_point lastAutosave_ = std::chrono::steady_clock::now();
+        Settings settings_;
         std::string scrubKey_;
+        bool cursorHidden_ = false;
+        long cursorBeforeX_ = 0, cursorBeforeY_ = 0;
 
         newui::Point pointer_;
         bool pointerKnown_ = false;

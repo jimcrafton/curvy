@@ -5,6 +5,8 @@
 #include <newui/bundle.h>
 
 #include <algorithm>
+#include <cmath>
+#include <functional>
 
 namespace curvy {
 
@@ -69,6 +71,7 @@ namespace curvy {
         }
         if (propertyDock_ != nullptr) {
             transformPanel_ = std::make_unique<TransformPanel>(frame_.rootView(), document_);
+            stylePanel_ = std::make_unique<StylePanel>(frame_.rootView(), document_);   // binds the views it finds by name; the rest of its panel is not in the dock
         }
         bindTools();
         bindToggles();
@@ -80,7 +83,12 @@ namespace curvy {
             layout();
             return SyncReturn::Handled;
         };
+        document_.onSelectionChanged += [this](SketchDocument&) {
+            refreshContext();
+            return SyncReturn::Handled;
+        };
         restyle();
+        refreshContext();
         sync();
     }
 
@@ -103,7 +111,7 @@ namespace curvy {
                 continue;
             }
             button->setIcon(row.icon);
-            button->setIconSize(20.0f);
+            button->setIconSize(18.0f);
             button->setToggleButton(true);
             tools_.push_back({button, row.tool});
             const SketchTool tool = row.tool;
@@ -133,6 +141,16 @@ namespace curvy {
                 return SyncReturn::Handled;
             };
         }
+        static const struct { const char* name; const char* icon; } kStrokeIcons[] = {
+            {"capButtButton", "icons/cap-butt.svg"}, {"capRoundButton", "icons/cap-round.svg"}, {"capSquareButton", "icons/cap-square.svg"},
+            {"joinMiterButton", "icons/join-miter.svg"}, {"joinRoundButton", "icons/join-round.svg"}, {"joinBevelButton", "icons/join-bevel.svg"}};
+        for (const auto& row : kStrokeIcons) {
+            if (auto* button = find<ToolbarButton>(frame_.rootView(), row.name)) {
+                button->setIcon(row.icon);
+                button->setIconSize(16.0f);
+                button->setToggleButton(true);
+            }
+        }
         if (auto* link = find<ToolbarButton>(frame_.rootView(), "linkAspectButton")) {
             link->setIcon("icons/link-aspect.svg");
             link->setIconSize(15.0f);
@@ -144,27 +162,84 @@ namespace curvy {
         for (const ToolButton& entry : tools_) {
             entry.button->setChecked(entry.tool == canvas_.tool());
         }
+        refreshContext();
+    }
+
+    void DockController::refreshContext() {
+        if (propertyDock_ == nullptr) {
+            return;
+        }
+        boxes_ = DockContext::boxesFor(document_, canvas_.tool());
+        auto show = [&](const char* name, bool visible) {
+            if (View* view = propertyDock_->findView(name)) {
+                view->setVisible(visible);
+            }
+        };
+        show("transformPanel", boxes_.transform);
+        show("colorPanel", boxes_.colour);
+        show("strokePanel", boxes_.stroke);
+        show("opacityPanel", boxes_.opacity);
+        show("dockCaption", !boxes_.caption.empty());
+        if (auto* caption = dynamic_cast<Label*>(propertyDock_->findView("dockCaption"))) {
+            caption->setText(boxes_.caption);
+        }
+        frame_.rootView().updateLayout();
+        canvas_.style().markDirty();
+    }
+
+    void DockController::setPropertyTextSize(int points) {
+        propertyTextSize_ = points;
+        if (propertyDock_ == nullptr) {
+            return;
+        }
+        const float scale = float(points) / 11.0f;
+        std::function<void(View*)> walk = [&](View* view) {
+            auto scaled = [&](const Font& font) {
+                const float base = baseFontSizes_.emplace(view, font.size()).first->second;
+                Font out = font;
+                out.setSize(std::max(6.0f, std::round(base * scale)));
+                return out;
+            };
+            if (auto* label = dynamic_cast<Label*>(view)) {
+                if (auto* style = dynamic_cast<LabelStyle*>(&label->style())) {
+                    style->setFont(scaled(style->font()));
+                }
+            } else if (auto* field = dynamic_cast<TextField*>(view)) {
+                field->setFont(scaled(field->font()));
+            }
+            for (SubView* child : view->childViews()) {
+                walk(child);
+            }
+        };
+        walk(propertyDock_);
+        layout();
+        frame_.rootView().updateLayout();
     }
 
     void DockController::layout() {
         const Rect client = canvas_.getClientBounds();
-        const float top = canvas_.rulerSize(), left = canvas_.rulerSize();
-        const float height = std::max(0.0f, client.height() - top);
-        auto place = [&](SubView* dock, float x, float width, const char* innerName) {
+        const float top = canvas_.rulerSize();
+        auto place = [&](SubView* dock, float x, float y, float width, const char* innerName) {
             if (dock == nullptr) {
                 return;
             }
-            dock->setBounds(Rect(x, top, width, height));
+            const float height = std::max(0.0f, client.height() - y);
+            dock->setBounds(Rect(x, y, width, height));
             if (View* inner = dock->findView(innerName)) {
                 inner->setBounds(Rect(0.0f, 0.0f, width, height));
             }
         };
         if (toolDock_ != nullptr) {
-            place(toolDock_, left, toolDock_->bounds().size().width, "toolDockBox");
+            const float width = toolDock_->bounds().size().width;
+            place(toolDock_, 0.0f, 0.0f, width, "toolDockBox");
+            canvas_.setLeftInset(toolDock_->isVisible() ? width : 0.0f);
         }
         if (propertyDock_ != nullptr) {
-            const float width = propertyDock_->bounds().size().width;
-            place(propertyDock_, client.width() - width, width, "propertyDockBox");
+            if (basePropertyWidth_ <= 0.0f) {
+                basePropertyWidth_ = propertyDock_->bounds().size().width;
+            }
+            const float width = basePropertyWidth_ * float(propertyTextSize_) / 11.0f;
+            place(propertyDock_, client.width() - width, top, width, "propertyDockBox");
         }
         canvas_.style().markDirty();
     }
@@ -216,6 +291,19 @@ namespace curvy {
             text(propertyDock_->findView("transformPanelHeaderInfo"), theme.textMuted);
             for (const char* name : {"transformXLabel", "transformYLabel", "transformWLabel", "transformHLabel", "transformAngleLabel", "transformAngleUnit"}) {
                 text(propertyDock_->findView(name), theme.textMuted);
+            }
+            for (const char* box : {"colorPanel", "strokePanel", "opacityPanel"}) {
+                const std::string base = box;
+                fill(propertyDock_->findView((base + "HeaderBar").c_str()), tint(theme.slot, 0x99));
+                text(propertyDock_->findView((base + "Header").c_str()), theme.textPrimary);
+            }
+            text(propertyDock_->findView("colorPanelHeaderInfo"), theme.textMuted);
+            text(propertyDock_->findView("dockCaption"), theme.textMuted);
+            for (const char* name : {"comp0SliderCaption", "comp1SliderCaption", "comp2SliderCaption", "strokeWeightLabel", "opacitySliderCaption"}) {
+                text(propertyDock_->findView(name), theme.textMuted);
+            }
+            for (const char* name : {"hexField", "comp0SliderValue", "comp1SliderValue", "comp2SliderValue", "strokeWeightField", "opacitySliderValue"}) {
+                fill(propertyDock_->findView(name), tint(theme.bgApp));
             }
             for (const char* name : {"transformXField", "transformYField", "transformWField", "transformHField", "transformAngleField"}) {
                 fill(propertyDock_->findView(name), tint(theme.bgApp));

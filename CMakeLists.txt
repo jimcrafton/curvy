@@ -34,6 +34,7 @@ add_executable(curvy
     src/gradientbar.cpp
     src/swatchgrid.cpp
     src/pagepreview.cpp
+    src/welcomeoverlay.cpp
     src/stylepanel.cpp
     src/transformpanel.cpp
     src/layertree.cpp
@@ -60,6 +61,7 @@ add_executable(curvy
     src/workspacemodel.cpp
     src/workspacecontroller.cpp
     src/dockcontroller.cpp
+    src/dockcontext.cpp
     src/workspacechecks.cpp
     src/sketchdocument.cpp
     src/documentlive.cpp
@@ -83,6 +85,8 @@ add_executable(curvy
     src/sketchchecks.cpp
     src/newdocumentmodel.cpp
     src/newdocumentdialog.cpp
+    src/settings.cpp
+    src/settingsdialog.cpp
     src/tracedialog.cpp
 )
 
@@ -119,7 +123,7 @@ set(CURVY_MODEL_SOURCES
     documentlayers documentswatches documentselect documentclip documentsymbols documentbrushes brush
     pathflatten textwarp imagedata documenttextpath documentimages documentexpand pdfexport documentartboards
     documenttrace imagetrace sketchsvg sketchexport shapetools pathops textoutline gzip numberscrubber
-    sketchbin cursorset newdocumentmodel graphdocument documentlive radialmenu holdscrub workspacemodel)
+    sketchbin cursorset newdocumentmodel graphdocument documentlive radialmenu holdscrub workspacemodel dockcontext settings)
 list(TRANSFORM CURVY_MODEL_SOURCES PREPEND src/)
 list(TRANSFORM CURVY_MODEL_SOURCES APPEND .cpp)
 

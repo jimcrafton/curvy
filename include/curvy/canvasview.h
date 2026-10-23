@@ -183,7 +183,10 @@ namespace curvy {
 
         void paint(BLContext& ctx) override;
 
-    // The thickness of the rulers (0 when hidden): what the docks leave clear.
+        // Width on the left that a dock keeps clear: the rulers and the drawing area start to its right.
+        float leftInset() const { return leftInset_; }
+        void setLeftInset(float inset) { leftInset_ = inset; style().markDirty(); }
+        // The thickness of the rulers (0 when hidden): what the docks leave clear.
         float rulerSize() const { return showRulers_ ? kRulerThickness : 0.0f; }
 
     private:
@@ -212,6 +215,7 @@ namespace curvy {
         float gridSpacing_ = 20.0f;
         bool showGrid_ = true;
         bool showRulers_ = true;
+        float leftInset_ = 0.0f;
         bool snapToGrid_ = true;
         BLPoint pointerDoc_;
         BLBox dragBounds_;  // the selection's bounds when a move began

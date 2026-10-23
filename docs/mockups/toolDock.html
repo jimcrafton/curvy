@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>curvy tool dock</title>
+<!-- The optional docked toolbar (docs/ui-design.md, "Optional docked toolbar and property boxes"): flush to the left edge, full height,
+     translucent over the artwork. Same tool order as the old palette (two columns). Colours are the theme tokens (include/curvy/theme.h):
+     bgSurface at 60% for the panel, border for the edge. The tools are ToolbarButton placeholders; WorkspaceController gives them
+     their icons and toggle state. Convert: python .claude/skills/html-mockup-to-newui/scripts/html2newui.py docs/mockups/toolDock.html -o Resources/toolDock.newui --name toolDock --fragment -->
+<style>
+  body { width: 74px; height: 700px; margin: 0; font-family: "Segoe UI", sans-serif; font-size: 12px; color: #F0F0F0; }
+  #toolDockBox { display: flex; flex-direction: row; gap: 4px; padding: 6px; background: #1E1E1E99; border-right: 1px solid #4A4A4A; }
+  .col { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 29px; }
+  .tool { width: 29px; height: 29px; }
+  .sep { width: 25px; height: 1px; background: #4A4A4A; }
+</style>
+</head>
+<body>
+  <div id="toolDockBox">
+    <div id="toolColumn1" class="col">
+      <canvas id="selectTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="directSelectTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <div class="sep"></div>
+      <canvas id="rectangleTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="ellipseTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="circleTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="roundRectTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="polygonTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="starTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="arcTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="lineTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <div class="sep"></div>
+      <canvas id="penTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="pencilTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="paintbrushTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="textTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="gradientTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="widthTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+    </div>
+    <div id="toolColumn2" class="col">
+      <canvas id="scissorsTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="knifeTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="eraserTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="shapeBuilderTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <div class="sep"></div>
+      <canvas id="eyedropperTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="magicWandTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="lassoTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="artboardTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <div class="sep"></div>
+      <canvas id="rotateTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="scaleTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="reflectTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <div class="sep"></div>
+      <canvas id="handTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="zoomTool" class="tool" data-newui-type="ToolbarButton"></canvas>
+    </div>
+  </div>
+</body>
+</html>

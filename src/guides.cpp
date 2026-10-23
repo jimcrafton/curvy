@@ -142,7 +142,7 @@ namespace curvy {
         }
         const Rect client = getClientBounds();
         const double rs = rulerSize();
-        const double left = double(pt.x) - double(client.left()), top = double(pt.y) - double(client.top());
+        const double left = double(pt.x) - double(client.left()) - double(leftInset_), top = double(pt.y) - double(client.top());
         if (showRulers_ && (left < rs || top < rs) && !(left < rs && top < rs)) {
             guideDragIndex_ = -1;
             guideDragVertical_ = left < rs;   // the left ruler gives a vertical guide
@@ -170,7 +170,7 @@ namespace curvy {
     void CanvasView::finishGuideDrag(const Point& pt) {
         const Rect client = getClientBounds();
         const double rs = rulerSize();
-        const bool inside = double(pt.x) - double(client.left()) >= rs && double(pt.y) - double(client.top()) >= rs;
+        const bool inside = double(pt.x) - double(client.left()) - double(leftInset_) >= rs && double(pt.y) - double(client.top()) >= rs;
         if (guideDragIndex_ < 0) {
             if (inside) {
                 document_->addGuide(guideDragVertical_, guideDragPosition_);
@@ -192,7 +192,7 @@ namespace curvy {
         }
         const Rect client = getClientBounds();
         const double rs = rulerSize();
-        const double x0 = double(client.left()) + rs, y0 = double(client.top()) + rs, x1 = double(client.left() + client.width()), y1 = double(client.top() + client.height());
+        const double x0 = double(client.left()) + double(leftInset_) + rs, y0 = double(client.top()) + rs, x1 = double(client.left() + client.width()), y1 = double(client.top() + client.height());
         ctx.save();
         ctx.clip_to_rect(BLRect(x0, y0, x1 - x0, y1 - y0));
         ctx.set_stroke_width(1.0);

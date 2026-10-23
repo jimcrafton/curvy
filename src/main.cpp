@@ -29,9 +29,11 @@
 #include "curvy/sketchchecks.h"
 #include "curvy/sketchdocument.h"
 #include "curvy/sketchwindow.h"
+#include "curvy/settingsdialog.h"
 #include "curvy/workspacecontroller.h"
 #include "curvy/workspacechecks.h"
 
+#include <chrono>
 #include <cstdio>
 #include <string>
 #include <typeinfo>
@@ -112,6 +114,9 @@ int main(int argc, char** argv) {
     registerReflectionData();
     registerCurvyReflection();
     const Options options = parseOptions(argc, argv);
+    if (options.check || options.checkTools || options.checkWorkspace || options.checkNewDocument) {
+        std::setvbuf(stdout, nullptr, _IONBF, 0);   // a crash in a check then still shows how far it got
+    }
 
     curvy::WorkspaceController::applyTheme(true);
     newui::Frame frame;
@@ -128,7 +133,7 @@ int main(int argc, char** argv) {
         return 1;
     }
     if (options.checkNewDocument) {
-        return curvy::NewDocumentDialog::check() + curvy::TraceDialog::check();
+        return curvy::NewDocumentDialog::check() + curvy::TraceDialog::check() + curvy::SettingsDialog::check();
     }
     if (options.check) {
         return printLayouts(frame, options.checkDepth);
@@ -145,6 +150,17 @@ int main(int argc, char** argv) {
         return curvy::runWorkspaceChecks(window);
     }
     window.start(options.startupPath);
+    app.runLoop().onStart.add([&window, &options](newui::RunLoop& loop) {
+        window.startAutosave();
+        // The recovery question and the welcome card wait until the window is on screen, so the question has a window behind it.
+        loop.postDelayed(std::chrono::milliseconds(400), [&window, &options] {
+            if (options.startupPath.empty() && !window.offerRecovery()) {
+                window.showWelcomeOnce();
+            }
+            return true;
+        });
+        return newui::SyncReturn::Handled;
+    });
 #ifdef CURVY_GUI_AUTOMATION
     if (!options.automationPipe.empty()) {
         newui::Automation::expose(frame.rootView());

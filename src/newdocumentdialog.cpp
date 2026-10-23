@@ -333,7 +333,7 @@ namespace curvy {
     }
 
     namespace {
-        bool showDialog(Frame& owner, NewDocumentModel& model, bool setup) {
+        bool showDialog(Frame& owner, NewDocumentModel& model, bool setup, bool nameEditable = false) {
             Dialog dialog;
             dialog.setName("newdocument");
             if (!Bundle::instance().loadDialog(dialog)) {
@@ -348,10 +348,13 @@ namespace curvy {
                 if (auto* ok = dynamic_cast<Button*>(dialog.rootView().findView("createButton"))) {
                     ok->setText("OK");
                 }
-                for (const char* name : {"categoryControl", "presetList", "newDocumentName"}) {
+                for (const char* name : {"categoryControl", "presetList"}) {
                     if (auto* control = dynamic_cast<Control*>(dialog.rootView().findView(name))) {
                         control->setEnabled(false);
                     }
+                }
+                if (auto* nameBox = dynamic_cast<Control*>(dialog.rootView().findView("newDocumentName"))) {
+                    nameBox->setEnabled(nameEditable);
                 }
             }
             if (dialog.showModal(&owner) != DialogResult::Ok) {
@@ -362,8 +365,8 @@ namespace curvy {
         }
     }
 
-    bool NewDocumentDialog::runSetup(Frame& owner, NewDocumentModel& model) {
-        return showDialog(owner, model, true);
+    bool NewDocumentDialog::runSetup(Frame& owner, NewDocumentModel& model, bool nameEditable) {
+        return showDialog(owner, model, true, nameEditable);
     }
 
     bool NewDocumentDialog::run(Frame& owner, NewDocumentModel& model) {

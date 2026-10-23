@@ -1,0 +1,88 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>curvy property dock</title>
+<!-- The optional property boxes (docs/ui-design.md): docked flush to the right edge, full height, translucent over the artwork, boxes stacked.
+     Boxes: Transform, Colour (fill/stroke), Stroke, Opacity, with the view names TransformPanel and StylePanel bind to; DockController shows the ones that apply to the selection and tool (include/curvy/dockcontext.h). Theme tokens (include/curvy/theme.h):
+     bgSurface at 60% for the dock, bgApp for the fields, textMuted for captions, border for lines.
+     Convert: python .claude/skills/html-mockup-to-newui/scripts/html2newui.py docs/mockups/propertyDock.html -o Resources/propertyDock.newui --name propertyDock --fragment -->
+<style>
+  body { width: 268px; height: 700px; margin: 0; font-family: "Segoe UI", sans-serif; font-size: 12px; color: #F0F0F0; }
+  #propertyDockBox { display: flex; flex-direction: column; padding: 0; background: #1E1E1E99; border-left: 1px solid #4A4A4A; }
+  #transformPanel { display: flex; flex-direction: column; height: 122px; }
+  #transformPanelHeaderBar { display: flex; flex-direction: row; align-items: center; gap: 6px; height: 24px; padding: 0 8px; background: #2E2E2E99; }
+  #transformPanelHeader { font-weight: 700; flex-grow: 1; }
+  #transformPanelHeaderInfo { color: #A0A0A0; width: 86px; text-align: right; }
+  #transformPanelBody { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; }
+  .row { display: flex; flex-direction: row; align-items: center; gap: 6px; height: 24px; }
+  .cap { width: 14px; color: #A0A0A0; }
+  .field { width: 70px; height: 20px; background: #121212; color: #F0F0F0; }
+  #transformAngleLabel { width: 44px; color: #A0A0A0; }
+  #transformAngleUnit { width: 30px; color: #A0A0A0; }
+  #linkAspectButton { width: 24px; height: 24px; }
+  #dockCaption { color: #A0A0A0; height: 22px; padding: 0 8px; }
+  .box { display: flex; flex-direction: column; }
+  .head { display: flex; flex-direction: row; align-items: center; gap: 6px; height: 24px; padding: 0 8px; background: #2E2E2E99; }
+  .head .title { font-weight: 700; flex-grow: 1; }
+  .head .info { color: #A0A0A0; width: 86px; text-align: right; }
+  .body { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; }
+  .well { width: 18px; height: 18px; border: 1px solid #4A4A4A; }
+  .slider { height: 24px; flex-grow: 1; }
+  .num { width: 44px; height: 20px; background: #121212; color: #F0F0F0; }
+  .tb { width: 26px; height: 26px; }
+  #colorPanel { height: 150px; }
+  #strokePanel { height: 130px; }
+  #opacityPanel { height: 62px; }
+</style>
+</head>
+<body>
+  <div id="propertyDockBox">
+    <div id="dockCaption"></div>
+    <div id="transformPanel">
+      <div id="transformPanelHeaderBar">
+        <span id="transformPanelHeader">Transform</span>
+        <span id="transformPanelHeaderInfo"></span>
+      </div>
+      <div id="transformPanelBody">
+        <div id="transformPosRow" class="row">
+          <span id="transformXLabel" class="cap">X</span><input id="transformXField" class="field" type="text" value="0">
+          <span id="transformYLabel" class="cap">Y</span><input id="transformYField" class="field" type="text" value="0">
+        </div>
+        <div id="transformSizeRow" class="row">
+          <span id="transformWLabel" class="cap">W</span><input id="transformWField" class="field" type="text" value="0">
+          <span id="transformHLabel" class="cap">H</span><input id="transformHField" class="field" type="text" value="0">
+          <canvas id="linkAspectButton" data-newui-type="ToolbarButton"></canvas>
+        </div>
+        <div id="transformAngleRow" class="row">
+          <span id="transformAngleLabel">Angle</span><input id="transformAngleField" class="field" type="text" value="0">
+          <span id="transformAngleUnit">deg</span>
+        </div>
+      </div>
+    </div>
+    <div id="colorPanel" class="box">
+      <div id="colorPanelHeaderBar" class="head"><span id="colorPanelHeader" class="title">Colour</span><span id="colorPanelHeaderInfo" class="info">Fill</span></div>
+      <div id="colorPanelBody" class="body">
+        <div class="row"><canvas id="fillWell" class="well" data-newui-type="SubView"></canvas><canvas id="strokeWell" class="well" data-newui-type="SubView"></canvas><input id="hexField" class="field" type="text" value="#000000"></div>
+        <div class="row"><span id="comp0SliderCaption" class="cap">H</span><input id="comp0Slider" class="slider" type="range"><input id="comp0SliderValue" class="num" type="text" value="0"></div>
+        <div class="row"><span id="comp1SliderCaption" class="cap">S</span><input id="comp1Slider" class="slider" type="range"><input id="comp1SliderValue" class="num" type="text" value="0"></div>
+        <div class="row"><span id="comp2SliderCaption" class="cap">B</span><input id="comp2Slider" class="slider" type="range"><input id="comp2SliderValue" class="num" type="text" value="0"></div>
+      </div>
+    </div>
+    <div id="strokePanel" class="box">
+      <div id="strokePanelHeaderBar" class="head"><span id="strokePanelHeader" class="title">Stroke</span></div>
+      <div id="strokePanelBody" class="body">
+        <div class="row"><span id="strokeWeightLabel" class="cap" style="width:44px">Width</span><input id="strokeWeightField" class="field" type="text" value="1"></div>
+        <div class="row"><span class="cap" style="width:44px">Cap</span><canvas id="capButtButton" class="tb" data-newui-type="ToolbarButton"></canvas><canvas id="capRoundButton" class="tb" data-newui-type="ToolbarButton"></canvas><canvas id="capSquareButton" class="tb" data-newui-type="ToolbarButton"></canvas></div>
+        <div class="row"><span class="cap" style="width:44px">Corner</span><canvas id="joinMiterButton" class="tb" data-newui-type="ToolbarButton"></canvas><canvas id="joinRoundButton" class="tb" data-newui-type="ToolbarButton"></canvas><canvas id="joinBevelButton" class="tb" data-newui-type="ToolbarButton"></canvas></div>
+      </div>
+    </div>
+    <div id="opacityPanel" class="box">
+      <div id="opacityPanelHeaderBar" class="head"><span id="opacityPanelHeader" class="title">Opacity</span></div>
+      <div id="opacityPanelBody" class="body">
+        <div class="row"><span id="opacitySliderCaption" class="cap" style="width:30px">All</span><input id="opacitySlider" class="slider" type="range"><input id="opacitySliderValue" class="num" type="text" value="100"></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
