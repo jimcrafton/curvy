@@ -1,0 +1,305 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>curvy graph tree</title>
+<!-- The node graph as a tree (docs/ui-design.md "Graph tree"): a docked panel for people who want to see and edit the graph without a node canvas.
+     Built from what newui already has: a TreeView (one row per node, glyph, text), a TextField filter, a SegmentedControl for the two views and
+     a parameter box under the tree (the same ParameterPanel rows the node view would use). Two views of one graph:
+       Document - layers and groups are subnets; a shape is the last node of its chain; open it to see the chain that feeds it.
+       Flow     - the Output node on top; every row's children are its inputs, so the tree reads as "what makes this". A node used by more
+                  than one consumer shows in full the first time and as a link row (arrow) after, so nothing is drawn twice.
+     Every edit is one undo step through GraphDocument (setGraphParam / setGraphString / connect). Theme tokens as the property dock. -->
+<style>
+  :root { --bg: #1E1E1E; --panel: #252526; --row: #2E2E2E; --line: #4A4A4A; --text: #F0F0F0; --muted: #A0A0A0; --accent: #FFB454; --field: #121212; }
+  * { box-sizing: border-box; }
+  body { margin: 0; width: 320px; height: 720px; font: 12px "Segoe UI", sans-serif; color: var(--text); background: #101010; overflow: hidden; }
+  #graphDock { display: flex; flex-direction: column; height: 100%; background: var(--bg); border-left: 1px solid var(--line); }
+  .head { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; background: var(--row); flex: none; }
+  .head .title { font-weight: 700; flex: 1; }
+  .head .info { color: var(--muted); }
+  #modeBar { display: flex; margin: 6px 8px 0; height: 24px; flex: none; }
+  #modeBar button { flex: 1; background: var(--row); color: var(--muted); border: 1px solid var(--line); font: inherit; cursor: pointer; }
+  #modeBar button + button { border-left: 0; }
+  #modeBar button.on { background: #3A3A3A; color: var(--text); box-shadow: inset 0 -2px var(--accent); }
+  #filterRow { display: flex; gap: 6px; padding: 6px 8px; flex: none; }
+  #filterField { flex: 1; height: 22px; background: var(--field); color: var(--text); border: 1px solid var(--line); padding: 0 6px; font: inherit; }
+  #filterField:focus { outline: 1px solid var(--accent); }
+  #tree { flex: 1 1 0; min-height: 120px; overflow-y: auto; background: var(--panel); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); user-select: none; }
+  .tr { display: flex; align-items: center; height: 22px; padding-right: 8px; cursor: default; white-space: nowrap; }
+  .tr:hover { background: #333; }
+  .tr.sel { background: #4A3A22; }
+  .tr.dim { opacity: .35; }
+  .tr .glyph { width: 14px; text-align: center; color: var(--muted); flex: none; font-size: 9px; }
+  .tr .icon { width: 16px; height: 16px; margin: 0 6px 0 2px; flex: none; }
+  .icon svg { width: 16px; height: 16px; display: block; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .chip { display: inline-block; width: 26px; height: 14px; border: 1px solid #6A6A6A; border-radius: 2px; vertical-align: middle;
+    background-image: linear-gradient(45deg, #777 25%, transparent 25%, transparent 75%, #777 75%), linear-gradient(45deg, #777 25%, #BBB 25%, #BBB 75%, #777 75%);
+    background-size: 8px 8px; background-position: 0 0, 4px 4px; position: relative; overflow: hidden; }
+  .chip i { position: absolute; inset: 0; display: block; }
+  .head .icon { width: 16px; height: 16px; }
+  .tr .name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  .tr .kind { color: var(--muted); margin-left: 8px; font-size: 11px; }
+  .tr.link .name { color: var(--muted); font-style: italic; }
+  .tr.sub .name { font-weight: 700; }
+  .tr .eye { color: var(--muted); width: 16px; text-align: center; flex: none; cursor: pointer; }
+  .tr .eye.off { opacity: .3; }
+  #detail { flex: none; height: 252px; overflow-y: auto; padding: 0 0 6px; }
+  .prow { display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; }
+  .prow .cap { width: 66px; color: var(--muted); }
+  .prow input[type=text], .prow input[type=number] { flex: 1; height: 20px; background: var(--field); color: var(--text); border: 1px solid var(--line); padding: 0 4px; font: inherit; min-width: 0; }
+  .prow input[type=color] { width: 28px; height: 20px; padding: 0; border: 1px solid var(--line); background: none; }
+  .prow input[type=range] { flex: 1; accent-color: var(--accent); }
+  .prow .ro { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .prow .go { color: var(--accent); cursor: pointer; }
+  .prow button { background: var(--row); color: var(--text); border: 1px solid var(--line); font: inherit; height: 22px; padding: 0 10px; cursor: pointer; white-space: nowrap; }
+  .prow button:hover { border-color: var(--accent); }
+  .sec { color: var(--muted); padding: 6px 8px 2px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  #status { flex: none; height: 24px; line-height: 24px; padding: 0 8px; color: var(--muted); border-top: 1px solid var(--line); background: var(--row); display: flex; gap: 8px; }
+  #status span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #status button { background: none; border: 0; color: var(--accent); font: inherit; cursor: pointer; padding: 0 2px; }
+  #status button:disabled { color: var(--muted); cursor: default; }
+</style>
+</head>
+<body>
+<div id="graphDock">
+  <div class="head"><span class="title">Graph</span><span class="info" id="graphInfo"></span></div>
+  <div id="modeBar"><button id="modeDocument" class="on">Document</button><button id="modeFlow">Flow</button></div>
+  <div id="filterRow"><input id="filterField" type="text" placeholder="Filter by name, type or value"></div>
+  <div id="tree" tabindex="0"></div>
+  <div class="head"><span class="title" id="detailTitle">Node</span><span class="info" id="detailKind"></span></div>
+  <div id="detail"></div>
+  <div id="status"><span id="statusText">Ready</span><button id="undoButton" disabled>Undo</button><button id="redoButton" disabled>Redo</button></div>
+</div>
+<script>
+// ---- the sample graph: what the editor makes when someone draws a face, a title and a page --------------------------------------------
+// 16 x 16 icons, drawn in the type's colour; in newui they are icons/*.svg loaded by the TreeItem like icons/close.svg.
+const TYPES = {
+  curvyPath:   { label: 'Path',   color: '#7FB6FF', icon: '<path d="M2.5 12.5C4 3 10 3 13.5 5"/><rect x="1" y="11" width="3" height="3" fill="currentColor"/><rect x="12" y="3.5" width="3" height="3" fill="currentColor"/>' },
+  curvyText:   { label: 'Text',   color: '#C792EA', icon: '<path d="M3 4V2.5h10V4M8 2.5v11M6 13.5h4"/>' },
+  curvyColor:  { label: 'Colour', color: '#FFB454', icon: '<path d="M8 1.5C5.5 5 4 7 4 9.5a4 4 0 0 0 8 0C12 7 10.5 5 8 1.5Z"/>' },
+  fill:        { label: 'Fill',   color: '#8BD17C', icon: '<path d="M2.5 8 8 2.5 13 7.5 7.5 13Z"/><path d="M13.5 10c0 1.5 1.2 2 1.2 3.2a1.2 1.2 0 0 1-2.4 0c0-1.2 1.2-1.7 1.2-3.2Z" fill="currentColor"/><path d="M2.5 8h10.5"/>' },
+  stroke:      { label: 'Stroke', color: '#5FD3C0', icon: '<path d="M2 13 11.5 3.5l2 2L4 15H2Z"/><path d="M10 5l2 2"/>' },
+  merge:       { label: 'Merge',  color: '#A0A0A0', icon: '<path d="M2 3.5h4c2.5 0 2.5 4.5 5 4.5h3M2 12.5h4c2.5 0 2.5-4.5 5-4.5"/><path d="M12 6l2.2 2L12 10"/>' },
+  subnet:      { label: 'Group',  color: '#E0E0E0', icon: '<path d="M1.5 4.5V13h13V5.5H8L6.5 3.5h-5Z"/><path d="M1.5 6.5h13"/>' },
+};
+const iconOf = t => `<span class="icon" style="color:${TYPES[t].color}"><svg viewBox="0 0 16 16">${TYPES[t].icon}</svg></span>`;
+const hasChip = n => n.type === 'fill' || n.type === 'curvyColor';
+const chipOf = (color, opacity) => `<span class="chip" title="${color}"><i style="background:${color};opacity:${(opacity === undefined ? 100 : opacity) / 100}"></i></span>`;
+const N = {};
+function node(id, name, type, params, inputs, parent) { N[id] = { id, name, type, params: params || {}, inputs: inputs || [], parent: parent || 0, visible: true }; }
+node(100, 'Sketch', 'subnet', {}, [], 0);
+node(101, 'Face', 'subnet', {}, [], 100);
+node(1, 'Head', 'curvyPath', { d: 'M 120 40 C 160 40 190 70 190 110 C 190 150 160 180 120 180 C 80 180 50 150 50 110 C 50 70 80 40 120 40 Z' }, [], 101);
+node(2, 'Head fill', 'fill', { color: '#F2C9A0', opacity: 100 }, [1], 101);
+node(7, 'Ink', 'curvyColor', { color: '#3A2A20' }, [], 101);
+node(3, 'Head stroke', 'stroke', { width: 2, opacity: 100 }, [2, 7], 101);
+node(4, 'Eye L', 'curvyPath', { d: 'M 95 95 C 100 90 106 90 110 95 C 106 102 100 102 95 95 Z' }, [], 101);
+node(5, 'Eye L fill', 'fill', { color: '#3A2A20', opacity: 100 }, [4], 101);
+node(6, 'Eye R', 'curvyPath', { d: 'M 130 95 C 135 90 141 90 145 95 C 141 102 135 102 130 95 Z' }, [], 101);
+node(12, 'Eye R fill', 'fill', { color: '#3A2A20', opacity: 100 }, [6], 101);
+node(11, 'Face', 'merge', {}, [3, 5, 12], 101);
+node(8, 'Title', 'curvyText', { text: 'Hello', font: 'Segoe UI', size: 28, matrix: '1 0 0 1 20 250' }, [], 100);
+node(9, 'Title fill', 'fill', { color: '#F0F0F0', opacity: 100 }, [8], 100);
+node(102, 'Background', 'subnet', {}, [], 0);
+node(13, 'Page', 'curvyPath', { d: 'M 0 0 L 240 0 L 240 300 L 0 300 Z' }, [], 102);
+node(14, 'Page fill', 'fill', { color: '#2B3A55', opacity: 100 }, [13], 102);
+node(15, 'Output', 'merge', {}, [11, 9, 14], 0);
+const ORDER = [100, 101, 102];                 // subnets in stacking order (top first)
+
+// ---- undo: each edit is one step, as GraphDocument::commitGraphEdit --------------------------------------------------------------------
+const undo = [], redo = [];
+function setParam(id, name, value, label) {
+  const old = N[id].params[name];
+  if (old === value) return;
+  N[id].params[name] = value;
+  undo.push({ id, name, old, value, label: label || 'Change ' + name }); redo.length = 0;
+  say(`${label || 'Change ' + name} — 1 undo step`); refreshButtons(); drawTree(true); drawDetail();
+}
+function step(from, to, dir) {
+  const s = from.pop(); if (!s) return;
+  N[s.id].params[s.name] = dir === 'undo' ? s.old : s.value;
+  to.push(s); selected = s.id; say((dir === 'undo' ? 'Undid ' : 'Redid ') + s.label.toLowerCase());
+  refreshButtons(); drawTree(); drawDetail();
+}
+function refreshButtons() { undoButton.disabled = !undo.length; redoButton.disabled = !redo.length; }
+function say(t) { statusText.textContent = t; }
+
+// ---- tree rows -------------------------------------------------------------------------------------------------------------------------
+let mode = 'document', selected = 15, filter = '';
+const open = { document: new Set([100, 101, 102]), flow: new Set(['flow:/15', 'flow:flow:/15/11']) };
+const consumers = id => Object.values(N).filter(n => n.inputs.includes(id));
+function summary(n) {
+  const p = n.params;
+  if (n.type === 'curvyPath') return (p.d.match(/[MLCQ]/g) || []).length + ' segs';
+  if (n.type === 'curvyText') return '“' + p.text + '”';
+  if (n.type === 'curvyColor' || n.type === 'fill') return p.color;
+  if (n.type === 'stroke') return p.width + ' px';
+  return TYPES[n.type].label;
+}
+function matches(n) {
+  if (!filter) return true;
+  const hay = (n.name + ' ' + TYPES[n.type].label + ' ' + summary(n)).toLowerCase();   // a colour chip still matches its hex text
+  return hay.includes(filter.toLowerCase());
+}
+function rows() {
+  const out = [];
+  const seen = new Set();                                    // flow view: a node already drawn in full becomes a link row afterwards
+  function chain(id, depth, via) {                           // a node and, when open, what feeds it
+    const n = N[id], key = mode + ':' + via + '/' + id;
+    const link = mode === 'flow' && seen.has(id);
+    seen.add(id);
+    const kids = link ? [] : n.inputs;
+    out.push({ n, depth, key, link, kids: kids.length, isOpen: open[mode].has(key) });
+    if (open[mode].has(key)) kids.forEach(k => chain(k, depth + 1, key));
+  }
+  if (mode === 'flow') {
+    open.flow.add('flow:/15');
+    chain(15, 0, '');
+    return out;
+  }
+  function container(id, depth) {
+    const n = N[id];
+    out.push({ n, depth, key: 'c' + id, kids: 1, isOpen: open.document.has(id), sub: true, cid: id });
+    if (!open.document.has(id)) return;
+    Object.values(N).filter(c => c.type === 'subnet' && c.parent === id).forEach(c => container(c.id, depth + 1));
+    const inside = Object.values(N).filter(c => c.parent === id && c.type !== 'subnet' && c.type !== 'merge');
+    inside.filter(c => !consumers(c.id).some(u => u.type !== 'merge' && u.parent === id)).forEach(c => chain(c.id, depth + 1, 'c' + id));
+  }
+  ORDER.filter(id => N[id].parent === 0).forEach(id => container(id, 0));
+  return out;
+}
+function visibleRows() {
+  const all = rows();
+  if (!filter) return { list: all, dim: new Set() };
+  // keep a matching row's ancestors so it can be found in place, dim the ones that only lead to it
+  const keep = new Set(), dim = new Set();
+  const stack = [];
+  all.forEach((r, i) => {
+    stack.length = r.depth; stack[r.depth] = i;
+    if (matches(r.n)) { for (let d = 0; d <= r.depth; d++) keep.add(stack[d]); }
+  });
+  const list = all.filter((r, i) => keep.has(i));
+  list.forEach(r => { if (!matches(r.n)) dim.add(r.key); });
+  return { list, dim };
+}
+function drawTree(keepScroll) {
+  const scroll = tree.scrollTop;
+  const { list, dim } = visibleRows();
+  tree.innerHTML = '';
+  list.forEach(r => {
+    const el = document.createElement('div');
+    el.className = 'tr' + (r.n.id === selected ? ' sel' : '') + (dim.has(r.key) ? ' dim' : '') + (r.link ? ' link' : '') + (r.sub ? ' sub' : '');
+    el.style.paddingLeft = (4 + r.depth * 14) + 'px';
+    const has = r.kids > 0 && !filter;
+    el.innerHTML = `<span class="glyph">${has ? (r.isOpen ? '▼' : '▶') : ''}</span>` +
+      iconOf(r.n.type) +
+      `<span class="name">${r.link ? '↗ ' : ''}${esc(r.n.name)}</span>` +
+      (r.sub ? `<span class="eye${r.n.visible ? '' : ' off'}" title="Show or hide">●</span>` : (hasChip(r.n) ? `<span class="kind">${chipOf(r.n.params.color, r.n.params.opacity)}</span>` : `<span class="kind">${esc(summary(r.n))}</span>`));
+    el.dataset.key = r.key;
+    el.onclick = e => {
+      if (e.target.classList.contains('eye')) { r.n.visible = !r.n.visible; say((r.n.visible ? 'Showed ' : 'Hid ') + r.n.name); drawTree(true); return; }
+      if (e.target.classList.contains('glyph') && has) { toggle(r); return; }
+      selected = r.n.id; drawTree(true); drawDetail();
+    };
+    el.ondblclick = () => { if (has) toggle(r); };
+    tree.appendChild(el);
+  });
+  if (keepScroll) tree.scrollTop = scroll;
+  graphInfo.textContent = Object.values(N).filter(n => n.type !== 'subnet').length + ' nodes';
+}
+function toggle(r) {
+  const k = r.sub ? r.cid : r.key;
+  open[mode].has(k) ? open[mode].delete(k) : open[mode].add(k);
+  drawTree(true);
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// ---- the parameter box -----------------------------------------------------------------------------------------------------------------
+// What the Curves row shows instead of the path text; the text is only reached through Copy and Paste (and goes away when bezierPath stores anchors).
+function pathInfo(d) {
+  const nums = (d.match(/-?\d+(\.\d+)?(e-?\d+)?/g) || []).map(Number);
+  const xs = nums.filter((v, i) => i % 2 === 0), ys = nums.filter((v, i) => i % 2 === 1);
+  const span = a => a.length ? Math.round(Math.max(...a) - Math.min(...a)) : 0;
+  return { anchors: (d.match(/[MLCQ]/g) || []).length, closed: /Z/.test(d), w: span(xs), h: span(ys) };
+}
+function drawDetail() {
+  const n = N[selected];
+  detailTitle.textContent = n.name;
+  detailKind.innerHTML = iconOf(n.type) + ' ' + TYPES[n.type].label;
+  detailKind.style.cssText = 'display:flex;align-items:center;gap:4px';
+  const p = n.params, h = [];
+  const text = (name, cap) => h.push(`<div class="prow"><span class="cap">${cap}</span><input type="text" data-p="${name}" value="${esc(p[name])}"></div>`);
+  const num = (name, cap, min, max) => h.push(`<div class="prow"><span class="cap">${cap}</span><input type="number" data-p="${name}" data-n="1" min="${min}" max="${max}" value="${p[name]}"></div>`);
+  const color = (name, cap) => h.push(`<div class="prow"><span class="cap">${cap}</span><input type="color" data-p="${name}" value="${p[name]}"><input type="text" data-p="${name}" value="${p[name]}"></div>`);
+  const range = (name, cap) => h.push(`<div class="prow"><span class="cap">${cap}</span><input type="range" data-p="${name}" data-n="1" min="0" max="100" value="${p[name]}"><span class="ro" style="flex:none;width:34px;text-align:right">${p[name]}%</span></div>`);
+  if (n.type === 'curvyPath') {
+    const g = pathInfo(p.d);
+    h.push(`<div class="prow"><span class="cap">Curves</span><span class="ro">${g.anchors} anchors · ${g.closed ? 'closed' : 'open'} · ${g.w} × ${g.h}</span></div>`);
+    h.push('<div class="prow"><span class="cap"></span><button id="editOnCanvas" title="Select the shape and switch to Direct Select">Edit</button><button id="copyPath" title="Copy the curves as SVG path data">Copy</button><button id="pastePath" title="Replace the curves with SVG path data from the clipboard">Paste</button></div>');
+  } else if (n.type === 'curvyText') {
+    text('text', 'Words'); text('font', 'Font'); num('size', 'Size', 1, 999); h.push(`<div class="prow"><span class="cap">Placement</span><span class="ro">${esc(p.matrix)}</span></div>`);
+  } else if (n.type === 'curvyColor') {
+    color('color', 'Colour');
+  } else if (n.type === 'fill') {
+    color('color', 'Colour'); range('opacity', 'Opacity');
+  } else if (n.type === 'stroke') {
+    num('width', 'Width', 0, 99); range('opacity', 'Opacity');
+  } else if (n.type === 'subnet') {
+    const inner = Object.values(N).filter(c => c.parent === n.id && c.type !== 'subnet').length;
+    h.push(`<div class="prow"><span class="cap">Contains</span><span class="ro">${inner} nodes</span></div>`);
+  }
+  h.push('<div class="sec">Inputs</div>');
+  if (!n.inputs.length) h.push('<div class="prow"><span class="ro" style="color:var(--muted)">None</span></div>');
+  n.inputs.forEach((i, k) => h.push(`<div class="prow"><span class="cap">${k + 1}</span><span class="ro">${esc(N[i].name)}</span><span class="go" data-go="${i}">Go to</span></div>`));
+  h.push('<div class="sec">Used by</div>');
+  const users = consumers(n.id);
+  if (!users.length) h.push('<div class="prow"><span class="ro" style="color:var(--muted)">Nothing</span></div>');
+  users.forEach(u => h.push(`<div class="prow"><span class="ro">${esc(u.name)}</span><span class="go" data-go="${u.id}">Go to</span></div>`));
+  detail.innerHTML = h.join('');
+  detail.querySelectorAll('[data-p]').forEach(el => {
+    el.addEventListener('change', () => {
+      const v = el.dataset.n ? Number(el.value) : el.value;
+      setParam(n.id, el.dataset.p, v, 'Change ' + el.dataset.p);
+    });
+    if (el.type === 'range') el.addEventListener('input', () => { el.nextElementSibling.textContent = el.value + '%'; });
+  });
+  const hook = (id, fn) => { const b = document.getElementById(id); if (b) b.onclick = fn; };
+  hook('editOnCanvas', () => say('Direct Select on ' + n.name));
+  hook('copyPath', () => { try { navigator.clipboard.writeText(p.d); } catch (e) {} say('Copied path data'); });
+  hook('pastePath', async () => {
+    let text = '';
+    try { text = (await navigator.clipboard.readText()).trim(); } catch (e) {}
+    if (/^[MLCQZ0-9 .,\-eE]+$/.test(text) && /^M/.test(text)) setParam(n.id, 'd', text, 'Paste path data');
+    else say('The clipboard does not hold path data');
+  });
+  detail.querySelectorAll('[data-go]').forEach(el => el.onclick = () => { selected = Number(el.dataset.go); reveal(selected); drawTree(true); drawDetail(); });
+}
+function reveal(id) {                                         // open the rows above a node so it can be seen in the tree
+  if (mode === 'document') { let p = N[id].parent; while (p) { open.document.add(p); p = N[p].parent; } }
+  else { const chainTo = (cur, path) => { if (cur === id) return path; for (const k of N[cur].inputs) { const r = chainTo(k, path.concat(cur)); if (r) return r; } return null; };
+    let key = ''; (chainTo(15, []) || []).forEach(c => { key = 'flow:' + key + '/' + c; open.flow.add(key); }); }
+  setTimeout(() => { const el = tree.querySelector('.sel'); if (el) el.scrollIntoView({ block: 'nearest' }); });
+}
+
+// ---- wiring ----------------------------------------------------------------------------------------------------------------------------
+function setMode(m) {
+  mode = m; modeDocument.classList.toggle('on', m === 'document'); modeFlow.classList.toggle('on', m === 'flow');
+  drawTree(); say(m === 'document' ? 'Layers and groups, each shape with the chain behind it' : 'The Output on top; every row is what feeds the one above');
+}
+modeDocument.onclick = () => setMode('document'); modeFlow.onclick = () => setMode('flow');
+filterField.oninput = () => { filter = filterField.value.trim(); drawTree(); };
+undoButton.onclick = () => step(undo, redo, 'undo'); redoButton.onclick = () => step(redo, undo, 'redo');
+tree.addEventListener('keydown', e => {
+  const items = [...tree.querySelectorAll('.tr')]; const i = items.findIndex(x => x.classList.contains('sel'));
+  const go = k => { if (items[k]) { const key = items[k].dataset.key; const r = visibleRows().list.find(x => x.key === key); selected = r.n.id; drawTree(true); drawDetail(); tree.querySelector('.sel').scrollIntoView({ block: 'nearest' }); } };
+  if (e.key === 'ArrowDown') { go(Math.min(items.length - 1, i + 1)); e.preventDefault(); }
+  if (e.key === 'ArrowUp') { go(Math.max(0, i - 1)); e.preventDefault(); }
+  if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    const r = visibleRows().list[i]; if (r && r.kids && (e.key === 'ArrowRight') !== r.isOpen) toggle(r); e.preventDefault();
+  }
+});
+drawTree(); drawDetail();
+</script>
+</body>
+</html>

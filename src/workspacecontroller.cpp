@@ -68,7 +68,7 @@ namespace curvy {
         RadialRing viewRing() {
             return {"View", "Back", "ring.document", {
                 {"Toolbar", "T", "view.toolbar"}, {"Properties", "P", "view.properties"}, {"Rulers", "G", "view.toggleRulers"}, {"Fit page", "0", "view.fitPage"},
-                {"Theme", "L", "view.theme"}, {"Settings", "S", "dialog.settings"}}};
+                {"Theme", "L", "view.theme"}, {"Graph", "N", "view.graph"}, {"Settings", "S", "dialog.settings"}}};
         }
         RadialRing objectRing() {
             return {"Object", "Properties...", "dialog.object", {
@@ -163,6 +163,9 @@ namespace curvy {
         if (dock_ != nullptr) {
             dock_->restyle();
         }
+        if (graph_ != nullptr) {
+            graph_->restyle();
+        }
         if (options_ != nullptr) {
             options_->restyle();
         }
@@ -195,6 +198,7 @@ namespace curvy {
         canvas_->addChild(menu_);
         bindViews();
         dock_ = std::make_unique<DockController>(frame_, *canvas_, *model_, document_);
+        graph_ = std::make_unique<GraphDock>(frame_, *canvas_, *model_, document_, *dock_);
         options_ = std::make_unique<ToolOptionsCard>(*canvas_, *canvas_);
         dock_->onToolOptions = [this](SketchTool tool, const Point& at) { showToolOptions(tool, at); };
         dock_->onCardDismissed = [this] { focusCanvas(); };
@@ -571,6 +575,7 @@ namespace curvy {
         else if (command == "ring.view") { menu_->open(viewRing(), at, false); model_->setRing("View"); }
         else if (command == "view.toolbar") { model_->setToolbarVisible(!model_->toolbarVisible()); model_->say(model_->toolbarVisible() ? "Toolbar on" : "Toolbar off"); }
         else if (command == "view.properties") { model_->setPropertiesVisible(!model_->propertiesVisible()); model_->say(model_->propertiesVisible() ? "Properties on" : "Properties off"); }
+        else if (command == "view.graph") { model_->setGraphVisible(!model_->graphVisible()); model_->say(model_->graphVisible() ? "Graph on" : "Graph off"); }
         else if (command == "view.theme") { setDarkTheme(!Theme::current().isDark); model_->say(Theme::current().isDark ? "Dark theme" : "Light theme"); }
         else if (command == "ring.arrange") { menu_->open(arrangeRing(), at, false); model_->setRing("Arrange"); }
         else if (command == "doc.newArtboard") {

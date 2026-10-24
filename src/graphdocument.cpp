@@ -1,9 +1,15 @@
 #include "curvy/graphdocument.h"
 
+#include "curvy/pathnode.h"
+
 #include <memory>
 #include <stdexcept>
 
 namespace curvy {
+
+    GraphDocument::GraphDocument() {
+        registerCurvyNodes();
+    }
 
     void GraphDocument::graphChanged() {
         markModified();
@@ -58,6 +64,19 @@ namespace curvy {
         const jitnodes::GraphSnapshot before = snapshotGraph();
         network_->node(id).setFloat(name, value);
         network_->markDirty(id);
+        commitGraphEdit(before, "Change " + name);
+    }
+
+    void GraphDocument::setGraphString(jitnodes::NodeId id, const std::string& name, const std::string& value) {
+        const jitnodes::GraphSnapshot before = snapshotGraph();
+        network_->node(id).setString(name, value);
+        network_->markDirty(id);
+        commitGraphEdit(before, "Change " + name);
+    }
+
+    void GraphDocument::setGraphGeometry(jitnodes::NodeId id, const std::string& name, jitnodes::GeometryHandle geometry) {
+        const jitnodes::GraphSnapshot before = snapshotGraph();
+        network_->node(id).setGeometryParam(name, std::move(geometry));
         commitGraphEdit(before, "Change " + name);
     }
 

@@ -951,6 +951,7 @@ namespace curvy {
         }
         outline.transform(textMatrix_);
         path_ = outline;
+        ++geometryRevision_;
     }
 
     void SketchObject::setTextWarp(const TextWarp& warp) {
@@ -1102,6 +1103,7 @@ namespace curvy {
 
     void SketchObject::transform(const BLMatrix2D& matrix) {
         path_.transform(matrix);
+        ++geometryRevision_;
         if (type_ == SketchObjectType::Text) {
             textMatrix_.post_transform(matrix);   // later edits of the words land where the object now is
         }
@@ -1114,6 +1116,7 @@ namespace curvy {
     }
 
     void SketchObject::warp(const std::function<BLPoint(const BLPoint&)>& map) {
+        ++geometryRevision_;
         BLPathView view = path_.view();
         std::vector<uint8_t> commands(view.command_data, view.command_data + view.size);
         std::vector<BLPoint> vertices(view.vertex_data, view.vertex_data + view.size);

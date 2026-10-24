@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>curvy logo concepts</title>
+<!-- Logo concepts for the top bar (24 px) and the welcome card (96 px+). Amber is the accent (dark #FFB454, light #B35C00), blue is the keyboard outline
+     colour of the welcome card (dark #4F86C6, light #2F6DB5). Each concept is one inline SVG symbol reused at every size and in both themes. -->
+<style>
+  body { margin: 0; padding: 24px; font-family: "Segoe UI", sans-serif; background: #2B2B2B; color: #F0F0F0; width: 1180px; }
+  h1 { font-size: 18px; margin: 0 0 4px 0; }
+  p.note { margin: 0 0 18px 0; color: #A0A0A0; font-size: 12px; }
+  .concept { display: flex; flex-direction: row; align-items: center; gap: 16px; margin-bottom: 14px; }
+  .name { width: 170px; font-size: 13px; }
+  .name b { display: block; font-size: 15px; margin-bottom: 3px; }
+  .name span { color: #A0A0A0; font-size: 11px; }
+  .panel { display: flex; flex-direction: row; align-items: center; gap: 18px; padding: 14px 18px; border-radius: 8px; width: 400px; }
+  .dark { background: #1E1E1E; --amber: #FFB454; --blue: #4F86C6; --ink: #F0F0F0; --tile: #121212; --edge: #4A4A4A; }
+  .light { background: #FFFFFF; --amber: #B35C00; --blue: #2F6DB5; --ink: #1A1A1A; --tile: #F5F5F5; --edge: #C8C8C8; }
+  .bar { display: flex; flex-direction: row; align-items: center; gap: 6px; height: 32px; width: 120px; padding: 0 8px; border-radius: 4px; font-size: 13px; font-weight: 600; }
+  .bar { color: var(--ink); }
+  .dark .bar { background: #121212; } .light .bar { background: #F5F5F5; }
+  svg { display: block; }
+  .a { fill: none; stroke: var(--amber); stroke-linecap: round; stroke-linejoin: round; }
+  .h { fill: none; stroke: var(--blue); stroke-width: 1.5; }
+  .k { fill: var(--blue); }
+  .k2 { fill: var(--tile); stroke: var(--blue); stroke-width: 2; }
+  .t { fill: var(--ink); font-family: "Segoe UI", sans-serif; font-weight: 700; }
+</style>
+</head>
+<body>
+<h1>curvy: logo concepts</h1>
+<p class="note">Each row: top-bar size (24 px, with the name), 48 px and 96 px (welcome card), on the dark and light themes.</p>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <!-- A: one cubic bezier with its anchors and handles showing -->
+    <symbol id="A" viewBox="0 0 64 64">
+      <line class="h" x1="10" y1="52" x2="10" y2="8"/><line class="h" x1="54" y1="12" x2="54" y2="56"/>
+      <circle class="k" cx="10" cy="8" r="3"/><circle class="k" cx="54" cy="56" r="3"/>
+      <path class="a" stroke-width="6" d="M10 52 C10 8 54 56 54 12"/>
+      <rect class="k2" x="5" y="47" width="10" height="10" rx="2"/><rect class="k2" x="49" y="7" width="10" height="10" rx="2"/>
+    </symbol>
+    <!-- B: a "c" drawn as an open arc with its end anchors -->
+    <symbol id="B" viewBox="0 0 64 64">
+      <path class="a" stroke-width="8" d="M49 18 A22 22 0 1 0 49 46"/>
+      <rect class="k2" x="44" y="13" width="10" height="10" rx="2"/><rect class="k2" x="44" y="41" width="10" height="10" rx="2"/>
+    </symbol>
+    <!-- C: app tile: the S-curve on a dark rounded square -->
+    <symbol id="C" viewBox="0 0 64 64">
+      <rect x="1" y="1" width="62" height="62" rx="15" fill="#161616" stroke="#4A4A4A" stroke-width="2"/>
+      <path d="M12 50 C12 10 52 54 52 14" fill="none" stroke="#FFB454" stroke-width="6" stroke-linecap="round"/>
+      <rect x="8" y="46" width="8" height="8" rx="2" fill="#161616" stroke="#4F86C6" stroke-width="2"/>
+      <rect x="48" y="10" width="8" height="8" rx="2" fill="#161616" stroke="#4F86C6" stroke-width="2"/>
+    </symbol>
+    <!-- D: a swash of curve drawn through the word -->
+    <symbol id="D" viewBox="0 0 64 64">
+      <path class="a" stroke-width="5" d="M6 40 C6 8 30 8 32 32 C34 56 58 56 58 24"/>
+      <circle class="k" cx="6" cy="40" r="4"/><circle class="k" cx="58" cy="24" r="4"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="concept">
+  <div class="name"><b>A. Bezier</b><span>One curve with its handles: says "vector curves" at a glance, busy at 24 px (handles drop out there).</span></div>
+  <div class="panel dark"><div class="bar"><svg width="24" height="24"><use href="#A"/></svg>curvy</div><svg width="48" height="48"><use href="#A"/></svg><svg width="96" height="96"><use href="#A"/></svg></div>
+  <div class="panel light"><div class="bar"><svg width="24" height="24"><use href="#A"/></svg>curvy</div><svg width="48" height="48"><use href="#A"/></svg><svg width="96" height="96"><use href="#A"/></svg></div>
+</div>
+
+<div class="concept">
+  <div class="name"><b>B. Monogram c</b><span>A "c" as an open path with end anchors. Simple, reads at small sizes.</span></div>
+  <div class="panel dark"><div class="bar"><svg width="24" height="24"><use href="#B"/></svg>curvy</div><svg width="48" height="48"><use href="#B"/></svg><svg width="96" height="96"><use href="#B"/></svg></div>
+  <div class="panel light"><div class="bar"><svg width="24" height="24"><use href="#B"/></svg>curvy</div><svg width="48" height="48"><use href="#B"/></svg><svg width="96" height="96"><use href="#B"/></svg></div>
+</div>
+
+<div class="concept">
+  <div class="name"><b>C. Tile</b><span>The S-curve on a dark rounded square: an app icon for the taskbar and installer as well. Same in both themes.</span></div>
+  <div class="panel dark"><div class="bar"><svg width="24" height="24"><use href="#C"/></svg>curvy</div><svg width="48" height="48"><use href="#C"/></svg><svg width="96" height="96"><use href="#C"/></svg></div>
+  <div class="panel light"><div class="bar"><svg width="24" height="24"><use href="#C"/></svg>curvy</div><svg width="48" height="48"><use href="#C"/></svg><svg width="96" height="96"><use href="#C"/></svg></div>
+</div>
+
+<div class="concept">
+  <div class="name"><b>D. Swash</b><span>A looping stroke with round end points: friendlier, more like a pen line than a diagram.</span></div>
+  <div class="panel dark"><div class="bar"><svg width="24" height="24"><use href="#D"/></svg>curvy</div><svg width="48" height="48"><use href="#D"/></svg><svg width="96" height="96"><use href="#D"/></svg></div>
+  <div class="panel light"><div class="bar"><svg width="24" height="24"><use href="#D"/></svg>curvy</div><svg width="48" height="48"><use href="#D"/></svg><svg width="96" height="96"><use href="#D"/></svg></div>
+</div>
+</body>
+</html>

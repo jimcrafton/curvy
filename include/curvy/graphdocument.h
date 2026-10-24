@@ -14,7 +14,7 @@ namespace curvy {
     // It knows nothing of sketch types, so it is testable alone.
     class GraphDocument : public newui::Document {
     public:
-        GraphDocument() = default;
+        GraphDocument();
 
         newui::UndoStack& undoStack() { return undoStack_; }
         jitnodes::Network& network() { return *network_; }
@@ -25,6 +25,8 @@ namespace curvy {
         void removeGraphNode(jitnodes::NodeId id);
         void connectGraphNodes(jitnodes::NodeId from, jitnodes::NodeId to, int inputIndex = 0);
         void setGraphParam(jitnodes::NodeId id, const std::string& name, float value);
+        void setGraphString(jitnodes::NodeId id, const std::string& name, const std::string& value);
+        void setGraphGeometry(jitnodes::NodeId id, const std::string& name, jitnodes::GeometryHandle geometry);
         void renameGraphNode(jitnodes::NodeId id, const std::string& name);
 
         // For a drag: edit the network directly, then record the finished edit from the snapshot taken first.
@@ -36,7 +38,7 @@ namespace curvy {
 
         jitnodes::GeometryHandle cook(jitnodes::NodeId id) { return network_->cook(id); }
 
-        std::string graphToText() const { return jitnodes::saveNetwork(*network_); }
+        std::string graphToText() const { return jitnodes::saveNetwork(*network_, true, true); }
         // Leaves the current graph untouched and returns false when the text is not a valid graph.
         bool graphFromText(const std::string& text);
         // Replaces the graph with an empty one without an undo step (a load, New).

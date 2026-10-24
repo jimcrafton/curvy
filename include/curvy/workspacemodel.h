@@ -48,6 +48,9 @@ namespace curvy {
         void setToolbarVisible(bool visible);
         bool propertiesVisible() const { return propertiesVisible_; }
         void setPropertiesVisible(bool visible);
+        // The graph dock beside the property dock (off by default, not saved).
+        bool graphVisible() const { return graphVisible_; }
+        void setGraphVisible(bool visible);
 
         void setRing(const std::string& title);   // "" when no ring is open
         void setSpaceDown(bool down);
@@ -78,7 +81,7 @@ namespace curvy {
         const ScrubProp* scrubProp_ = nullptr;
         double scrubValue_ = 0.0, anchorX_ = 0.0, anchorY_ = 0.0;
         ScrubAxis axis_ = ScrubAxis::Vertical;
-        bool toolbarVisible_ = false, propertiesVisible_ = false;
+        bool toolbarVisible_ = false, propertiesVisible_ = false, graphVisible_ = false;
         std::string ring_;
         bool spaceDown_ = false;
         std::size_t selectionCount_ = 0;

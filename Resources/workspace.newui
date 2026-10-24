@@ -1,7 +1,7 @@
 {
   meta: {
     author: "",
-    date: "2026-10-21",
+    date: "2026-10-24",
     copyright: "",
     version: "0.1.0.900"
   },
@@ -115,7 +115,7 @@
             bounds: {
               type: "Rect",
               pos: { type: "Point", x: 91, y: 7 },
-              size: { type: "Size", width: 1093, height: 17 }
+              size: { type: "Size", width: 1008, height: 17 }
             },
             name: "topBarSpace",
             layoutParams: { type: "FlexLayoutParams", weight: 1 },
@@ -133,7 +133,7 @@
             text: "Tools",
             bounds: {
               type: "Rect",
-              pos: { type: "Point", x: 1194, y: 5 },
+              pos: { type: "Point", x: 1109, y: 5 },
               size: { type: "Size", width: 75, height: 22 }
             },
             name: "toolbarToggle",
@@ -149,10 +149,26 @@
             text: "Panels",
             bounds: {
               type: "Rect",
-              pos: { type: "Point", x: 1279, y: 5 },
+              pos: { type: "Point", x: 1194, y: 5 },
               size: { type: "Size", width: 75, height: 22 }
             },
             name: "propertiesToggle",
+            style: {
+              type: "ThemedButtonStyle",
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+            },
+            desiredSize: { type: "Size", width: 75, height: 22 },
+            desiredSizeOverride: true
+          },
+          {
+            type: "Button",
+            text: "Graph",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 1279, y: 5 },
+              size: { type: "Size", width: 75, height: 22 }
+            },
+            name: "graphToggle",
             style: {
               type: "ThemedButtonStyle",
               font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }

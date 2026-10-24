@@ -22,6 +22,9 @@
 #include <newui/keyboard_constants.h>
 #include <newui/mouse_constants.h>
 #include "curvy/sketchbin.h"
+#include "curvy/pathnode.h"
+#include "curvy/graphtree.h"
+#include <jitnodes/geo/topology.h>
 
 #include <array>
 #include <chrono>
@@ -2936,6 +2939,16 @@ namespace {
         return "differ at byte " + std::to_string(i) + ":\n  first : " + around(a) + "\n  second: " + around(b);
     }
 
+    // The SVG without its embedded graph: .skb files do not store it (the nodes are made from the objects on load), so only the drawing is compared.
+    std::string withoutGraph(std::string svg) {
+        const std::size_t start = svg.find("<metadata>");
+        const std::size_t end = svg.find("</metadata>");
+        if (start != std::string::npos && end != std::string::npos) {
+            svg.erase(start, end + 11 - start);
+        }
+        return svg;
+    }
+
     // A document that uses most of what the format carries.
     void fillRichDocument(SketchDocument& doc) {
         doc.setPageSize(500, 400);
@@ -2999,7 +3012,7 @@ TEST(SketchBinary, ADocumentRoundTripsWithNothingLost) {
         ASSERT_TRUE(documentFromBinary(file, copy)) << "compress " << compress;
         ASSERT_EQ(copy.objectCount(), doc.objectCount());
         // The SVG writer reads every part of the model, so equal SVG means equal documents.
-        EXPECT_EQ(firstDifference(svgFromDocument(copy), svgFromDocument(doc)), "");
+        EXPECT_EQ(firstDifference(withoutGraph(svgFromDocument(copy)), withoutGraph(svgFromDocument(doc))), "");
         EXPECT_TRUE(copy.object(4).isText());
         EXPECT_EQ(copy.object(4).text(), doc.object(4).text());
         EXPECT_EQ(copy.object(0).activeEffectIndex(), 2u);
@@ -3077,7 +3090,7 @@ TEST(SketchBinary, FilesSaveAndLoadByExtensionAndByContent) {
     in.close();
     SketchDocument loaded;
     ASSERT_TRUE(loaded.load(path));
-    EXPECT_EQ(firstDifference(svgFromDocument(loaded), svgFromDocument(doc)), "");
+    EXPECT_EQ(firstDifference(withoutGraph(svgFromDocument(loaded)), withoutGraph(svgFromDocument(doc))), "");
     std::string renamed = (folder / "sketch_test_e.svg").string();
     std::filesystem::copy_file(path, renamed, std::filesystem::copy_options::overwrite_existing);
     SketchDocument fromRenamed;
@@ -6184,6 +6197,337 @@ TEST(LiveShape, SurvivesSvgRoundTrip) {
     EXPECT_TRUE(loaded.setLiveShapeParam(object.id(), "radius", 30.0f));
     EXPECT_NEAR(loaded.findById(object.id())->geometryBounds().x1 - loaded.findById(object.id())->geometryBounds().x0, 60.0, 0.01);
     (void)id;
+}
+
+namespace {
+// True when every object has exactly one curvyPath node, holding its outline, and no other curvyPath node exists.
+bool pathNodesMatch(const SketchDocument& doc) {
+    std::size_t nodes = 0;
+    for (jitnodes::NodeId id : doc.network().nodeIds()) {
+        if (isShapeNodeType(doc.network().node(id).typeName())) {
+            ++nodes;
+        }
+    }
+    for (std::size_t i = 0; i < doc.objectCount(); ++i) {
+        const SketchObject& object = doc.object(i);
+        if (object.graphNode() == 0 || doc.network().node(object.graphNode()).typeName() != shapeNodeType(object) ||
+            !sameCurveShape(*doc.network().node(object.graphNode()).geometryParam("curve"), *geometryFromPath(object.geometry()), 1e-4)) {
+            return false;
+        }
+    }
+    return nodes == doc.objectCount();
+}
+}
+
+TEST(PathNode, TextRoundTripsCurves) {
+    BLPath path;
+    path.move_to(1.5, 2.25);
+    path.line_to(10, 20);
+    path.quad_to(12, 22, 14, 18);
+    path.cubic_to(15, 1, 16, 2, 17, 3);
+    path.close();
+    path.move_to(-4, -5);
+    path.line_to(-6, -7);
+    BLPath back;
+    ASSERT_TRUE(pathFromText(pathToText(path), back));
+    EXPECT_EQ(pathToText(back), pathToText(path));
+    EXPECT_EQ(back.size(), path.size());
+    EXPECT_FALSE(pathFromText("M 1 2 X 3 4", back));
+}
+
+TEST(PathNode, CooksCubicPrimitivesAndFlattensOnRequest) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeEllipse(50, 50, 20, 10));
+    const jitnodes::GeometryHandle geometry = doc.cook(doc.object(0).graphNode());
+    ASSERT_EQ(geometry->primitiveCount(), 1u);
+    const jitnodes::Primitive& prim = geometry->primitives().front();
+    EXPECT_EQ(prim.kind, jitnodes::PrimKind::cubic);
+    EXPECT_TRUE(prim.closed);
+    EXPECT_EQ(jitnodes::cubicSegments(prim), 4u);
+    EXPECT_EQ(geometry->pointCount(), 12u);   // four anchors, each with two handles
+
+    const jitnodes::Geometry flat = jitnodes::flattenCurves(*geometry, 0.05f);
+    EXPECT_FALSE(jitnodes::hasCurves(flat));
+    EXPECT_GT(flat.pointCount(), 12u);
+    float left = 1e9f, right = -1e9f, top = 1e9f, bottom = -1e9f;
+    for (std::size_t i = 0; i < flat.pointCount(); ++i) {
+        left = std::min(left, flat.x()[i]);
+        right = std::max(right, flat.x()[i]);
+        top = std::min(top, flat.y()[i]);
+        bottom = std::max(bottom, flat.y()[i]);
+    }
+    EXPECT_NEAR(left, 30.0f, 0.1f);
+    EXPECT_NEAR(right, 70.0f, 0.1f);
+    EXPECT_NEAR(top, 40.0f, 0.1f);
+    EXPECT_NEAR(bottom, 60.0f, 0.1f);
+}
+
+TEST(PathNode, LinesQuadsAndOpenFiguresBecomeCubics) {
+    SketchDocument doc;
+    BLPath path;
+    path.move_to(0, 0);
+    path.line_to(30, 0);
+    path.quad_to(45, 15, 30, 30);
+    doc.add(SketchObject::makePath(path));
+    const jitnodes::GeometryHandle geometry = doc.cook(doc.object(0).graphNode());
+    ASSERT_EQ(geometry->primitiveCount(), 1u);
+    const jitnodes::Primitive& prim = geometry->primitives().front();
+    EXPECT_FALSE(prim.closed);
+    EXPECT_EQ(jitnodes::cubicSegments(prim), 2u);
+    EXPECT_NEAR(geometry->x()[3], 30.0f, 1e-4f);   // the anchor after the line
+    EXPECT_NEAR(geometry->x()[1], 0.0f, 1e-4f);    // a line's handles sit on its anchors
+    EXPECT_NEAR(geometry->x()[2], 30.0f, 1e-4f);
+    EXPECT_NEAR(geometry->x()[4], 40.0f, 1e-4f);   // 30 + 2/3 * (45 - 30): the quad raised to a cubic
+    EXPECT_NEAR(geometry->y()[4], 10.0f, 1e-4f);
+}
+
+TEST(PathNode, EveryObjectHasANodeThroughEdits) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    doc.add(SketchObject::makeEllipse(40, 40, 8, 8));
+    EXPECT_TRUE(pathNodesMatch(doc));
+
+    doc.setSelection({a});
+    const auto before = doc.snapshotSelection();
+    doc.findById(a)->transform(BLMatrix2D::make_scaling(2.0));
+    doc.touch();
+    doc.commitGeometry(before, "Resize");
+    EXPECT_TRUE(pathNodesMatch(doc));
+    doc.undoStack().undo();
+    EXPECT_TRUE(pathNodesMatch(doc));
+    doc.undoStack().redo();
+    EXPECT_TRUE(pathNodesMatch(doc));
+
+    const jitnodes::NodeId node = doc.findById(a)->graphNode();
+    doc.deleteSelection();
+    EXPECT_TRUE(pathNodesMatch(doc));
+    EXPECT_EQ(doc.network().nodeIds().size(), 1u);
+    doc.undoStack().undo();
+    ASSERT_NE(doc.findById(a), nullptr);
+    EXPECT_EQ(doc.findById(a)->graphNode(), node);
+    EXPECT_TRUE(pathNodesMatch(doc));
+
+    doc.setSelection({a});
+    doc.duplicateSelection(5, 5);
+    EXPECT_EQ(doc.objectCount(), 3u);
+    EXPECT_TRUE(pathNodesMatch(doc));
+}
+
+TEST(PathNode, EditingTheNodeMovesTheObjectAndUndoes) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    const std::string original = pathToText(doc.findById(a)->geometry());
+    BLPath wide;
+    wide.move_to(0, 0);
+    wide.line_to(40, 0);
+    wide.line_to(40, 20);
+    wide.line_to(0, 20);
+    wide.close();
+    doc.setGraphGeometry(doc.findById(a)->graphNode(), "curve", geometryFromPath(wide));
+    EXPECT_NEAR(doc.findById(a)->geometryBounds().x1, 40.0, 1e-6);
+    EXPECT_TRUE(pathNodesMatch(doc));
+    doc.undoStack().undo();
+    EXPECT_EQ(pathToText(doc.findById(a)->geometry()), original);
+    EXPECT_TRUE(pathNodesMatch(doc));
+    doc.undoStack().redo();
+    EXPECT_NEAR(doc.findById(a)->geometryBounds().x1, 40.0, 1e-6);
+    EXPECT_TRUE(pathNodesMatch(doc));
+}
+
+TEST(PathNode, UndoAndRedoKeepTheExactCoordinates) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeEllipse(1234.56789123, 987.654321987, 321.123456789, 55.5555555)).id();
+    doc.setSelection({a});
+    const BLPath start = doc.findById(a)->geometry();
+    const auto before = doc.snapshotSelection();
+    doc.findById(a)->transform(BLMatrix2D::make_rotation(0.7, 100.1, 200.2));
+    doc.commitGeometry(before, "Rotate");
+    const BLPath moved = doc.findById(a)->geometry();
+    for (int i = 0; i < 3; ++i) {
+        doc.undoStack().undo();
+        EXPECT_TRUE(doc.findById(a)->geometry().equals(start));
+        doc.undoStack().redo();
+        EXPECT_TRUE(doc.findById(a)->geometry().equals(moved));
+    }
+    EXPECT_TRUE(pathNodesMatch(doc));
+}
+
+TEST(PathNode, TextSymbolAndImageObjectsHaveNodesToo) {
+    SketchDocument doc;
+    const std::size_t text = doc.add(SketchObject::makeText("Hello\nthere", "", 24.0, BLPoint(10, 40))).id();
+    doc.add(SketchObject::makeRect(0, 0, 10, 10)).setFill(SketchPaint::solid(SketchColor::fromHex("#ff0000")));
+    doc.setSelection({doc.object(1).id()});
+    const std::size_t symbol = doc.makeSymbol("red");
+    ASSERT_NE(symbol, 0u);
+    const std::size_t instance = doc.placeSymbol(symbol, BLPoint(100, 100));
+    const std::size_t picture = doc.placeImage(decodeImage(twoColorPng(40, 20), "two.png"), BLPoint(50, 50));
+    ASSERT_NE(instance, 0u);
+    ASSERT_NE(picture, 0u);
+    EXPECT_TRUE(pathNodesMatch(doc));
+    const jitnodes::Network& net = doc.network();
+    EXPECT_EQ(net.node(doc.findById(text)->graphNode()).typeName(), std::string(kTextNodeType));
+    EXPECT_EQ(net.node(doc.findById(text)->graphNode()).getString("text"), "Hello\nthere");
+    EXPECT_EQ(net.node(doc.findById(instance)->graphNode()).getString("symbol"), std::to_string(symbol));
+    EXPECT_EQ(net.node(doc.findById(picture)->graphNode()).getString("image"), "two.png");
+
+    SketchObject* object = doc.findById(text);
+    doc.setSelection({text});
+    object->setText("Changed");
+    doc.touch();
+    EXPECT_EQ(net.node(object->graphNode()).getString("text"), "Changed");
+    EXPECT_TRUE(pathNodesMatch(doc));
+}
+
+TEST(PathNode, EditingATextNodeRebuildsTheText) {
+    SketchDocument doc;
+    const std::size_t id = doc.add(SketchObject::makeText("One", "", 20.0, BLPoint(5, 30))).id();
+    const jitnodes::NodeId node = doc.findById(id)->graphNode();
+    const BLBox start = doc.findById(id)->geometryBounds();
+    doc.setGraphString(node, "text", "One Two Three");
+    EXPECT_EQ(doc.findById(id)->text(), "One Two Three");
+    EXPECT_GT(doc.findById(id)->geometryBounds().x1, start.x1 + 10.0);
+    EXPECT_TRUE(pathNodesMatch(doc));
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.findById(id)->text(), "One");
+    EXPECT_NEAR(doc.findById(id)->geometryBounds().x1, start.x1, 1e-6);
+    EXPECT_TRUE(pathNodesMatch(doc));
+}
+
+TEST(PathNode, AttributesOnAnchorsSurviveMovesAndUndo) {
+    SketchDocument doc;
+    BLPath curve;
+    curve.move_to(0, 0);
+    curve.cubic_to(10, 20, 30, 20, 40, 0);
+    const std::size_t id = doc.add(SketchObject::makePath(curve)).id();
+    const jitnodes::NodeId node = doc.findById(id)->graphNode();
+    auto drawn = std::make_shared<jitnodes::Geometry>(*doc.network().node(node).geometryParam("curve"));
+    drawn->attrib(jitnodes::AttribClass::point, "pressure").floats()[0] = 0.25f;
+    drawn->attrib(jitnodes::AttribClass::point, "pressure").floats()[3] = 0.75f;
+    doc.setGraphGeometry(node, "curve", drawn);
+    auto pressure = [&](std::size_t i) { return doc.network().node(node).geometryParam("curve")->findAttrib(jitnodes::AttribClass::point, "pressure")->at(i); };
+    EXPECT_NEAR(pressure(3), 0.75f, 1e-6f);
+
+    doc.setSelection({id});
+    const auto before = doc.snapshotSelection();
+    doc.findById(id)->transform(BLMatrix2D::make_translation(100, 5));
+    doc.commitGeometry(before, "Move");
+    ASSERT_NE(doc.network().node(node).geometryParam("curve")->findAttrib(jitnodes::AttribClass::point, "pressure"), nullptr);
+    EXPECT_NEAR(pressure(0), 0.25f, 1e-6f);
+    EXPECT_NEAR(doc.network().node(node).geometryParam("curve")->x()[0], 100.0f, 1e-4f);
+    doc.undoStack().undo();
+    EXPECT_NEAR(doc.network().node(node).geometryParam("curve")->x()[0], 0.0f, 1e-4f);
+    EXPECT_NEAR(pressure(3), 0.75f, 1e-6f);
+}
+
+TEST(PathNode, SurviveSaveAndLoad) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    doc.add(SketchObject::makeEllipse(40, 40, 8, 8));
+    SketchDocument loaded;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), loaded));
+    EXPECT_EQ(loaded.objectCount(), 2u);
+    EXPECT_TRUE(pathNodesMatch(loaded));
+    EXPECT_EQ(loaded.graphToText(), doc.graphToText());
+}
+
+TEST(PathNode, AFileWithoutAGraphGetsNodesOnLoad) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    std::string svg = svgFromDocument(doc);
+    const std::size_t start = svg.find("<metadata>");
+    const std::size_t end = svg.find("</metadata>");
+    ASSERT_NE(start, std::string::npos);
+    svg.erase(start, end + 11 - start);
+    SketchDocument loaded;
+    ASSERT_TRUE(documentFromSvg(svg, loaded));
+    EXPECT_TRUE(pathNodesMatch(loaded));
+}
+
+TEST(PathNode, AThousandsObjectDocumentStaysResponsive) {
+    SketchDocument doc;
+    {
+        SketchDocument::Batch batch(doc);
+        for (int i = 0; i < 5000; ++i) {
+            doc.add(SketchObject::makeRect(i % 100 * 12, i / 100 * 12, 10, 10));
+        }
+    }
+    EXPECT_TRUE(pathNodesMatch(doc));
+    const auto start = std::chrono::steady_clock::now();
+    const std::size_t id = doc.object(0).id();
+    doc.setSelection({id});
+    for (int i = 0; i < 200; ++i) {
+        const auto before = doc.snapshotSelection();
+        doc.findById(id)->transform(BLMatrix2D::make_translation(1.0, 0.0));
+        doc.commitGeometry(before, "Move");
+    }
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    std::printf("200 commits on 5000 objects: %.1f ms\n", ms);
+    EXPECT_LT(ms, 2000.0);
+    EXPECT_TRUE(pathNodesMatch(doc));
+}
+
+namespace {
+GraphRow treeRow(std::size_t depth, const std::string& text, const std::string& summary = std::string()) {
+    GraphRow row;
+    row.depth = depth;
+    row.text = text;
+    row.summary = summary;
+    return row;
+}
+}
+
+TEST(GraphTree, PathsResolveThroughTheFlatRows) {
+    GraphTreeModel model;
+    model.setRows({treeRow(0, "a"), treeRow(1, "a1"), treeRow(2, "a1x"), treeRow(1, "a2"), treeRow(0, "b"), treeRow(1, "b1")});
+    EXPECT_EQ(model.childCount({}), 2u);
+    EXPECT_EQ(model.childCount({0}), 2u);
+    EXPECT_EQ(model.childCount({0, 0}), 1u);
+    EXPECT_EQ(model.childCount({1}), 1u);
+    EXPECT_EQ(model.childCount({5}), 0u);
+    ASSERT_NE(model.rowAt({0, 1}), nullptr);
+    EXPECT_EQ(model.rowAt({0, 1})->text, "a2");
+    EXPECT_EQ(model.rowAt({1, 0})->text, "b1");
+    EXPECT_EQ(model.rowAt({2}), nullptr);
+    for (std::size_t i = 0; i < model.rows().size(); ++i) {
+        EXPECT_EQ(model.rowAt(model.pathOf(i))->text, model.rows()[i].text);
+    }
+    EXPECT_EQ(std::any_cast<std::string>(model.value(std::vector<std::size_t>{0, 0, 0})), "a1x");
+    // a row cannot sit deeper than one below the row above it
+    model.setRows({treeRow(0, "a"), treeRow(3, "deep")});
+    EXPECT_EQ(model.rows()[1].depth, 1u);
+    EXPECT_EQ(model.childCount({0}), 1u);
+}
+
+TEST(GraphTree, FlowShowsASharedInputOnceAndLinksAfter) {
+    // 3 feeds 1 and 2; 1 and 2 feed 4
+    FlowSource source;
+    source.nodes = {1, 2, 3, 4};
+    source.inputs = {{3}, {3}, {}, {1, 2}};
+    const std::vector<GraphRow> rows = flowRows(source, [](GraphRow& row) { row.text = "n" + std::to_string(row.node); });
+    ASSERT_EQ(rows.size(), 5u) << "4 is the only node nobody uses; 3 appears once in full and once as a link";
+    EXPECT_EQ(rows[0].text, "n4");
+    EXPECT_EQ(rows[1].text, "n1");
+    EXPECT_EQ(rows[1].depth, 1u);
+    EXPECT_EQ(rows[2].text, "n3");
+    EXPECT_EQ(rows[2].depth, 2u);
+    EXPECT_EQ(rows[2].kind, GraphRow::Kind::Node);
+    EXPECT_EQ(rows[3].text, "n2");
+    EXPECT_EQ(rows[4].text, "-> n3");
+    EXPECT_EQ(rows[4].kind, GraphRow::Kind::Link);
+}
+
+TEST(GraphTree, FilterKeepsMatchesAndTheRowsAboveThem) {
+    const std::vector<GraphRow> rows = {treeRow(0, "Sketch"), treeRow(1, "Face"), treeRow(2, "Head", "#F2C9A0"), treeRow(2, "Eye"), treeRow(1, "Title"), treeRow(0, "Background")};
+    EXPECT_EQ(filterRows(rows, "").size(), rows.size());
+    const std::vector<GraphRow> kept = filterRows(rows, "head");
+    ASSERT_EQ(kept.size(), 3u);
+    EXPECT_EQ(kept[0].text, "Sketch");
+    EXPECT_TRUE(kept[0].dim);
+    EXPECT_TRUE(kept[1].dim);
+    EXPECT_EQ(kept[2].text, "Head");
+    EXPECT_FALSE(kept[2].dim);
+    EXPECT_EQ(filterRows(rows, "f2c9").size(), 3u) << "the summary text matches too";
+    EXPECT_TRUE(filterRows(rows, "zzz").empty());
 }
 
 TEST(RadialLayout, SlotsRunClockwiseFromTheTop) {

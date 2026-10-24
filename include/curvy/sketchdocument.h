@@ -777,6 +777,15 @@ namespace curvy {
         void changed();
         // Rebuilds the outline of every live shape from its cooked node.
         void refreshLiveShapes();
+        // Adopts the curves of every path node whose text no longer matches its object (a graph edit, undo or redo wrote it), unless the
+        // object itself changed since the node was written.
+        void pullPathNodes();
+        // Writes the curves of every path object edited since its node was written into that node, so a geometry commit (and its undo and
+        // redo) lands in the graph in the same step instead of waiting for changed().
+        void writePathNodes();
+        // Mirrors every path object into a curvyPath node holding its curves: creates the missing nodes, rewrites the ones whose outline
+        // changed since they were written and removes those whose object is gone. A deleted-then-restored object gets its node id back.
+        void syncPathNodes();
         // Puts the objects in the stacking order given by ids (all of them, back to front).
         void reorder(const std::vector<std::size_t>& ids);
         // Records a visible/locked change of some objects (already applied) as one undo step.

@@ -479,7 +479,11 @@ namespace curvy {
 
         const BLPath& geometry() const { return path_; }
         // Replaces the outline (undo restores the pre-edit one through this).
-        void setGeometry(const BLPath& path) { path_ = path; }
+        void setGeometry(const BLPath& path) { path_ = path; ++geometryRevision_; }
+        // Counts the edits of the outline; the document compares it with the revision its path node was last written at.
+        std::uint64_t geometryRevision() const { return geometryRevision_; }
+        std::uint64_t nodeRevision() const { return nodeRevision_; }
+        void setNodeRevision(std::uint64_t revision) { nodeRevision_ = revision; }
         // Bakes a transform into the outline - move/resize/rotate all go through here, so stroke width
         // stays put and handles are always axis-aligned on geometryBounds().
         void transform(const BLMatrix2D& matrix);
@@ -548,6 +552,8 @@ namespace curvy {
         BLPath path_;
         std::size_t id_ = 0;
         std::uint32_t graphNode_ = 0;
+        std::uint64_t geometryRevision_ = 1;
+        std::uint64_t nodeRevision_ = 0;
         std::string name_;
         bool visible_ = true;
         bool locked_ = false;

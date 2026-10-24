@@ -735,6 +735,7 @@ namespace curvy {
             }
             groupAngle_ = frame.groupAngle;
             quadFrame_ = frame.quad;
+            writePathNodes();
             changed();
         };
         undoStack_.push({description,
@@ -1231,6 +1232,7 @@ namespace curvy {
             return;
         }
         syncLayers();   // new objects find their layer, layer state reaches the objects, the stack follows the layers
+        syncPathNodes();
         markModified();
         updateAllViews();
         onChanged(*this);

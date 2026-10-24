@@ -57,6 +57,11 @@ namespace curvy {
         touch();
     }
 
+    void WorkspaceModel::setGraphVisible(bool visible) {
+        graphVisible_ = visible;
+        touch();
+    }
+
     void WorkspaceModel::setRing(const std::string& title) {
         ring_ = title;
         touch();

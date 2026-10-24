@@ -27,6 +27,7 @@ namespace curvy {
                 checkScrub();
                 checkPanAndBarrel();
                 checkDocks();
+                checkGraphDock();
                 checkTheme();
                 std::printf("%d failure(s)\n", failures_);
                 return failures_;
@@ -313,6 +314,79 @@ namespace curvy {
                 expect(!w_.menu().isOpen() && card.isOpen() && card.tool() == SketchTool::Star, "Shift + the slot's key opens its options instead of arming it");
                 expect(canvas_->tool() == SketchTool::Select, "and the tool is not armed");
                 card.close();
+            }
+
+            // The graph dock: the document's layers, groups and nodes as a tree with a box for the selected node's parameters.
+            void checkGraphDock() {
+                GraphDock& graph = w_.graph();
+                expect(graph.dock() != nullptr && graph.tree() != nullptr && !graph.dock()->isVisible(), "the graph dock loads and is off by default");
+                auto* toggle = dynamic_cast<newui::Button*>(w_.frame().rootView().findView("graphToggle"));
+                expect(toggle != nullptr, "the top bar has the Graph toggle");
+                doc_->clearObjects();
+                doc_->undoStack().clear();
+                SketchObject& rect = doc_->add(SketchObject::makeRect(10, 20, 50, 30));
+                rect.setFill(SketchPaint::solid(SketchColor::fromHex("#ff0000")));
+                rect.setName("Box");
+                const std::size_t rectId = rect.id();
+                const std::size_t textId = doc_->add(SketchObject::makeText("Hello", "", 20.0, BLPoint(10, 100))).id();
+                toggle->onClick(*toggle);
+                expect(model_->graphVisible() && graph.dock()->isVisible() && toggle->isChecked(), "the Graph toggle shows the dock");
+                const newui::Rect client = canvas_->getClientBounds();
+                expect(graph.dock()->bounds().left() + graph.dock()->bounds().width() == client.width(), "it sits flush right while the property dock is off");
+                w_.runCommand("view.properties");
+                expect(graph.dock()->bounds().left() + graph.dock()->bounds().width() + w_.dock().propertyDock()->bounds().width() == client.width(), "and beside the property dock when that is on");
+                w_.runCommand("view.properties");
+
+                graph.refresh();
+                auto row = [&](const std::string& text) -> const GraphRow* {
+                    for (const GraphRow& r : graph.rows()) {
+                        if (r.text == text) {
+                            return &r;
+                        }
+                    }
+                    return nullptr;
+                };
+                expect(graph.rows().size() >= 3 && graph.rows().front().kind == GraphRow::Kind::Layer, "Document view: a layer row, then its objects");
+                expect(row("Box") != nullptr && row("Box")->chip && row("Box")->chipColor == 0xFF0000 && row("Box")->icon == "icons/node-path.svg", "a filled shape has a path icon and a colour chip");
+                expect(row("\"Hello\"") != nullptr && row("\"Hello\"")->icon == "icons/node-text.svg", "an unnamed text is listed by its words, with the text icon");
+                expect(row("Box")->depth == 1 && row("Box")->objectId == rectId, "objects sit one level under their layer and know their object");
+
+                doc_->setSelection({rectId});
+                expect(graph.detailNode() == rect.graphNode() && graph.title() == "Box", "selecting an object on the canvas shows its node");
+                expect(graph.detailCaption(0) == "Curves" && graph.detailValue(0) == "4 anchors, closed, 50 x 30", "a path node shows its curves as a summary, not as text");
+                expect(graph.detailCaption(2) == "Inputs" && graph.detailValue(2) == "None", "and what feeds it, right under the buttons");
+
+                doc_->setSelection({textId});
+                expect(graph.detailCaption(0) == "Words" && graph.detailValue(0) == "Hello" && graph.detailShown(2), "a text node shows words, font and size");
+                graph.setDetailValue(0, "Bye");
+                expect(doc_->findById(textId)->text() == "Bye", "editing the words in the box edits the text");
+                expect(doc_->undoStack().canUndo(), "as an undo step");
+                doc_->undoStack().undo();
+                expect(doc_->findById(textId)->text() == "Hello" && graph.detailValue(0) == "Hello", "which undoes, and the box follows");
+                graph.setDetailValue(2, "40");
+                expect(doc_->findById(textId)->fontSize() == 40.0, "the size field sets the font size");
+                graph.setDetailValue(2, "oops");
+                expect(doc_->findById(textId)->fontSize() == 40.0, "a size that is not a number is ignored");
+
+                graph.setFilter("hel");
+                expect(graph.rows().size() == 2 && row("\"Hello\"") != nullptr && row("Box") == nullptr && row("\"Hello\"")->dim == false, "the filter keeps matching rows and the layer above them");
+                graph.setFilter("");
+                expect(row("Box") != nullptr, "an empty filter shows everything again");
+
+                graph.setMode(GraphDock::Mode::Flow);
+                std::size_t nodes = 0;
+                for (const GraphRow& r : graph.rows()) {
+                    nodes += r.kind == GraphRow::Kind::Node ? 1 : 0;
+                }
+                expect(nodes == doc_->network().nodeIds().size() && graph.rows().front().kind == GraphRow::Kind::Node, "Flow view lists the nodes");
+                graph.setMode(GraphDock::Mode::Document);
+
+                doc_->setSelection({});
+                expect(graph.detailNode() == 0 && graph.title() == "Nothing selected", "no selection, no node in the box");
+                w_.runCommand("view.graph");
+                expect(!model_->graphVisible() && !graph.dock()->isVisible() && !toggle->isChecked(), "the View ring's Graph slot hides it and the toggle follows");
+                doc_->clearObjects();
+                doc_->undoStack().clear();
             }
 
             void checkTheme() {

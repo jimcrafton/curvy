@@ -127,6 +127,46 @@ class Docks(CurvyCase):
         self.assertFalse(self.ring_open())
 
 
+class GraphDock(CurvyCase):
+    def test_the_graph_toggle_shows_the_dock_flush_right(self):
+        self.new_a4()
+        canvas = self.app.find("canvas")
+        self.app.click("graphToggle")
+        self.app.wait_until(lambda: self.app.prop("graphToggle", "checked"), "the toggle to check")
+        tree = self.app.find("graphTree")
+        self.assertGreater(tree.x, canvas.x + canvas.w - 340)      # the dock is 320 wide, flush with the canvas edge
+        self.assertGreater(tree.h, 100)
+        self.app.click("graphToggle")
+        self.app.wait_until(lambda: not self.app.prop("graphToggle", "checked"), "the toggle to clear")
+
+    def test_the_graph_dock_sits_beside_the_property_dock(self):
+        self.new_a4()
+        self.app.click("propertiesToggle")
+        self.app.click("graphToggle")
+        self.app.wait_until(lambda: self.app.prop("graphToggle", "checked"), "the toggle to check")
+        graph = self.app.find("graphTree")
+        field = self.app.find("transformXField")
+        self.assertLess(graph.x + graph.w, field.x)                # the graph dock is left of the property boxes
+
+    def test_the_mode_control_switches_to_flow(self):
+        self.new_a4()
+        self.app.click("graphToggle")
+        self.app.click_segment("graphModeControl", 1)
+        self.app.wait_until(lambda: "nobody uses" in self.app.prop("graphStatus", "text"), "the Flow view")
+        self.app.click_segment("graphModeControl", 0)
+        self.app.wait_until(lambda: "Layers and groups" in self.app.prop("graphStatus", "text"), "the Document view")
+
+    def test_the_view_ring_has_a_graph_slot(self):
+        self.new_a4()
+        canvas = self.app.find("canvas")
+        self.app.click_at((canvas.x + 200, canvas.y + canvas.h // 2))
+        self.tap_space()
+        self.app.key("v")
+        self.app.wait_until(lambda: self.app.prop("hintKeys", "text") == "Ring: View", "the View ring")
+        self.app.key("n")
+        self.app.wait_until(lambda: self.app.prop("graphToggle", "checked"), "the Graph toggle to follow the ring")
+
+
 class SettingsDialog(CurvyCase):
     """The settings dialog is a modal newui dialog; the app exposes its root to the driver while it is open."""
 

@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>curvy tool options card</title>
+<!-- The card a tool's options open in (docs/ui-design.md "Tool options"): up to two slider rows with a number box each, Reset and a note.
+     ToolOptionsCard shows the rows the tool has and sets their captions and ranges; the card is the popup style (bgSurface nearly opaque).
+     Convert: python .claude/skills/html-mockup-to-newui/scripts/html2newui.py docs/mockups/toolOptionsCard.html -o Resources/toolOptionsCard.newui --name toolOptionsCard --fragment -->
+<style>
+  body { width: 236px; height: 132px; margin: 0; font-family: "Segoe UI", sans-serif; font-size: 12px; color: #F0F0F0; }
+  #optionsCard { display: flex; flex-direction: column; background: #1E1E1EF2; border: 1px solid #4A4A4A; }
+  #optionsHead { display: flex; flex-direction: row; align-items: center; gap: 6px; height: 24px; padding: 0 8px; background: #2E2E2EF2; }
+  #optionsTitle { font-weight: 700; flex-grow: 1; }
+  #optionsInfo { color: #A0A0A0; width: 74px; text-align: right; }
+  #optionsClose { width: 22px; height: 20px; }
+  #optionsBody { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; }
+  .row { display: flex; flex-direction: row; align-items: center; gap: 6px; height: 24px; }
+  .cap { width: 70px; color: #A0A0A0; }
+  .slider { height: 24px; flex-grow: 1; }
+  .num { width: 44px; height: 20px; background: #121212; color: #F0F0F0; }
+  #optionsReset { width: 60px; height: 24px; }
+  #optionsNote { color: #FFB454; flex-grow: 1; }
+</style>
+</head>
+<body>
+  <div id="optionsCard">
+    <div id="optionsHead">
+      <span id="optionsTitle">Star</span>
+      <span id="optionsInfo">next shape</span>
+      <canvas id="optionsClose" data-newui-type="ToolbarButton"></canvas>
+    </div>
+    <div id="optionsBody">
+      <div id="optionRow1" class="row"><span id="optionLabel1" class="cap">Points</span><input id="optionSlider1" class="slider" type="range"><input id="optionValue1" class="num" type="text" value="5"></div>
+      <div id="optionRow2" class="row"><span id="optionLabel2" class="cap">Inner radius</span><input id="optionSlider2" class="slider" type="range"><input id="optionValue2" class="num" type="text" value="40"></div>
+      <div id="optionsFoot" class="row"><button id="optionsReset">Reset</button><span id="optionsNote">Applies to new shapes</span></div>
+    </div>
+  </div>
+</body>
+</html>

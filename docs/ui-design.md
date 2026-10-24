@@ -327,6 +327,16 @@ node. So the node UI is one more view, never a separate mode. The mockups explor
   matches group names, colours and node types; Fit, a minimap and breadcrumbs. Graphs this size want the lens or a large window, not the drawer.
 - Not yet explored: auto-layout, collapsing a chain into one node, and a palette node feeding many Fill nodes.
 
+### Graph tree (mockup `docs/mockups/graphTree.html`)
+A node view without a canvas, for reading and editing the graph as a list; built from a TreeView, a filter field and a parameter box, so it needs
+no new controls. Two views of the one graph: **Document** (layers and groups are subnets, a shape row is the last node of its chain and opens to
+show the chain behind it) and **Flow** (the Output on top, every row's children are its inputs; a node with several users is drawn in full once and
+as a link row after). Every row has an icon for its node kind (path, text, colour, fill, stroke, merge, group), and Fill and Colour nodes show a colour chip (checkerboard under it so opacity reads) instead of hex text; the filter still matches the hex. A path node's Curves row never shows the path text: it reads "5 anchors, closed, 140 x 140" with Edit (Direct Select), Copy and Paste path data buttons. The box under the tree edits the selected node (colour, width, words, opacity...) with Inputs and Used by lists that jump to
+the node. Each edit is one undo step through `GraphDocument`. Not in the mockup: wiring (drag a row onto another to connect), canvas selection
+link, thumbnails, virtual scrolling for large graphs (the 341-shape one).
+
+**Built (2026-10-24):** `Resources/graphDock.newui` (from `docs/mockups/graphDock.html`), `GraphDock` (src/graphdock.cpp), `GraphTreeModel`/`GraphTreeItem`/`GraphTreeController` (src/graphtree.cpp: a newui TreeView with a row item that draws the icon, name and chip), a "Graph" button in the top bar, the View ring's Graph slot (N), `WorkspaceModel::graphVisible()`. Differences from the mockup: Document view is the document's layers, groups and objects (layers and groups are not subnets yet), each object row is the node that holds its curves, and the chip is the object's solid fill (or stroke) since fill and stroke are not nodes yet; Flow view lists the graph's nodes by their wiring, which is flat until nodes can be connected. The box under the tree edits a text node (words, font, size), the numbers of a live shape, and shows a path node's curves as a summary with Edit, Copy and Paste path data; Inputs and Used by are text. Icons are `Resources/icons/node-*.svg` with their colour in the file. Not built: connecting by dragging rows, thumbnails, "Go to" links, virtual scrolling beyond what TreeView does.
+
 ### Document structure views (mockup `docs/mockups/structure.html`)
 Metadata, layers, groups, shapes and artboards are views of the same graph, shown the usual way so they are familiar. Same translucent look as the
 property boxes.

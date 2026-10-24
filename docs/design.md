@@ -47,4 +47,35 @@ nothing of sketch types (paths, layers, artboards), so it can be unit tested alo
   consequences are in `docs/ui-design.md` ("The graph is the document", "Document structure views"). **Decided: path nodes need a `bezierPath` node type, or an
   extension of the geometry model, and one of them will be added** (jitnodes geometry is polyline-only today). Still needs a plan for the migration
   and for selection and hit testing by node.
+- **Path nodes (2026-10-24, first step of the direction change).** Every Line/Rect/RoundRect/Ellipse/Polygon/Polyline/Path object has a `curvyPath` node
+  (`pathnode.h/.cpp`, registered by `GraphDocument`) whose string parameter `d` holds its curves (M/L/Q/C/Z, six significant digits - what the SVG and
+  .skb files keep); its cook is the flattened polyline, so other nodes can read it. For now the object is still edited directly and the node is a
+  **mirror**: `SketchDocument::syncPathNodes()` (from `changed()`) creates missing nodes, rewrites those whose object's `geometryRevision()` moved,
+  and removes orphans, so every edit, undo, delete, duplicate and load is covered without touching the `setGeometry` call sites. A restored object
+  gets its old node id back. Live shapes keep their own node and are skipped. Files without a graph get nodes on load.
+  **Authority (2026-10-24):** `commitGeometry` writes the node in the same step as the object (`writePathNodes`), and a graph edit, undo or redo
+  that changes a node's text is adopted by the object (`pullPathNodes`, via `GraphDocument::setGraphString`) unless the object was edited since its
+  node was written - so a freshly loaded file (object newer) keeps the SVG's curves. Live drag previews still touch the object first; the node
+  catches up at commit. Text, symbol and image objects have `curvyText`, `curvySymbol` and `curvyImage` nodes: `d` is the outline, plus the words,
+  font, size, placement, style and warp (text), the definition id (symbol) or the picture name (image). A text node's words are adopted back
+  into the object; which symbol or picture an object shows is mirrored only, since definitions and pixels live in the document. Still to do: layers
+  and groups as subnets, selection and hit-testing by node, the node view, storing the graph in .skb.
+- **Bezier curves in jitnodes (2026-10-24, both steps done).** `jitnodes::Primitive` has a `kind` (`polyline`, `cubic`). A cubic primitive holds
+  SVG-order control points (anchor, out handle, in handle, anchor ...; open 3n+1 points, closed 3n ending on the first anchor), so handles are ordinary
+  points: transform, wrangle and noise nodes move them with their anchors and a point attribute on an anchor (pressure, tilt, width) is just a point
+  attribute. `hasCurves`/`flattenCurves(tolerance)` in `geo/topology.h`; resample, subdivide and blast flatten curves first; a `flatten` node;
+  `geometryToSvg` writes cubics as paths; copyToPoints/append/concat keep the kind. **Native storage:** a node can hold a geometry parameter
+  (`Node::declareGeometry`, `setGeometryParam`, `geometryParam`; `sameGeometry`), saved with the node (`"geometries"`: points, primitives, attribute
+  arrays as `{name, values}` entries because the JSON5 reader rejects keys like "n.x"), restored by undo snapshots, clips and asset updates like any
+  other parameter. `curvyPath`, `curvyText`, `curvySymbol` and `curvyImage` hold their outline in the geometry parameter `curve` (a figure of straight
+  lines is a polyline, any other a cubic; quads are raised exactly) and cook it as it is; the `d` text is gone, `pathToText`/`pathFromText` remain for
+  Copy/Paste path data and the text warp. Coordinates are float32 (the cooked precision). `geometryFromPath`/`pathFromGeometry` convert; objects are
+  only rebuilt from a node whose curve differs from theirs by more than 1e-5 relative, and attributes on anchors stay while a move or undo keeps the layout
+  (`geometryFromPath(path, keepAttributes)`). `GraphDocument::setGraphGeometry` is the undoable edit. After loading a file the object and its node
+  may differ in the last digit a file holds; they are treated as in agreement within 1e-4. **Costs and gaps:** an embedded graph is much bigger than
+  the path text it replaced (SVG metadata now holds every node's arrays, written compact); `.skb` still stores no graph (the nodes are made from the
+  objects on load, so attributes on anchors are not kept there) because the duplicate would swell the format - fixed when objects stop holding a
+  second copy of their curves. Files saved with the earlier `d` text nodes fail to load their graph and get nodes made from their objects. The
+  jitnodes edit is in the 3rdparty/jitnodes working tree: **commit and push it, then bump the submodule.** Next: layers and groups as subnets,
+  selection and hit-testing by node, the node view (the graph tree mockup), objects as pure views of their nodes.
 - **Risks.** Node ids must stay stable across undo (restoreSnapshot preserves them); the Network must not be edited while cooking.

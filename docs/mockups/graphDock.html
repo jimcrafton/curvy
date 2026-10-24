@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>curvy graph dock</title>
+<!-- The graph tree dock (docs/ui-design.md "Graph tree"; the interactive design is graphTree.html): docked to the right edge beside the property
+     dock, full height, translucent. Static layout only: GraphDock (src/graphdock.cpp) fills the TreeView (a GraphTreeModel with icon, name and a colour
+     chip or summary on each row), the segmented control (Document / Flow) and the parameter box (rows added in code for the selected node).
+     Theme tokens (include/curvy/theme.h): bgSurface at 60% for the dock, bgApp for the fields, textMuted for captions, border for lines.
+     Convert: python .claude/skills/html-mockup-to-newui/scripts/html2newui.py docs/mockups/graphDock.html -o Resources/graphDock.newui --name graphDock --fragment -->
+<style>
+  body { width: 320px; height: 700px; margin: 0; font-family: "Segoe UI", sans-serif; font-size: 12px; color: #F0F0F0; }
+  #graphDockBox { display: flex; flex-direction: column; padding: 0; background: #1E1E1E99; border-left: 1px solid #4A4A4A; }
+  .head { display: flex; flex-direction: row; align-items: center; gap: 6px; height: 28px; padding: 0 8px; background: #2E2E2E99; }
+  .head .title { font-weight: 700; flex-grow: 1; }
+  .head .info { color: #A0A0A0; width: 120px; text-align: right; }
+  #graphModeRow { display: flex; flex-direction: row; padding: 6px 8px 0 8px; height: 30px; }
+  #graphModeControl { height: 24px; flex-grow: 1; }
+  #graphFilterRow { display: flex; flex-direction: row; padding: 6px 8px; height: 34px; }
+  #graphFilterField { flex-grow: 1; height: 22px; background: #121212; color: #F0F0F0; }
+  #graphTree { flex-grow: 1; height: 320px; }
+  #graphDetail { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; height: 230px; }
+  #graphStatus { color: #A0A0A0; height: 24px; padding: 0 8px; }
+</style>
+</head>
+<body>
+  <div id="graphDockBox">
+    <div id="graphHeaderBar" class="head"><span id="graphDockTitle" class="title">Graph</span><span id="graphInfo" class="info"></span></div>
+    <div id="graphModeRow"><canvas id="graphModeControl" data-newui-type="SegmentedControl"></canvas></div>
+    <div id="graphFilterRow"><input id="graphFilterField" type="text" placeholder="Filter by name, type or value" value=""></div>
+    <canvas id="graphTree" data-newui-type="TreeView"></canvas>
+    <div id="graphDetailBar" class="head"><span id="graphDetailTitle" class="title">Node</span><span id="graphDetailKind" class="info"></span></div>
+    <div id="graphDetail"></div>
+    <span id="graphStatus"></span>
+  </div>
+</body>
+</html>

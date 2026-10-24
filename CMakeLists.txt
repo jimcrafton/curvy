@@ -56,6 +56,9 @@ add_executable(curvy
     src/sketchcolor.cpp
     src/sketchobject.cpp
     src/graphdocument.cpp
+    src/graphtree.cpp
+    src/graphdock.cpp
+    src/pathnode.cpp
     src/radialmenu.cpp
     src/tooloptionscard.cpp
     src/colorwheel.cpp
@@ -125,7 +128,7 @@ set(CURVY_MODEL_SOURCES
     documentlayers documentswatches documentselect documentclip documentsymbols documentbrushes brush
     pathflatten textwarp imagedata documenttextpath documentimages documentexpand pdfexport documentartboards
     documenttrace imagetrace sketchsvg sketchexport shapetools pathops textoutline gzip numberscrubber
-    sketchbin cursorset newdocumentmodel graphdocument documentlive radialmenu holdscrub workspacemodel dockcontext settings)
+    sketchbin cursorset newdocumentmodel graphdocument graphtree pathnode documentlive radialmenu holdscrub workspacemodel dockcontext settings)
 list(TRANSFORM CURVY_MODEL_SOURCES PREPEND src/)
 list(TRANSFORM CURVY_MODEL_SOURCES APPEND .cpp)
 
