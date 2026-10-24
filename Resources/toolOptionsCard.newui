@@ -1,0 +1,329 @@
+{
+  meta: {
+    author: "",
+    date: "2026-10-23",
+    copyright: "",
+    version: "0.1.0.900"
+  },
+  type: "SubView",
+  bounds: {
+    type: "Rect",
+    pos: { type: "Point", x: 0, y: 0 },
+    size: { type: "Size", width: 236, height: 132 }
+  },
+  visible: true,
+  name: "toolOptionsCard",
+  childViews: [
+    {
+      type: "SubView",
+      bounds: {
+        type: "Rect",
+        pos: { type: "Point", x: 0, y: 0 },
+        size: { type: "Size", width: 236, height: 118 }
+      },
+      visible: true,
+      name: "optionsCard",
+      layout: { type: "FlexLayout", orientation: "Vertical" },
+      style: {
+        type: "ViewStyle",
+        backgroundFill: { type: "Fill", kind: "Color", color: "#1e1e1ef2" },
+        borderWidth: 1,
+        borderFill: "#4a4a4a"
+      },
+      childViews: [
+        {
+          type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 0 },
+            size: { type: "Size", width: 236, height: 24 }
+          },
+          visible: true,
+          name: "optionsHead",
+          layout: {
+            type: "FlexLayout",
+            orientation: "Horizontal",
+            crossAxisAlignment: "Center",
+            spacing: 6,
+            padding: 4
+          },
+          style: {
+            type: "ViewStyle",
+            backgroundFill: { type: "Fill", kind: "Color", color: "#2e2e2ef2" }
+          },
+          desiredSize: { type: "Size", width: 236, height: 24 },
+          desiredSizeOverride: true,
+          childViews: [
+            {
+              type: "Label",
+              text: "Star",
+              textAlignment: "Left",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 4, y: 3 },
+                size: { type: "Size", width: 120, height: 17 }
+              },
+              name: "optionsTitle",
+              layoutParams: { type: "FlexLayoutParams", weight: 1 },
+              style: {
+                type: "LabelStyle",
+                text: "Star",
+                wordWrap: true,
+                font: { type: "Font", name: "Segoe UI", size: 12, bold: true, italic: false, strikeThrough: false, underlined: false },
+                textColor: "#f0f0f0",
+                textAlignment: "Left"
+              }
+            },
+            {
+              type: "Label",
+              text: "next shape",
+              textAlignment: "Right",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 130, y: 3 },
+                size: { type: "Size", width: 74, height: 17 }
+              },
+              name: "optionsInfo",
+              style: {
+                type: "LabelStyle",
+                text: "next shape",
+                wordWrap: true,
+                font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                textColor: "#a0a0a0",
+                textAlignment: "Right"
+              },
+              desiredSize: { type: "Size", width: 74, height: 17 },
+              desiredSizeOverride: true
+            },
+            {
+              type: "Button",
+              text: "x",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 210, y: 2 },
+                size: { type: "Size", width: 22, height: 20 }
+              },
+              name: "optionsClose",
+              style: {
+                type: "ThemedButtonStyle",
+                font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+              },
+              desiredSize: { type: "Size", width: 22, height: 20 },
+              desiredSizeOverride: true
+            }
+          ]
+        },
+        {
+          type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 24 },
+            size: { type: "Size", width: 236, height: 94 }
+          },
+          visible: true,
+          name: "optionsBody",
+          layout: {
+            type: "FlexLayout",
+            orientation: "Vertical",
+            spacing: 4,
+            padding: 7
+          },
+          childViews: [
+            {
+              type: "SubView",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 7, y: 7 },
+                size: { type: "Size", width: 222, height: 24 }
+              },
+              visible: true,
+              name: "optionRow1",
+              layout: {
+                type: "FlexLayout",
+                orientation: "Horizontal",
+                crossAxisAlignment: "Center",
+                spacing: 6
+              },
+              desiredSize: { type: "Size", width: 222, height: 24 },
+              desiredSizeOverride: true,
+              childViews: [
+                {
+                  type: "Label",
+                  text: "Points",
+                  textAlignment: "Left",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 0, y: 3 },
+                    size: { type: "Size", width: 70, height: 17 }
+                  },
+                  name: "optionLabel1",
+                  style: {
+                    type: "LabelStyle",
+                    text: "Points",
+                    wordWrap: true,
+                    font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                    textColor: "#a0a0a0",
+                    textAlignment: "Left"
+                  },
+                  desiredSize: { type: "Size", width: 70, height: 17 },
+                  desiredSizeOverride: true
+                },
+                {
+                  type: "Slider",
+                  value: 0,
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 76, y: 0 },
+                    size: { type: "Size", width: 96, height: 24 }
+                  },
+                  name: "optionSlider1",
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                  desiredSize: { type: "Size", width: 96, height: 24 },
+                  desiredSizeOverride: true
+                },
+                {
+                  type: "TextField",
+                  text: "5",
+                  font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                  textColor: "#f0f0f0",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 178, y: 2 },
+                    size: { type: "Size", width: 44, height: 20 }
+                  },
+                  name: "optionValue1",
+                  desiredSize: { type: "Size", width: 44, height: 20 },
+                  desiredSizeOverride: true
+                }
+              ]
+            },
+            {
+              type: "SubView",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 7, y: 35 },
+                size: { type: "Size", width: 222, height: 24 }
+              },
+              visible: true,
+              name: "optionRow2",
+              layout: {
+                type: "FlexLayout",
+                orientation: "Horizontal",
+                crossAxisAlignment: "Center",
+                spacing: 6
+              },
+              desiredSize: { type: "Size", width: 222, height: 24 },
+              desiredSizeOverride: true,
+              childViews: [
+                {
+                  type: "Label",
+                  text: "Inner radius",
+                  textAlignment: "Left",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 0, y: -5 },
+                    size: { type: "Size", width: 70, height: 35 }
+                  },
+                  name: "optionLabel2",
+                  style: {
+                    type: "LabelStyle",
+                    text: "Inner radius",
+                    wordWrap: true,
+                    font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                    textColor: "#a0a0a0",
+                    textAlignment: "Left"
+                  },
+                  desiredSize: { type: "Size", width: 70, height: 35 },
+                  desiredSizeOverride: true
+                },
+                {
+                  type: "Slider",
+                  value: 0,
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 76, y: 0 },
+                    size: { type: "Size", width: 96, height: 24 }
+                  },
+                  name: "optionSlider2",
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                  desiredSize: { type: "Size", width: 96, height: 24 },
+                  desiredSizeOverride: true
+                },
+                {
+                  type: "TextField",
+                  text: "40",
+                  font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                  textColor: "#f0f0f0",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 178, y: 2 },
+                    size: { type: "Size", width: 44, height: 20 }
+                  },
+                  name: "optionValue2",
+                  desiredSize: { type: "Size", width: 44, height: 20 },
+                  desiredSizeOverride: true
+                }
+              ]
+            },
+            {
+              type: "SubView",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 7, y: 63 },
+                size: { type: "Size", width: 222, height: 24 }
+              },
+              visible: true,
+              name: "optionsFoot",
+              layout: {
+                type: "FlexLayout",
+                orientation: "Horizontal",
+                crossAxisAlignment: "Center",
+                spacing: 6
+              },
+              desiredSize: { type: "Size", width: 222, height: 24 },
+              desiredSizeOverride: true,
+              childViews: [
+                {
+                  type: "Button",
+                  text: "Reset",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 0, y: 0 },
+                    size: { type: "Size", width: 60, height: 24 }
+                  },
+                  name: "optionsReset",
+                  style: {
+                    type: "ThemedButtonStyle",
+                    font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+                  },
+                  desiredSize: { type: "Size", width: 60, height: 24 },
+                  desiredSizeOverride: true
+                },
+                {
+                  type: "Label",
+                  text: "Applies to new shapes",
+                  textAlignment: "Left",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 66, y: 3 },
+                    size: { type: "Size", width: 156, height: 17 }
+                  },
+                  name: "optionsNote",
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                  style: {
+                    type: "LabelStyle",
+                    text: "Applies to new shapes",
+                    wordWrap: true,
+                    font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                    textColor: "#ffb454",
+                    textAlignment: "Left"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

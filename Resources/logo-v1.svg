@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024pt" height="792pt" viewBox="0 0 1024 792" data-ppi="72" data-color-mode="rgb" data-page-background="rgb 1 1 1" data-artboards="Artboard%201,0,0,1024,792" data-active-artboard="0">
+<defs>
+<linearGradient id="grad1" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="100" y2="100" spreadMethod="pad" data-angle="45">
+  <stop offset="0" stop-color="#f2b824"/>
+  <stop offset="1" stop-color="#e8452c"/>
+</linearGradient>
+<radialGradient id="grad2" gradientUnits="userSpaceOnUse" cx="50" cy="50" fx="50" fy="50" r="50" spreadMethod="pad">
+  <stop offset="0" stop-color="#ffffff"/>
+  <stop offset="1" stop-color="#00aeef"/>
+</radialGradient>
+</defs>
+<rect id="pageBackground" x="0" y="0" width="1024" height="792" fill="#ffffff"/>
+<g>
+<g data-sketch="appearance" id="obj53" data-type="Path" data-name="Brush Path" data-frame-angle="0.34734">
+<path d="M430.087 209.263 C452.368 195.679 458.795 167.827 447.402 147.56 C426.672 110.687 355.243 114.265 303.2 130.184 C224.218 154.343 148.137 237.814 168.469 336.249 C202.888 502.878 382.381 377.075 472.828 383.502" data-item="fill" fill="none" stroke="none"/>
+<path d="M430.087 209.263 C452.368 195.679 458.795 167.827 447.402 147.56 C426.672 110.687 355.243 114.265 303.2 130.184 C224.218 154.343 148.137 237.814 168.469 336.249 C202.888 502.878 382.381 377.075 472.828 383.502" data-item="stroke" fill="none" stroke="#0078d4" stroke-width="2" data-width-profile="0 1 1;0.492969 30.598 30.598;1 1 1" stroke-miterlimit="10"/>
+<path d="M0 0" data-item="effect" data-effect="drop-shadow" data-softness="6" data-dx="4" data-dy="4" data-radius="10" stroke="none" fill="#000000" opacity="0.75" style="mix-blend-mode:multiply"/>
+<path d="M0 0" data-item="effect" data-effect="outer-glow" data-softness="2" data-dx="4" data-dy="4" data-radius="10" stroke="none" fill="#ffe066" opacity="0.75"/>
+</g>
+<g data-sketch="appearance" id="obj108" data-type="Path" data-name="Brush Path" data-frame-angle="0.579088">
+<path d="M421.798 229.893 C426.658 244.242 420.628 258.786 415.435 271.119 C407.934 288.935 390.95 301.374 388.475 322.326 C387.227 332.879 389.522 353.508 413.398 352.003 C436.213 350.565 444.226 304.479 449.593 287.817 C452.326 279.335 454.667 270.771 457.085 262.198 C457.81 259.627 458.477 257.042 459.2 254.471 C459.466 253.527 460.258 250.701 460.088 251.666 C459.976 252.302 458.132 259.373 458.504 258.048 C452.972 277.518 427.417 355.416 463.233 363.345 C468.006 364.402 473.789 360.033 471.079 359.265" data-item="fill" fill="none" stroke="none"/>
+<path d="M421.798 229.893 C426.658 244.242 420.628 258.786 415.435 271.119 C407.934 288.935 390.95 301.374 388.475 322.326 C387.227 332.879 389.522 353.508 413.398 352.003 C436.213 350.565 444.226 304.479 449.593 287.817 C452.326 279.335 454.667 270.771 457.085 262.198 C457.81 259.627 458.477 257.042 459.2 254.471 C459.466 253.527 460.258 250.701 460.088 251.666 C459.976 252.302 458.132 259.373 458.504 258.048 C452.972 277.518 427.417 355.416 463.233 363.345 C468.006 364.402 473.789 360.033 471.079 359.265" data-item="stroke" fill="none" stroke="#0078d4" stroke-width="2" data-width-profile="0 1 1;0.194069 6.76965 6.76965;0.836238 4.24808 4.24808;1 1 1" stroke-miterlimit="10"/>
+<path d="M0 0" data-item="effect" data-effect="drop-shadow" data-softness="6" data-dx="4" data-dy="4" data-radius="10" stroke="none" fill="#000000" opacity="0.75" style="mix-blend-mode:multiply"/>
+<path d="M0 0" data-item="effect" data-effect="outer-glow" data-softness="2" data-dx="4" data-dy="4" data-radius="10" stroke="none" fill="#ffe066" opacity="0.75"/>
+</g>
+<g>
+<g data-sketch="appearance" id="obj109" data-type="Path" data-name="Brush Path" data-frame-angle="0.713077">
+<path d="M512.971 223.579 C509.507 240.689 506.817 257.55 501.727 274.287 C494.521 297.98 480.294 322.785 480.197 348.16 C480.191 349.643 482.163 352.78 482.169 352.951" data-item="fill" fill="none" stroke="none"/>
+<path d="M512.971 223.579 C509.507 240.689 506.817 257.55 501.727 274.287 C494.521 297.98 480.294 322.785 480.197 348.16 C480.191 349.643 482.163 352.78 482.169 352.951" data-item="stroke" fill="none" stroke="#0078d4" stroke-width="2" data-width-profile="0 1 1;0.504827 10.452 10.452;1 1 1" stroke-miterlimit="10"/>
+<path d="M0 0" data-item="effect" data-effect="drop-shadow" data-softness="6" data-dx="4" data-dy="4" data-radius="10" stroke="none" fill="#000000" opacity="0.75" style="mix-blend-mode:multiply"/>
+<path d="M0 0" data-item="effect" data-effect="outer-glow" data-softness="2" data-dx="4" data-dy="4" data-radius="10" stroke="none" fill="#ffe066" opacity="0.75"/>
+</g>
+<g data-sketch="appearance" id="obj110" data-type="Path" data-name="Brush Path" data-frame-angle="0.713077">
+<path d="M485.823 246.815 C504.47 235.671 532.353 212.819 551.508 228.704 C569.49 247.812 523.426 278.706 503.335 299.752 C528.222 329.496 552.35 341.367 573.941 334.486" data-item="fill" fill="none" stroke="none"/>
+<path d="M485.823 246.815 C504.47 235.671 532.353 212.819 551.508 228.704 C569.49 247.812 523.426 278.706 503.335 299.752 C528.222 329.496 552.35 341.367 573.941 334.486" data-item="stroke" fill="none" stroke="#0078d4" stroke-width="2" data-width-profile="0 1 1;0.251062 7.14989 7.14989;1 1 1" stroke-miterlimit="10"/>
+<path d="M0 0" data-item="effect" data-effect="drop-shadow" data-softness="6" data-dx="4" data-dy="4" data-radius="10" stroke="none" fill="#000000" opacity="0.75" style="mix-blend-mode:multiply"/>
+<path d="M0 0" data-item="effect" data-effect="outer-glow" data-softness="2" data-dx="4" data-dy="4" data-radius="10" stroke="none" fill="#ffe066" opacity="0.75"/>
+</g>
+</g>
+<g data-sketch="appearance" id="obj111" data-type="Path" data-name="Brush Path" data-frame-angle="0.777111">
+<path d="M591.356 196.514 C600.58 216.627 560.587 281.615 587.491 323.486 C588.02 322.362 589.945 323.145 590.537 322.053 C596.757 310.586 599.435 283.297 602.422 270.403 C610.578 235.195 620.576 220.198 648.381 207.806" data-item="fill" fill="none" stroke="none"/>
+<path d="M591.356 196.514 C600.58 216.627 560.587 281.615 587.491 323.486 C588.02 322.362 589.945 323.145 590.537 322.053 C596.757 310.586 599.435 283.297 602.422 270.403 C610.578 235.195 620.576 220.198 648.381 207.806" data-item="stroke" fill="none" stroke="#0078d4" stroke-width="2" data-width-profile="0 1 1;0.736179 5.57636 5.57636;1 1 1" stroke-miterlimit="10"/>
+<path d="M0 0" data-item="effect" data-effect="drop-shadow" data-softness="6" data-dx="4" data-dy="4" data-radius="10" stroke="none" fill="#000000" opacity="0.75" style="mix-blend-mode:multiply"/>
+<path d="M0 0" data-item="effect" data-effect="outer-glow" data-softness="2" data-dx="4" data-dy="4" data-radius="10" stroke="none" fill="#ffe066" opacity="0.75"/>
+</g>
+<g>
+<g data-sketch="appearance" id="obj116" data-type="Path" data-name="Brush Path" data-frame-angle="0.502287">
+<path d="M664.832 220 C636.62 245.562 629.479 322.691 685.598 302.943" data-item="fill" fill="none" stroke="none"/>
+<path d="M664.832 220 C636.62 245.562 629.479 322.691 685.598 302.943" data-item="stroke" fill="none" stroke="#0078d4" stroke-width="2" data-width-profile="0 1 1;0.545896 6.87251 6.87251;1 1 1" stroke-miterlimit="10"/>
+<path d="M0 0" data-item="effect" data-effect="drop-shadow" data-softness="6" data-dx="4" data-dy="4" data-radius="10" stroke="none" fill="#000000" opacity="0.75" style="mix-blend-mode:multiply"/>
+<path d="M0 0" data-item="effect" data-effect="outer-glow" data-softness="2" data-dx="4" data-dy="4" data-radius="10" stroke="none" fill="#ffe066" opacity="0.75"/>
+</g>
+<g data-sketch="appearance" id="obj118" data-type="Path" data-name="Brush Path" data-frame-angle="0.502287">
+<path d="M713.122 225.593 C690.896 217.71 683.772 243.225 687.229 260.82 C692.856 289.46 691.626 335.175 678.547 366.358 C660.43 409.555 626.258 445.664 588.537 457.129 C499.008 484.34 457.55 419.261 366.878 463.683" data-item="fill" fill="none" stroke="none"/>
+<path d="M713.122 225.593 C690.896 217.71 683.772 243.225 687.229 260.82 C692.856 289.46 691.626 335.175 678.547 366.358 C660.43 409.555 626.258 445.664 588.537 457.129 C499.008 484.34 457.55 419.261 366.878 463.683" data-item="stroke" fill="none" stroke="#0078d4" stroke-width="2" data-width-profile="0 1 1;0.474638 14.382 14.382;0.683174 7.83539 7.83539;1 1 1" stroke-miterlimit="10"/>
+<path d="M0 0" data-item="effect" data-effect="drop-shadow" data-softness="6" data-dx="4" data-dy="4" data-radius="10" stroke="none" fill="#000000" opacity="0.75" style="mix-blend-mode:multiply"/>
+<path d="M0 0" data-item="effect" data-effect="outer-glow" data-softness="2" data-dx="4" data-dy="4" data-radius="10" stroke="none" fill="#ffe066" opacity="0.75"/>
+</g>
+</g>
+</g>
+<g>
+<path id="obj119" d="M136.057 554.041 C187.749 475.533 684.482 611.854 723.888 525.875" data-type="Path" data-name="Path" data-frame-angle="-0.103912" fill="none" stroke="#2f5fb3" stroke-width="1.5" stroke-miterlimit="10"/>
+<path id="obj125" d="M131.938 553.106 L139.895 552.276 L140.725 560.233 L132.768 561.063 Z" data-type="Rect" data-name="Rectangle" data-frame-angle="-0.103912" fill="#d9e6ff" stroke="#2f5fb3" stroke-width="1.5" stroke-miterlimit="10"/>
+<path id="obj126" d="M719.255 520.008 L727.212 519.178 L728.041 527.135 L720.085 527.964 Z" data-type="Rect" data-name="Rectangle" data-frame-angle="-0.103912" fill="#d9e6ff" stroke="#2f5fb3" stroke-width="1.5" stroke-miterlimit="10"/>
+<path id="obj127" d="M200.723 485.459 L135.917 552.691" data-type="Line" data-name="Line" data-frame-angle="-0.103912" fill="none" stroke="#2f5fb3" stroke-width="1.5" stroke-miterlimit="10"/>
+<path id="obj128" d="M645.744 615.43 L723.989 526.836" data-type="Line" data-name="Line" data-frame-angle="-0.103912" fill="none" stroke="#2f5fb3" stroke-width="1.5" stroke-miterlimit="10"/>
+<path id="obj120" d="M205.268 484.985 C205.53 487.495 203.707 489.742 201.197 490.004 C198.686 490.266 196.439 488.443 196.177 485.933 C195.916 483.422 197.738 481.175 200.249 480.913 C202.759 480.651 205.006 482.474 205.268 484.985 Z" data-type="Ellipse" data-name="Circle" data-frame-angle="-0.103912" fill="#d9e6ff" stroke="#2f5fb3" stroke-width="1.5" stroke-miterlimit="10"/>
+<path id="obj121" d="M650.29 614.956 C650.551 617.466 648.729 619.713 646.218 619.975 C643.708 620.237 641.461 618.414 641.199 615.904 C640.937 613.393 642.76 611.146 645.27 610.884 C647.781 610.622 650.028 612.445 650.29 614.956 Z" data-type="Ellipse" data-name="Circle" data-frame-angle="-0.103912" fill="#d9e6ff" stroke="#2f5fb3" stroke-width="1.5" stroke-miterlimit="10"/>
+</g>
+<g data-sketch="graphic-styles" display="none">
+<path id="style1" d="M0 0 L100 0 L100 100 L0 100 Z" data-type="Rect" data-name="Default" fill="#ffffff" stroke="#000000" stroke-width="1" stroke-miterlimit="10"/>
+<g data-sketch="appearance" id="style2" data-type="Rect" data-name="Sunset + shadow">
+<path d="M0 0 L100 0 L100 100 L0 100 Z" data-item="fill" fill="url(#grad1)" stroke="none"/>
+<path d="M0 0 L100 0 L100 100 L0 100 Z" data-item="stroke" fill="none" stroke="none"/>
+<path d="M0 0" data-item="effect" data-effect="drop-shadow" data-softness="6" data-dx="4" data-dy="4" data-radius="10" stroke="none" fill="#000000" data-fill-color="gray 0" opacity="0.75" style="mix-blend-mode:multiply"/>
+</g>
+<path id="style3" d="M0 0 L100 0 L100 100 L0 100 Z" data-type="Rect" data-name="Blue card" fill="#0078d4" stroke="#1b3a6b" stroke-width="3" stroke-miterlimit="10"/>
+<g data-sketch="appearance" id="style4" data-type="Rect" data-name="Glow">
+<path d="M0 0 L100 0 L100 100 L0 100 Z" data-item="fill" fill="url(#grad2)" stroke="none"/>
+<path d="M0 0 L100 0 L100 100 L0 100 Z" data-item="stroke" fill="none" stroke="none"/>
+<path d="M0 0" data-item="effect" data-effect="outer-glow" data-softness="8" data-dx="4" data-dy="4" data-radius="10" stroke="none" fill="#ffe066" opacity="0.75"/>
+</g>
+<path id="style5" d="M0 0 L100 0 L100 100 L0 100 Z" data-type="Rect" data-name="Dashed red" fill="#ffffff" stroke="#c0392b" stroke-width="3" stroke-dasharray="8 4" stroke-miterlimit="10"/>
+<path id="style6" d="M0 0 L100 0 L100 100 L0 100 Z" data-type="Rect" data-name="Ghost" fill="#6a4fc7" stroke="none" opacity="0.55"/>
+</g>
+</svg>
