@@ -66,7 +66,7 @@ namespace curvy {
         newui::SubView* rows_[2] = {nullptr, nullptr};
         newui::Label* labels_[2] = {nullptr, nullptr};
         newui::Button* reset_ = nullptr;
-        newui::Button* close_ = nullptr;
+        newui::ToolbarButton* close_ = nullptr;
         SketchTool tool_ = SketchTool::Select;
         bool open_ = false;
         std::vector<Row> active_;

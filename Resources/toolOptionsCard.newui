@@ -1,7 +1,7 @@
 {
   meta: {
     author: "",
-    date: "2026-10-23",
+    date: "2026-10-24",
     copyright: "",
     version: "0.1.0.900"
   },
@@ -96,18 +96,13 @@
               desiredSizeOverride: true
             },
             {
-              type: "Button",
-              text: "x",
+              type: "ToolbarButton",
               bounds: {
                 type: "Rect",
                 pos: { type: "Point", x: 210, y: 2 },
                 size: { type: "Size", width: 22, height: 20 }
               },
               name: "optionsClose",
-              style: {
-                type: "ThemedButtonStyle",
-                font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
-              },
               desiredSize: { type: "Size", width: 22, height: 20 },
               desiredSizeOverride: true
             }

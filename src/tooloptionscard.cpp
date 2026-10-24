@@ -67,8 +67,10 @@ namespace curvy {
         parent_.addChild(card_);
         title_ = find<Label>(*card_, "optionsTitle");
         reset_ = find<Button>(*card_, "optionsReset");
-        close_ = find<Button>(*card_, "optionsClose");
+        close_ = find<ToolbarButton>(*card_, "optionsClose");
         if (close_ != nullptr) {
+            close_->setIcon("icons/close.svg");
+            close_->setIconSize(14.0f);
             close_->onClick += [this](Control&) {
                 close();
                 if (onDismissed) {
