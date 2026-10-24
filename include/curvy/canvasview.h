@@ -1,5 +1,7 @@
 #pragma once
 
+#include "curvy/holdscrub.h"
+
 #include "curvy/cursorset.h"
 #include "curvy/shapetools.h"
 #include "curvy/sketchdocument.h"
@@ -226,6 +228,7 @@ namespace curvy {
         BLPoint pointerDoc_;
         bool hasHover_ = false;       // the Select tool's pointer is over an unselected object: its fill (or stroke) is lit
         std::size_t hoverId_ = 0;
+        ScrubPart hoverPart_ = ScrubPart::None;   // the stroke wins where it is under the pointer; else the fill
         void updateHover();
         void paintHover(BLContext& ctx) const;
         BLBox dragBounds_;  // the selection's bounds when a move began

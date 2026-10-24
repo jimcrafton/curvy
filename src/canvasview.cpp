@@ -1,4 +1,5 @@
 #include "curvy/canvasview.h"
+#include "curvy/theme.h"
 
 #include <newui/bundle.h>
 
@@ -44,16 +45,19 @@ namespace curvy {
     void CanvasView::updateHover() {
         bool has = false;
         std::size_t id = 0;
+        ScrubPart part = ScrubPart::None;
         if (document_ != nullptr && tool_ == SketchTool::Select && drag_ == Drag::None && !panning_) {
             const SketchObject* hit = document_->hitTest(pointerDoc_, 4.0 / double(zoom_));
             if (hit != nullptr && !document_->isSelected(hit->id())) {
-                has = true;
+                part = HoldScrub::partAt(*hit, pointerDoc_, 4.0 / double(zoom_));
+                has = part != ScrubPart::None;
                 id = hit->id();
             }
         }
-        if (has != hasHover_ || (has && id != hoverId_)) {
+        if (has != hasHover_ || (has && (id != hoverId_ || part != hoverPart_))) {
             hasHover_ = has;
             hoverId_ = id;
+            hoverPart_ = part;
             style().markDirty();
         }
     }
@@ -66,17 +70,16 @@ namespace curvy {
         const BLPoint origin = toView(BLPoint(0.0, 0.0));
         BLPath path = object->geometry();
         path.transform(BLMatrix2D(double(zoom_), 0.0, 0.0, double(zoom_), origin.x, origin.y));
-        const BLRgba32 accent(0xFF1E6FE0u);
+        const std::uint32_t amber = Theme::current().accent & 0xFFFFFFu;   // the theme's amber, see-through so the shape stays visible under it
         ctx.save();
-        if (!object->fill().isNone() && object->isClosed()) {
-            ctx.set_fill_style(BLRgba32(0x401E6FE0u));
+        if (hoverPart_ == ScrubPart::Fill) {
+            ctx.set_fill_style(BLRgba32(0x55000000u | amber));
             ctx.fill_path(path);
-            ctx.set_stroke_width(1.0);
         } else {
-            ctx.set_stroke_width(3.0);
+            ctx.set_stroke_width(std::max(3.0, object->strokeWidth() * double(zoom_)));
+            ctx.set_stroke_style(BLRgba32(0xE6000000u | amber));
+            ctx.stroke_path(path);
         }
-        ctx.set_stroke_style(accent);
-        ctx.stroke_path(path);
         ctx.restore();
     }
 
