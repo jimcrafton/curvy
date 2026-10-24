@@ -14,7 +14,9 @@ namespace curvy {
     class SettingsDialog {
     public:
         // True when the user pressed OK (settings then holds the choices); false on Cancel/close or if the file cannot be loaded.
-        static bool run(newui::Frame& owner, Settings& settings, const std::function<void(const Settings&)>& apply);
+        // `onCancel` runs when the Cancel button is clicked (Escape clicks it too), not when the window is closed another way.
+        static bool run(newui::Frame& owner, Settings& settings, const std::function<void(const Settings&)>& apply,
+                        const std::function<void()>& onCancel = {});
 
         // Headless self-test (curvy.exe --check-settings): loads the dialog without showing it and drives its controls.
         // Returns the number of failed checks.

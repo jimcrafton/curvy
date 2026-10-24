@@ -65,7 +65,8 @@ def states(data, tokens):
     push = {"PBS_NORMAL": dict(fillColor="slot", borderColor="border", textColor="text"),
             "PBS_HOT": dict(fillColor="hot", borderColor="muted", textColor="text"),
             "PBS_PRESSED": dict(fillColor="accentDeep", borderColor="accent", textColor="text"),
-            "PBS_DISABLED": dict(fillColor="bgSurface", borderColor="slot", textColor="disabled")}
+            "PBS_DISABLED": dict(fillColor="bgSurface", borderColor="slot", textColor="disabled"),
+            "PBS_DEFAULTED": dict(fillColor="slot", borderColor="accent", textColor="text")}
     for state, named in push.items():
         put("BUTTON", "BP_PUSHBUTTON", state, **named)
 

@@ -369,6 +369,7 @@
           {
             type: "Button",
             name: "createButton",
+            defaultControl: true,
             desiredSize: { type: "Size", width: 96, height: 28 },
             desiredSizeOverride: true,
             text: "Create"
@@ -376,6 +377,7 @@
           {
             type: "Button",
             name: "cancelButton",
+            cancelControl: true,
             desiredSize: { type: "Size", width: 96, height: 28 },
             desiredSizeOverride: true,
             text: "Cancel"

@@ -1887,6 +1887,7 @@
                   size: { type: "Size", width: 88, height: 28 }
                 },
                 name: "settingsCancel",
+                cancelControl: true,
                 style: {
                   type: "ThemedButtonStyle",
                   font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
@@ -1903,6 +1904,7 @@
                   size: { type: "Size", width: 88, height: 28 }
                 },
                 name: "settingsOk",
+                defaultControl: true,
                 style: {
                   type: "ThemedButtonStyle",
                   font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }

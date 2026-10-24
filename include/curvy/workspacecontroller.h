@@ -4,6 +4,7 @@
 #include "curvy/dockcontroller.h"
 #include "curvy/holdscrub.h"
 #include "curvy/radialmenu.h"
+#include "curvy/tooloptionscard.h"
 #include "curvy/settings.h"
 #include "curvy/sketchcommands.h"
 #include "curvy/sketchcontroller.h"
@@ -63,6 +64,7 @@ namespace curvy {
         CanvasView& canvas() { return *canvas_; }
         RadialMenu& menu() { return *menu_; }
         DockController& dock() { return *dock_; }
+        ToolOptionsCard& toolOptions() { return *options_; }
         SketchCommandController& commands() { return *commands_; }
         SketchDocumentController& files() { return *files_; }
         const HoldScrub& scrub() const { return scrub_; }
@@ -117,8 +119,10 @@ namespace curvy {
         std::unique_ptr<SketchDocumentController> files_;
         std::unique_ptr<SketchCommandController> commands_;
         std::unique_ptr<DockController> dock_;
+        std::unique_ptr<ToolOptionsCard> options_;
         HoldScrub scrub_;
         void autosaveTick();
+        void showToolOptions(SketchTool tool, const newui::Point& at);
         void clearRecovery();
         void dismissWelcome();
         std::string recoveryFile_;

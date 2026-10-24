@@ -8,6 +8,7 @@
 #include <newui/dialogs.h>
 #include <newui/layout.h>
 #include <newui/models.h>
+#include <newui/uiinputmanager.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -70,7 +71,7 @@ namespace curvy {
 
             RootView& root() { return root_; }
 
-            void wire(const std::function<void(DialogResult)>& closeWith) {
+            void wire(const std::function<void(DialogResult)>& closeWith, std::function<void()> onCancel = {}) {
                 for (std::size_t i = 0; i < std::size(kPages); ++i) {
                     if (auto* nav = find<Button>(kPages[i].nav)) {
                         nav->onClick += [this, i](Control&) { showPage(i); return SyncReturn::Handled; };
@@ -85,7 +86,13 @@ namespace curvy {
                     };
                 }
                 if (auto* cancel = find<Button>("settingsCancel")) {
-                    cancel->onClick += [closeWith](Control&) { closeWith(DialogResult::Cancel); return SyncReturn::Handled; };
+                    cancel->onClick += [closeWith, onCancel](Control&) {
+                        if (onCancel) {
+                            onCancel();
+                        }
+                        closeWith(DialogResult::Cancel);
+                        return SyncReturn::Handled;
+                    };
                 }
                 if (auto* ok = find<Button>("settingsOk")) {
                     ok->onClick += [closeWith](Control&) { closeWith(DialogResult::Ok); return SyncReturn::Handled; };
@@ -334,7 +341,7 @@ namespace curvy {
         };
     }
 
-    bool SettingsDialog::run(Frame& owner, Settings& settings, const std::function<void(const Settings&)>& apply) {
+    bool SettingsDialog::run(Frame& owner, Settings& settings, const std::function<void(const Settings&)>& apply, const std::function<void()>& onCancel) {
         Dialog dialog;
         dialog.setName("settings");
         if (!Bundle::instance().loadDialog(dialog)) {
@@ -343,7 +350,7 @@ namespace curvy {
         const Settings original = settings;
         Settings working = settings;
         Session session(dialog.rootView(), working, apply);
-        session.wire([&dialog](DialogResult result) { dialog.close(result); });
+        session.wire([&dialog](DialogResult result) { dialog.close(result); }, onCancel);
         session.start();
 #ifdef CURVY_GUI_AUTOMATION
         Automation::expose(dialog.rootView());   // so a GUI test can reach the dialog's views while it is open
@@ -371,7 +378,9 @@ namespace curvy {
         int applied = 0;
         Settings last;
         Session session(dialog.rootView(), working, [&applied, &last](const Settings& s) { ++applied; last = s; });
-        session.wire([](DialogResult) {});
+        int closedOk = 0;
+        int closedCancel = 0;
+        session.wire([&closedOk, &closedCancel](DialogResult result) { (result == DialogResult::Ok ? closedOk : closedCancel)++; });
         session.start();
         dialog.rootView().updateLayout();
 
@@ -417,6 +426,21 @@ namespace curvy {
 
         reset->onClick(*reset);
         expect(working.spaceTapMs == 300 && working.theme == Settings::ThemeChoice::Light, "Reset page only resets the shown page");
+
+        RootView& root = dialog.rootView();
+        root.setFocusedSubView(hold);
+        UIInputManager::instance().routeDialogKeyDown(root, 0, 0, 1, vkReturn);
+        expect(closedOk == 0, "Return in a field with its own handler does not press OK");
+        root.setFocusedSubView(reset);
+        UIInputManager::instance().routeDialogKeyDown(root, 0, 0, 1, vkSpaceBar);
+        expect(closedOk == 0 && closedCancel == 0, "Space on a focused button clicks that button, not OK");
+        root.setFocusedSubView(rulers);
+        UIInputManager::instance().routeDialogKeyDown(root, 0, 0, 1, vkReturn);
+        expect(closedOk == 1, "Return elsewhere presses the default OK button");
+        UIInputManager::instance().routeDialogKeyDown(root, 0, 0, 1, vkEscape);
+        expect(closedCancel == 1, "Escape presses Cancel");
+        UIInputManager::instance().routeDialogKeyDown(root, kmCtrl, 0, 1, vkEscape);
+        expect(closedCancel == 1, "Ctrl+Escape is left alone");
 
         Settings roundTrip;
         roundTrip.fromText(working.toText());

@@ -40,6 +40,9 @@ namespace curvy {
         bool toolDefaultsInDocument = false;
         int polygonSides = 5;   // the tool defaults kept per user (in the document instead when toolDefaultsInDocument)
         int starPoints = 5;
+        int cornerRadius = 12;      // the other tool-option card values (Rounded Rectangle, Star inner radius %, Pencil smoothing); always per user
+        int starInner = 50;
+        int pencilSmoothing = 40;
 
         bool welcomeShown = false;   // the first-run overlay has been shown
         bool autosave = true;

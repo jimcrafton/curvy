@@ -31,7 +31,11 @@
   .slider { height: 24px; flex-grow: 1; }
   .num { width: 44px; height: 20px; background: #121212; color: #F0F0F0; }
   .tb { width: 26px; height: 26px; }
-  #colorPanel { height: 150px; }
+  #colorPanel { height: 372px; }
+  .col { display: flex; flex-direction: column; gap: 4px; height: 148px; }
+  .host { flex-grow: 1; height: 34px; }
+  .wheel { height: 148px; }
+  .mode { height: 24px; }
   #strokePanel { height: 130px; }
   #opacityPanel { height: 62px; }
 </style>
@@ -63,10 +67,19 @@
     <div id="colorPanel" class="box">
       <div id="colorPanelHeaderBar" class="head"><span id="colorPanelHeader" class="title">Colour</span><span id="colorPanelHeaderInfo" class="info">Fill</span></div>
       <div id="colorPanelBody" class="body">
+        <div class="row"><canvas id="fillNoneButton" class="tb" data-newui-type="ToolbarButton"></canvas><canvas id="fillSolidButton" class="tb" data-newui-type="ToolbarButton"></canvas><canvas id="fillLinearButton" class="tb" data-newui-type="ToolbarButton"></canvas><canvas id="fillRadialButton" class="tb" data-newui-type="ToolbarButton"></canvas></div>
         <div class="row"><canvas id="fillWell" class="well" data-newui-type="SubView"></canvas><canvas id="strokeWell" class="well" data-newui-type="SubView"></canvas><input id="hexField" class="field" type="text" value="#000000"></div>
-        <div class="row"><span id="comp0SliderCaption" class="cap">H</span><input id="comp0Slider" class="slider" type="range"><input id="comp0SliderValue" class="num" type="text" value="0"></div>
-        <div class="row"><span id="comp1SliderCaption" class="cap">S</span><input id="comp1Slider" class="slider" type="range"><input id="comp1SliderValue" class="num" type="text" value="0"></div>
-        <div class="row"><span id="comp2SliderCaption" class="cap">B</span><input id="comp2Slider" class="slider" type="range"><input id="comp2SliderValue" class="num" type="text" value="0"></div>
+        <div id="gradientRow" class="row" style="height:34px"><canvas id="gradientBarHost" class="host" data-newui-type="SubView"></canvas></div>
+        <canvas id="pickerTabs" class="mode" data-newui-type="SegmentedControl"></canvas>
+        <canvas id="colorWheelHost" class="wheel" data-newui-type="SubView"></canvas>
+        <div id="pickerSliderArea" class="col">
+          <canvas id="colorModeControl" class="mode" data-newui-type="SegmentedControl"></canvas>
+          <div id="comp0SliderRow" class="row"><span id="comp0SliderCaption" class="cap">R</span><input id="comp0Slider" class="slider" type="range"><input id="comp0SliderValue" class="num" type="text" value="0"></div>
+          <div id="comp1SliderRow" class="row"><span id="comp1SliderCaption" class="cap">G</span><input id="comp1Slider" class="slider" type="range"><input id="comp1SliderValue" class="num" type="text" value="0"></div>
+          <div id="comp2SliderRow" class="row"><span id="comp2SliderCaption" class="cap">B</span><input id="comp2Slider" class="slider" type="range"><input id="comp2SliderValue" class="num" type="text" value="0"></div>
+          <div id="comp3SliderRow" class="row"><span id="comp3SliderCaption" class="cap">K</span><input id="comp3Slider" class="slider" type="range"><input id="comp3SliderValue" class="num" type="text" value="0"></div>
+        </div>
+        <div id="alphaSliderRow" class="row"><span id="alphaSliderCaption" class="cap">A</span><input id="alphaSlider" class="slider" type="range"><input id="alphaSliderValue" class="num" type="text" value="100"></div>
       </div>
     </div>
     <div id="strokePanel" class="box">

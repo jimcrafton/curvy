@@ -32,6 +32,52 @@ namespace curvy {
         onKeyDown.add(this, &CanvasView::handleKeyDown);
         onKeyPress.add(this, &CanvasView::handleKeyPress);
         onMouseDblClick.add(this, &CanvasView::handleMouseDblClick);
+        onMouseLeft += [this](View&, const Point&, std::uint32_t, std::uint32_t) {
+            if (hasHover_) {
+                hasHover_ = false;
+                style().markDirty();
+            }
+            return SyncReturn::Ignored;
+        };
+    }
+
+    void CanvasView::updateHover() {
+        bool has = false;
+        std::size_t id = 0;
+        if (document_ != nullptr && tool_ == SketchTool::Select && drag_ == Drag::None && !panning_) {
+            const SketchObject* hit = document_->hitTest(pointerDoc_, 4.0 / double(zoom_));
+            if (hit != nullptr && !document_->isSelected(hit->id())) {
+                has = true;
+                id = hit->id();
+            }
+        }
+        if (has != hasHover_ || (has && id != hoverId_)) {
+            hasHover_ = has;
+            hoverId_ = id;
+            style().markDirty();
+        }
+    }
+
+    void CanvasView::paintHover(BLContext& ctx) const {
+        const SketchObject* object = hasHover_ && document_ != nullptr ? document_->findById(hoverId_) : nullptr;
+        if (object == nullptr || object->geometry().size() == 0) {
+            return;
+        }
+        const BLPoint origin = toView(BLPoint(0.0, 0.0));
+        BLPath path = object->geometry();
+        path.transform(BLMatrix2D(double(zoom_), 0.0, 0.0, double(zoom_), origin.x, origin.y));
+        const BLRgba32 accent(0xFF1E6FE0u);
+        ctx.save();
+        if (!object->fill().isNone() && object->isClosed()) {
+            ctx.set_fill_style(BLRgba32(0x401E6FE0u));
+            ctx.fill_path(path);
+            ctx.set_stroke_width(1.0);
+        } else {
+            ctx.set_stroke_width(3.0);
+        }
+        ctx.set_stroke_style(accent);
+        ctx.stroke_path(path);
+        ctx.restore();
     }
 
     void CanvasView::setDocument(SketchDocument* document) {
@@ -103,6 +149,7 @@ namespace curvy {
             commitText();   // leaving the Text tool finishes the text
         }
         tool_ = tool;
+        hasHover_ = false;
         drag_ = Drag::None;
         refreshCursor(lastPointer_, 0);
         style().markDirty();
@@ -775,6 +822,7 @@ namespace curvy {
         pointerDoc_ = toDocument(pt);
         onPointerMoved(*this);
         refreshCursor(pt, keys);
+        updateHover();
         if (panning_) {
             setPan(panStartX_ + (pt.x - panAnchor_.x), panStartY_ + (pt.y - panAnchor_.y));
             return SyncReturn::Handled;
@@ -1228,6 +1276,7 @@ namespace curvy {
             ctx.fill_circle(BLCircle(o.x, o.y, 1.6));
         }
 
+        paintHover(ctx);
         if (tool_ == SketchTool::Gradient) {
             paintGradientOverlay(ctx);
         }

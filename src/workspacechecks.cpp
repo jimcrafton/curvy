@@ -1,5 +1,6 @@
 #include "curvy/workspacechecks.h"
 
+#include "curvy/colorwheel.h"
 #include "curvy/workspacecontroller.h"
 #include "curvy/theme.h"
 
@@ -194,6 +195,8 @@ namespace curvy {
                 w_.runCommand("view.toolbar");
                 w_.runCommand("view.properties");
                 expect(!dock->toolDock()->isVisible() && !dock->propertyDock()->isVisible() && !toolbarToggle->isChecked(), "the View ring commands turn them off and the toggles follow");
+                checkAppearanceCards();
+                checkToolOptions();
                 move(at(-60, 400));
                 tapSpace();
                 expect(w_.menu().isOpen() && w_.menu().ring().title == "Document", "over the pasteboard the Document ring opens");
@@ -202,6 +205,114 @@ namespace curvy {
                 key(newui::vkLetterT);
                 expect(model_->toolbarVisible() && dock->toolDock()->isVisible(), "T in the View ring turns the toolbar on");
                 w_.runCommand("view.toolbar");
+            }
+
+            // The object ring's Fill and Stroke slots lift the dock's Colour / Stroke box into a card at the pen, with the docks off.
+            void checkAppearanceCards() {
+                DockController* dock = &w_.dock();
+                doc_->setSelection({doc_->hitTest(BLPoint(375, 170), 2.0)->id()});
+                auto box = [&](const char* name) { return w_.frame().rootView().findView(name); };
+                auto homeless = [&](const char* name) { return box(name) != nullptr && box(name)->parent() != nullptr && box(name)->parent()->name() != "propertyDockBox"; };
+                w_.runCommand("card.color");
+                expect(dock->card() == DockController::Card::Fill && homeless("colorPanel") && box("colorPanel")->isVisible(), "the Fill slot lifts the Colour box out of the dock into a card");
+                expect(!dock->propertyDock()->isVisible(), "and the dock itself stays off");
+                expect(dock->stylePanel()->target() == StylePanel::Target::Fill, "a filled closed shape opens the Color card on Fill");
+                {
+                    SketchObject* shape = doc_->findById(doc_->selection().front());
+                    const SketchPaint kept = shape->fill();
+                    shape->setFill(SketchPaint::none());
+                    w_.runCommand("card.color");
+                    expect(dock->stylePanel()->target() == StylePanel::Target::Stroke, "a shape with no fill opens the Color card on Stroke");
+                    shape->setFill(kept);
+                    w_.runCommand("card.color");
+                }
+                auto* red = dynamic_cast<newui::Slider*>(box("comp0Slider"));
+                auto* hex = dynamic_cast<newui::TextField*>(box("hexField"));
+                expect(red != nullptr && hex != nullptr && box("alphaSlider") != nullptr, "the Colour card has the component and alpha sliders");
+                red->setValue(0.0f);
+                expect(hex->text().compare(0, 3, L"#00") == 0, "moving the R slider changes the fill (the hex follows)");
+                auto* mode = dynamic_cast<newui::SegmentedControl*>(box("colorModeControl"));
+                expect(mode != nullptr && mode->segments().size() == 4, "the card has the Gray / RGB / CMYK / HSB control");
+                mode->setSelectedIndex(3);
+                expect(dynamic_cast<newui::Label*>(box("comp0SliderCaption"))->text() == "H", "HSB turns the sliders into H, S, B");
+                mode->setSelectedIndex(1);
+
+                auto* host = dynamic_cast<newui::SubView*>(box("colorWheelHost"));
+                auto* wheel = host != nullptr && !host->childViews().empty() ? dynamic_cast<ColorWheel*>(host->childViews().front()) : nullptr;
+                expect(wheel != nullptr && host->isVisible(), "the Colour card opens on the colour wheel");
+                const newui::Rect area = wheel->getClientBounds();
+                const float cx = area.left() + area.width() * 0.5f, cy = area.top() + area.height() * 0.5f;
+                const float ringRadius = std::min(area.width(), area.height()) * 0.5f - 2.0f - 8.0f;
+                const newui::Point onRing(cx + ringRadius * std::cos(2.0944f), cy + ringRadius * std::sin(2.0944f));   // 120 degrees clockwise from red: green
+                wheel->onMouseDown(*wheel, onRing, newui::mbmLeftButton, 0);
+                wheel->onMouseUp(*wheel, onRing, newui::mbmLeftButton, 0);
+                auto channel = [&](std::size_t at) { return int(std::wcstol(hex->text().substr(at, 2).c_str(), nullptr, 16)); };
+                expect(std::fabs(wheel->hue() - 1.0 / 3.0) < 0.02 && channel(3) > 0xE0 && channel(1) < 0x20, "pressing on the ring turns the hue: the fill goes green");
+                const newui::Point inSquare(cx - area.width() * 0.1f, cy);
+                wheel->onMouseDown(*wheel, newui::Point(cx - ringRadius * 0.45f, cy), newui::mbmLeftButton, 0);   // left side of the square: no saturation
+                wheel->onMouseUp(*wheel, inSquare, newui::mbmLeftButton, 0);
+                expect(wheel->saturation() < 0.1 && std::abs(channel(1) - channel(3)) < 0x20, "a press at the square's left edge desaturates the fill");
+                auto* tabs = dynamic_cast<newui::SegmentedControl*>(box("pickerTabs"));
+                tabs->setSelectedIndex(1);
+                expect(!host->isVisible() && box("pickerSliderArea")->isVisible(), "the Sliders tab swaps the wheel for the sliders");
+                tabs->setSelectedIndex(0);
+                auto* linear = dynamic_cast<newui::ToolbarButton*>(box("fillLinearButton"));
+                linear->setChecked(true);
+                expect(box("gradientRow")->isVisible() && canvas_->tool() == SketchTool::Gradient, "choosing Linear shows the stop strip and arms the Gradient tool");
+                auto* solid = dynamic_cast<newui::ToolbarButton*>(box("fillSolidButton"));
+                solid->setChecked(true);
+                expect(!box("gradientRow")->isVisible(), "choosing Solid hides the strip again");
+                canvas_->setTool(SketchTool::Select);
+                w_.runCommand("card.stroke");
+                expect(dock->card() == DockController::Card::Stroke && homeless("strokePanel") && !homeless("colorPanel"), "the Stroke slot swaps the card to the Stroke box and the Colour box goes home");
+                dock->closeCard();
+                expect(dock->card() == DockController::Card::None && !homeless("strokePanel") && !homeless("colorPanel"), "closing the card puts the box back in the dock");
+                w_.runCommand("card.color");
+                w_.frame().rootView().setFocusedSubView(dynamic_cast<newui::SubView*>(box("comp1Slider")));
+                w_.frame().rootView().onKeyDown(w_.frame().rootView(), 0, 0, 1, newui::vkEscape);   // what RootView::keyEvent does first with any key
+                expect(dock->card() == DockController::Card::None, "Esc closes the card while one of its sliders has the focus");
+                w_.runCommand("card.stroke");
+                auto* x = dynamic_cast<newui::Control*>(box("cardClose"));
+                expect(x != nullptr, "the card has a close button");
+                x->onClick(*x);
+                expect(dock->card() == DockController::Card::None, "the close button puts the card away");
+                doc_->clearSelection();
+            }
+
+            // The option cards: defaults for the next shape, from a ring slot's option box or Shift + its key, and in step with the canvas.
+            void checkToolOptions() {
+                ToolOptionsCard& card = w_.toolOptions();
+                auto view = [&](const char* name) { return w_.frame().rootView().findView(name); };
+                const newui::Point box = RadialLayout::optionBoxCenter(1, 8);
+                expect(std::hypot(double(box.x), double(box.y)) > RadialLayout::ringRadius + RadialLayout::slotHeight * 0.5, "a slot's option box sits past the slot's outer end");
+
+                const int pointsBefore = canvas_->starPointCount(), innerBefore = canvas_->starInnerPercent();
+                w_.runCommand("options.star");
+                expect(canvas_->starPointCount() == pointsBefore && canvas_->starInnerPercent() == innerBefore, "opening the card leaves the defaults as they were");
+                expect(card.isOpen() && card.tool() == SketchTool::Star, "the Star card opens");
+                expect(card.value(0) == double(canvas_->starPointCount()) && card.value(1) == double(canvas_->starInnerPercent()), "and shows the canvas's points and inner radius");
+                expect(view("optionRow1")->isVisible() && view("optionRow2")->isVisible(), "Star has two rows");
+                canvas_->setStarPoints(7);
+                expect(card.value(0) == 7.0 && dynamic_cast<newui::Slider*>(view("optionSlider1"))->value() == 7.0f, "the arrows while dragging and the card agree");
+                dynamic_cast<newui::Slider*>(view("optionSlider2"))->setValue(30.0f);
+                expect(canvas_->starInnerPercent() == 30, "moving the inner radius slider changes the canvas default");
+                auto* reset = dynamic_cast<newui::Button*>(view("optionsReset"));
+                reset->onClick(*reset);
+                expect(canvas_->starPointCount() == 5 && canvas_->starInnerPercent() == 50, "Reset puts the defaults back");
+                canvas_->setStarPoints(9);
+                w_.runCommand("options.polygon");
+                expect(card.tool() == SketchTool::Polygon && !view("optionRow2")->isVisible() && canvas_->starPointCount() == 9, "the Polygon card has one row and leaves the star alone");
+                key(newui::vkEscape);
+                expect(!card.isOpen(), "Esc closes the card");
+                canvas_->setStarPoints(5);
+
+                move(at(300, 400));
+                tapSpace();
+                expect(w_.menu().isOpen() && w_.menu().ring().title == "Create", "the Create ring is up for Shift + key");
+                w_.menu().handleKey("S", true);
+                expect(!w_.menu().isOpen() && card.isOpen() && card.tool() == SketchTool::Star, "Shift + the slot's key opens its options instead of arming it");
+                expect(canvas_->tool() == SketchTool::Select, "and the tool is not armed");
+                card.close();
             }
 
             void checkTheme() {

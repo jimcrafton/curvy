@@ -14,6 +14,7 @@ namespace curvy {
         std::string label;
         std::string key;       // shown on the slot and picked with the same key while the ring is open
         std::string command;
+        std::string optionsCommand;   // when set the slot carries an option box at its outer end; tapping the box (or Shift + the key) runs this instead
     };
 
     // @reflect ignore=true
@@ -38,6 +39,9 @@ namespace curvy {
         static newui::Point slotCenter(int index, int count);
         // The slot nearest to the direction of (dx, dy) from the ring's centre, the hub, or outside.
         static int slotAt(double dx, double dy, int count);
+        // Where a slot's option box sits relative to the ring's centre: just past the slot's outer end, along the line from the hub.
+        static newui::Point optionBoxCenter(int index, int count);
+        static constexpr double optionBoxReach = 13.0;   // the box's tap target, a pen-sized circle
     };
 
     // The ring menu: opened at a point (the pen or the cursor), it names itself in the hub, runs a slot's command on a tap or on its
@@ -54,8 +58,8 @@ namespace curvy {
         const RadialRing& ring() const { return ring_; }
         int hot() const { return hot_; }
 
-        // Keys while open; returns true when the key was used.
-        bool handleKey(const std::string& key);
+        // Keys while open; returns true when the key was used. With `options` (Shift held) a slot that has options runs its optionsCommand.
+        bool handleKey(const std::string& key, bool options = false);
         bool handleEscape();
 
         newui::Delegate<RadialMenu, const std::string&> onCommand;
@@ -66,7 +70,8 @@ namespace curvy {
         newui::SyncReturn handleMouseDown(newui::View& sender, const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys);
         newui::SyncReturn handleMouseMove(newui::View& sender, const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys);
         newui::SyncReturn handleMouseUp(newui::View& sender, const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys);
-        void choose(int hit);
+        void choose(int hit, bool options = false);
+        int optionBoxAt(const newui::Point& pt) const;
         int hitAt(const newui::Point& pt) const;
 
         RadialRing ring_;

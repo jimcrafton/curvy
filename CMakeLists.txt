@@ -57,6 +57,8 @@ add_executable(curvy
     src/sketchobject.cpp
     src/graphdocument.cpp
     src/radialmenu.cpp
+    src/tooloptionscard.cpp
+    src/colorwheel.cpp
     src/holdscrub.cpp
     src/workspacemodel.cpp
     src/workspacecontroller.cpp

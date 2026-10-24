@@ -220,6 +220,7 @@
           {
             type: "Button",
             name: "traceButton",
+            defaultControl: true,
             desiredSize: { type: "Size", width: 96, height: 28 },
             desiredSizeOverride: true,
             text: "Trace"
@@ -227,6 +228,7 @@
           {
             type: "Button",
             name: "traceCancelButton",
+            cancelControl: true,
             desiredSize: { type: "Size", width: 96, height: 28 },
             desiredSizeOverride: true,
             text: "Cancel"

@@ -70,7 +70,7 @@ namespace curvy {
             void wire(const std::function<void(DialogResult)>& closeWith) {
                 for (TextField* field : {colors_, size_, specks_}) {
                     if (field != nullptr) {
-                        field->onReturnPressed += [this](TextField&) { commit(); return SyncReturn::Handled; };
+                        field->onReturnPressed += [this](TextField&) { commit(); return SyncReturn::Ignored; };
                         field->onLostFocus += [this](View&) { commit(); return SyncReturn::Handled; };
                     }
                 }

@@ -41,6 +41,9 @@ namespace curvy {
                 toolDefaultsInDocument = defaults.toolDefaultsInDocument;
                 polygonSides = defaults.polygonSides;
                 starPoints = defaults.starPoints;
+                cornerRadius = defaults.cornerRadius;
+                starInner = defaults.starInner;
+                pencilSmoothing = defaults.pencilSmoothing;
                 break;
             case SettingsPage::Files:
                 autosave = defaults.autosave;
@@ -86,6 +89,9 @@ namespace curvy {
             << "toolDefaultsInDocument=" << toolDefaultsInDocument << "\n"
             << "polygonSides=" << polygonSides << "\n"
             << "starPoints=" << starPoints << "\n"
+            << "cornerRadius=" << cornerRadius << "\n"
+            << "starInner=" << starInner << "\n"
+            << "pencilSmoothing=" << pencilSmoothing << "\n"
             << "welcomeShown=" << welcomeShown << "\n"
             << "autosave=" << autosave << "\n"
             << "autosaveMinutes=" << autosaveMinutes << "\n"
@@ -169,6 +175,9 @@ namespace curvy {
         flag("snapGuides", snapGuides);
         integer("polygonSides", polygonSides, 3, 60);
         integer("starPoints", starPoints, 3, 40);
+        integer("cornerRadius", cornerRadius, 0, 200);
+        integer("starInner", starInner, 10, 90);
+        integer("pencilSmoothing", pencilSmoothing, 0, 100);
         flag("toolDefaultsInDocument", toolDefaultsInDocument);
         flag("welcomeShown", welcomeShown);
         flag("autosave", autosave);

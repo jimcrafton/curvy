@@ -23,6 +23,16 @@ namespace curvy {
         return Point(float(ringRadius * std::cos(angle)), float(ringRadius * std::sin(angle)));
     }
 
+    Point RadialLayout::optionBoxCenter(int index, int count) {
+        const Point at = slotCenter(index, count);
+        const double length = std::hypot(double(at.x), double(at.y));
+        const double ux = length > 0.0 ? double(at.x) / length : 0.0, uy = length > 0.0 ? double(at.y) / length : -1.0;
+        const double toSide = std::fabs(ux) > 1e-6 ? slotWidth * 0.5 / std::fabs(ux) : 1e9;
+        const double toEnd = std::fabs(uy) > 1e-6 ? slotHeight * 0.5 / std::fabs(uy) : 1e9;
+        const double out = std::min(toSide, toEnd) + 14.0;
+        return Point(float(double(at.x) + ux * out), float(double(at.y) + uy * out));
+    }
+
     int RadialLayout::slotAt(double dx, double dy, int count) {
         const double distance = std::hypot(dx, dy);
         if (distance < hubRadius) {
@@ -48,7 +58,7 @@ namespace curvy {
         ring_ = ring;
         openedByPress_ = openedByPress;
         const Rect client = getClientBounds();
-        const double margin = RadialLayout::ringRadius + RadialLayout::slotWidth * 0.5 + 6.0;
+        const double margin = RadialLayout::ringRadius + RadialLayout::slotWidth * 0.5 + 26.0;   // room for the option boxes past the slots
         const double x = std::clamp(double(center.x), client.left() + margin, std::max(client.left() + margin, client.left() + client.width() - margin));
         const double y = std::clamp(double(center.y), client.top() + margin, std::max(client.top() + margin, client.top() + client.height() - margin));
         center_ = Point(float(x), float(y));
@@ -70,12 +80,27 @@ namespace curvy {
         return RadialLayout::slotAt(double(pt.x) - double(center_.x), double(pt.y) - double(center_.y), int(ring_.slots.size()));
     }
 
-    void RadialMenu::choose(int hit) {
+    int RadialMenu::optionBoxAt(const Point& pt) const {
+        const int count = int(ring_.slots.size());
+        for (int i = 0; i < count; ++i) {
+            if (ring_.slots[std::size_t(i)].optionsCommand.empty()) {
+                continue;
+            }
+            const Point box = RadialLayout::optionBoxCenter(i, count);
+            if (std::hypot(double(pt.x) - double(center_.x) - double(box.x), double(pt.y) - double(center_.y) - double(box.y)) <= RadialLayout::optionBoxReach) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    void RadialMenu::choose(int hit, bool options) {
         std::string command;
         if (hit == RadialLayout::hub) {
             command = ring_.hubCommand;
         } else if (hit >= 0 && hit < int(ring_.slots.size())) {
-            command = ring_.slots[std::size_t(hit)].command;
+            const RadialSlot& slot = ring_.slots[std::size_t(hit)];
+            command = options && !slot.optionsCommand.empty() ? slot.optionsCommand : slot.command;
         }
         close();
         if (!command.empty()) {
@@ -83,13 +108,13 @@ namespace curvy {
         }
     }
 
-    bool RadialMenu::handleKey(const std::string& key) {
+    bool RadialMenu::handleKey(const std::string& key, bool options) {
         if (!open_) {
             return false;
         }
         for (std::size_t i = 0; i < ring_.slots.size(); ++i) {
             if (!ring_.slots[i].key.empty() && ring_.slots[i].key == key) {
-                choose(int(i));
+                choose(int(i), options);
                 return true;
             }
         }
@@ -107,6 +132,10 @@ namespace curvy {
     SyncReturn RadialMenu::handleMouseDown(View&, const Point& pt, std::uint32_t, std::uint32_t) {
         if (!open_) {
             return SyncReturn::Ignored;
+        }
+        if (const int box = optionBoxAt(pt); box >= 0) {
+            choose(box, true);
+            return SyncReturn::Handled;
         }
         const int hit = hitAt(pt);
         if (hit == RadialLayout::outside) {
@@ -135,7 +164,7 @@ namespace curvy {
         }
         // The press that opened the ring is let go: over a slot that is a flick; on the hub or outside it stays open for a tap.
         openedByPress_ = false;
-        const int hit = hitAt(pt);
+        const int hit = optionBoxAt(pt) >= 0 ? RadialLayout::outside : hitAt(pt);   // letting go on an option box is not a flick onto the slot
         if (hit >= 0) {
             choose(hit);
         }
@@ -182,6 +211,22 @@ namespace curvy {
                     ctx.fill_utf8_text(BLPoint(tx + double(labelWidth) + 6.0, y + h * 0.5 + 4.0), *blSmall, slot.key.c_str(), slot.key.size());
                 }
             }
+        }
+
+        // The option box (a tiny dialog glyph, heavier top edge) at the outer end of a slot that has options; it is a tap target.
+        for (int i = 0; i < count; ++i) {
+            if (ring_.slots[std::size_t(i)].optionsCommand.empty()) {
+                continue;
+            }
+            const Point box = RadialLayout::optionBoxCenter(i, count);
+            const double bx = cx + double(box.x) - 8.0, by = cy + double(box.y) - 6.75;
+            ctx.set_fill_style(rgb(theme.bgSurface));
+            ctx.fill_round_rect(BLRoundRect(bx, by, 16.0, 13.5, 2.7));
+            ctx.set_stroke_style(rgb(theme.highlight));
+            ctx.set_stroke_width(1.35);
+            ctx.stroke_round_rect(BLRoundRect(bx + 0.7, by + 0.7, 14.6, 12.1, 2.7));
+            ctx.set_fill_style(rgb(theme.highlight));
+            ctx.fill_rect(BLRect(bx, by, 16.0, 3.6));
         }
 
         ctx.set_fill_style(hot_ == RadialLayout::hub ? rgb(theme.slot) : rgb(theme.bgSurface));

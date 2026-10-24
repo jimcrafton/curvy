@@ -7,6 +7,7 @@
 #include <newui/rootview.h>
 #include <newui/segmentedcontrol.h>
 
+#include "curvy/colorwheel.h"
 #include "curvy/gradientbar.h"
 #include "curvy/swatchgrid.h"
 
@@ -48,6 +49,11 @@ namespace curvy {
         std::size_t selectedStop() const { return selectedStop_; }
         void setSelectedStop(std::size_t index);
         newui::Delegate<StylePanel> onStopSelected;
+        // The user chose a Linear or Radial fill from the type buttons: the host can put the canvas on the Gradient tool so the line and its stops are
+        // draggable on the shape.
+        newui::Delegate<StylePanel> onGradientChosen;
+        // Fired when the panel's content grows or shrinks (the gradient bar appearing), so a floating card can resize to fit.
+        newui::Delegate<StylePanel> onContentChanged;
         // Fired when the fill/stroke target changes.
         newui::Delegate<StylePanel> onTargetChanged;
 
@@ -129,6 +135,7 @@ namespace curvy {
         SketchDocument& document_;
         Target target_ = Target::Fill;
         bool updating_ = false;
+        ColorWheel* wheel_ = nullptr;
         bool baseRowSelected_ = false;  // the stack's base "Opacity" row is the one being edited
         // The layout's own heights of every section fitSection() has moved, and how far each is moved now.
         struct Section {

@@ -187,12 +187,205 @@ class SettingsDialog(CurvyCase):
         ok = self.app.find("settingsOk")
         self.assertLessEqual(ok.y + ok.h, root.y + root.h)
 
+    def test_escape_cancels_and_reverts(self):
+        self.open_settings()
+        self.app.click("navWorkspace")
+        self.app.click("toolbarVisible")                            # not applied until OK
+        self.app.key_raw("escape")
+        self.app.wait_until(lambda: not self.dialog_open(), "the dialog to close")
+        self.assertFalse(self.app.prop("toolbarToggle", "checked"))
+        # Only the Cancel button's click says this; closing the window any other way would not, so Escape did reach the button.
+        self.app.wait_until(lambda: self.app.prop("hintKeys", "text") == "Settings cancelled", "Cancel's click to run")
+
     def test_ok_applies_the_start_settings_now(self):
         self.open_settings()
         self.app.click("navWorkspace")
         self.app.click("toolbarVisible")
         self.app.click("settingsOk")
         self.app.wait_until(lambda: self.app.prop("toolbarToggle", "checked"), "the toolbar to show after OK")
+
+
+class AppearanceCards(CurvyCase):
+    """The Object ring's Fill and Stroke slots open the dock's Colour / Stroke box as a card at the pen, with the docks off."""
+
+    def draw_rectangle(self):
+        self.new_a4()
+        canvas = self.app.find("canvas")
+        cx, cy = canvas.x + canvas.w // 2, canvas.y + canvas.h // 2
+        self.app.click_at((cx, cy))
+        self.tap_space()                                           # over the page: the Create ring
+        self.app.key("r")
+        self.app.wait_until(lambda: self.hint_tool() == "Rectangle", "the rectangle tool")
+        self.app.drag((cx - 60, cy - 40), (cx + 60, cy + 40))
+        self.app.key("escape")                                     # back to Select
+        return cx, cy
+
+    def open_card(self, key):
+        cx, cy = self.draw_rectangle()
+        self.app.click_at((cx, cy))                                # select the shape
+        self.tap_space()
+        self.app.wait_until(lambda: self.app.prop("hintKeys", "text") == "Ring: Object", "the Object ring")
+        self.app.key(key)
+
+    def card_visible(self, name):
+        """In the card: shown, and not flush against the canvas's right edge where the (hidden) dock keeps its boxes."""
+        try:
+            box, canvas = self.app.find(name), self.app.find("canvas")
+        except newui_guitest.GuiTestError:
+            return False
+        return box.visible and box.w > 0 and box.x + box.w < canvas.x + canvas.w - 2
+
+    def test_the_fill_slot_opens_the_colour_box_as_a_card(self):
+        self.open_card("3")
+        self.app.wait_until(lambda: self.card_visible("colorPanel"), "the Colour card")
+        box, canvas = self.app.find("colorPanel"), self.app.find("canvas")
+        self.assertGreaterEqual(box.x, canvas.x)
+        self.assertLessEqual(box.x + box.w, canvas.x + canvas.w)
+        self.assertFalse(self.app.prop("propertiesToggle", "checked"))     # the dock itself stays off
+        self.app.click_at((canvas.x + 40, canvas.y + canvas.h - 40))      # a press elsewhere puts the card away
+        self.app.wait_until(lambda: not self.card_visible("colorPanel"), "the card to close")
+
+    def test_a_slider_in_the_card_changes_the_fill_and_the_mode_control_switches_models(self):
+        self.open_card("3")
+        self.app.wait_until(lambda: self.card_visible("colorPanel"), "the Colour card")
+        self.app.click_segment("pickerTabs", 1)                          # the card opens on the wheel; the sliders are the other tab
+        before = self.app.prop("hexField", "text")
+        slider = self.app.find("comp0Slider")
+        self.app.drag((slider.x + slider.w // 2, slider.y + slider.h // 2), (slider.x + 4, slider.y + slider.h // 2))
+        self.app.wait_until(lambda: self.app.prop("hexField", "text") != before, "the fill to change")
+        self.app.click_segment("colorModeControl", 3)                    # HSB
+        self.app.wait_until(lambda: self.app.prop("comp0SliderCaption", "text") == "H", "the sliders to become H S B")
+
+    def test_dragging_on_the_wheel_changes_the_fill(self):
+        self.open_card("3")
+        self.app.wait_until(lambda: self.card_visible("colorPanel"), "the Colour card")
+        before = self.app.prop("hexField", "text")
+        wheel = self.app.find("colorWheelHost")
+        cx, cy = wheel.x + wheel.w // 2, wheel.y + wheel.h // 2
+        radius = min(wheel.w, wheel.h) // 2 - 2 - 8
+        self.app.drag((cx + radius, cy), (cx, cy + radius))               # round the ring from red towards green
+        self.app.wait_until(lambda: self.app.prop("hexField", "text") != before, "the fill to change")
+
+    def test_choosing_linear_arms_the_gradient_tool_and_the_card_stays_for_the_shape(self):
+        cx, cy = self.draw_rectangle()
+        self.app.click_at((cx, cy))
+        self.tap_space()
+        self.app.wait_until(lambda: self.app.prop("hintKeys", "text") == "Ring: Object", "the Object ring")
+        self.app.key("3")
+        self.app.wait_until(lambda: self.card_visible("colorPanel"), "the Colour card")
+        self.app.click("fillLinearButton")
+        self.app.wait_until(lambda: self.hint_tool() == "Gradient", "the Gradient tool")
+        self.assertTrue(self.app.find("gradientBarHost").visible)
+        self.app.drag((cx - 50, cy), (cx + 50, cy))                        # lay the line across the shape: a press on the canvas
+        self.assertTrue(self.card_visible("colorPanel"))                   # the card is still up for the stops
+
+    def test_escape_closes_the_card_with_a_slider_focused(self):
+        self.open_card("3")
+        self.app.wait_until(lambda: self.card_visible("colorPanel"), "the Colour card")
+        self.app.click_segment("pickerTabs", 1)
+        slider = self.app.find("comp1Slider")
+        self.app.click_at((slider.x + slider.w // 2, slider.y + slider.h // 2))   # the focus is now in the card
+        self.app.key("escape")
+        self.app.wait_until(lambda: not self.card_visible("colorPanel"), "the card to close")
+
+    def test_the_close_button_puts_the_card_away(self):
+        self.open_card("3")
+        self.app.wait_until(lambda: self.card_visible("colorPanel"), "the Colour card")
+        self.app.click("cardClose")
+        self.app.wait_until(lambda: not self.card_visible("colorPanel"), "the card to close")
+        self.app.key("space")                                              # the focus went back to the canvas, so Space opens the ring again
+        self.app.wait_until(self.ring_open, "the ring to open")
+
+    def test_the_stroke_slot_opens_the_stroke_box_and_escape_closes_it(self):
+        self.open_card("4")
+        self.app.wait_until(lambda: self.card_visible("strokePanel"), "the Stroke card")
+        self.assertFalse(self.card_visible("colorPanel"))
+        self.app.key("escape")
+        self.app.wait_until(lambda: not self.card_visible("strokePanel"), "the card to close")
+
+
+class ToolOptions(CurvyCase):
+    """Double-clicking a toolbar button opens that tool's options card; the x and Esc close it."""
+
+    def card_open(self):
+        try:
+            return self.app.find("toolOptionsCard").visible      # the card's own root: a child's flag ignores a hidden parent
+        except newui_guitest.GuiTestError:
+            return False
+
+    def open_star_options(self):
+        self.new_a4()
+        self.app.click("toolbarToggle")
+        self.app.double_click("starTool")
+        self.app.wait_until(self.card_open, "the Star options card")
+
+    def test_double_click_opens_the_options_and_the_slider_moves_the_default(self):
+        self.open_star_options()
+        self.assertEqual("Star", self.app.prop("optionsTitle", "text"))
+        slider = self.app.find("optionSlider1")
+        self.app.drag((slider.x + slider.w // 2, slider.y + slider.h // 2), (slider.x + slider.w - 3, slider.y + slider.h // 2))
+        self.app.wait_until(lambda: self.app.prop("optionValue1", "text") == "24", "the points to reach the top of the slider")
+        self.app.click("optionsReset")
+        self.app.wait_until(lambda: self.app.prop("optionValue1", "text") == "5", "Reset to put the default back")
+
+    def test_the_close_button_and_escape_close_it(self):
+        self.open_star_options()
+        self.app.click("optionsClose")
+        self.app.wait_until(lambda: not self.card_open(), "the card to close")
+        self.app.double_click("starTool")
+        self.app.wait_until(self.card_open, "the card to open again")
+        self.app.click("optionValue1")                                     # focus in the card
+        self.app.key("escape")
+        self.app.wait_until(lambda: not self.card_open(), "Esc to close it")
+
+
+class NewDocumentDialog(CurvyCase):
+    """Return presses the default Create button and Escape the Cancel button (Control::setDefaultControl/setCancelControl)."""
+
+    def open_dialog(self):
+        self.focus_canvas()
+        self.tap_space()
+        canvas = self.app.find("canvas")
+        self.app.click_at((canvas.x + canvas.w // 2, canvas.y + canvas.h // 2))   # the ring opens under the pointer: this is its hub
+        self.app.wait_until(self.dialog_open, "the New Document dialog to open")
+
+    def dialog_open(self):
+        try:
+            return self.app.find("createButton").w > 0
+        except newui_guitest.GuiTestError:
+            return False
+
+    def tearDown(self):
+        try:
+            if self.dialog_open():
+                self.app.click("cancelButton")
+        finally:
+            super().tearDown()
+
+    def test_escape_cancels_the_dialog(self):
+        self.open_dialog()
+        self.app.key_raw("escape")                                 # key() would bring the disabled main window forward, not the dialog
+        self.app.wait_until(lambda: not self.dialog_open(), "the dialog to close")
+        self.assertEqual("Nothing open", self.hint_tool())
+
+    def test_the_default_button_has_the_accent_border(self):
+        self.open_dialog()
+        shot = self.app.screenshot("newDocumentRoot")
+
+        def edge(name):                                            # the brightest of the pixels along the button's top edge
+            b = self.app.find(name)
+            return max((shot.pixel(b.x + b.w // 2, b.y + dy) for dy in (0, 1)), key=sum)
+
+        create, cancel = edge("createButton"), edge("cancelButton")
+        self.assertGreater(create[0], 0xC0, create)                # amber #FFB454: strong red, weak blue
+        self.assertLess(create[2], 0x90, create)
+        self.assertLess(cancel[0], 0x80, cancel)                   # the other button keeps the plain grey border
+
+    def test_return_creates_the_document(self):
+        self.open_dialog()
+        self.app.key_raw("enter")
+        self.app.wait_until(lambda: not self.dialog_open(), "the dialog to close")
+        self.app.wait_until(lambda: self.hint_tool() == "Select", "a document to open")
 
 
 class Welcome(CurvyCase):

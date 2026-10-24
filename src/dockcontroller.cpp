@@ -3,6 +3,7 @@
 #include "curvy/theme.h"
 
 #include <newui/bundle.h>
+#include <newui/segmentedcontrol.h>
 
 #include <algorithm>
 #include <cmath>
@@ -69,9 +70,31 @@ namespace curvy {
                 canvas_.addChild(dock);
             }
         }
+        if (auto* mode = find<SegmentedControl>(frame_.rootView(), "colorModeControl")) {
+            mode->setSegments({"Gray", "RGB", "CMYK", "HSB"});   // the layout file only has the placeholder; StylePanel follows the colour's space
+            mode->setSelectedIndex(1);
+        }
         if (propertyDock_ != nullptr) {
             transformPanel_ = std::make_unique<TransformPanel>(frame_.rootView(), document_);
             stylePanel_ = std::make_unique<StylePanel>(frame_.rootView(), document_);   // binds the views it finds by name; the rest of its panel is not in the dock
+            stylePanel_->onContentChanged += [this](StylePanel&) { fitCard(); return SyncReturn::Handled; };
+        }
+        if (propertyDock_ != nullptr) {
+            cardHost_ = new SubView();
+            cardHost_->setVisible(false);
+            canvas_.addChild(cardHost_);
+            cardClose_ = new ToolbarButton();
+            cardClose_->setName("cardClose");
+            cardClose_->setIcon("icons/close.svg");   // drawn, so the cross sits exactly in the middle (a glyph sits on the text baseline)
+            cardClose_->setIconSize(14.0f);
+            cardClose_->onClick += [this](Control&) {
+                closeCard();
+                if (onCardDismissed) {
+                    onCardDismissed();
+                }
+                return SyncReturn::Handled;
+            };
+            cardHost_->addChild(cardClose_);
         }
         bindTools();
         bindToggles();
@@ -120,6 +143,14 @@ namespace curvy {
                 syncTool();
                 return SyncReturn::Handled;
             };
+            button->onMouseDblClick += [this, tool, button](View&, const Point&, std::uint32_t, std::uint32_t) {
+                if (onToolOptions) {
+                    const Point corner = frame_.rootView().accumulatedOffset(button);
+                    const Point origin = frame_.rootView().accumulatedOffset(&canvas_);
+                    onToolOptions(tool, Point(corner.x - origin.x + button->bounds().size().width + 6.0f, corner.y - origin.y));
+                }
+                return SyncReturn::Handled;
+            };
         }
         syncTool();
     }
@@ -143,7 +174,9 @@ namespace curvy {
         }
         static const struct { const char* name; const char* icon; } kStrokeIcons[] = {
             {"capButtButton", "icons/cap-butt.svg"}, {"capRoundButton", "icons/cap-round.svg"}, {"capSquareButton", "icons/cap-square.svg"},
-            {"joinMiterButton", "icons/join-miter.svg"}, {"joinRoundButton", "icons/join-round.svg"}, {"joinBevelButton", "icons/join-bevel.svg"}};
+            {"joinMiterButton", "icons/join-miter.svg"}, {"joinRoundButton", "icons/join-round.svg"}, {"joinBevelButton", "icons/join-bevel.svg"},
+            {"fillNoneButton", "icons/fill-none.svg"}, {"fillSolidButton", "icons/fill-solid.svg"}, {"fillLinearButton", "icons/fill-linear.svg"},
+            {"fillRadialButton", "icons/fill-radial.svg"}};
         for (const auto& row : kStrokeIcons) {
             if (auto* button = find<ToolbarButton>(frame_.rootView(), row.name)) {
                 button->setIcon(row.icon);
@@ -185,6 +218,120 @@ namespace curvy {
         }
         frame_.rootView().updateLayout();
         canvas_.style().markDirty();
+    }
+
+    void DockController::showCard(Card which, const Point& at, const Rect* avoid) {
+        closeCard();
+        if (cardHost_ == nullptr || which == Card::None) {
+            return;
+        }
+        auto* box = dynamic_cast<SubView*>(propertyDock_->findView(which == Card::Fill ? "colorPanel" : "strokePanel"));
+        if (box == nullptr) {
+            return;
+        }
+        cardHome_ = dynamic_cast<SubView*>(box->parent());
+        if (cardHome_ == nullptr) {
+            return;
+        }
+        const auto& siblings = cardHome_->childViews();
+        cardHomeIndex_ = std::size_t(std::find(siblings.begin(), siblings.end(), box) - siblings.begin());
+        cardBox_ = box;
+        card_ = which;
+        if (which == Card::Fill) {
+            stylePanel_->setTarget(StylePanel::Target::Fill);
+        }
+        stylePanel_->refresh();
+
+        const Size size(propertyDock_->bounds().size().width, box->desiredSize().height);
+        const Rect client = canvas_.getClientBounds();
+        constexpr float kGap = 24.0f;   // room for a selected shape's handles and a gradient line's ends
+        const float fullWidth = size.width;
+        float x = at.x + 28.0f;
+        float y = at.y - size.height * 0.5f;
+        if (avoid != nullptr) {
+            const float right = avoid->right() + kGap;
+            const float left = avoid->left() - kGap - fullWidth;
+            // The roomier side; with neither fitting, the card overlaps the shape rather than leave the canvas.
+            if (right + fullWidth <= client.width() || client.width() - avoid->right() >= avoid->left()) {
+                x = right;
+            } else {
+                x = left;
+            }
+            y = avoid->top() + avoid->height() * 0.5f - size.height * 0.5f;
+        }
+        x = std::clamp(x, 0.0f, std::max(0.0f, client.width() - size.width));
+        y = std::clamp(y, canvas_.rulerSize(), std::max(canvas_.rulerSize(), client.height() - size.height));
+        cardHome_->removeChild(box);
+        cardHost_->addChild(box);
+        box->setVisible(true);
+        // The close button sits in the header's right end; a spacer there keeps the header's own content clear of it.
+        constexpr float kCloseSize = 20.0f;
+        constexpr float kHeaderHeight = 24.0f;
+        cardHeader_ = box->findView(which == Card::Fill ? "colorPanelHeaderBar" : "strokePanelHeaderBar");
+        if (auto* header = dynamic_cast<SubView*>(cardHeader_)) {
+            cardSpacer_ = new SubView();
+            cardSpacer_->setVisible(true);
+            cardSpacer_->setDesiredSize(Size(kCloseSize + 2.0f, 1.0f));
+            header->addChild(cardSpacer_);
+            header->setBounds(Rect(0.0f, 0.0f, size.width, kHeaderHeight));
+            header->updateLayout();
+        }
+        cardHost_->setBounds(Rect(x, y, size.width, size.height));
+        box->setBounds(Rect(0.0f, 0.0f, size.width, size.height));
+        cardHost_->removeChild(cardClose_);
+        cardHost_->addChild(cardClose_);   // on top of the box
+        cardClose_->setBounds(Rect(size.width - kCloseSize - 4.0f, (kHeaderHeight - kCloseSize) * 0.5f, kCloseSize, kCloseSize));
+        cardHost_->setVisible(true);
+        restyle();
+        frame_.rootView().updateLayout();
+        fitCard();
+        canvas_.style().markDirty();
+    }
+
+    void DockController::fitCard() {
+        if (card_ != Card::Fill || cardBox_ == nullptr || cardHost_ == nullptr) {
+            return;
+        }
+        auto* last = dynamic_cast<SubView*>(cardBox_->findView("alphaSliderRow"));
+        if (last == nullptr) {
+            return;
+        }
+        RootView& root = frame_.rootView();
+        constexpr float kBottomPadding = 10.0f;
+        const float bottom = root.accumulatedOffset(last).y + last->bounds().size().height - root.accumulatedOffset(cardBox_).y;
+        const float height = bottom + kBottomPadding;
+        const Rect now = cardHost_->bounds();
+        const Rect client = canvas_.getClientBounds();
+        const float y = std::clamp(now.top(), canvas_.rulerSize(), std::max(canvas_.rulerSize(), client.height() - height));
+        cardHost_->setBounds(Rect(now.left(), y, now.width(), height));
+        cardBox_->setBounds(Rect(0.0f, 0.0f, cardBox_->bounds().size().width, height));
+        root.updateLayout();
+        canvas_.style().markDirty();
+    }
+
+    void DockController::closeCard() {
+        if (card_ == Card::None) {
+            return;
+        }
+        card_ = Card::None;
+        cardHost_->setVisible(false);
+        if (auto* header = dynamic_cast<SubView*>(cardHeader_)) {
+            header->removeChild(cardSpacer_);
+        }
+        delete cardSpacer_;
+        cardSpacer_ = nullptr;
+        cardHeader_ = nullptr;
+        cardHost_->removeChild(cardBox_);
+        cardHome_->addChild(cardBox_);
+        cardHome_->reorderChild(cardBox_, cardHomeIndex_);
+        cardBox_ = nullptr;
+        cardHome_ = nullptr;
+        refreshContext();   // the box is shown again only if the selection and tool call for it
+        canvas_.style().markDirty();
+    }
+
+    bool DockController::cardContains(const Point& pt) const {
+        return card_ != Card::None && cardHost_ != nullptr && cardHost_->bounds().contains(pt);
     }
 
     void DockController::setPropertyTextSize(int points) {
@@ -280,6 +427,7 @@ namespace curvy {
                 label->setTextColor(BLRgba32(Theme::argb(rgb)));
             }
         };
+        fill(cardHost_, tint(theme.bgSurface));   // opaque: a translucent card shows the page edge through it as a stripe
         // The panels are translucent over the artwork: bgSurface at 60%.
         if (toolDock_ != nullptr) {
             fill(toolDock_->findView("toolDockBox"), tint(theme.bgSurface, 0x99));

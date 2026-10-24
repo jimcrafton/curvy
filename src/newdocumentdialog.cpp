@@ -2,6 +2,9 @@
 
 #include "curvy/pagepreview.h"
 
+#ifdef CURVY_GUI_AUTOMATION
+#include <newui/automation.h>
+#endif
 #include <newui/bundle.h>
 #include <newui/controls.h>
 #include <newui/dialogs.h>
@@ -87,7 +90,7 @@ namespace curvy {
                     if (field == nullptr) {
                         return;
                     }
-                    field->onReturnPressed += [this](TextField&) { commitFields(); return SyncReturn::Handled; };
+                    field->onReturnPressed += [this](TextField&) { commitFields(); return SyncReturn::Ignored; };
                     field->onLostFocus += [this](View&) { commitFields(); return SyncReturn::Handled; };
                 };
                 commitOnEnterOrLeave(nameField_);
@@ -357,6 +360,10 @@ namespace curvy {
                     nameBox->setEnabled(nameEditable);
                 }
             }
+#ifdef CURVY_GUI_AUTOMATION
+            dialog.rootView().setName("newDocumentRoot");   // the workspace's own root is "rootview" too, and the driver finds the first
+            Automation::expose(dialog.rootView());   // so a GUI test can reach the dialog's views while it is open
+#endif
             if (dialog.showModal(&owner) != DialogResult::Ok) {
                 return false;
             }

@@ -115,11 +115,16 @@ namespace curvy {
         // Rounded Rectangle / Polygon / Star settings, changed with the Up / Down arrows while dragging one out.
         double cornerRadius() const { return cornerRadius_; }
         void setCornerRadius(double radius);
+        // The Star's inner radius as a percentage of the outer (10..90) and how much a Pencil stroke is simplified (0..100, 40 is the old fixed fit).
+        int starInnerPercent() const { return starInner_; }
+        void setStarInnerPercent(int percent);
+        int pencilSmoothing() const { return pencilSmoothing_; }
+        void setPencilSmoothing(int value);
         int polygonSides() const { return polygonSides_; }
         void setPolygonSides(int sides);
         int starPointCount() const { return starPoints_; }
         void setStarPoints(int points);
-        newui::Delegate<CanvasView> onToolDefaultsChanged;   // the polygon sides or star points changed
+        newui::Delegate<CanvasView> onToolDefaultsChanged;   // a tool default (corner radius, polygon sides, star points and inner radius, pencil smoothing) changed
         double arcSweep() const { return arcSweep_; }
         void setArcSweep(double radians);
         // Guides: lines dragged out of the rulers that things snap to (the document keeps them). Dragging a guide with the Select tool moves it
@@ -219,6 +224,10 @@ namespace curvy {
         float leftInset_ = 0.0f;
         bool snapToGrid_ = true;
         BLPoint pointerDoc_;
+        bool hasHover_ = false;       // the Select tool's pointer is over an unselected object: its fill (or stroke) is lit
+        std::size_t hoverId_ = 0;
+        void updateHover();
+        void paintHover(BLContext& ctx) const;
         BLBox dragBounds_;  // the selection's bounds when a move began
         // ---- Guides and snapping (guides.cpp) ----
         // `value` (an x for axis 0, a y for axis 1) moved onto the nearest grid line, guide or - Smart Guides - object edge / center within
@@ -436,6 +445,8 @@ namespace curvy {
         double cornerRadius_ = 12.0;
         int polygonSides_ = 5;
         int starPoints_ = 5;
+        int starInner_ = 50;
+        int pencilSmoothing_ = 40;
         bool dragShift_ = false;               // Shift was down at the last drag update (the preview follows it)
         std::vector<BLPoint> pencilPoints_;    // the freehand points so far
         std::vector<PenAnchor> penAnchors_;    // the pen path being built (empty when none)

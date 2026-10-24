@@ -111,6 +111,46 @@ namespace curvy {
     StylePanel::StylePanel(RootView& root, SketchDocument& document)
         : root_(root), document_(document) {
 
+        // The hue ring and the gradient strip are drawn by views of their own; the layout holds a host for each (and the tabs that swap the ring for
+        // the sliders).
+        if (auto* host = find<SubView>("colorWheelHost")) {
+            wheel_ = new ColorWheel();
+            host->addChild(wheel_);
+            wheel_->setBounds(Rect(Point(0.0f, 0.0f), host->bounds().size()));
+            host->onSizeChanged += [this](View&, const Size& size) {
+                wheel_->setBounds(Rect(0.0f, 0.0f, size.width, size.height));
+                return SyncReturn::Handled;
+            };
+        }
+        if (auto* host = find<SubView>("gradientBarHost"); host != nullptr && find<GradientBar>("gradientBar") == nullptr) {
+            auto* bar = new GradientBar();
+            bar->setName("gradientBar");
+            host->addChild(bar);
+            bar->setBounds(Rect(Point(0.0f, 0.0f), host->bounds().size()));
+            host->onSizeChanged += [bar](View&, const Size& size) {
+                bar->setBounds(Rect(0.0f, 0.0f, size.width, size.height));
+                return SyncReturn::Handled;
+            };
+        }
+        if (auto* tabs = find<SegmentedControl>("pickerTabs")) {
+            tabs->setSegments({"Wheel", "Sliders"});
+            tabs->setSelectedIndex(0);
+            auto show = [this](bool wheel) {
+                if (auto* area = find<View>("colorWheelHost")) {
+                    area->setVisible(wheel);
+                }
+                if (auto* area = find<View>("pickerSliderArea")) {
+                    area->setVisible(!wheel);
+                }
+                root_.updateLayout();
+            };
+            tabs->onSelectionChanged += [show](SegmentedControl& changed) {
+                show(changed.selectedIndex() != std::optional<std::size_t>(1));
+                return SyncReturn::Handled;
+            };
+            show(true);
+        }
+
         // Fill / Stroke wells in the tool palette choose what the Color panel edits.
         if (auto* well = find<SubView>("fillWell")) {
             well->onMouseDown += [this](View&, const Point&, std::uint32_t, std::uint32_t) {
@@ -438,6 +478,9 @@ namespace curvy {
                                 : SketchGradient::fromColor(current.isNone() ? lastSolid_ : current.color());
                             applyGradient(gradient, kind == 2 ? SketchPaint::Kind::Linear : SketchPaint::Kind::Radial,
                                 kind == 2 ? "Linear Gradient" : "Radial Gradient");
+                            refresh();
+                            onGradientChosen(*this);
+                            return SyncReturn::Handled;
                         }
                     }
                     refresh();
@@ -610,6 +653,27 @@ namespace curvy {
                     }
                 }
                 refresh();
+                return SyncReturn::Handled;
+            };
+        }
+
+        if (wheel_ != nullptr) {
+            wheel_->onDragStarted += [this](ColorWheel&) {
+                beginDrag();
+                return SyncReturn::Handled;
+            };
+            wheel_->onDragFinished += [this](ColorWheel&) {
+                endDrag();
+                refresh();
+                return SyncReturn::Handled;
+            };
+            wheel_->onChanged += [this](ColorWheel& changed) {
+                if (updating_) {
+                    return SyncReturn::Ignored;
+                }
+                const SketchColor shown = displayedColor();
+                SketchColor color = SketchColor::hsb(float(changed.hue()), float(changed.saturation()), float(changed.brightness()), shown.alpha());
+                applyColor(color.convertedTo(shown.space()), target_ == Target::Fill ? "Change Fill" : "Change Stroke");
                 return SyncReturn::Handled;
             };
         }
@@ -878,9 +942,6 @@ namespace curvy {
 
     void StylePanel::applySlidersAsColor() {
         auto* a = find<Slider>("alphaSlider");
-        if (a == nullptr) {
-            return;
-        }
         float v[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         for (int i = 0; i < 4; ++i) {
             if (auto* slider = find<Slider>(kColorSliders[i])) {
@@ -888,7 +949,7 @@ namespace curvy {
             }
         }
         // Edit in the space the color already has (what the mode control shows).
-        SketchColor color = colorFromSliders(displayedColor().space(), v, a->value() / 100.0f);
+        SketchColor color = colorFromSliders(displayedColor().space(), v, a != nullptr ? a->value() / 100.0f : displayedColor().alpha());
         applyColor(color, target_ == Target::Fill ? "Change Fill" : "Change Stroke");
     }
 
@@ -1118,7 +1179,15 @@ namespace curvy {
         SketchPaint fill = first != nullptr ? first->fill() : document_.defaultFill();
         SketchPaint stroke = first != nullptr ? first->stroke() : document_.defaultStroke();
         paintWell("fillWell", fill, target_ == Target::Fill);
-        paintWell("strokeWell", stroke, target_ == Target::Stroke);
+        // The stroke well is a ring in the stroke's colour, so it reads as the outline next to the fill's swatch.
+        if (auto* well = find<SubView>("strokeWell")) {
+            gfx::Fill& background = well->style().backgroundFill();
+            background.setKind(gfx::PaintKind::Color);
+            background.setColor(toColor(SketchColor::rgb(0.16f, 0.16f, 0.16f)));
+            well->style().setBorderFill(stroke.isNone() ? Color(0.45f, 0.45f, 0.45f, 1.0f) : toColor(stroke.color()));
+            well->style().setBorderWidth(5.0f);
+            well->style().markDirty();
+        }
         if (auto* info = find<Label>("colorPanelHeaderInfo")) {
             info->setText(target_ == Target::Fill ? "Fill \xE2\x97\x8F   Stroke \xE2\x97\x8B" : "Fill \xE2\x97\x8B   Stroke \xE2\x97\x8F");
         }
@@ -1170,6 +1239,18 @@ namespace curvy {
             syncSlider(sliderName.c_str(), values[i]);
         }
         syncSlider("alphaSlider", paint.isNone() ? 100.0f : shown.alpha() * 100.0f);
+        if (wheel_ != nullptr && !wheel_->isDragging()) {
+            const SketchColor hsb = shown.convertedTo(ColorSpace::HSB);
+            const bool hueMeaningful = hsb.component(1) > 0.002f && hsb.component(2) > 0.002f;   // a grey or black has no hue: keep the one shown
+            wheel_->setHsb(double(hsb.component(0)), double(hsb.component(1)), double(hsb.component(2)), hueMeaningful);
+        }
+        if (auto* row = find<View>("gradientRow")) {
+            if (row->isVisible() != paint.isGradient()) {
+                row->setVisible(paint.isGradient());
+                root_.updateLayout();
+                onContentChanged(*this);
+            }
+        }
         if (auto* hex = find<TextField>("hexField")) {
             hex->setText(widen(paint.isNone() ? std::string("none") : shown.toHex()));
         }

@@ -29,8 +29,29 @@ namespace curvy {
     // ---- settings ----
 
     void CanvasView::setCornerRadius(double radius) {
+        const double before = cornerRadius_;
         cornerRadius_ = std::max(0.0, radius);
         style().markDirty();
+        if (cornerRadius_ != before) {
+            onToolDefaultsChanged(*this);
+        }
+    }
+
+    void CanvasView::setStarInnerPercent(int percent) {
+        const int before = starInner_;
+        starInner_ = std::max(10, std::min(90, percent));
+        style().markDirty();
+        if (starInner_ != before) {
+            onToolDefaultsChanged(*this);
+        }
+    }
+
+    void CanvasView::setPencilSmoothing(int value) {
+        const int before = pencilSmoothing_;
+        pencilSmoothing_ = std::max(0, std::min(100, value));
+        if (pencilSmoothing_ != before) {
+            onToolDefaultsChanged(*this);
+        }
     }
 
     void CanvasView::setPolygonSides(int sides) {
@@ -116,7 +137,7 @@ namespace curvy {
             valid = true;
             return path;
         }
-        std::vector<BLPoint> points = tool_ == SketchTool::Star ? curvy::starPoints(a, radius, kStarInnerRatio, starPoints_, first)
+        std::vector<BLPoint> points = tool_ == SketchTool::Star ? curvy::starPoints(a, radius, double(starInner_) / 100.0, starPoints_, first)
                                                                  : regularPolygonPoints(a, radius, polygonSides_, first);
         path.move_to(points[0].x, points[0].y);
         for (std::size_t i = 1; i < points.size(); ++i) {
@@ -217,7 +238,8 @@ namespace curvy {
         // with handles that follow the stroke (sharp corners stay sharp).
         // A hand shakes: smooth the samples lightly first (the two ends stay put), so the fit follows the stroke rather than the tremor.
         points = smoothPolyline(points, 2);
-        std::vector<PenAnchor> anchors = fitCurve(points, 2.5 / double(zoom_));
+        // The smoothing option moves the fit tolerance from 0.5 to 5.5 screen pixels; the default 40 is the 2.5 it always was.
+        std::vector<PenAnchor> anchors = fitCurve(points, (0.5 + 0.05 * double(pencilSmoothing_)) / double(zoom_));
         if (anchors.size() < 2) {
             return;
         }

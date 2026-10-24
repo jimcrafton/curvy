@@ -13,6 +13,7 @@
 #include <newui/controls.h>
 #include <newui/frame.h>
 
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -48,6 +49,25 @@ namespace curvy {
         // The property boxes' text (the file's sizes stand for 11) and the panel width, scaled together.
         void setPropertyTextSize(int points);
 
+        // A floating card at `at` (canvas coordinates) that holds the property dock's Colour box (Fill: the card edits the fill, the well switches to the
+        // stroke) or Stroke box, moved out of the dock while the card is up and put back when it closes. This is what the object ring's Fill and
+        // Stroke slots open, so the pen-only workflow needs no docks; the boxes and their StylePanel are the same ones the dock shows.
+        enum class Card { None, Fill, Stroke };
+        // `avoid` (canvas coordinates), when given, is kept clear: the card goes beside it, on the side with room, rather than at the pen.
+        void showCard(Card which, const newui::Point& at, const newui::Rect* avoid = nullptr);
+        void closeCard();
+        // Sizes the open Colour card to its content (the gradient bar comes and goes).
+        void fitCard();
+        // The card's x was pressed: the host puts focus back on the canvas so Space still opens the ring.
+        std::function<void()> onCardDismissed;
+        Card card() const { return card_; }
+        bool cardContains(const newui::Point& pt) const;
+
+        // A double-click on a tool button asks for that tool's options, with the point (canvas coordinates) just right of the button; the
+        // workspace owns the card. Set by whoever hosts the dock.
+        std::function<void(SketchTool, const newui::Point&)> onToolOptions;
+
+        StylePanel* stylePanel() const { return stylePanel_.get(); }
         newui::SubView* toolDock() const { return toolDock_; }
         newui::SubView* propertyDock() const { return propertyDock_; }
         newui::ToolbarButton* toolButton(SketchTool tool) const;
@@ -75,6 +95,14 @@ namespace curvy {
         int propertyTextSize_ = 11;
         bool shownTools_ = false, shownProperties_ = false;
         float shownRuler_ = -1.0f;
+        newui::SubView* cardHost_ = nullptr;
+        newui::ToolbarButton* cardClose_ = nullptr;
+        newui::View* cardHeader_ = nullptr;
+        newui::SubView* cardSpacer_ = nullptr;
+        newui::SubView* cardBox_ = nullptr;
+        newui::SubView* cardHome_ = nullptr;
+        std::size_t cardHomeIndex_ = 0;
+        Card card_ = Card::None;
         std::unique_ptr<TransformPanel> transformPanel_;
         std::unique_ptr<StylePanel> stylePanel_;
         DockBoxes boxes_;

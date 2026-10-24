@@ -57,8 +57,8 @@ namespace curvy {
         }
         RadialRing createRing() {
             return {"Create", "Shape options...", "dialog.shape", {
-                {"Rectangle", "R", "tool.rect"}, {"Ellipse", "E", "tool.ellipse"}, {"Polygon", "P", "tool.polygon"}, {"Star", "S", "tool.star"},
-                {"Line", "L", "tool.line"}, {"Freehand", "B", "tool.pencil"}, {"Text", "T", "tool.text"}, {"Select", "V", "tool.select"}}};
+                {"Rectangle", "R", "tool.rect"}, {"Ellipse", "E", "tool.ellipse"}, {"Polygon", "P", "tool.polygon", "options.polygon"}, {"Star", "S", "tool.star", "options.star"},
+                {"Line", "L", "tool.line"}, {"Freehand", "B", "tool.pencil", "options.pencil"}, {"Text", "T", "tool.text"}, {"Select", "V", "tool.select"}}};
         }
         RadialRing documentRing() {
             return {"Document", "Setup...", "dialog.setup", {
@@ -72,8 +72,8 @@ namespace curvy {
         }
         RadialRing objectRing() {
             return {"Object", "Properties...", "dialog.object", {
-                {"Arrange", "1", "ring.arrange"}, {"Group", "2", "object.group"}, {"Duplicate", "D", "edit.duplicate"}, {"Delete", "X", "edit.delete"},
-                {"Lock", "K", "object.lock"}, {"Flip", "F", "object.flipHorizontal"}}};
+                {"Arrange", "1", "ring.arrange"}, {"Group", "2", "object.group"}, {"Color", "3", "card.color"}, {"Stroke", "4", "card.stroke"},
+                {"Duplicate", "D", "edit.duplicate"}, {"Delete", "X", "edit.delete"}, {"Flip", "F", "object.flipHorizontal"}, {"Lock", "K", "object.lock"}}};
         }
         RadialRing arrangeRing() {
             return {"Arrange", "Back", "ring.object", {
@@ -115,6 +115,7 @@ namespace curvy {
                 case SketchTool::Pencil: return "Freehand";
                 case SketchTool::Text: return "Text";
                 case SketchTool::Hand: return "Hand";
+                case SketchTool::Gradient: return "Gradient";
                 default: return "Tool";
             }
         }
@@ -162,6 +163,9 @@ namespace curvy {
         if (dock_ != nullptr) {
             dock_->restyle();
         }
+        if (options_ != nullptr) {
+            options_->restyle();
+        }
         frame_.rootView().refreshThemes();
         frame_.rootView().style().markDirty();
         canvas_->style().markDirty();
@@ -191,6 +195,41 @@ namespace curvy {
         canvas_->addChild(menu_);
         bindViews();
         dock_ = std::make_unique<DockController>(frame_, *canvas_, *model_, document_);
+        options_ = std::make_unique<ToolOptionsCard>(*canvas_, *canvas_);
+        dock_->onToolOptions = [this](SketchTool tool, const Point& at) { showToolOptions(tool, at); };
+        dock_->onCardDismissed = [this] { focusCanvas(); };
+        if (StylePanel* style = dock_->stylePanel()) {
+            // A gradient fill is edited on the shape: the type buttons put the canvas on the Gradient tool, and the stop the panel and the canvas have
+            // selected stays the same one.
+            style->onGradientChosen += [this](StylePanel&) {
+                armTool(SketchTool::Gradient, true, std::string());
+                model_->say("Drag the line or a stop on the shape; click the line to add a stop");
+                return SyncReturn::Handled;
+            };
+            style->onStopSelected += [this](StylePanel& panel) {
+                canvas_->setSelectedGradientStop(panel.selectedStop());
+                return SyncReturn::Handled;
+            };
+            canvas_->onGradientStopSelected += [this](CanvasView& view) {
+                dock_->stylePanel()->setSelectedStop(view.selectedGradientStop());
+                return SyncReturn::Handled;
+            };
+        }
+        options_->onDismissed = [this] { focusCanvas(); };
+        // Esc closes a card even while one of its controls has the keyboard focus (the canvas's own key filter would never see it then).
+        frame_.rootView().onKeyDown += [this](View&, std::uint32_t, int, int, std::uint32_t vk) {
+            const bool cardUp = (dock_ != nullptr && dock_->card() != DockController::Card::None) || (options_ != nullptr && options_->isOpen());
+            if (vk == vkEscape && cardUp && !menu_->isOpen()) {
+                if (dock_ != nullptr) {
+                    dock_->closeCard();
+                }
+                options_->close();
+                focusCanvas();
+                return SyncReturn::Handled;
+            }
+            return SyncReturn::Ignored;
+        };
+        canvas_->reorderChild(menu_, canvas_->childViews().size());   // the ring stays above the docks and cards
     }
 
     void WorkspaceController::bindViews() {
@@ -325,7 +364,8 @@ namespace curvy {
         edited.propertiesVisible = model_->propertiesVisible();
         edited.rulersVisible = canvas_->showRulers();
         const Settings before = edited;
-        if (SettingsDialog::run(frame_, edited, [this](const Settings& live) { applySettings(live); })) {
+        if (SettingsDialog::run(frame_, edited, [this](const Settings& live) { applySettings(live); },
+                            [this] { model_->say("Settings cancelled"); })) {
             applySettings(edited);
             if (edited.toolbarVisible != before.toolbarVisible) {
                 model_->setToolbarVisible(edited.toolbarVisible);
@@ -381,6 +421,9 @@ namespace curvy {
         applyingToolDefaults_ = true;
         canvas_->setPolygonSides(sides);
         canvas_->setStarPoints(points);
+        canvas_->setCornerRadius(double(settings_.cornerRadius));
+        canvas_->setStarInnerPercent(settings_.starInner);
+        canvas_->setPencilSmoothing(settings_.pencilSmoothing);
         applyingToolDefaults_ = false;
     }
 
@@ -393,8 +436,11 @@ namespace curvy {
         } else {
             settings_.polygonSides = canvas_->polygonSides();
             settings_.starPoints = canvas_->starPointCount();
-            settings_.save(Settings::defaultPath());
         }
+        settings_.cornerRadius = int(std::lround(canvas_->cornerRadius()));
+        settings_.starInner = canvas_->starInnerPercent();
+        settings_.pencilSmoothing = canvas_->pencilSmoothing();
+        settings_.save(Settings::defaultPath());
     }
 
     void WorkspaceController::start(const std::string& path) {
@@ -482,6 +528,18 @@ namespace curvy {
         return SyncReturn::Handled;
     }
 
+    void WorkspaceController::showToolOptions(SketchTool tool, const Point& at) {
+        if (options_ == nullptr || !ToolOptionsCard::hasOptions(tool)) {
+            return;
+        }
+        if (dock_ != nullptr) {
+            dock_->closeCard();
+        }
+        options_->show(tool, at);
+        model_->used("toolOptions");
+        model_->say("Defaults for the next shape; Esc closes");
+    }
+
     void WorkspaceController::armTool(SketchTool tool, bool sticky, const std::string& heldKey) {
         toolSticky_ = sticky;
         heldToolKey_ = heldKey;
@@ -524,6 +582,35 @@ namespace curvy {
             board.height = 300.0;
             document_.addArtboard(board);
             model_->say("New artboard at the pen");
+        }
+        else if (SketchTool optionsTool = SketchTool::Select; ToolOptionsCard::toolFromCommand(command, optionsTool)) {
+            showToolOptions(optionsTool, Point(at.x + 28.0f, at.y - 40.0f));
+        }
+        else if (command == "card.color" || command == "card.stroke") {
+            if (options_ != nullptr) {
+                options_->close();
+            }
+            if (dock_ != nullptr) {
+                Rect selected;
+                bool haveSelected = false;
+                for (std::size_t id : document_.selection()) {
+                    if (const SketchObject* object = document_.findById(id)) {
+                        const BLBox box = object->bounds();
+                        const BLPoint a = canvas_->toView(BLPoint(box.x0, box.y0)), b = canvas_->toView(BLPoint(box.x1, box.y1));
+                        const Rect one(float(std::min(a.x, b.x)), float(std::min(a.y, b.y)), float(std::abs(b.x - a.x)), float(std::abs(b.y - a.y)));
+                        selected = haveSelected ? selected.united(one) : one;
+                        haveSelected = true;
+                    }
+                }
+                dock_->showCard(command == "card.color" ? DockController::Card::Fill : DockController::Card::Stroke, at, haveSelected ? &selected : nullptr);
+                if (command == "card.color" && dock_->stylePanel() != nullptr) {
+                    // An open path has nothing to fill, so its colour is the stroke's.
+                    const SketchObject* shape = document_.selection().empty() ? nullptr : document_.findById(document_.selection().front());
+                    const bool strokeOnly = shape != nullptr && (shape->fill().isNone() || !shape->isClosed());
+                    dock_->stylePanel()->setTarget(strokeOnly ? StylePanel::Target::Stroke : StylePanel::Target::Fill);
+                }
+                model_->used("appearance");
+            }
         }
         else if (command == "dialog.new") { files_->newDocument(); }
         else if (command == "dialog.settings") { openSettings(); }
@@ -569,6 +656,14 @@ namespace curvy {
         pointerKnown_ = true;
         shiftDown_ = (keys & kmShift) != 0;
         dismissWelcome();
+        // The Fill card stays up while the Gradient tool works the shape under it.
+        const bool gradientAtWork = dock_ != nullptr && dock_->card() == DockController::Card::Fill && canvas_->tool() == SketchTool::Gradient;
+        if (dock_ != nullptr && dock_->card() != DockController::Card::None && !dock_->cardContains(pt) && !gradientAtWork) {
+            dock_->closeCard();   // a press anywhere else puts the card away and carries on as usual
+        }
+        if (options_ != nullptr && options_->isOpen() && !options_->contains(pt)) {
+            options_->close();
+        }
         const PenState& pen = frame_.rootView().penState();
         if (pen.eraser && (buttons & mbmLeftButton) != 0) {
             if (model_->documentOpen() && !menu_->isOpen()) {
@@ -703,7 +798,7 @@ namespace curvy {
                 model_->say("Ring closed");
                 focusCanvas();
             } else {
-                menu_->handleKey(keyName(vk));
+                menu_->handleKey(keyName(vk), shiftDown_);
             }
             return true;
         }
@@ -723,6 +818,14 @@ namespace curvy {
             return false;
         }
         if (vk == vkEscape) {
+            if (dock_ != nullptr && dock_->card() != DockController::Card::None) {
+                dock_->closeCard();
+                return true;
+            }
+            if (options_ != nullptr && options_->isOpen()) {
+                options_->close();
+                return true;
+            }
             armTool(SketchTool::Select, false, std::string());
             model_->say("Select");
             return false;   // the canvas also clears the selection
@@ -834,7 +937,7 @@ namespace curvy {
         }
         if (model_->scrubbing()) {
             paintScrubCard(ctx);
-        } else if (model_->hover().part != ScrubPart::None && !menu_->isOpen()) {
+        } else if (model_->hover().part != ScrubPart::None && !menu_->isOpen() && (dock_ == nullptr || dock_->card() == DockController::Card::None) && (options_ == nullptr || !options_->isOpen())) {
             paintHoverChip(ctx);
         }
     }

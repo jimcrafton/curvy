@@ -82,6 +82,13 @@
                         "fillColor": "#ffffffff",
                         "borderColor": "#f0f0f0ff"
                     }
+                },
+                "PBS_DEFAULTED": {
+                    "colors": {
+                        "fillColor": "#f0f0f0ff",
+                        "borderColor": "#b35c00ff",
+                        "textColor": "#1a1a1aff"
+                    }
                 }
             },
             "BP_CHECKBOX": {
