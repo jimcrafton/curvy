@@ -700,6 +700,9 @@ namespace curvy {
             model_->say("Tap Space to start");
             return true;
         }
+        if (scrub_.active()) {
+            return true;   // the held key owns the pointer: a click must not start a move under the scrub
+        }
         if (spaceDown_) {
             spaceUsed_ = true;
             panning_ = true;
