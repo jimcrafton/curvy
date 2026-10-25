@@ -1,0 +1,270 @@
+{
+  meta: {
+    author: "",
+    date: "2026-10-24",
+    copyright: "",
+    version: "0.1.0.900"
+  },
+  type: "SubView",
+  bounds: {
+    type: "Rect",
+    pos: { type: "Point", x: 0, y: 0 },
+    size: { type: "Size", width: 320, height: 700 }
+  },
+  visible: true,
+  name: "graphDock",
+  childViews: [
+    {
+      type: "SubView",
+      bounds: {
+        type: "Rect",
+        pos: { type: "Point", x: 0, y: 0 },
+        size: { type: "Size", width: 320, height: 694 }
+      },
+      visible: true,
+      name: "graphDockBox",
+      layout: { type: "FlexLayout", orientation: "Vertical" },
+      style: {
+        type: "ViewStyle",
+        backgroundFill: { type: "Fill", kind: "Color", color: "#1e1e1e99" }
+      },
+      childViews: [
+        {
+          type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 0 },
+            size: { type: "Size", width: 320, height: 28 }
+          },
+          visible: true,
+          name: "graphHeaderBar",
+          layout: {
+            type: "FlexLayout",
+            orientation: "Horizontal",
+            crossAxisAlignment: "Center",
+            spacing: 6,
+            padding: 4
+          },
+          style: {
+            type: "ViewStyle",
+            backgroundFill: { type: "Fill", kind: "Color", color: "#2e2e2e99" }
+          },
+          desiredSize: { type: "Size", width: 320, height: 28 },
+          desiredSizeOverride: true,
+          childViews: [
+            {
+              type: "Label",
+              text: "Graph",
+              textAlignment: "Left",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 4, y: 5 },
+                size: { type: "Size", width: 186, height: 17 }
+              },
+              name: "graphDockTitle",
+              layoutParams: { type: "FlexLayoutParams", weight: 1 },
+              style: {
+                type: "LabelStyle",
+                text: "Graph",
+                wordWrap: true,
+                font: { type: "Font", name: "Segoe UI", size: 12, bold: true, italic: false, strikeThrough: false, underlined: false },
+                textColor: "#f0f0f0",
+                textAlignment: "Left"
+              }
+            },
+            {
+              type: "Label",
+              text: "",
+              textAlignment: "Right",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 196, y: 5 },
+                size: { type: "Size", width: 120, height: 17 }
+              },
+              name: "graphInfo",
+              style: {
+                type: "LabelStyle",
+                text: "",
+                wordWrap: true,
+                font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                textColor: "#a0a0a0",
+                textAlignment: "Right"
+              },
+              desiredSize: { type: "Size", width: 120, height: 17 },
+              desiredSizeOverride: true
+            }
+          ]
+        },
+        {
+          type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 28 },
+            size: { type: "Size", width: 320, height: 30 }
+          },
+          visible: true,
+          name: "graphModeRow",
+          layout: { type: "FlexLayout", orientation: "Horizontal", padding: 6 },
+          desiredSize: { type: "Size", width: 320, height: 30 },
+          desiredSizeOverride: true,
+          childViews: [
+            {
+              type: "SegmentedControl",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 6, y: 6 },
+                size: { type: "Size", width: 309, height: 24 }
+              },
+              name: "graphModeControl",
+              layoutParams: { type: "FlexLayoutParams", weight: 1 },
+              desiredSize: { type: "Size", width: 309, height: 24 },
+              desiredSizeOverride: true
+            }
+          ]
+        },
+        {
+          type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 58 },
+            size: { type: "Size", width: 320, height: 34 }
+          },
+          visible: true,
+          name: "graphFilterRow",
+          layout: { type: "FlexLayout", orientation: "Horizontal", padding: 7 },
+          desiredSize: { type: "Size", width: 320, height: 34 },
+          desiredSizeOverride: true,
+          childViews: [
+            {
+              type: "TextField",
+              placeholder: "Filter by name, type or value",
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+              textColor: "#f0f0f0",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 7, y: 7 },
+                size: { type: "Size", width: 306, height: 22 }
+              },
+              name: "graphFilterField",
+              layoutParams: { type: "FlexLayoutParams", weight: 1 },
+              desiredSize: { type: "Size", width: 306, height: 22 },
+              desiredSizeOverride: true
+            }
+          ]
+        },
+        {
+          type: "TreeView",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 92 },
+            size: { type: "Size", width: 320, height: 320 }
+          },
+          name: "graphTree",
+          layoutParams: { type: "FlexLayoutParams", weight: 1 },
+          desiredSize: { type: "Size", width: 320, height: 320 },
+          desiredSizeOverride: true
+        },
+        {
+          type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 412 },
+            size: { type: "Size", width: 320, height: 28 }
+          },
+          visible: true,
+          name: "graphDetailBar",
+          layout: {
+            type: "FlexLayout",
+            orientation: "Horizontal",
+            crossAxisAlignment: "Center",
+            spacing: 6,
+            padding: 4
+          },
+          style: {
+            type: "ViewStyle",
+            backgroundFill: { type: "Fill", kind: "Color", color: "#2e2e2e99" }
+          },
+          desiredSize: { type: "Size", width: 320, height: 28 },
+          desiredSizeOverride: true,
+          childViews: [
+            {
+              type: "Label",
+              text: "Node",
+              textAlignment: "Left",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 4, y: 5 },
+                size: { type: "Size", width: 186, height: 17 }
+              },
+              name: "graphDetailTitle",
+              layoutParams: { type: "FlexLayoutParams", weight: 1 },
+              style: {
+                type: "LabelStyle",
+                text: "Node",
+                wordWrap: true,
+                font: { type: "Font", name: "Segoe UI", size: 12, bold: true, italic: false, strikeThrough: false, underlined: false },
+                textColor: "#f0f0f0",
+                textAlignment: "Left"
+              }
+            },
+            {
+              type: "Label",
+              text: "",
+              textAlignment: "Right",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 196, y: 5 },
+                size: { type: "Size", width: 120, height: 17 }
+              },
+              name: "graphDetailKind",
+              style: {
+                type: "LabelStyle",
+                text: "",
+                wordWrap: true,
+                font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                textColor: "#a0a0a0",
+                textAlignment: "Right"
+              },
+              desiredSize: { type: "Size", width: 120, height: 17 },
+              desiredSizeOverride: true
+            }
+          ]
+        },
+        {
+          type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 440 },
+            size: { type: "Size", width: 320, height: 230 }
+          },
+          visible: true,
+          name: "graphDetail",
+          desiredSize: { type: "Size", width: 320, height: 230 },
+          desiredSizeOverride: true,
+          childViews: []
+        },
+        {
+          type: "Label",
+          text: "",
+          textAlignment: "Left",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 670 },
+            size: { type: "Size", width: 320, height: 24 }
+          },
+          name: "graphStatus",
+          style: {
+            type: "LabelStyle",
+            text: "",
+            wordWrap: true,
+            font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+            textColor: "#a0a0a0",
+            textAlignment: "Left"
+          },
+          desiredSize: { type: "Size", width: 320, height: 24 },
+          desiredSizeOverride: true
+        }
+      ]
+    }
+  ]
+}
