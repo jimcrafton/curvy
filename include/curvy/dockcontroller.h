@@ -2,6 +2,7 @@
 
 #include <map>
 
+#include "curvy/aliveguard.h"
 #include "curvy/canvasview.h"
 #include "curvy/dockcontext.h"
 #include "curvy/stylepanel.h"
@@ -34,7 +35,7 @@ namespace curvy {
     class DockController : public newui::Controller {
     public:
         DockController(newui::Frame& frame, CanvasView& canvas, WorkspaceModel& model, SketchDocument& document);
-        ~DockController() override = default;
+        ~DockController() override;
         DockController(const DockController&) = delete;
         DockController& operator=(const DockController&) = delete;
 
@@ -107,6 +108,7 @@ namespace curvy {
         std::unique_ptr<TransformPanel> transformPanel_;
         std::unique_ptr<StylePanel> stylePanel_;
         DockBoxes boxes_;
+        std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);   // the views and models outlive this object and still call its handlers while closing
     };
 
 }

@@ -1,9 +1,10 @@
 #pragma once
 
 #include <newui/controls.h>
+#include <newui/delegate.h>
 
 #include <cstdint>
-#include <functional>
+#include <memory>
 
 namespace curvy {
 
@@ -18,28 +19,41 @@ namespace curvy {
     // The keys can be pressed or let go in the middle of a drag; it carries on from where the value is.
     //
     // The scrubber only turns mouse movement into numbers. What the numbers do - and how a whole drag becomes one undo step - is the
-    // caller's business, through three callbacks (see Callbacks). It lives as long as the label's handlers do.
+    // caller's business, through the delegates below. attach() hangs a scrubber on a view and returns it (the view's handlers keep it alive);
+    // a view that scrubs several captions itself (a painted grid of rows) owns one and calls press / move / release.
     // @reflect ignore=true
     class NumberScrubber {
     public:
-        struct Callbacks {
-            // The mouse went down: report the field's current value; return false when there is nothing to scrub (the drag is then ignored).
-            std::function<bool(double& value)> begin;
-            // The value changed (called only when it moves to a new value). Apply it live, without an undo step.
-            std::function<void(double value)> change;
-            // The button was let go. `changed` says whether `change` was called at all; this is where the drag becomes one undo step.
-            std::function<void(bool changed)> end;
-            // When set, asked at every move for the plain step, instead of the `unit` given to attach (a field whose unit depends on its row).
-            std::function<double()> unit;
-        };
+        // The mouse went down: set `value` to the field's current value and return Handled to start the drag; Ignored when there is nothing to scrub.
+        newui::Delegate<NumberScrubber, double&> onBegin;
+        // The value changed (only when it moves to a new value). Apply it live, without an undo step.
+        newui::Delegate<NumberScrubber, double> onChange;
+        // The button was let go. `changed` says whether onChange fired at all; this is where the drag becomes one undo step.
+        newui::Delegate<NumberScrubber, bool> onEnd;
+        // Optional, asked at every move: a handler that sets `unit` and returns Handled replaces the unit given to attach (a field whose unit
+        // depends on its row).
+        newui::Delegate<NumberScrubber, double&> onUnit;
 
-        // Makes dragging `label` scrub, with `unit` as the plain step (see above) and the value kept within [minimum, maximum].
-        static void attach(newui::Label& label, double unit, double minimum, double maximum, Callbacks callbacks);
+        bool active() const { return active_; }
+        // False when nobody started the drag in onBegin.
+        bool press(float x);
+        void move(float x, std::uint32_t keys, double unit, double minimum, double maximum);
+        void release();
+
+        // Makes dragging `view` (a caption label) scrub, with `unit` as the plain step (see above) and the value kept within [minimum, maximum].
+        static std::shared_ptr<NumberScrubber> attach(newui::View& view, double unit, double minimum, double maximum);
 
         // The step for the modifier keys held (newui::kmShift / kmCtrl bits): unit, unit / 10, unit / 100.
         static double stepFor(double unit, std::uint32_t keys);
         // `value` rounded to a multiple of `step` (and cleaned of binary noise: 0.30000000000000004 -> 0.3).
         static double roundToStep(double value, double step);
+
+    private:
+        bool active_ = false;
+        bool changed_ = false;
+        float lastX_ = 0.0f;
+        double raw_ = 0.0;       // the value the mouse has led to, before snapping
+        double shown_ = 0.0;     // the last value reported
     };
 
 }

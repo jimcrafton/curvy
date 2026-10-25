@@ -714,29 +714,32 @@ namespace curvy {
             return;
         }
         auto suffix = std::make_shared<std::string>();   // what follows the number in the field ("pt", "%", the degree sign)
-        NumberScrubber::Callbacks callbacks;
-        callbacks.begin = [this, fieldName, suffix](double& value) {
+        auto scrubber = NumberScrubber::attach(*label, unit, minimum, maximum);
+        scrubber->onBegin += [this, fieldName, suffix](NumberScrubber&, double& value) {
             auto* field = find<TextField>(fieldName);
             if (field == nullptr || !field->isEnabled() || !field->isVisible() || !leadingNumber(field->text(), value)) {
-                return false;
+                return SyncReturn::Ignored;
             }
             std::string text = narrow(field->text());
             std::size_t at = 0;
             while (at < text.size() && (std::isdigit(static_cast<unsigned char>(text[at])) || text[at] == '.' || text[at] == '-' || text[at] == '+')) { ++at; }
             *suffix = text.substr(at);
             beginDrag();
-            return true;
+            return SyncReturn::Handled;
         };
-        callbacks.change = [this, fieldName, suffix](double value) {
+        scrubber->onChange += [this, fieldName, suffix](NumberScrubber&, double value) {
             if (auto* field = find<TextField>(fieldName)) {
                 char buffer[48];
                 std::snprintf(buffer, sizeof(buffer), "%g", value);
                 field->setText(widen(buffer + *suffix));
                 field->onReturnPressed(*field);
             }
+            return SyncReturn::Handled;
         };
-        callbacks.end = [this](bool) { endDrag(); };
-        NumberScrubber::attach(*label, unit, minimum, maximum, std::move(callbacks));
+        scrubber->onEnd += [this](NumberScrubber&, bool) {
+            endDrag();
+            return SyncReturn::Handled;
+        };
     }
 
     namespace {

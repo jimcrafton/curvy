@@ -148,7 +148,10 @@ namespace curvy {
         return drivenPlaces_.count(place) != 0;
     }
 
-    void SketchDocument::timeChanged() {
+    void SketchDocument::timeChanged(bool graphAffected) {
+        if (graphAffected) {
+            outlineCache_.clear();
+        }
         jitnodes::Network& net = network();
         const std::vector<jitnodes::NodeId> ids = net.nodeIds();
         const auto placed = placementNodes(net, ids);
@@ -167,6 +170,7 @@ namespace curvy {
     void SketchDocument::graphChanged() {
         drivenDirty_ = true;
         placedCache_.clear();
+        outlineCache_.clear();
         appearanceChains_.clear();
         pullPathNodes();
         refreshLiveShapes();
@@ -823,13 +827,23 @@ namespace curvy {
     }
 
     BLPath SketchDocument::placedOutline(const SketchObject& object) const {
+        // One edited since its node was written (a drag in progress) is newer than the node.
+        if (object.nodeRevision() != object.geometryRevision()) {
+            return object.geometry();
+        }
+        const auto cached = outlineCache_.find(object.id());
+        if (cached != outlineCache_.end() && cached->second.revision == object.geometryRevision()) {
+            return cached->second.path;
+        }
         const jitnodes::NodeId place = transformNodeOf(object.id());
-        if (place != jitnodes::invalidNodeId) {
+        // A driven object shows what its chain cooks (adoptChain), which the object holds and its shape node does not.
+        if (place != jitnodes::invalidNodeId && !drivenPlace(place)) {
             try {
                 const jitnodes::Network& net = network();
                 const jitnodes::GeometryHandle& curve = net.node(object.graphNode()).geometryParam("curve");
                 BLPath path;
                 if (curve && curve->primitiveCount() > 0 && pathFromGeometry(*placeGeometry(*curve, worldTransformOf(net, place)), path)) {
+                    outlineCache_[object.id()] = PlacedOutline{object.geometryRevision(), path};
                     return path;
                 }
             } catch (const std::exception&) {

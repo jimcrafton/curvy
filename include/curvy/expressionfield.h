@@ -30,9 +30,15 @@ namespace curvy {
         // The colours of plain and expression text (and of the bar).
         void setColours(const newui::Color& plain, const newui::Color& expression);
 
+        // A keyed number shows a diamond at the right edge: filled on a key of the current time, hollow between keys.
+        enum class KeyState { None, Between, OnKey };
+        void setKeyState(KeyState state);
+        KeyState keyState() const { return keyState_; }
+
         void paint(BLContext& ctx) override;
 
     private:
+        KeyState keyState_ = KeyState::None;
         bool expression_ = false;
         newui::Color plain_;
         newui::Color accent_;

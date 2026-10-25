@@ -208,13 +208,13 @@ namespace curvy {
             }
             object.setTextAll(snap.text, snap.font, size, style);
         };
-        NumberScrubber::Callbacks callbacks;
-        callbacks.begin = [this, which](double& value) {
+        auto scrubber = NumberScrubber::attach(*label, unit, minimum, maximum);
+        scrubber->onBegin += [this, which](NumberScrubber&, double& value) {
             scrubBefore_.clear();
             scrubActive_ = false;
             const SketchObject* first = firstText();
             if (updating_ || first == nullptr) {
-                return false;
+                return newui::SyncReturn::Ignored;
             }
             value = which == Scrubbed::Size ? first->fontSize() : (which == Scrubbed::Tracking ? first->textStyle().tracking : first->textStyle().leading * 100.0);
             for (std::size_t id : document_.selection()) {
@@ -225,11 +225,11 @@ namespace curvy {
             }
             scrubValue_ = value;
             scrubActive_ = true;
-            return true;
+            return newui::SyncReturn::Handled;
         };
-        callbacks.change = [this, set](double value) {
+        scrubber->onChange += [this, set](NumberScrubber&, double value) {
             if (!scrubActive_) {
-                return;
+                return newui::SyncReturn::Ignored;
             }
             scrubValue_ = value;
             for (const Snap& snap : scrubBefore_) {
@@ -238,10 +238,11 @@ namespace curvy {
                 }
             }
             document_.touch();
+            return newui::SyncReturn::Handled;
         };
-        callbacks.end = [this, set, which](bool changed) {
+        scrubber->onEnd += [this, set, which](NumberScrubber&, bool changed) {
             if (!scrubActive_) {
-                return;
+                return newui::SyncReturn::Ignored;
             }
             scrubActive_ = false;
             if (changed) {
@@ -264,8 +265,8 @@ namespace curvy {
             }
             scrubBefore_.clear();
             refresh();
+            return newui::SyncReturn::Handled;
         };
-        NumberScrubber::attach(*label, unit, minimum, maximum, std::move(callbacks));
     }
 
     // The Start and Flip controls of text on a path (Flip alone for text between paths).

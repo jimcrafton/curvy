@@ -262,6 +262,8 @@ namespace curvy {
         // The outline the graph makes for the object (its shape node's curve carried by the page matrix of its transform node); the object's own
         // path when it has no nodes yet. Picking and the marquee read this; the object's cached bounds only rule out the far objects first.
         BLPath placedOutline(const SketchObject& object) const;
+        // The bounding box of placedOutline(); what the selection box and frame are measured on.
+        BLBox outlineBounds(const SketchObject& object) const;
         // The object a shape, placement or appearance node belongs to (0 for any other node).
         std::size_t objectOfNode(jitnodes::NodeId node) const;
         // The node of the topmost visible, unlocked object under the point (invalidNodeId when none).
@@ -837,7 +839,7 @@ namespace curvy {
         // Adopts the curves of every path node whose text no longer matches its object (a graph edit, undo or redo wrote it), unless the
         // object itself changed since the node was written.
         void pullPathNodes();
-        void timeChanged() override;
+        void timeChanged(bool graphAffected) override;
         // Makes a driven object show what the chain ending at its placement node cooks; false when the chain cooks to nothing usable.
         bool adoptChain(SketchObject& object, jitnodes::NodeId place);
         // Whether the object placed by `place` is driven (a move-points node or an expression or keys on the way). Worked out once per graph change.
@@ -868,6 +870,14 @@ namespace curvy {
         std::size_t appearanceObjectCount_ = 0;
         std::string activeTag_ = "tag1";
         std::shared_ptr<jitnodes::GraphSnapshot> pivotBefore_;   // the graph when a live pivot drag started
+        // placedOutline() per object, valid for the object's geometry revision at the time; cleared when the graph or the time changes.
+        struct PlacedOutline {
+            std::uint64_t revision = 0;
+            BLPath path;
+        };
+        mutable std::unordered_map<std::size_t, PlacedOutline> outlineCache_;
+        // Where findById last found each id; every hit is checked against the object there, so a stale entry only costs a rescan.
+        mutable std::unordered_map<std::size_t, std::size_t> indexOfId_;
         std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> placedCache_;   // a shape node's transform node, rebuilt when the graph's wiring may have changed
         // Puts the objects in the stacking order given by ids (all of them, back to front).
         void reorder(const std::vector<std::size_t>& ids);

@@ -114,7 +114,13 @@ nothing of sketch types (paths, layers, artboards), so it can be unit tested alo
   (`parentSelection`, `releaseParent`). Not yet: align/distribute and the nudge paths do not carry children, and `.skb` stores no parent.
 - **Selection and picking by node (2026-10-25).** `selectedNodes()` / `setSelectedNodes()` (placement nodes), `objectOfNode()` (shape, placement or appearance node to its object) and
   `hitTestNode()`. `placedOutline(object)` is the outline the graph makes (shape node's curve carried by `worldTransformOf` its transform node); `hitTest` and the marquee/lasso
-  test that, with the object's cached bounds only ruling out far objects first. Not yet: selection handles and the frame still read the object's own matrix and path copy, and
+  test that, with the object's cached bounds only ruling out far objects first. **DG-03 stage 3 (2026-10-25):** `selectionBounds` and `selectionFrame` (so the handles, the
+  Transform panel and the drag origin) are measured on `placedOutline()` too (`outlineBounds`). `placedOutline` falls back to the object's own path for a driven object (its
+  chain's cook lives only in the object) and for one edited since its node was written (a drag in progress). The outline is cached per object (by its geometry revision; cleared
+  when the graph changes or time moves a node) and `findById` is indexed, because measuring a 2000-object selection took 10 ms; it is now 0.5 ms (0.15 ms mid-drag), and a timeline
+  step on that graph went from 23 to 1.5 ms with jitnodes changes (`Network::dependsOnTime` skips plain-number parameters; `setTime` keeps a list of the nodes that have an
+  expression, keys or a subnet, rebuilt after any edit that can change it, and returns whether any node was affected; `GraphDocument::timeChanged(bool graphAffected)`). Not yet: `frameAngle` and the accumulated matrix are still the object's,
+  the object still holds its own path copy (the staging for removing it: make `geometry()` a cache refreshed from the node, then drop it from `.skb`), and
   `selection_` is still a list of object ids underneath (the node ids are mapped to it).
 - **Point ids and tags (2026-10-25).** Every point of a shape node's curve has an int attribute `id` (`kPointIdAttrib`) that travels with it through the nodes (and into saved
   files). `geometryFromPath` numbers a new shape's points 0..n-1; when the object is edited and its points are added or removed, the points still where they were (matched in order,
@@ -137,11 +143,13 @@ nothing of sketch types (paths, layers, artboards), so it can be unit tested alo
   (`resolvedTransformOf`), so an expression or key drives them; an object whose chain has an expression, keys or a move-points node (or whose parent's does) is **driven**
   (`drivenPlace`, worked out once per graph change): it shows what the chain cooks at the current time and an edit of its outline snaps back to the expression. `ExpressionField`
   (`include/curvy/expressionfield.h`) is the text field of the parameter box: a number is stored, any other text (or text after "=") becomes the expression, a lone "=" clears it, and a
-  driven field shows "=expression" in the accent colour with a bar down its left edge. **To look into: the PropertyEditor pattern.** The Visual Designer in
-  `code/cpp_codetools/extension/NativeEditControls` draws the value of each property row itself and only creates a text-field-like control for the row the user clicks, which is
-  wrapped in a `PropertyEditor` base class with a derived class per kind of property (number, text, colour, enum, expression...). The graph dock currently keeps nine permanent
-  `ExpressionField`s and sliders, chips and labels per row; moving to that pattern would cut the number of views to one editor at a time, would make a property list scale to nodes with
-  many parameters and give the dopesheet and the Tag/Move Points boxes a common editor, and is the natural home for the keyframe diamond (`key`) beside each `fx`.
+  driven field shows "=expression" in the accent colour with a bar down its left edge. **Done 2026-10-25: the PropertyEditor pattern.** The Visual Designer in
+  `code/cpp_codetools/extension/NativeEditControls` (PropertiesGrid) draws the value of each property row itself and only creates an editor for the row the user clicks. The graph
+  dock's parameter box now works that way: `ParamGrid` (`include/curvy/paramgrid.h`) paints every row (caption, value, key diamond, colour/gradient chip, slider) and moves one
+  `ExpressionField` ("graphDetailEditor") over the clicked value; the dock keeps only what a row does (`DetailRow`: apply, scrub, node, param) and fills the grid's `Row`s. Caption drag
+  scrubs through `NumberScrubber` (an instance with `onBegin`/`onChange`/`onEnd`/`onUnit` delegates, shared with `NumberScrubber::attach`; the grid exposes the same as delegates too, no
+  listener classes). A `Choice` row (click steps to the next option, Shift+click the previous) serves the Tag and Move Points boxes and the Paint/Spread rows. Keys: the diamond at the right of a number is clicked, or Ctrl+K in the editor, to key
+  the number at the current time (hollow between keys, filled on one). The grid is not reflected, so GUI tests read a value by opening its editor (`param_value` in tests/gui).
   **Timeline bar** (`TimelineBar`, mockup `docs/mockups/timelineBar.html` -> `Resources/timelineBar.newui`): First, Previous, Play/Stop, Next, Last, a frame field, a scrubber over
   0..48 and the frame rate, along the bottom of the canvas; the View ring's Timeline slot (M) shows it (no menu item yet). The document's time is frame / fps (`Network::fps()`, 24);
   Play runs a 16 ms timer by the wall clock and loops; every move calls `SketchDocument::setTime`. Callbacks into it are guarded by a liveness flag, because the views and the model

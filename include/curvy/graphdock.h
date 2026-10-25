@@ -1,9 +1,11 @@
 #pragma once
 
+#include "curvy/aliveguard.h"
 #include "curvy/canvasview.h"
 #include "curvy/dockcontroller.h"
 #include "curvy/expressionfield.h"
 #include "curvy/graphtree.h"
+#include "curvy/paramgrid.h"
 #include "curvy/sketchdocument.h"
 #include "curvy/workspacemodel.h"
 
@@ -38,7 +40,7 @@ namespace curvy {
         enum class Mode { Document, Flow };
 
         GraphDock(newui::Frame& frame, CanvasView& canvas, WorkspaceModel& model, SketchDocument& document, DockController& docks);
-        ~GraphDock() override = default;
+        ~GraphDock() override;
         GraphDock(const GraphDock&) = delete;
         GraphDock& operator=(const GraphDock&) = delete;
 
@@ -81,14 +83,10 @@ namespace curvy {
         static constexpr std::size_t kLinkRows = 3;
 
     private:
+        // What a row of the parameter box does; how it looks and what it shows is the matching row of grid_.
         struct DetailRow {
-            enum class Kind { Text, Colour, Gradient, Slider };
+            using Kind = ParamGrid::Kind;
             Kind kind = Kind::Text;
-            newui::Label* caption = nullptr;
-            ExpressionField* field = nullptr;
-            ColourChip* chip = nullptr;         // beside the hex of a colour
-            newui::Slider* slider = nullptr;    // a 0..100 value with its percent
-            newui::Label* percent = nullptr;
             std::function<void(const std::string&)> apply;
             // Dragging the caption scrubs the number: the node and parameter it changes, within [minimum, maximum]; `scale` is how many
             // times the box's number is the parameter (a percent slider shows 100 times its parameter).
@@ -111,6 +109,8 @@ namespace curvy {
         void selectionChangedInTree();
         void showDetail(const GraphRow* row);
         void setRow(std::size_t index, const std::string& caption, const std::string& value, std::function<void(const std::string&)> apply);
+        // One of `options`: a click steps to the next (Shift+click the previous) and `apply` gets its name.
+        void setChoiceRow(std::size_t index, const std::string& caption, const std::string& current, std::vector<std::string> options, std::function<void(const std::string&)> apply);
         void setColourRow(std::size_t index, const std::string& caption, const SketchColor& color, std::function<void(const std::string&)> apply);
         // `value` is 0..1; `apply` gets the percent as text.
         void setSliderRow(std::size_t index, const std::string& caption, double value, std::function<void(const std::string&)> apply);
@@ -120,9 +120,10 @@ namespace curvy {
         void setPaintKind(jitnodes::NodeId id, int kind);
         void setGradientRow(std::size_t index, const std::string& caption, const SketchPaint& paint, std::function<void(const std::string&)> apply);
         void scrubRow(std::size_t index, jitnodes::NodeId id, const std::string& param, double minimum, double maximum, double scale = 1.0);
-        void commitSlider(std::size_t index);
         // The text of a detail row was entered: a number or expression for a parameter row, otherwise the row's own apply.
-        void commitDetail(std::size_t index);
+        void commitDetail(std::size_t index, const std::string& text);
+        // Ctrl+K in a parameter box: puts a key at the current time with the shown value, or takes the key there away.
+        void toggleKey(std::size_t index);
         // A parameter row shows "=expression" (in the expression colour) while one drives the parameter, otherwise its number.
         void showParam(DetailRow& row);
         void clearDetail();
@@ -152,6 +153,7 @@ namespace curvy {
         newui::SegmentedControl* modeControl_ = nullptr;
         newui::TextField* filterField_ = nullptr;
         newui::SubView* detail_ = nullptr;
+        ParamGrid* grid_ = nullptr;
         newui::Label* detailTitle_ = nullptr;
         newui::Label* detailKind_ = nullptr;
         newui::Label* info_ = nullptr;
@@ -180,6 +182,7 @@ namespace curvy {
         bool shown_ = false;
         float shownRight_ = -1.0f;
         bool havePropertyDock_ = false;
+        std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);   // the views and models outlive this object and still call its handlers while closing
     };
 
 }

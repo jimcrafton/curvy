@@ -2,6 +2,8 @@
 
 #include "curvy/pathnode.h"
 
+#include <algorithm>
+#include <cmath>
 #include <memory>
 #include <stdexcept>
 
@@ -36,9 +38,75 @@ namespace curvy {
             [this, a, b]() { jitnodes::restoreSnapshot(*network_, *b, a.get()); graphChanged(); }});
     }
 
+    namespace {
+        constexpr double kKeyTolerance = 1e-6;
+
+        void putKey(jitnodes::Node& node, const std::string& name, double time, float value) {
+            std::vector<jitnodes::Keyframe> keys = node.keyframes(name);
+            for (jitnodes::Keyframe& key : keys) {
+                if (std::abs(key.time - time) < kKeyTolerance) {
+                    key.value = value;
+                    node.setKeyframes(name, std::move(keys));
+                    return;
+                }
+            }
+            keys.push_back({time, value, jitnodes::KeyInterp::linear});
+            node.setKeyframes(name, std::move(keys));
+        }
+
+        // A keyed parameter takes an edit as a key at the current time, any other as its stored value.
+        void writeFloat(jitnodes::Network& network, jitnodes::NodeId id, const std::string& name, float value) {
+            jitnodes::Node& node = network.node(id);
+            if (node.keyframes(name).empty()) {
+                node.setFloat(name, value);
+            } else {
+                putKey(node, name, network.time(), value);
+            }
+            network.markDirty(id);
+        }
+    }
+
     void GraphDocument::setGraphFloatLive(jitnodes::NodeId id, const std::string& name, float value) {
-        network_->node(id).setFloat(name, value);
+        writeFloat(*network_, id, name, value);
         graphChanged();
+    }
+
+    void GraphDocument::setGraphKey(jitnodes::NodeId id, const std::string& name, float value) {
+        const jitnodes::GraphSnapshot before = snapshotGraph();
+        putKey(network_->node(id), name, network_->time(), value);
+        network_->markDirty(id);
+        commitGraphEdit(before, "Set Key " + name);
+    }
+
+    void GraphDocument::removeGraphKey(jitnodes::NodeId id, const std::string& name) {
+        jitnodes::Node& node = network_->node(id);
+        std::vector<jitnodes::Keyframe> keys = node.keyframes(name);
+        const double time = network_->time();
+        const auto at = std::find_if(keys.begin(), keys.end(), [&](const jitnodes::Keyframe& key) { return std::abs(key.time - time) < kKeyTolerance; });
+        if (at == keys.end()) {
+            return;
+        }
+        const jitnodes::GraphSnapshot before = snapshotGraph();
+        keys.erase(at);
+        if (keys.empty()) {
+            // The last key goes: the parameter keeps the value it had, as a plain number.
+            const float held = jitnodes::evaluateKeyframes(node.keyframes(name), time);
+            node.clearAnimation(name);
+            node.setFloat(name, held);
+        } else {
+            node.setKeyframes(name, std::move(keys));
+        }
+        network_->markDirty(id);
+        commitGraphEdit(before, "Remove Key " + name);
+    }
+
+    bool GraphDocument::hasKeyAtTime(jitnodes::NodeId id, const std::string& name) const {
+        for (const jitnodes::Keyframe& key : network_->node(id).keyframes(name)) {
+            if (std::abs(key.time - network_->time()) < kKeyTolerance) {
+                return true;
+            }
+        }
+        return false;
     }
 
     void GraphDocument::restoreGraph(const jitnodes::GraphSnapshot& target) {
@@ -67,8 +135,7 @@ namespace curvy {
 
     void GraphDocument::setGraphParam(jitnodes::NodeId id, const std::string& name, float value) {
         const jitnodes::GraphSnapshot before = snapshotGraph();
-        network_->node(id).setFloat(name, value);
-        network_->markDirty(id);
+        writeFloat(*network_, id, name, value);
         commitGraphEdit(before, "Change " + name);
     }
 
@@ -96,8 +163,7 @@ namespace curvy {
         if (seconds == network_->time()) {
             return;
         }
-        network_->setTime(seconds);
-        timeChanged();
+        timeChanged(network_->setTime(seconds));
     }
 
     void GraphDocument::setGraphString(jitnodes::NodeId id, const std::string& name, const std::string& value) {

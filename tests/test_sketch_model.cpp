@@ -4000,11 +4000,10 @@ TEST(SketchScrub, ADragOnALabelReportsValuesThenEnds) {
     newui::Label label;
     std::vector<double> seen;
     bool began = false, ended = false, endedChanged = false;
-    NumberScrubber::Callbacks callbacks;
-    callbacks.begin = [&](double& value) { value = 10.0; began = true; return true; };
-    callbacks.change = [&](double value) { seen.push_back(value); };
-    callbacks.end = [&](bool changed) { ended = true; endedChanged = changed; };
-    NumberScrubber::attach(label, 1.0, 0.0, 100.0, callbacks);
+    auto scrubber = NumberScrubber::attach(label, 1.0, 0.0, 100.0);
+    scrubber->onBegin += [&](NumberScrubber&, double& value) { value = 10.0; began = true; return newui::SyncReturn::Handled; };
+    scrubber->onChange += [&](NumberScrubber&, double value) { seen.push_back(value); return newui::SyncReturn::Handled; };
+    scrubber->onEnd += [&](NumberScrubber&, bool changed) { ended = true; endedChanged = changed; return newui::SyncReturn::Handled; };
     label.onMouseDown(label, newui::Point(50, 5), std::uint32_t(newui::mbmLeftButton), 0u);
     EXPECT_TRUE(began);
     label.onMouseMove(label, newui::Point(53, 5), std::uint32_t(newui::mbmLeftButton), 0u);   // 3 px: 3 units
@@ -7028,6 +7027,44 @@ TEST(Expressions, AnExpressionOnAPlacementFollowsTheTime) {
     EXPECT_NEAR(left(id), 10.0, 1e-3);
 }
 
+TEST(Keys, KeyingAParameterAnimatesTheObjectAndEditsMakeKeys) {
+    SketchDocument doc;
+    const std::size_t id = doc.add(SketchObject::makeRect(10, 10, 40, 20)).id();
+    const jitnodes::NodeId place = doc.transformNodeOf(id);
+    auto left = [&](std::size_t object) { return doc.findById(object)->geometryBounds().x0; };
+
+    doc.setTime(0.0);
+    doc.setGraphKey(place, "translateX", 0.0f);
+    doc.setTime(2.0);
+    doc.setGraphKey(place, "translateX", 100.0f);
+    EXPECT_TRUE(doc.hasKeyAtTime(place, "translateX"));
+    doc.setTime(1.0);
+    EXPECT_FALSE(doc.hasKeyAtTime(place, "translateX"));
+    EXPECT_NEAR(left(id), 60.0, 1e-3) << "linear between the keys";
+
+    doc.setGraphParam(place, "translateX", 20.0f);
+    EXPECT_EQ(doc.network().node(place).keyframes("translateX").size(), 3u) << "editing a keyed parameter keys it at the current time";
+    EXPECT_NEAR(left(id), 30.0, 1e-3);
+
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.network().node(place).keyframes("translateX").size(), 2u);
+    EXPECT_NEAR(left(id), 60.0, 1e-3);
+
+    SketchDocument copy = roundTrip(doc);
+    copy.setTime(1.0);
+    EXPECT_NEAR(copy.object(0).geometryBounds().x0, 60.0, 1e-3) << "a saved file keeps the keys";
+
+    doc.setTime(2.0);
+    doc.removeGraphKey(place, "translateX");
+    EXPECT_EQ(doc.network().node(place).keyframes("translateX").size(), 1u);
+    doc.setTime(0.0);
+    doc.removeGraphKey(place, "translateX");
+    EXPECT_TRUE(doc.network().node(place).keyframes("translateX").empty());
+    EXPECT_FALSE(doc.network().node(place).isAnimated("translateX"));
+    doc.setTime(5.0);
+    EXPECT_NEAR(left(id), 10.0, 1e-3) << "the last key's value stays as a plain number";
+}
+
 TEST(PointTags, MovePointsMovesOnlyTheTaggedPointsAndTheObjectFollows) {
     SketchDocument doc;
     const std::size_t id = doc.add(SketchObject::makeRect(10, 10, 40, 20)).id();
@@ -7121,6 +7158,79 @@ TEST(NodeSelection, SelectionAndPickingGoByNode) {
 
     EXPECT_TRUE(doc.selectInRect(BLBox(190, -5, 250, 50), false));
     EXPECT_EQ(doc.selection(), (std::vector<std::size_t>{a}));
+
+    // The selection box and frame are measured on that outline too.
+    BLBox selected(0, 0, 0, 0);
+    ASSERT_TRUE(doc.selectionBounds(selected));
+    EXPECT_NEAR(selected.x0, outline.x0, 1e-3);
+    EXPECT_NEAR(selected.x1, outline.x1, 1e-3);
+    SelectionFrame frame;
+    ASSERT_TRUE(doc.selectionFrame(frame));
+    EXPECT_NEAR(frame.local.x0, outline.x0, 1e-3);
+    EXPECT_NEAR(frame.local.x1, outline.x1, 1e-3);
+}
+
+// The handles ask for the selection's frame and bounds on every mouse move of a drag (and on every frame of the timeline), so with
+// thousands of objects in the graph that must stay far inside a frame's budget.
+TEST(Selection, TheFrameOfALargeGraphIsCheapToMeasureWhileScrubbing) {
+    SketchDocument doc;
+    constexpr int kCount = 2000;
+    for (int i = 0; i < kCount; ++i) {
+        doc.add(SketchObject::makeRect(double(i % 50) * 30.0, double(i / 50) * 30.0, 20, 20));
+    }
+    doc.selectAll();
+    ASSERT_EQ(doc.selection().size(), std::size_t(kCount));
+    constexpr double kBudgetMs = 3.0;
+    auto millisSince = [](std::chrono::steady_clock::time_point start) {
+        return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    };
+    BLBox box(0, 0, 0, 0);
+    SelectionFrame frame;
+
+    // Resting: nothing edited, so the nodes' outline is the one measured.
+    auto start = std::chrono::steady_clock::now();
+    for (int i = 0; i < 20; ++i) {
+        ASSERT_TRUE(doc.selectionBounds(box));
+        ASSERT_TRUE(doc.selectionFrame(frame));
+    }
+    const double resting = millisSince(start) / 20;
+
+    // Dragging: each mouse move puts the objects back and moves them again (CanvasView::applyToSelection), then the handles are measured.
+    const std::vector<GeometryState> before = doc.snapshotSelection(true);
+    double dragging = 0.0;
+    for (int step = 1; step <= 20; ++step) {
+        for (const GeometryState& entry : before) {
+            SketchObject* object = doc.findById(entry.id);
+            object->setGeometry(entry.path);
+            object->transform(BLMatrix2D::make_translation(step * 3.0, step * 2.0));
+        }
+        start = std::chrono::steady_clock::now();
+        ASSERT_TRUE(doc.selectionBounds(box));
+        ASSERT_TRUE(doc.selectionFrame(frame));
+        dragging += millisSince(start);
+    }
+    dragging /= 20;
+    EXPECT_NEAR(box.x0, 60.0, 1e-3) << "the handles follow the drag";
+    doc.commitGeometry(before, "Move");
+
+    // Scrubbing the timeline: every frame re-cooks the graph, then the handles are measured.
+    double cook = 0.0, measure = 0.0;
+    for (int frameNo = 1; frameNo <= 20; ++frameNo) {
+        start = std::chrono::steady_clock::now();
+        doc.setTime(frameNo / 24.0);
+        cook += millisSince(start);
+        start = std::chrono::steady_clock::now();
+        ASSERT_TRUE(doc.selectionBounds(box));
+        ASSERT_TRUE(doc.selectionFrame(frame));
+        measure += millisSince(start);
+    }
+    const double scrubbing = (cook + measure) / 20;
+
+    std::printf("frame + bounds of %d objects: resting %.2f ms, dragging %.2f ms; timeline step %.2f ms (setTime %.2f, measuring %.2f)\n",
+        kCount, resting, dragging, scrubbing, cook / 20, measure / 20);
+    EXPECT_LT(resting, kBudgetMs);
+    EXPECT_LT(dragging, kBudgetMs);
+    EXPECT_LT(scrubbing, 4 * kBudgetMs) << "includes re-cooking the graph";
 }
 
 TEST(PaintWarp, AGradientFollowsAPerspectiveWarpOfItsShape) {

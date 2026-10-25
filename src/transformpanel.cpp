@@ -119,11 +119,11 @@ namespace curvy {
         if (label == nullptr) {
             return;
         }
-        NumberScrubber::Callbacks callbacks;
-        callbacks.begin = [this, which](double& value) {
+        auto scrubber = NumberScrubber::attach(*label, unit, minimum, maximum);
+        scrubber->onBegin += [this, which](NumberScrubber&, double& value) {
             scrub_ = Scrub();
             if (updating_ || !document_.selectionBounds(scrub_.box)) {
-                return false;
+                return newui::SyncReturn::Ignored;
             }
             scrub_.before = document_.snapshotSelection(true);
             scrub_.frameBefore = document_.frameState();
@@ -132,11 +132,11 @@ namespace curvy {
             const double values[5] = {scrub_.box.x0, scrub_.box.y0, scrub_.box.x1 - scrub_.box.x0, scrub_.box.y1 - scrub_.box.y0, scrub_.angle * 180.0 / kPi};
             value = values[int(which)];
             scrub_.active = true;
-            return true;
+            return newui::SyncReturn::Handled;
         };
-        callbacks.change = [this, which](double value) {
+        scrubber->onChange += [this, which](NumberScrubber&, double value) {
             if (!scrub_.active) {
-                return;
+                return newui::SyncReturn::Ignored;
             }
             if (which == Field::Angle) {
                 scrub_.angleDelta = value * kPi / 180.0 - scrub_.angle;
@@ -149,10 +149,11 @@ namespace curvy {
                 scrub_.matrix = SketchDocument::matrixForBox(scrub_.box, boxFor(which, value, scrub_.box, link_ != nullptr && link_->isChecked()));
             }
             document_.previewTransform(scrub_.before, scrub_.matrix, scrub_.angleDelta);
+            return newui::SyncReturn::Handled;
         };
-        callbacks.end = [this, which](bool changed) {
+        scrubber->onEnd += [this, which](NumberScrubber&, bool changed) {
             if (!scrub_.active) {
-                return;
+                return newui::SyncReturn::Ignored;
             }
             scrub_.active = false;
             if (changed) {
@@ -161,8 +162,8 @@ namespace curvy {
                 document_.noteTransform(scrub_.matrix, scrub_.angleDelta);
             }
             refresh();
+            return newui::SyncReturn::Handled;
         };
-        NumberScrubber::attach(*label, unit, minimum, maximum, std::move(callbacks));
     }
 
     // Enter in a field: that one value changes, the rest stay as the selection has them.

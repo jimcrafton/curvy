@@ -29,59 +29,62 @@ namespace curvy {
         return std::round(snapped * 1e6) / 1e6;
     }
 
-    void NumberScrubber::attach(newui::Label& label, double unit, double minimum, double maximum, Callbacks callbacks) {
-        struct State {
-            bool active = false;
-            bool changed = false;
-            float lastX = 0.0f;
-            double raw = 0.0;       // the value the mouse has led to, before snapping
-            double shown = 0.0;     // the last value reported
-        };
-        auto state = std::make_shared<State>();
-        label.setCursor(newui::Cursor(newui::CursorKind::SizeWE));
+    bool NumberScrubber::press(float x) {
+        double value = 0.0;
+        if (!onBegin.syncCallFirst(*this, value).handled()) {
+            return false;
+        }
+        active_ = true;
+        changed_ = false;
+        lastX_ = x;
+        raw_ = shown_ = value;
+        return true;
+    }
 
-        label.onMouseDown += [state, callbacks](newui::View&, const newui::Point& at, std::uint32_t buttons, std::uint32_t) {
-            if ((buttons & newui::mbmLeftButton) == 0) {
+    void NumberScrubber::move(float x, std::uint32_t keys, double unit, double minimum, double maximum) {
+        onUnit.syncCallFirst(*this, unit);
+        double step = stepFor(unit, keys);
+        raw_ += double(x - lastX_) * step;
+        lastX_ = x;
+        raw_ = std::max(minimum, std::min(maximum, raw_));
+        double value = std::max(minimum, std::min(maximum, roundToStep(raw_, step)));
+        if (value != shown_) {
+            shown_ = value;
+            changed_ = true;
+            onChange(*this, value);
+        }
+    }
+
+    void NumberScrubber::release() {
+        active_ = false;
+        onEnd(*this, changed_);
+    }
+
+    std::shared_ptr<NumberScrubber> NumberScrubber::attach(newui::View& view, double unit, double minimum, double maximum) {
+        auto scrubber = std::make_shared<NumberScrubber>();
+        view.setCursor(newui::Cursor(newui::CursorKind::SizeWE));
+
+        view.onMouseDown += [scrubber](newui::View&, const newui::Point& at, std::uint32_t buttons, std::uint32_t) {
+            if ((buttons & newui::mbmLeftButton) == 0 || !scrubber->press(at.x)) {
                 return newui::SyncReturn::Ignored;
-            }
-            double value = 0.0;
-            if (!callbacks.begin || !callbacks.begin(value)) {
-                return newui::SyncReturn::Ignored;
-            }
-            state->active = true;
-            state->changed = false;
-            state->lastX = at.x;
-            state->raw = state->shown = value;
-            return newui::SyncReturn::Handled;
-        };
-        label.onMouseMove += [state, callbacks, unit, minimum, maximum](newui::View&, const newui::Point& at, std::uint32_t, std::uint32_t keys) {
-            if (!state->active) {
-                return newui::SyncReturn::Ignored;
-            }
-            double step = NumberScrubber::stepFor(callbacks.unit ? callbacks.unit() : unit, keys);
-            state->raw += double(at.x - state->lastX) * step;
-            state->lastX = at.x;
-            state->raw = std::max(minimum, std::min(maximum, state->raw));
-            double value = std::max(minimum, std::min(maximum, NumberScrubber::roundToStep(state->raw, step)));
-            if (value != state->shown) {
-                state->shown = value;
-                state->changed = true;
-                if (callbacks.change) {
-                    callbacks.change(value);
-                }
             }
             return newui::SyncReturn::Handled;
         };
-        label.onMouseUp += [state, callbacks](newui::View&, const newui::Point&, std::uint32_t, std::uint32_t) {
-            if (!state->active) {
+        view.onMouseMove += [scrubber, unit, minimum, maximum](newui::View&, const newui::Point& at, std::uint32_t, std::uint32_t keys) {
+            if (!scrubber->active()) {
                 return newui::SyncReturn::Ignored;
             }
-            state->active = false;
-            if (callbacks.end) {
-                callbacks.end(state->changed);
-            }
+            scrubber->move(at.x, keys, unit, minimum, maximum);
             return newui::SyncReturn::Handled;
         };
+        view.onMouseUp += [scrubber](newui::View&, const newui::Point&, std::uint32_t, std::uint32_t) {
+            if (!scrubber->active()) {
+                return newui::SyncReturn::Ignored;
+            }
+            scrubber->release();
+            return newui::SyncReturn::Handled;
+        };
+        return scrubber;
     }
 
 }

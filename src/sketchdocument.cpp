@@ -85,12 +85,20 @@ namespace curvy {
     }
 
     SketchObject* SketchDocument::findById(std::size_t id) const {
-        for (const std::unique_ptr<SketchObject>& object : objects_) {
-            if (object->id() == id) {
-                return object.get();
+        const auto known = indexOfId_.find(id);
+        if (known != indexOfId_.end() && known->second < objects_.size() && objects_[known->second]->id() == id) {
+            return objects_[known->second].get();
+        }
+        // Not where it was (or never seen): index them all, so a run of lookups scans once.
+        indexOfId_.clear();
+        SketchObject* found = nullptr;
+        for (std::size_t i = 0; i < objects_.size(); ++i) {
+            indexOfId_[objects_[i]->id()] = i;
+            if (objects_[i]->id() == id) {
+                found = objects_[i].get();
             }
         }
-        return nullptr;
+        return found;
     }
 
     SketchObject* SketchDocument::hitTest(const BLPoint& point, double tolerance) const {
@@ -124,6 +132,7 @@ namespace curvy {
 
     void SketchDocument::clearObjects() {
         objects_.clear();
+        outlineCache_.clear();   // ids start again from 1
         clearGraph();
         drivenDirty_ = true;
         nextId_ = 1;
@@ -309,6 +318,12 @@ namespace curvy {
         setSelection(ids);
     }
 
+    BLBox SketchDocument::outlineBounds(const SketchObject& object) const {
+        BLBox box(0, 0, 0, 0);
+        placedOutline(object).get_bounding_box(&box);
+        return box;
+    }
+
     bool SketchDocument::selectionBounds(BLBox& out) const {
         bool any = false;
         for (std::size_t id : selection_) {
@@ -316,11 +331,11 @@ namespace curvy {
             if (object == nullptr) {
                 continue;
             }
-            BLBox box = object->geometryBounds();
+            BLBox box = outlineBounds(*object);
             for (std::size_t group : object->groups()) {
                 const SketchObject* mask = clipMaskOf(group);
                 if (mask != nullptr && mask != object) {
-                    BLBox m = mask->geometryBounds();
+                    BLBox m = outlineBounds(*mask);
                     BLBox cut(std::max(box.x0, m.x0), std::max(box.y0, m.y0), std::min(box.x1, m.x1), std::min(box.y1, m.y1));
                     box = cut.x1 >= cut.x0 && cut.y1 >= cut.y0 ? cut : m;
                 }
@@ -445,7 +460,7 @@ namespace curvy {
             if (object == nullptr) {
                 continue;
             }
-            BLPath path = object->geometry();
+            BLPath path = placedOutline(*object);
             if (angle != 0.0) {
                 path.transform(BLMatrix2D::make_rotation(-angle));
             }

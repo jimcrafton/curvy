@@ -1,5 +1,7 @@
 #include "curvy/workspacechecks.h"
 
+#include "curvy/pathnode.h"
+
 #include "curvy/colorwheel.h"
 #include "curvy/workspacecontroller.h"
 #include "curvy/theme.h"
@@ -514,6 +516,22 @@ namespace curvy {
                 expect(std::fabs(left() - 15.0) < 1e-3, "the shape holds still again");
                 doc_->undoStack().undo();
                 expect(graph.detailValue(0) == "=sin(time) * 50", "undo brings the expression back, and the box follows");
+
+                // A Tag node's box: kind and operation are choices, the counts are numbers from zero up.
+                expect(doc_->tagPoints(id, "pins", {1, 2}, true), "two points are tagged");
+                jitnodes::NodeId tag = jitnodes::invalidNodeId;
+                for (jitnodes::NodeId candidate : doc_->network().nodeIds()) {
+                    if (doc_->network().node(candidate).typeName() == kTagNodeType) {
+                        tag = candidate;
+                    }
+                }
+                graph.refresh();
+                expect(tag != jitnodes::invalidNodeId, "a Tag node exists");
+                expect(graph.selectNode(tag), "its row can be selected");
+                expect(graph.detailCaption(5) == "kind" && graph.detailCaption(6) == "operation", "the Tag node's box lists kind and operation");                graph.setDetailValue(5, "anchors");
+                expect(graph.detailValue(5) == "anchors" && doc_->network().node(tag).getString("kind") == "anchors", "a choice sets the node's string");
+                graph.setDetailValue(3, "2");
+                expect(doc_->network().node(tag).baseFloat("offset") == 2.0f, "offset takes a number");
 
                 doc_->setTime(0.0);
                 w_.runCommand("view.graph");

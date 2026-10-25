@@ -47,8 +47,35 @@ namespace curvy {
         setTextColor(expression_ ? accent_ : plain_);
     }
 
+    void ExpressionField::setKeyState(KeyState state) {
+        if (state == keyState_) {
+            return;
+        }
+        keyState_ = state;
+        style().markDirty();
+    }
+
     void ExpressionField::paint(BLContext& ctx) {
         TextField::paint(ctx);
+        if (keyState_ != KeyState::None) {
+            const newui::Rect bounds = getClientBounds();
+            const double half = 4.0;
+            const double cx = double(bounds.right()) - 10.0, cy = double(bounds.top()) + double(bounds.height()) * 0.5;
+            BLPath diamond;
+            diamond.move_to(cx, cy - half);
+            diamond.line_to(cx + half, cy);
+            diamond.line_to(cx, cy + half);
+            diamond.line_to(cx - half, cy);
+            diamond.close();
+            ctx.set_fill_style(BLRgba(accent_.r, accent_.g, accent_.b, accent_.a));
+            if (keyState_ == KeyState::OnKey) {
+                ctx.fill_path(diamond);
+            } else {
+                ctx.set_stroke_width(1.2);
+                ctx.set_stroke_style(BLRgba(accent_.r, accent_.g, accent_.b, accent_.a));
+                ctx.stroke_path(diamond);
+            }
+        }
         if (expression_) {
             const newui::Rect bounds = getClientBounds();
             ctx.set_fill_style(BLRgba(accent_.r, accent_.g, accent_.b, accent_.a));

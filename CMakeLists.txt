@@ -54,6 +54,7 @@ add_executable(curvy
     src/textpanel.cpp
     src/numberscrubber.cpp
     src/expressionfield.cpp
+    src/paramgrid.cpp
     src/sketchcolor.cpp
     src/sketchobject.cpp
     src/graphdocument.cpp

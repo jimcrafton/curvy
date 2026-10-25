@@ -9,6 +9,7 @@
 #include <newui/bundle.h>
 #include <newui/clipboardmgr.h>
 #include <newui/segmentedcontrol.h>
+#include <newui/uiinputmanager.h>
 #include <newui/utils.h>
 
 #include <algorithm>
@@ -136,55 +137,59 @@ namespace curvy {
         controller_->setModel(std::make_unique<GraphTreeModel>());
         if (tree_ != nullptr) {
             tree_->setController(controller_);
-            tree_->onSelectionChanged += [this](TreeView&) {
+            tree_->onSelectionChanged += guarded(alive_, [this](TreeView&) {
                 selectionChangedInTree();
                 return SyncReturn::Handled;
-            };
+            });
         }
         if (modeControl_ != nullptr) {
             modeControl_->setSegments({"Document", "Flow"});
             modeControl_->setSelectedIndex(0);
-            modeControl_->onSelectionChanged += [this](SegmentedControl& changed) {
+            modeControl_->onSelectionChanged += guarded(alive_, [this](SegmentedControl& changed) {
                 setMode(changed.selectedIndex() == 1 ? Mode::Flow : Mode::Document);
                 return SyncReturn::Handled;
-            };
+            });
         }
         if (filterField_ != nullptr) {
-            filterField_->onKeyUp += [this](View&, std::uint32_t, int, int, std::uint32_t) {
+            filterField_->onKeyUp += guarded(alive_, [this](View&, std::uint32_t, int, int, std::uint32_t) {
                 setFilter(wideToUtf8(filterField_->text()));
                 return SyncReturn::Handled;
-            };
+            });
         }
         buildDetail();
         if (auto* toggle = find<Button>(frame_.rootView(), "graphToggle")) {
             toggle->setToggleButton(true);
-            toggle->onClick += [this](Control&) {
+            toggle->onClick += guarded(alive_, [this](Control&) {
                 model_.setGraphVisible(!model_.graphVisible());
                 return SyncReturn::Handled;
-            };
+            });
         }
-        model_.onChanged += [this](Model&) {
+        model_.onChanged += guarded(alive_, [this](Model&) {
             sync();
             return SyncReturn::Handled;
-        };
-        canvas_.onSizeChanged += [this](View&, const Size&) {
+        });
+        canvas_.onSizeChanged += guarded(alive_, [this](View&, const Size&) {
             layout();
             return SyncReturn::Handled;
-        };
-        document_.onChanged += [this](SketchDocument&) {
+        });
+        document_.onChanged += guarded(alive_, [this](SketchDocument&) {
             if (shown_) {
                 refresh();
             }
             return SyncReturn::Handled;
-        };
-        document_.onSelectionChanged += [this](SketchDocument&) {
+        });
+        document_.onSelectionChanged += guarded(alive_, [this](SketchDocument&) {
             if (shown_) {
                 refresh();
             }
             return SyncReturn::Handled;
-        };
+        });
         restyle();
         sync();
+    }
+
+    GraphDock::~GraphDock() {
+        *alive_ = false;
     }
 
     void GraphDock::buildDetail() {
@@ -192,82 +197,72 @@ namespace curvy {
             return;
         }
         detailRows_.resize(kDetailRows);
-        for (std::size_t i = 0; i < kDetailRows; ++i) {
-            DetailRow& row = detailRows_[i];
-            row.caption = new Label();
-            row.caption->setName("graphDetailCaption" + std::to_string(i));
-            row.caption->setVisible(false);
-            detail_->addChild(row.caption);
-            row.field = new ExpressionField();
-            row.field->setName("graphDetailField" + std::to_string(i));
-            row.field->setVisible(false);
-            detail_->addChild(row.field);
-            row.chip = new ColourChip();
-            row.chip->setName("graphDetailChip" + std::to_string(i));
-            row.chip->setVisible(false);
-            detail_->addChild(row.chip);
-            row.chip->onMouseDown += [this, i](View&, const Point&, std::uint32_t, std::uint32_t) {
-                editDetailColour(i);
-                return SyncReturn::Handled;
-            };
-            row.slider = new Slider();
-            row.slider->setRange(0.0f, 100.0f);
-            row.slider->setVisible(false);
-            detail_->addChild(row.slider);
-            row.percent = new Label();
-            row.percent->setTextAlignment(TextAlignment::Right);
-            row.percent->setVisible(false);
-            detail_->addChild(row.percent);
-            NumberScrubber::Callbacks scrub;
-            scrub.begin = [this, i](double& value) {
-                const DetailRow& r = detailRows_[i];
-                if (!r.scrub || r.node == 0) {
-                    return false;
+        grid_ = new ParamGrid();
+        grid_->setName("graphParams");
+        detail_->addChild(grid_);
+        grid_->resize(kDetailRows);
+        grid_->onCommit += guarded(alive_, [this](ParamGrid&, std::size_t i, const std::string& text) {
+            commitDetail(i, text);
+            return SyncReturn::Handled;
+        });
+        grid_->onSliderReleased += guarded(alive_, [this](ParamGrid&, std::size_t i, double percent) {
+            if (detailRows_[i].apply) {
+                const auto apply = detailRows_[i].apply;   // a copy: the edit rebuilds the rows, and with them this function
+                apply(numberText(std::round(percent)));
+            }
+            return SyncReturn::Handled;
+        });
+        grid_->onEditEnded += guarded(alive_, [this](ParamGrid&) {
+            if (RootView* root = canvas_.rootView()) {
+                if (SubView* target = UIInputManager::instance().resolveClickFocusTarget(&canvas_)) {
+                    root->setFocusedSubView(target);
                 }
-                value = r.scale * document_.network().node(r.node).baseFloat(r.param);
-                scrubBefore_ = std::make_shared<jitnodes::GraphSnapshot>(document_.snapshotGraph());
-                return true;
-            };
-            scrub.change = [this, i](double value) {
-                DetailRow& r = detailRows_[i];
-                value = std::clamp(value, r.minimum, r.maximum);
-                document_.setGraphFloatLive(r.node, r.param, float(value / r.scale));
-                if (r.kind == DetailRow::Kind::Slider) {
-                    r.slider->setValue(float(value));
-                } else {
-                    r.field->setText(utf8ToWide(numberText(value)));
-                }
-            };
-            scrub.end = [this, i](bool changed) {
-                if (changed && scrubBefore_) {
-                    document_.commitGraphEdit(*scrubBefore_, "Change " + detailRows_[i].param);
-                }
-                scrubBefore_.reset();
-            };
-            scrub.unit = [this, i]() { return detailRows_[i].unit; };
-            NumberScrubber::attach(*row.caption, 1.0, -1e9, 1e9, std::move(scrub));
-            row.slider->onValueChanged += [this, i](Slider& slider) {
-                detailRows_[i].percent->setText(numberText(std::round(slider.value())) + "%");
-                return SyncReturn::Handled;
-            };
-            row.slider->onMouseUp += [this, i](View&, const Point&, std::uint32_t, std::uint32_t) {
-                commitSlider(i);
+            }
+            return SyncReturn::Handled;
+        });
+        grid_->onChipClicked += guarded(alive_, [this](ParamGrid&, std::size_t i) {
+            editDetailColour(i);
+            return SyncReturn::Handled;
+        });
+        grid_->onKeyToggled += guarded(alive_, [this](ParamGrid&, std::size_t i) {
+            toggleKey(i);
+            return SyncReturn::Handled;
+        });
+        grid_->onScrubBegin += guarded(alive_, [this](ParamGrid&, std::size_t i, double& value) {
+            const DetailRow& r = detailRows_[i];
+            if (!r.scrub || r.node == 0) {
                 return SyncReturn::Ignored;
-            };
-            row.slider->onKeyUp += [this, i](View&, std::uint32_t, int, int, std::uint32_t) {
-                commitSlider(i);
-                return SyncReturn::Ignored;
-            };
-            auto apply = [this, i](View&) {
-                commitDetail(i);
-                return SyncReturn::Handled;
-            };
-            row.field->onReturnPressed += [this, i](TextField&) {
-                commitDetail(i);
-                return SyncReturn::Handled;
-            };
-            row.field->onLostFocus += apply;
-        }
+            }
+            const jitnodes::Node& scrubbed = document_.network().node(r.node);
+            const std::vector<jitnodes::Keyframe>& keys = scrubbed.keyframes(r.param);
+            value = r.scale * (keys.empty() ? scrubbed.baseFloat(r.param) : jitnodes::evaluateKeyframes(keys, document_.time()));
+            scrubBefore_ = std::make_shared<jitnodes::GraphSnapshot>(document_.snapshotGraph());
+            return SyncReturn::Handled;
+        });
+        grid_->onScrubChange += guarded(alive_, [this](ParamGrid&, std::size_t i, double value) {
+            DetailRow& r = detailRows_[i];
+            value = std::clamp(value, r.minimum, r.maximum);
+            document_.setGraphFloatLive(r.node, r.param, float(value / r.scale));
+            ParamGrid::Row& cell = grid_->edit(i);
+            if (r.kind == DetailRow::Kind::Slider) {
+                cell.percent = value;
+            } else {
+                cell.text = numberText(value);
+            }
+            grid_->changed();
+            return SyncReturn::Handled;
+        });
+        grid_->onScrubEnd += guarded(alive_, [this](ParamGrid&, std::size_t i, bool changed) {
+            if (changed && scrubBefore_) {
+                document_.commitGraphEdit(*scrubBefore_, "Change " + detailRows_[i].param);
+            }
+            scrubBefore_.reset();
+            return SyncReturn::Handled;
+        });
+        grid_->onScrubUnit += guarded(alive_, [this](ParamGrid&, std::size_t i, double& unit) {
+            unit = detailRows_[i].unit;
+            return SyncReturn::Handled;
+        });
         auto makeLabel = [this](bool link) {
             auto* label = new Label();
             label->setVisible(false);
@@ -296,10 +291,10 @@ namespace curvy {
                 link.name = makeLabel(false);
                 link.go = makeLabel(true);
                 link.go->setText("Go to");
-                link.go->onLinkClicked += [this, list, k](Label&) {
+                link.go->onLinkClicked += guarded(alive_, [this, list, k](Label&) {
                     selectNode((*list)[k].node);
                     return SyncReturn::Handled;
-                };
+                });
             }
         }
         const char* names[3] = {"Edit", "Copy", "Paste"};
@@ -314,20 +309,20 @@ namespace curvy {
         resetButton_->setText("Reset");
         resetButton_->setVisible(false);
         detail_->addChild(resetButton_);
-        resetButton_->onClick += [this](Control&) {
+        resetButton_->onClick += guarded(alive_, [this](Control&) {
             if (detailNode_ != 0) {
                 resetTransform(detailNode_);
             }
             return SyncReturn::Handled;
-        };
-        pathButtons_[0]->onClick += [this](Control&) {
+        });
+        pathButtons_[0]->onClick += guarded(alive_, [this](Control&) {
             if (detailObject_ != 0) {
                 document_.setSelection({detailObject_});
                 canvas_.setTool(SketchTool::DirectSelect);
             }
             return SyncReturn::Handled;
-        };
-        pathButtons_[1]->onClick += [this](Control&) {
+        });
+        pathButtons_[1]->onClick += guarded(alive_, [this](Control&) {
             if (detailNode_ != 0 && document_.network().node(detailNode_).hasGeometryParam("curve")) {
                 BLPath path;
                 if (pathFromGeometry(*document_.network().node(detailNode_).geometryParam("curve"), path)) {
@@ -336,8 +331,8 @@ namespace curvy {
                 }
             }
             return SyncReturn::Handled;
-        };
-        pathButtons_[2]->onClick += [this](Control&) {
+        });
+        pathButtons_[2]->onClick += guarded(alive_, [this](Control&) {
             std::wstring text;
             BLPath path;
             if (detailNode_ != 0 && ClipboardManager::getText(text) && pathFromText(wideToUtf8(text), path) && path.size() > 1) {
@@ -347,7 +342,7 @@ namespace curvy {
                 status_->setText("The clipboard does not hold path data");
             }
             return SyncReturn::Handled;
-        };
+        });
         layoutDetail();
     }
 
@@ -357,31 +352,17 @@ namespace curvy {
         }
         const float width = detail_->bounds().size().width;
         const float fieldLeft = 8.0f + kCaptionWidth, fieldWidth = std::max(40.0f, width - fieldLeft - 8.0f);
-        float y = 4.0f;
-        for (std::size_t i = 0; i < detailRows_.size(); ++i) {
-            DetailRow& row = detailRows_[i];
-            if (!row.caption->isVisible()) {
-                continue;
-            }
-            row.caption->setBounds(Rect(8.0f, y, kCaptionWidth, 20.0f));
-            if (row.kind == DetailRow::Kind::Gradient) {
-                row.chip->setBounds(Rect(fieldLeft, y + 1.0f, fieldWidth, 18.0f));
-            } else if (row.kind == DetailRow::Kind::Colour) {
-                row.chip->setBounds(Rect(fieldLeft, y + 1.0f, 28.0f, 18.0f));
-                row.field->setBounds(Rect(fieldLeft + 34.0f, y, std::max(40.0f, fieldWidth - 34.0f), 20.0f));
-            } else if (row.kind == DetailRow::Kind::Slider) {
-                row.slider->setBounds(Rect(fieldLeft, y, std::max(40.0f, fieldWidth - 40.0f), 20.0f));
-                row.percent->setBounds(Rect(width - 8.0f - 38.0f, y, 38.0f, 20.0f));
-            } else {
-                row.field->setBounds(Rect(fieldLeft, y, fieldWidth, 20.0f));
-            }
-            y += kRowHeight;
-            if (i == 0 && pathButtons_.front()->isVisible()) {
-                const float buttonWidth = 64.0f;
-                for (std::size_t k = 0; k < pathButtons_.size(); ++k) {
-                    pathButtons_[k]->setBounds(Rect(fieldLeft + float(k) * (buttonWidth + 6.0f), y, buttonWidth, 22.0f));
-                }
-                y += kRowHeight;
+        // The path buttons sit under the first row.
+        grid_->setGapAfter(0, pathButtons_.front()->isVisible() ? kRowHeight : 0.0f);
+        const float gridHeight = grid_->contentHeight();
+        grid_->setBounds(Rect(0.0f, 0.0f, width, gridHeight));
+        grid_->changed();
+        float y = gridHeight;
+        if (pathButtons_.front()->isVisible()) {
+            const float buttonWidth = 64.0f;
+            const float buttonsTop = grid_->rowTop(0) + kRowHeight;
+            for (std::size_t k = 0; k < pathButtons_.size(); ++k) {
+                pathButtons_[k]->setBounds(Rect(fieldLeft + float(k) * (buttonWidth + 6.0f), buttonsTop, buttonWidth, 22.0f));
             }
         }
         if (resetButton_->isVisible()) {
@@ -493,11 +474,14 @@ namespace curvy {
             filterField_->style().setBackgroundColor(tint(theme.bgApp));
             filterField_->setTextColor(rgb(theme.textPrimary));
         }
-        for (DetailRow& row : detailRows_) {
-            row.caption->setTextColor(rgb(theme.textMuted));
-            row.field->style().setBackgroundColor(tint(theme.bgApp));
-            row.field->setColours(rgb(theme.textPrimary), rgb(theme.accent));
-            row.percent->setTextColor(rgb(theme.textPrimary));
+        if (grid_ != nullptr) {
+            ParamGrid::Palette palette;
+            palette.caption = theme.textMuted;
+            palette.text = theme.textPrimary;
+            palette.accent = theme.accent;
+            palette.field = theme.bgApp;
+            palette.border = theme.border;
+            grid_->setPalette(palette);
         }
         for (Label* label : {inputsHeader_, usersHeader_, noInputs_, noUsers_}) {
             if (label != nullptr) {
@@ -543,8 +527,13 @@ namespace curvy {
     }
 
     std::size_t GraphDock::objectOfNode(jitnodes::NodeId node) const {
-        if (document_.network().node(node).typeName() == kTransformNodeType) {
-            node = document_.network().inputOf(node, 0);   // a transform node belongs to the shape it moves
+        // Transform, Tag and Move Points nodes belong to the shape they work on: follow the first input back to it.
+        for (int steps = 0; steps < 1000 && node != jitnodes::invalidNodeId; ++steps) {
+            const std::string type = document_.network().node(node).typeName();
+            if (type != kTransformNodeType && type != kTagNodeType && type != kMovePointsNodeType) {
+                break;
+            }
+            node = document_.network().inputOf(node, 0);
         }
         for (std::size_t i = 0; i < document_.objectCount(); ++i) {
             if (document_.object(i).graphNode() == node) {
@@ -823,7 +812,7 @@ namespace curvy {
             return;
         }
         const jitnodes::Node& node = document_.network().node(detailNode_);
-        if (node.typeName() != kTransformNodeType) {
+        if (node.typeName() != kTransformNodeType && node.typeName() != kMovePointsNodeType) {
             return;
         }
         updating_ = true;
@@ -845,25 +834,53 @@ namespace curvy {
             return;
         }
         const std::string& expression = node.expression(row.param);
-        const std::wstring text = utf8ToWide(expression.empty() ? numberText(node.baseFloat(row.param)) : "=" + expression);
-        const bool was = updating_;
-        updating_ = true;
-        row.field->setExpressionMode(!expression.empty());
-        if (row.field->text() != text) {
-            row.field->setText(text);
-        }
-        updating_ = was;
+        const std::vector<jitnodes::Keyframe>& keys = node.keyframes(row.param);
+        const float shown = keys.empty() ? node.baseFloat(row.param) : jitnodes::evaluateKeyframes(keys, document_.time());
+        const std::size_t index = std::size_t(&row - detailRows_.data());
+        ParamGrid::Row& cell = grid_->edit(index);
+        cell.text = expression.empty() ? numberText(shown) : "=" + expression;
+        cell.expression = !expression.empty();
+        cell.key = keys.empty() ? ExpressionField::KeyState::None
+                  : document_.hasKeyAtTime(row.node, row.param) ? ExpressionField::KeyState::OnKey
+                                                                 : ExpressionField::KeyState::Between;
+        grid_->changed();
     }
 
-    void GraphDock::commitDetail(std::size_t index) {
+    void GraphDock::toggleKey(std::size_t index) {
+        if (index >= detailRows_.size()) {
+            return;
+        }
+        const DetailRow& row = detailRows_[index];
+        if (!(row.scrub && row.kind == DetailRow::Kind::Text && row.node != 0)) {
+            return;
+        }
+        jitnodes::Node& node = document_.network().node(row.node);
+        if (document_.hasKeyAtTime(row.node, row.param)) {
+            document_.removeGraphKey(row.node, row.param);
+        } else {
+            const FieldEntry typed = parseFieldEntry(grid_->editingRow() == index ? wideToUtf8(grid_->editor().text()) : std::string());
+            const std::vector<jitnodes::Keyframe>& keys = node.keyframes(row.param);
+            float value = node.getFloat(row.param);   // what an expression gives at this time, or the stored number
+            if (typed.kind == FieldEntry::Kind::Number) {
+                value = float(typed.number);
+            } else if (!keys.empty()) {
+                value = jitnodes::evaluateKeyframes(keys, document_.time());
+            }
+            document_.setGraphKey(row.node, row.param, value);
+        }
+        status_->setText("");
+        showParam(detailRows_[index]);
+    }
+
+    void GraphDock::commitDetail(std::size_t index, const std::string& text) {
         if (updating_ || index >= detailRows_.size()) {
             return;
         }
         DetailRow& row = detailRows_[index];
-        const std::string text = wideToUtf8(row.field->text());
         if (!(row.scrub && row.kind == DetailRow::Kind::Text && row.node != 0)) {
             if (row.apply) {
-                row.apply(text);
+                const auto apply = row.apply;   // a copy: the edit rebuilds the rows, and with them this function
+                apply(text);
             }
             return;
         }
@@ -1002,15 +1019,15 @@ namespace curvy {
     }
 
     std::string GraphDock::detailCaption(std::size_t index) const {
-        return index < detailRows_.size() ? detailRows_[index].caption->text() : std::string();
+        return index < detailRows_.size() ? grid_->row(index).caption : std::string();
     }
 
     std::string GraphDock::detailValue(std::size_t index) const {
         if (index >= detailRows_.size()) {
             return std::string();
         }
-        const DetailRow& row = detailRows_[index];
-        return row.kind == DetailRow::Kind::Slider ? row.percent->text() : wideToUtf8(row.field->text());   // a gradient row has no text
+        const ParamGrid::Row& row = grid_->row(index);
+        return row.kind == DetailRow::Kind::Slider ? numberText(std::round(row.percent)) + "%" : row.text;   // a gradient row has no text
     }
 
     std::vector<std::string> GraphDock::detailLinks(bool inputs) const {
@@ -1025,7 +1042,7 @@ namespace curvy {
 
     bool GraphDock::editDetailColour(std::size_t index) {
         if (index >= detailRows_.size() || (detailRows_[index].kind != DetailRow::Kind::Colour && detailRows_[index].kind != DetailRow::Kind::Gradient) ||
-            !detailRows_[index].chip->isVisible() || detailNode_ == 0) {
+            !grid_->row(index).shown || detailNode_ == 0) {
             return false;
         }
         std::size_t objectId = 0;
@@ -1037,8 +1054,8 @@ namespace curvy {
         const AppearanceKind kind = item->kind;
         const std::size_t at = std::size_t(item - object->appearance().data());
         // Where the swatch is on the canvas; the card goes beside the dock rather than over it.
-        Point corner(0.0f, 0.0f);
-        for (const View* view = detailRows_[index].chip; view != nullptr && view != &canvas_; view = view->parent()) {
+        Point corner(ParamGrid::kMargin + ParamGrid::kCaptionWidth, grid_->rowTop(index));
+        for (const View* view = grid_; view != nullptr && view != &canvas_; view = view->parent()) {
             corner = Point(corner.x + view->bounds().left(), corner.y + view->bounds().top());
         }
         const Rect avoid = dock_->bounds();
@@ -1060,15 +1077,8 @@ namespace curvy {
         return false;
     }
 
-    void GraphDock::commitSlider(std::size_t index) {
-        if (updating_ || index >= detailRows_.size() || !detailRows_[index].apply) {
-            return;
-        }
-        detailRows_[index].apply(numberText(std::round(detailRows_[index].slider->value())));
-    }
-
     bool GraphDock::detailShown(std::size_t index) const {
-        return index < detailRows_.size() && detailRows_[index].caption->isVisible();
+        return index < detailRows_.size() && grid_->row(index).shown;
     }
 
     void GraphDock::setDetailValue(std::size_t index, const std::string& text) {
@@ -1078,25 +1088,22 @@ namespace curvy {
         if (detailRows_[index].kind == DetailRow::Kind::Slider) {
             double percent = 0.0;
             if (parseNumber(text, percent)) {
-                detailRows_[index].slider->setValue(float(percent));
+                grid_->edit(index).percent = percent;
+                grid_->changed();
             }
         } else {
-            detailRows_[index].field->setText(utf8ToWide(text));
-            commitDetail(index);
+            commitDetail(index, text);
             return;
         }
         if (detailRows_[index].apply) {
-            detailRows_[index].apply(text);
+            const auto apply = detailRows_[index].apply;
+            apply(text);
         }
     }
 
     void GraphDock::clearDetail() {
+        grid_->clearRows();
         for (DetailRow& row : detailRows_) {
-            row.caption->setVisible(false);
-            row.field->setVisible(false);
-            row.chip->setVisible(false);
-            row.slider->setVisible(false);
-            row.percent->setVisible(false);
             row.kind = DetailRow::Kind::Text;
             row.scrub = false;
             row.apply = nullptr;
@@ -1154,13 +1161,26 @@ namespace curvy {
         if (index >= detailRows_.size()) {
             return;
         }
-        DetailRow& row = detailRows_[index];
-        row.caption->setText(caption);
-        row.caption->setVisible(true);
-        row.field->setText(utf8ToWide(value));
-        row.field->setVisible(true);
-        row.field->setEnabled(static_cast<bool>(apply));
-        row.apply = std::move(apply);
+        ParamGrid::Row& cell = grid_->edit(index);
+        cell = ParamGrid::Row();
+        cell.shown = true;
+        cell.caption = caption;
+        cell.text = value;
+        cell.editable = static_cast<bool>(apply);
+        detailRows_[index].apply = std::move(apply);
+        grid_->changed();
+    }
+
+    void GraphDock::setChoiceRow(std::size_t index, const std::string& caption, const std::string& current, std::vector<std::string> options, std::function<void(const std::string&)> apply) {
+        setRow(index, caption, current, std::move(apply));
+        if (index >= detailRows_.size()) {
+            return;
+        }
+        detailRows_[index].kind = DetailRow::Kind::Choice;
+        ParamGrid::Row& cell = grid_->edit(index);
+        cell.kind = ParamGrid::Kind::Choice;
+        cell.options = std::move(options);
+        grid_->changed();
     }
 
     void GraphDock::lookRows(const jitnodes::Node& node, jitnodes::NodeId id, std::size_t& at) {
@@ -1175,7 +1195,7 @@ namespace curvy {
         };
         auto choice = [&](const char* caption, const char* name, std::vector<std::string> names) {
             const std::size_t current = std::size_t(std::max(0L, std::lround(node.baseFloat(name))));
-            setRow(at++, caption, current < names.size() ? names[current] : std::string(), [this, id, key = std::string(name), names](const std::string& value) {
+            setChoiceRow(at++, caption, current < names.size() ? names[current] : std::string(), names, [this, id, key = std::string(name), names](const std::string& value) {
                 for (std::size_t i = 0; i < names.size(); ++i) {
                     if (names[i] == value) {
                         document_.setGraphParam(id, key, float(i));
@@ -1221,7 +1241,7 @@ namespace curvy {
         }
         // The kinds of paint, by name: switching one keeps the look (see setPaintKind) rather than writing the number.
         const std::vector<std::string> kinds = {"None", "Solid", "Linear", "Radial", "Pattern", "Points"};
-        setRow(at++, "Paint", kinds[std::size_t(std::clamp(paint, 0, 5))], [this, id, kinds](const std::string& value) {
+        setChoiceRow(at++, "Paint", kinds[std::size_t(std::clamp(paint, 0, 5))], kinds, [this, id, kinds](const std::string& value) {
             for (std::size_t k = 0; k < kinds.size(); ++k) {
                 if (kinds[k] == value) {
                     setPaintKind(id, int(k));
@@ -1254,10 +1274,12 @@ namespace curvy {
             hex += alpha;
         }
         setRow(index, caption, hex, std::move(apply));
-        DetailRow& row = detailRows_[index];
-        row.kind = DetailRow::Kind::Colour;
-        row.chip->setColour(color.toRgba32().value & 0x00FFFFFFu, color.alpha());
-        row.chip->setVisible(true);
+        detailRows_[index].kind = DetailRow::Kind::Colour;
+        ParamGrid::Row& cell = grid_->edit(index);
+        cell.kind = ParamGrid::Kind::Colour;
+        cell.chipColor = color.toRgba32().value & 0x00FFFFFFu;
+        cell.chipAlpha = color.alpha();
+        grid_->changed();
     }
 
     void GraphDock::setSliderRow(std::size_t index, const std::string& caption, double value, std::function<void(const std::string&)> apply) {
@@ -1265,13 +1287,11 @@ namespace curvy {
             return;
         }
         setRow(index, caption, "", std::move(apply));
-        DetailRow& row = detailRows_[index];
-        row.kind = DetailRow::Kind::Slider;
-        row.field->setVisible(false);
-        row.slider->setValue(float(value * 100.0));
-        row.slider->setVisible(true);
-        row.percent->setText(numberText(std::round(value * 100.0)) + "%");
-        row.percent->setVisible(true);
+        detailRows_[index].kind = DetailRow::Kind::Slider;
+        ParamGrid::Row& cell = grid_->edit(index);
+        cell.kind = ParamGrid::Kind::Slider;
+        cell.percent = value * 100.0;
+        grid_->changed();
     }
 
     void GraphDock::scrubRow(std::size_t index, jitnodes::NodeId id, const std::string& param, double minimum, double maximum, double scale) {
@@ -1284,6 +1304,9 @@ namespace curvy {
             row.maximum = maximum;
             row.scale = scale;
             row.unit = param == "scaleX" || param == "scaleY" ? 0.1 : 1.0;
+            ParamGrid::Row& cell = grid_->edit(index);
+            cell.scrub = true;
+            cell.keyable = row.kind == DetailRow::Kind::Text;
             showParam(row);
         }
     }
@@ -1293,15 +1316,15 @@ namespace curvy {
             return;
         }
         setRow(index, caption, "", std::move(apply));
-        DetailRow& row = detailRows_[index];
-        row.kind = DetailRow::Kind::Gradient;
-        row.field->setVisible(false);
-        std::vector<std::pair<double, std::uint32_t>> stops;
+        detailRows_[index].kind = DetailRow::Kind::Gradient;
+        ParamGrid::Row& cell = grid_->edit(index);
+        cell.kind = ParamGrid::Kind::Gradient;
+        cell.stops.clear();
         for (const GradientStop& stop : paint.gradient().stops) {
-            stops.emplace_back(stop.offset, stop.color.toRgba32().value);
+            cell.stops.emplace_back(stop.offset, stop.color.toRgba32().value);
         }
-        row.chip->setGradient(std::move(stops), paint.kind() == SketchPaint::Kind::Radial);
-        row.chip->setVisible(true);
+        cell.radial = paint.kind() == SketchPaint::Kind::Radial;
+        grid_->changed();
     }
 
     void GraphDock::setPaintKind(jitnodes::NodeId id, int kind) {
@@ -1421,23 +1444,26 @@ namespace curvy {
                 auto textRow = [&](const char* caption, const char* name) {
                     setRow(at++, caption, node.getString(name), [this, id, name](const std::string& value) { document_.setGraphString(id, name, value); });
                 };
-                auto numberRow = [&](const std::string& name) {
+                auto numberRow = [&](const std::string& name, double lowest = -100000.0) {
                     setRow(at++, name, numberText(node.baseFloat(name)), [this, id, name](const std::string& value) {
                         double number = 0.0;
                         if (parseNumber(value, number)) {
                             document_.setGraphParam(id, name, float(number));
                         }
                     });
-                    scrubRow(at - 1, id, name, -100000.0, 100000.0);
+                    scrubRow(at - 1, id, name, lowest, 100000.0);
+                };
+                auto choiceRow = [&](const char* name, std::vector<std::string> options) {
+                    setChoiceRow(at++, name, node.getString(name), std::move(options), [this, id, name](const std::string& value) { document_.setGraphString(id, name, value); });
                 };
                 textRow("group", "group");
                 if (type == kTagNodeType) {
                     textRow("ids", "ids");
-                    numberRow("every");
-                    numberRow("offset");
+                    numberRow("every", 0.0);
+                    numberRow("offset", 0.0);
                     textRow("box", "box");
-                    textRow("kind", "kind");
-                    textRow("operation", "operation");
+                    choiceRow("kind", {"any", "anchors", "handles", "corners", "smooth"});
+                    choiceRow("operation", {"replace", "union", "subtract", "intersect"});
                 } else {
                     for (const char* name : {"translateX", "translateY", "rotation", "scaleX", "scaleY", "shear", "pivotX", "pivotY"}) {
                         numberRow(name);

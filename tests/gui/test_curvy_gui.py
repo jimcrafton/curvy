@@ -167,18 +167,30 @@ class GraphDock(CurvyCase):
         self.app.wait_until(lambda: self.app.prop("graphToggle", "checked"), "the toggle to check")
         tree = self.app.find("graphTree")
         self.app.click_at((tree.x + 120, tree.y + 2 * 22 + 11))         # the rectangle's Stroke row (layer, rectangle, stroke, fill)
-        self.app.wait_until(lambda: self.app.prop("graphDetailCaption2", "text") == "Width", "the stroke's box")
-        before = float(self.app.prop("graphDetailField2", "text"))
-        caption = self.app.find("graphDetailCaption2")
-        self.app.drag((caption.x + caption.w // 2, caption.y + caption.h // 2), (caption.x + caption.w // 2 + 12, caption.y + caption.h // 2))
-        self.app.wait_until(lambda: float(self.app.prop("graphDetailField2", "text")) > before + 5, "the width to follow the drag")
+        self.app.wait_until(lambda: self.app.prop("graphDetailKind", "text") == "Stroke", "the stroke's box")
+        before = float(self.param_value(2))                              # Colour, Paint, Width, Opacity
+        x, y = self.param_point(2, 20)                                   # on the caption
+        self.app.drag((x, y), (x + 12, y))
+        self.app.wait_until(lambda: float(self.param_value(2)) > before + 5, "the width to follow the drag")
         self.app.key("ctrl+z")
-        self.app.wait_until(lambda: float(self.app.prop("graphDetailField2", "text")) == before, "one undo to bring the width back")
+        self.app.wait_until(lambda: float(self.param_value(2)) == before, "one undo to bring the width back")
+
+    # The parameter box is painted by one grid; a value is read by opening its editor.
+    def param_point(self, row, dx=100):
+        grid = self.app.find("graphParams")
+        return (grid.x + dx, grid.y + 4 + row * 24 + 10)
+
+    def param_value(self, row):
+        self.app.click_at(self.param_point(row))
+        self.app.wait_until(lambda: self.app.find("graphDetailEditor").visible, "the row's editor")
+        text = self.app.text_of("graphDetailEditor")
+        self.app.key("escape")
+        self.app.wait_until(lambda: not self.app.find("graphDetailEditor").visible, "the editor to close")
+        return text
 
     def transform_fields(self):
-        names = [self.app.prop("graphDetailCaption%d" % i, "text") for i in range(8)]
-        values = [self.app.prop("graphDetailField%d" % i, "text") for i in range(8)]
-        return dict(zip(names, values))
+        names = ["translateX", "translateY", "rotation", "scaleX", "scaleY", "shear", "pivotX", "pivotY"]
+        return dict(zip(names, [self.param_value(i) for i in range(8)]))
 
     def test_a_new_polygon_has_an_identity_transform_node(self):
         self.new_a4()
@@ -192,9 +204,8 @@ class GraphDock(CurvyCase):
         self.app.click_segment("graphModeControl", 1)                  # the Flow view lists the transform node; Document shows shapes and looks
         self.app.wait_until(lambda: "nobody uses" in self.app.prop("graphStatus", "text"), "the Flow view")
         self.app.click_row("graphTree", "Transform")
-        self.app.wait_until(lambda: self.app.prop("graphDetailCaption0", "text") == "translateX", "the transform node's box")
+        self.app.wait_until(lambda: self.app.prop("graphDetailKind", "text") == "Transform", "the transform node's box")
         fields = self.transform_fields()
-        self.assertEqual(["translateX", "translateY", "rotation", "scaleX", "scaleY", "shear", "pivotX", "pivotY"], list(fields))
         for name in ("translateX", "translateY", "rotation", "shear"):
             self.assertEqual("0", fields[name], name)
         self.assertEqual("1", fields["scaleX"])
@@ -211,8 +222,8 @@ class GraphDock(CurvyCase):
         self.app.wait_until(lambda: self.app.prop("graphToggle", "checked"), "the toggle to check")
         tree = self.app.find("graphTree")
         self.app.click_at((tree.x + 120, tree.y + 3 * 22 + 11))         # the rectangle's Fill row (layer, rectangle, stroke, fill)
-        self.app.wait_until(lambda: self.app.prop("graphDetailCaption0", "text") == "Colour", "the fill's box")
-        self.app.click("graphDetailChip0")
+        self.app.wait_until(lambda: self.app.prop("graphDetailKind", "text") == "Fill", "the fill's box")
+        self.app.click_at(self.param_point(0, 8 + 74 + 14))               # the swatch of the first row, Colour
         self.app.wait_until(lambda: self.app.find("cardClose").visible, "the Colour card to open")
         card = self.app.find("cardClose")
         self.assertLess(card.x, tree.x)                                  # beside the graph dock, not over it

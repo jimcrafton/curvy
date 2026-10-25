@@ -35,6 +35,12 @@ namespace curvy {
         // when the expression is not valid, and changes nothing then.
         std::string setGraphExpression(jitnodes::NodeId id, const std::string& name, const std::string& expression);
 
+        // Keys a float parameter at the current time with `value` (making it keyed if it was not); one undo step. Editing a keyed parameter
+        // (setGraphParam, setGraphFloatLive) does the same. Removing the last key leaves the parameter a plain number at the value it had.
+        void setGraphKey(jitnodes::NodeId id, const std::string& name, float value);
+        void removeGraphKey(jitnodes::NodeId id, const std::string& name);
+        bool hasKeyAtTime(jitnodes::NodeId id, const std::string& name) const;
+
         // The time (seconds) expressions and keys are evaluated at. Moving it is not an undo step; everything that depends on it follows.
         double time() const { return network_->time(); }
         void setTime(double seconds);
@@ -59,8 +65,8 @@ namespace curvy {
     protected:
         // The graph changed (an edit, undo or redo); derived documents refresh what depends on it.
         virtual void graphChanged();
-        // The time moved; derived documents refresh what shows time-dependent values.
-        virtual void timeChanged() {}
+        // The time moved; derived documents refresh what shows time-dependent values. `graphAffected`: some node depends on time.
+        virtual void timeChanged(bool graphAffected) { (void)graphAffected; }
 
         // A document of only a graph is saved as the graph text; derived documents with another format override these.
         bool readFromFile(const std::string& path) override;
