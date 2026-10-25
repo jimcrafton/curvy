@@ -62,6 +62,11 @@ namespace curvy {
         touch();
     }
 
+    void WorkspaceModel::setTimelineVisible(bool visible) {
+        timelineVisible_ = visible;
+        touch();
+    }
+
     void WorkspaceModel::setRing(const std::string& title) {
         ring_ = title;
         touch();

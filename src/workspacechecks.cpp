@@ -28,6 +28,7 @@ namespace curvy {
                 checkPanAndBarrel();
                 checkDocks();
                 checkGraphDock();
+                checkTimeline();
                 checkTheme();
                 std::printf("%d failure(s)\n", failures_);
                 return failures_;
@@ -447,6 +448,78 @@ namespace curvy {
                 expect(graph.detailNode() == 0 && graph.title() == "Nothing selected", "no selection, no node in the box");
                 w_.runCommand("view.graph");
                 expect(!model_->graphVisible() && !graph.dock()->isVisible() && !toggle->isChecked(), "the View ring's Graph slot hides it and the toggle follows");
+                doc_->clearObjects();
+                doc_->undoStack().clear();
+            }
+
+            // The timeline strip moves the document's time, and an `fx` expression typed into a parameter follows it.
+            void checkTimeline() {
+                TimelineBar& timeline = w_.timeline();
+                expect(timeline.bar() != nullptr && !timeline.isShown() && !model_->timelineVisible(), "the timeline bar loads and is off by default");
+                w_.runCommand("view.timeline");
+                w_.frame().rootView().updateLayout();
+                const newui::Rect client = canvas_->getClientBounds();
+                expect(model_->timelineVisible() && timeline.isShown(), "the View ring's Timeline slot shows it");
+                expect(timeline.bar()->bounds().top() + timeline.bar()->bounds().height() == client.height(), "along the bottom of the canvas");
+
+                doc_->clearObjects();
+                doc_->undoStack().clear();
+                const std::size_t id = doc_->add(SketchObject::makeRect(10, 20, 50, 30)).id();
+                auto left = [&] { return doc_->findById(id)->geometryBounds().x0; };
+                auto button = [&](const char* name) { return dynamic_cast<newui::Button*>(timeline.bar()->findView(name)); };
+                auto field = dynamic_cast<newui::TextField*>(timeline.bar()->findView("timelineFrame"));
+                auto scrub = dynamic_cast<newui::Slider*>(timeline.bar()->findView("timelineScrub"));
+                expect(button("timelinePlay") != nullptr && field != nullptr && scrub != nullptr, "it has Play, the frame field and the scrubber");
+
+                timeline.setFrame(24);
+                expect(std::fabs(doc_->time() - 1.0) < 1e-9 && timeline.frame() == 24, "frame 24 at 24 fps is one second");
+                expect(field->text() == L"24" && int(scrub->value()) == 24, "the field and the scrubber show it");
+                scrub->setValue(36.0f);
+                expect(timeline.frame() == 36 && std::fabs(doc_->time() - 1.5) < 1e-9, "dragging the scrubber moves the time");
+                button("timelinePrev")->onClick(*button("timelinePrev"));
+                expect(timeline.frame() == 35, "Previous steps back a frame");
+                button("timelineLast")->onClick(*button("timelineLast"));
+                expect(timeline.frame() == timeline.lastFrame(), "Last goes to the last frame");
+                button("timelineFirst")->onClick(*button("timelineFirst"));
+                expect(timeline.frame() == 0, "First goes back to the start");
+                field->setText(L"10");
+                field->onReturnPressed(*field);
+                expect(timeline.frame() == 10, "typing a frame in the field moves the playhead");
+                timeline.setFrame(999);
+                expect(timeline.frame() == timeline.lastFrame(), "a frame past the end is clamped");
+                timeline.setFrame(timeline.lastFrame() - 1);
+                timeline.advance(0.1);
+                expect(timeline.frame() >= 0 && timeline.frame() <= 3, "playing past the last frame wraps to the start");
+                expect(!timeline.isPlaying(), "nothing plays until Play");
+
+                // An expression in a parameter box.
+                GraphDock& graph = w_.graph();
+                w_.runCommand("view.graph");
+                graph.setMode(GraphDock::Mode::Flow);
+                const jitnodes::NodeId place = doc_->transformNodeOf(id);
+                expect(graph.selectNode(place) && graph.detailCaption(0) == "translateX", "the Transform node's box starts with Translate X");
+                timeline.setFrame(0);
+                graph.setDetailValue(0, "sin(time) * 50");
+                expect(graph.detailValue(0) == "=sin(time) * 50", "text that is not a number becomes an expression, shown with the =");
+                expect(doc_->network().node(place).expression("translateX") == "sin(time) * 50", "and is on the node");
+                timeline.setFrame(12);
+                expect(std::fabs(left() - (10.0 + 50.0 * std::sin(0.5))) < 1e-2, "the shape follows the time the timeline sets");
+                timeline.setFrame(6);
+                expect(std::fabs(left() - (10.0 + 50.0 * std::sin(0.25))) < 1e-2, "and scrubbing back");
+                graph.setDetailValue(0, "sin((");
+                expect(graph.detailValue(0) == "=sin(time) * 50", "a bad expression is refused and the field keeps the old one");
+                graph.setDetailValue(0, "5");
+                expect(graph.detailValue(0) == "5" && doc_->network().node(place).expression("translateX").empty(), "typing a number takes the expression away");
+                timeline.setFrame(24);
+                expect(std::fabs(left() - 15.0) < 1e-3, "the shape holds still again");
+                doc_->undoStack().undo();
+                expect(graph.detailValue(0) == "=sin(time) * 50", "undo brings the expression back, and the box follows");
+
+                doc_->setTime(0.0);
+                w_.runCommand("view.graph");
+                w_.runCommand("view.timeline");
+                expect(!timeline.isShown() && !timeline.isPlaying(), "the Timeline slot hides it again");
+                graph.setMode(GraphDock::Mode::Document);
                 doc_->clearObjects();
                 doc_->undoStack().clear();
             }

@@ -96,6 +96,56 @@ nothing of sketch types (paths, layers, artboards), so it can be unit tested alo
   (`paintFrameBounds()`) and carried by it (`paintToPage()`), so gradients, point gradients and patterns follow all of those; the SVG writer adds the matrix to
   `gradientTransform` and PDF to the shading pattern's matrix. Authority is as for the other nodes: an object edit writes curve and matrix, a graph edit or undo that
   changes either rebuilds the outline as matrix x curve (`pullPathNodes`). Files: `data-paint-matrix` in SVG, version 3 of `.skb` (a version 2 file, or one with only a
-  frame angle, gets a rotation). A graph saved before this has no transform nodes; they are added on load and the shape nodes are rewritten as drawn. Not yet: a warp
-  (perspective) moving paints, moving the matrix out of the object so selection and handles read it from the node.
+  frame angle, gets a rotation). A graph saved before this has no transform nodes; they are added on load and the shape nodes are rewritten as drawn. Not yet: moving the matrix
+  out of the object so selection and handles read it from the node.
+- **Perspective warp and paints (2026-10-25).** A perspective warp bakes into the outline (control points mapped) and into `SketchObject::paintWarp()` too: a projective map
+  `PaintWarp` of the plane the paints are laid out on, so a paint sits at `paintToPage() . paintWarp()`; a warp of page-to-page map H stores `A^-1 H A W`, and later moves, rotates
+  and scales only grow `paintToPage()`. The canvas draws a warped gradient, point gradient or pattern flat on its own box and resamples it through the inverse map
+  (`setWarpedPaintStyle`, at most 2048 px a side; strokes too). Persisted: `data-paint-warp` in SVG, a bit of the placement byte in `.skb` v3; undo restores it through
+  `GeometryState`. Not yet: the SVG and PDF *pictures* of a warped gradient or pattern are still the unwarped paint (needs an image fill; the data round-trips), the paint-editing
+  overlays and handles read the affine part only, and the warp is not in the transform node (it is in the shape node's curve).
+- **Transform node parameters and parents (2026-10-25).** The node's parameters are translateX/Y, rotation (degrees), scaleX/Y, shear (degrees) and pivotX/Y, composed as
+  translate x pivot x rotate x shear x scale x pivot^-1 (any 2D affine matrix, a flip is a negative scale; the order is fixed because it adds no reach in 2D). A new node pivots
+  about the middle of its shape. The graph box follows the numbers while a shape is dragged. **Parents:** `SketchObject::parent()` and `SketchDocument::setParent` (undoable, loops
+  refused). A child's transform node takes its parent's transform node as an optional input 1; each transform node's output geometry carries its page matrix as details
+  `w0`..`w5`, so a child cooks as parent x own placement, and the node holds the placement *relative to the parent* (`worldTransformOf` follows the links). Transforming a parent
+  (`transformObjects`, and the drag, panel, rotate 90, flip and transform-again paths through `snapshotSelection(true)`) carries its descendants; a loaded graph's links give
+  objects their parents. UI: Object > Parent > "Parent to Last Selected" (the last object selected becomes the parent of the others) and "Release Parent", one undo step each
+  (`parentSelection`, `releaseParent`). Not yet: align/distribute and the nudge paths do not carry children, and `.skb` stores no parent.
+- **Selection and picking by node (2026-10-25).** `selectedNodes()` / `setSelectedNodes()` (placement nodes), `objectOfNode()` (shape, placement or appearance node to its object) and
+  `hitTestNode()`. `placedOutline(object)` is the outline the graph makes (shape node's curve carried by `worldTransformOf` its transform node); `hitTest` and the marquee/lasso
+  test that, with the object's cached bounds only ruling out far objects first. Not yet: selection handles and the frame still read the object's own matrix and path copy, and
+  `selection_` is still a list of object ids underneath (the node ids are mapped to it).
+- **Point ids and tags (2026-10-25).** Every point of a shape node's curve has an int attribute `id` (`kPointIdAttrib`) that travels with it through the nodes (and into saved
+  files). `geometryFromPath` numbers a new shape's points 0..n-1; when the object is edited and its points are added or removed, the points still where they were (matched in order,
+  64-point lookahead) keep their `id` and every other attribute, and new points get ids above all the old ones. Research behind it: Houdini renumbers points on delete and the
+  recommended practice is a stable `id` attribute; Blender loses groups wherever a node rebuilds geometry without carrying the attribute; CAD calls it the topological naming
+  problem. **Tag node** `curvyTag` (Houdini's Group Create, points only): passes its input through and adds the point group `group.<name>` (jitnodes' int attribute). Selectors,
+  any of which picks a point: `ids` ("3,7,10-14"), `every`/`offset` (every nth anchor), `box` ("x0 y0 x1 y1" in the shape's own space); `kind` narrows to any, anchors, handles,
+  corners or smooth (a cubic's handles follow their anchor); `operation` joins with a group of that name already on the input (replace, union, subtract, intersect). A tag may sit between
+  a shape and its transform (`shapeBehind` looks through it). **UI:** in the direct-select tool Ctrl-click an anchor to tag or untag it (the document's active tag, "tag1"), tagged anchors
+  get an orange ring; Object > Points has Tag Picked Point, Untag Picked Point, Clear Tag and Move Tagged Points. `SketchDocument::tagPoints/clearTag/taggedIds/taggedPositions/pointIdNear`
+  keep the tag node's `ids` (one undo step each). **Move Points** (`curvyMovePoints`, `addMovePoints`) is the "Group parameter" of the transform: translate, rotate, scale, shear and
+  pivot (in the shape's own space) applied to the points of one group only (all when empty). It is a node of its own, not a parameter of the placement transform, because the placement
+  is one rigid matrix that the object, its paints and its children all share. An object with a move-points node in its chain is **driven** (`drivenBy`, `adoptChain`): its outline is
+  what the chain cooks, moving or rotating it only changes the placement matrix, and the shape node is never written from it, so drawing on a driven object snaps back. Not yet: a
+  way to name or switch tags (the canvas always uses "tag1"), multi-point tagging (marquee), a Group parameter on other nodes, ids kept through a move-and-insert in one edit, and tags
+  that follow ids through join, reverse and simplify.
+- **Expressions (`fx`), time and the timeline (2026-10-25).** jitnodes already evaluates float parameters from expressions (`sin(time) * 50`, `frame`, `pi`, `node.param`
+  references) and from keyframes at `Network::time()`; curvy now exposes it. `GraphDocument::setGraphExpression` (one undo step, returns the parser's message for a bad one) and
+  `setTime` (not an undo step; `SketchDocument::timeChanged` refreshes the objects that follow it). The placement and move-points cooks read the *resolved* values
+  (`resolvedTransformOf`), so an expression or key drives them; an object whose chain has an expression, keys or a move-points node (or whose parent's does) is **driven**
+  (`drivenPlace`, worked out once per graph change): it shows what the chain cooks at the current time and an edit of its outline snaps back to the expression. `ExpressionField`
+  (`include/curvy/expressionfield.h`) is the text field of the parameter box: a number is stored, any other text (or text after "=") becomes the expression, a lone "=" clears it, and a
+  driven field shows "=expression" in the accent colour with a bar down its left edge. **To look into: the PropertyEditor pattern.** The Visual Designer in
+  `code/cpp_codetools/extension/NativeEditControls` draws the value of each property row itself and only creates a text-field-like control for the row the user clicks, which is
+  wrapped in a `PropertyEditor` base class with a derived class per kind of property (number, text, colour, enum, expression...). The graph dock currently keeps nine permanent
+  `ExpressionField`s and sliders, chips and labels per row; moving to that pattern would cut the number of views to one editor at a time, would make a property list scale to nodes with
+  many parameters and give the dopesheet and the Tag/Move Points boxes a common editor, and is the natural home for the keyframe diamond (`key`) beside each `fx`.
+  **Timeline bar** (`TimelineBar`, mockup `docs/mockups/timelineBar.html` -> `Resources/timelineBar.newui`): First, Previous, Play/Stop, Next, Last, a frame field, a scrubber over
+  0..48 and the frame rate, along the bottom of the canvas; the View ring's Timeline slot (M) shows it (no menu item yet). The document's time is frame / fps (`Network::fps()`, 24);
+  Play runs a 16 ms timer by the wall clock and loops; every move calls `SketchDocument::setTime`. Callbacks into it are guarded by a liveness flag, because the views and the model
+  outlive the object while the window closes (an unguarded handler crashed `--check-workspace` at exit; the same `+=` lambdas capturing `this` in `GraphDock` and `DockController`
+  have the same exposure). Not yet: `key` (keyframes in the fields), easing curves, the frame range and fps as document settings (saved), the ruler, keyed rows and dopesheet from
+  `animation.html`, a key for Play, per-frame caching.
 - **Risks.** Node ids must stay stable across undo (restoreSnapshot preserves them); the Network must not be edited while cooking.

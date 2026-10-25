@@ -33,7 +33,7 @@ namespace curvy {
         if (!document_->selectionFrame(dragFrame_)) {
             return;
         }
-        dragBefore_ = document_->snapshotSelection();
+        dragBefore_ = document_->snapshotSelection(true);
         dragFrameBefore_ = document_->frameState();
         dragOrigin_ = document_->selectionOrigin(dragFrame_);
         dragMatrix_ = BLMatrix2D::make_identity();
@@ -52,6 +52,7 @@ namespace curvy {
             if (SketchObject* object = document_->findById(entry.id)) {
                 object->setGeometry(entry.path);
                 object->setPaintMatrix(entry.paintMatrix);
+                object->setPaintWarp(entry.paintWarp);
                 object->setTextMatrix(entry.textMatrix);
                 object->transform(matrix);
                 object->setFrameAngle(angleScale * entry.angle + angleOffset);

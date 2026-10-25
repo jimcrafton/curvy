@@ -80,6 +80,26 @@ namespace curvy {
         commitGraphEdit(before, description);
     }
 
+    std::string GraphDocument::setGraphExpression(jitnodes::NodeId id, const std::string& name, const std::string& expression) {
+        const jitnodes::GraphSnapshot before = snapshotGraph();
+        try {
+            network_->node(id).setExpression(name, expression);
+        } catch (const std::exception& error) {
+            return error.what();
+        }
+        network_->markDirty(id);
+        commitGraphEdit(before, expression.empty() ? "Clear Expression" : "Set Expression");
+        return {};
+    }
+
+    void GraphDocument::setTime(double seconds) {
+        if (seconds == network_->time()) {
+            return;
+        }
+        network_->setTime(seconds);
+        timeChanged();
+    }
+
     void GraphDocument::setGraphString(jitnodes::NodeId id, const std::string& name, const std::string& value) {
         const jitnodes::GraphSnapshot before = snapshotGraph();
         network_->node(id).setString(name, value);

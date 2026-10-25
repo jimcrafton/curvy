@@ -295,15 +295,108 @@ namespace curvy {
             BLBox box;
             BLMatrix2D toPage;
             BLBox world;
+            const PaintWarp* warp = nullptr;   // set when the outline was perspective-warped: the paints go through it after `toPage`
+            double pad = 0.0;                  // how far past `world` the paint is seen (a stroke's reach)
             PaintFrame(const BLBox& b) : box(b), toPage(BLMatrix2D::make_identity()), world(b) {}
             PaintFrame(const BLBox& b, const BLMatrix2D& m, const BLBox& w) : box(b), toPage(m), world(w) {}
         };
+
+        // The most pixels along a side of the images a warped paint is drawn flat into and resampled from.
+        constexpr int kWarpedPaintMaxSide = 2048;
+
+        // A paint that is a picture of its own (gradient, pattern, point gradient) rather than one colour.
+        bool paintIsLaidOut(const SketchPaint& paint) {
+            return paint.isPattern() || paint.isPoints() || paint.isGradient();
+        }
+
+        bool setPaintStyle(BLContext& ctx, const SketchPaint& paint, const PaintFrame& frame, bool asStroke);
+
+        // The paint of a warped outline: drawn flat on its own box, then every pixel under the outline looks up where the warp took it from.
+        // Returns false when the warp cannot be undone, and the caller paints it unwarped.
+        bool setWarpedPaintStyle(BLContext& ctx, const SketchPaint& paint, const PaintFrame& frame, bool asStroke) {
+            PaintWarp unwarp;
+            BLMatrix2D toLocal = frame.toPage;
+            const double w = frame.box.x1 - frame.box.x0, h = frame.box.y1 - frame.box.y0;
+            if (!frame.warp->inverted(unwarp) || toLocal.invert() != BL_SUCCESS || !(w >= 1e-6) || !(h >= 1e-6)) {
+                return false;
+            }
+            const BLBox dest(frame.world.x0 - frame.pad, frame.world.y0 - frame.pad, frame.world.x1 + frame.pad, frame.world.y1 + frame.pad);
+            const double destW = dest.x1 - dest.x0, destH = dest.y1 - dest.y0;
+            if (!(destW > 0.0) || !(destH > 0.0)) {
+                return false;
+            }
+            const BLMatrix2D m = ctx.final_transform();
+            const double device = std::max(1e-3, std::sqrt(std::fabs(m.m00 * m.m11 - m.m01 * m.m10)));
+            double perUnit = device;
+            if (std::max(destW, destH) * perUnit > kWarpedPaintMaxSide) {
+                perUnit = kWarpedPaintMaxSide / std::max(destW, destH);
+            }
+            const int dw = std::max(1, int(std::ceil(destW * perUnit))), dh = std::max(1, int(std::ceil(destH * perUnit)));
+            const double sx = double(dw) / destW, sy = double(dh) / destH;
+
+            // The flat picture is as dense as the warp stretches it, so enlarging does not blur.
+            double density = perUnit * std::max(1.0, std::sqrt(destW * destH / (w * h)));
+            if (std::max(w, h) * density > kWarpedPaintMaxSide) {
+                density = kWarpedPaintMaxSide / std::max(w, h);
+            }
+            const int fw = std::max(2, int(std::ceil(w * density))), fh = std::max(2, int(std::ceil(h * density)));
+            BLImage flat(fw, fh, BL_FORMAT_PRGB32);
+            {
+                BLContext fc(flat);
+                fc.clear_all();
+                BLMatrix2D place = BLMatrix2D::make_translation(-frame.box.x0, -frame.box.y0);
+                place.post_scale(double(fw) / w, double(fh) / h);
+                fc.set_transform(place);
+                if (setPaintStyle(fc, paint, PaintFrame(frame.box), false)) {
+                    fc.fill_rect(BLRect(frame.box.x0, frame.box.y0, w, h));
+                }
+                fc.end();
+            }
+            BLImage warped(dw, dh, BL_FORMAT_PRGB32);
+            BLImageData from, to;
+            if (flat.get_data(&from) != BL_SUCCESS || warped.get_data(&to) != BL_SUCCESS) {
+                return false;
+            }
+            for (int y = 0; y < dh; ++y) {
+                std::uint32_t* row = reinterpret_cast<std::uint32_t*>(static_cast<std::uint8_t*>(to.pixel_data) + std::ptrdiff_t(y) * to.stride);
+                for (int x = 0; x < dw; ++x) {
+                    const BLPoint local = unwarp.map(toLocal.map_point(dest.x0 + (x + 0.5) / sx, dest.y0 + (y + 0.5) / sy));
+                    const double u = std::min(double(fw - 1), std::max(0.0, (local.x - frame.box.x0) / w * fw - 0.5));
+                    const double v = std::min(double(fh - 1), std::max(0.0, (local.y - frame.box.y0) / h * fh - 0.5));
+                    const int u0 = int(u), v0 = int(v), u1 = std::min(fw - 1, u0 + 1), v1 = std::min(fh - 1, v0 + 1);
+                    const double fu = u - u0, fv = v - v0;
+                    auto pixel = [&](int px, int py) {
+                        return *reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(from.pixel_data) + std::ptrdiff_t(py) * from.stride + std::ptrdiff_t(px) * 4);
+                    };
+                    const std::uint32_t corner[4] = {pixel(u0, v0), pixel(u1, v0), pixel(u0, v1), pixel(u1, v1)};
+                    const double weight[4] = {(1 - fu) * (1 - fv), fu * (1 - fv), (1 - fu) * fv, fu * fv};
+                    std::uint32_t out = 0;
+                    for (int shift = 0; shift < 32; shift += 8) {
+                        double sum = 0.0;
+                        for (int k = 0; k < 4; ++k) {
+                            sum += weight[k] * double((corner[k] >> shift) & 0xFFu);
+                        }
+                        out |= std::uint32_t(std::min(255.0, sum + 0.5)) << shift;
+                    }
+                    row[x] = out;
+                }
+            }
+            BLMatrix2D put = BLMatrix2D::make_scaling(1.0 / sx, 1.0 / sy);
+            put.post_translate(dest.x0, dest.y0);
+            BLPattern pattern(warped, BL_EXTEND_MODE_PAD, put);
+            if (asStroke) { ctx.set_stroke_style(pattern); } else { ctx.set_fill_style(pattern); }
+            ctx.set_pattern_quality(BL_PATTERN_QUALITY_BILINEAR);
+            return true;
+        }
 
         // Applies a paint to ctx as the fill or stroke style over the frame's box (the object's bounds),
         // returning false when there is nothing to paint.
         bool setPaintStyle(BLContext& ctx, const SketchPaint& paint, const PaintFrame& frame, bool asStroke) {
             if (paint.isNone()) {
                 return false;
+            }
+            if (frame.warp != nullptr && paintIsLaidOut(paint) && setWarpedPaintStyle(ctx, paint, frame, asStroke)) {
+                return true;
             }
             const BLBox& box = frame.box;
             const BLMatrix2D& turn = frame.toPage;
@@ -1248,7 +1341,102 @@ namespace curvy {
         return box;
     }
 
-    void SketchObject::warp(const std::function<BLPoint(const BLPoint&)>& map) {
+    namespace {
+        // Heckbert's unit square -> quad: X = (a u + b v + c) / (g u + h v + 1), Y likewise with d, e, f.
+        PaintWarp unitSquareTo(const BLPoint* q) {
+            const double dx1 = q[1].x - q[2].x, dx2 = q[3].x - q[2].x, dx3 = q[0].x - q[1].x + q[2].x - q[3].x;
+            const double dy1 = q[1].y - q[2].y, dy2 = q[3].y - q[2].y, dy3 = q[0].y - q[1].y + q[2].y - q[3].y;
+            double g = 0.0, h = 0.0;
+            const double den = dx1 * dy2 - dx2 * dy1;
+            if ((std::fabs(dx3) > 1e-12 || std::fabs(dy3) > 1e-12) && std::fabs(den) > 1e-12) {
+                g = (dx3 * dy2 - dx2 * dy3) / den;
+                h = (dx1 * dy3 - dx3 * dy1) / den;
+            }
+            PaintWarp result;
+            const double m[9] = {q[1].x - q[0].x + g * q[1].x, q[3].x - q[0].x + h * q[3].x, q[0].x,
+                q[1].y - q[0].y + g * q[1].y, q[3].y - q[0].y + h * q[3].y, q[0].y, g, h, 1.0};
+            std::copy(m, m + 9, result.m);
+            return result;
+        }
+
+        // The path with every vertex (control points included) moved by `map`.
+        template <typename Map>
+        BLPath mappedPath(const BLPath& path, Map map) {
+            BLPath result = path;
+            const BLPathView view = path.view();
+            for (std::size_t i = 0; i < view.size; ++i) {
+                if (view.command_data[i] != BL_PATH_CMD_CLOSE && view.command_data[i] != BL_PATH_CMD_WEIGHT) {
+                    const BLPoint mapped = map(view.vertex_data[i]);
+                    result.set_vertex_at(i, BL_PATH_CMD_PRESERVE, mapped.x, mapped.y);
+                }
+            }
+            return result;
+        }
+    }
+
+    bool PaintWarp::isIdentity() const {
+        return *this == PaintWarp();
+    }
+
+    bool PaintWarp::operator==(const PaintWarp& other) const {
+        return std::equal(m, m + 9, other.m);
+    }
+
+    BLPoint PaintWarp::map(const BLPoint& p) const {
+        double w = m[6] * p.x + m[7] * p.y + m[8];
+        if (std::fabs(w) < 1e-12) {
+            w = w < 0.0 ? -1e-12 : 1e-12;
+        }
+        return BLPoint((m[0] * p.x + m[1] * p.y + m[2]) / w, (m[3] * p.x + m[4] * p.y + m[5]) / w);
+    }
+
+    bool PaintWarp::inverted(PaintWarp& out) const {
+        const double a = m[4] * m[8] - m[5] * m[7], b = m[2] * m[7] - m[1] * m[8], c = m[1] * m[5] - m[2] * m[4];
+        const double d = m[5] * m[6] - m[3] * m[8], e = m[0] * m[8] - m[2] * m[6], f = m[2] * m[3] - m[0] * m[5];
+        const double g = m[3] * m[7] - m[4] * m[6], h = m[1] * m[6] - m[0] * m[7], i = m[0] * m[4] - m[1] * m[3];
+        const double det = m[0] * a + m[1] * d + m[2] * g;
+        if (std::fabs(det) < 1e-18) {
+            return false;
+        }
+        const double result[9] = {a / det, b / det, c / det, d / det, e / det, f / det, g / det, h / det, i / det};
+        std::copy(result, result + 9, out.m);
+        return true;
+    }
+
+    PaintWarp PaintWarp::then(const PaintWarp& next) const {
+        PaintWarp result;
+        for (int row = 0; row < 3; ++row) {
+            for (int column = 0; column < 3; ++column) {
+                double sum = 0.0;
+                for (int k = 0; k < 3; ++k) {
+                    sum += next.m[row * 3 + k] * m[k * 3 + column];
+                }
+                result.m[row * 3 + column] = sum;
+            }
+        }
+        return result;
+    }
+
+    PaintWarp PaintWarp::fromMatrix(const BLMatrix2D& a) {
+        PaintWarp result;
+        const double m[9] = {a.m00, a.m10, a.m20, a.m01, a.m11, a.m21, 0.0, 0.0, 1.0};
+        std::copy(m, m + 9, result.m);
+        return result;
+    }
+
+    PaintWarp PaintWarp::between(const BLPoint* from, const BLPoint* to) {
+        PaintWarp fromInverse;
+        if (!unitSquareTo(from).inverted(fromInverse)) {
+            return PaintWarp();
+        }
+        return fromInverse.then(unitSquareTo(to));
+    }
+
+    void SketchObject::warp(const std::function<BLPoint(const BLPoint&)>& map, const PaintWarp& page) {
+        PaintWarp toLocal, matrix = PaintWarp::fromMatrix(paintMatrix_);
+        if (!page.isIdentity() && matrix.inverted(toLocal)) {
+            paintWarp_ = paintWarp_.then(matrix).then(page).then(toLocal);
+        }
         ++geometryRevision_;
         BLPathView view = path_.view();
         std::vector<uint8_t> commands(view.command_data, view.command_data + view.size);
@@ -1269,6 +1457,10 @@ namespace curvy {
         }
         BLPath original = path_;
         original.transform(back);
+        PaintWarp unwarp;
+        if (!paintWarp_.isIdentity() && paintWarp_.inverted(unwarp)) {
+            original = mappedPath(original, [&unwarp](const BLPoint& p) { return unwarp.map(p); });
+        }
         BLBox box(0, 0, 0, 0);
         original.get_bounding_box(&box);
         return box;
@@ -1302,6 +1494,8 @@ namespace curvy {
         copy->groups_ = groups_;
         copy->frameAngle_ = frameAngle_;
         copy->paintMatrix_ = paintMatrix_;
+        copy->paintWarp_ = paintWarp_;
+        copy->parent_ = parent_;
         copy->text_ = text_;
         copy->fontName_ = fontName_;
         copy->fontSize_ = fontSize_;
@@ -1406,8 +1600,12 @@ namespace curvy {
     }
 
     BLBox SketchObject::bounds() const {
+        return boundsOf(path_);
+    }
+
+    BLBox SketchObject::boundsOf(const BLPath& outline) const {
         BLBox box(0, 0, 0, 0);
-        path_.get_bounding_box(&box);
+        outline.get_bounding_box(&box);
         double half = 0.0;
         for (const AppearanceItem& item : items_) {
             if (item.kind != AppearanceKind::Stroke || !item.visible || item.paint.isNone()) {
@@ -1432,16 +1630,17 @@ namespace curvy {
         return BLBox(box.x0 - half, box.y0 - half, box.x1 + half, box.y1 + half);
     }
 
-    bool SketchObject::hitTest(const BLPoint& point, double tolerance) const {
-        BLBox box = bounds();
+    bool SketchObject::hitTest(const BLPoint& point, double tolerance, const BLPath* outlineOverride) const {
+        const BLPath& outline = outlineOverride != nullptr ? *outlineOverride : path_;
+        BLBox box = boundsOf(outline);
         if (point.x < box.x0 - tolerance || point.x > box.x1 + tolerance ||
             point.y < box.y0 - tolerance || point.y > box.y1 + tolerance) {
             return false;
         }
         if (type_ == SketchObjectType::Symbol || type_ == SketchObjectType::Image) {
-            return path_.hit_test(point, BL_FILL_RULE_NON_ZERO) == BL_HIT_TEST_IN;
+            return outline.hit_test(point, BL_FILL_RULE_NON_ZERO) == BL_HIT_TEST_IN;
         }
-        if (isClosed() && path_.hit_test(point, BL_FILL_RULE_NON_ZERO) == BL_HIT_TEST_IN) {
+        if (isClosed() && outline.hit_test(point, BL_FILL_RULE_NON_ZERO) == BL_HIT_TEST_IN) {
             for (const AppearanceItem& item : items_) {
                 if (item.kind == AppearanceKind::Fill && item.visible && !item.paint.isNone()) {
                     return true;
@@ -1455,12 +1654,12 @@ namespace curvy {
             if (item.kind == AppearanceKind::Stroke && item.visible && !item.paint.isNone() && item.strokeWidth > 0.0) {
                 any = true;
                 const double covered = item.strokeOptions.brush ? item.strokeOptions.brush->reach(item.strokeWidth) * 2.0 : item.strokeWidth;
-                if (strokeHit(path_, covered + tolerance * 2.0, item.strokeOptions, point)) {
+                if (strokeHit(outline, covered + tolerance * 2.0, item.strokeOptions, point)) {
                     return true;
                 }
             }
         }
-        return !any && tolerance > 0.0 && strokeHit(path_, tolerance * 2.0, StrokeOptions(), point);
+        return !any && tolerance > 0.0 && strokeHit(outline, tolerance * 2.0, StrokeOptions(), point);
     }
 
     namespace {
@@ -1810,7 +2009,11 @@ namespace curvy {
                 shown = applyGeometryEffect(shown, items_[j]);
             }
         }
-        const PaintFrame frame(box, paintMatrix_, geometryBounds());
+        PaintFrame frame(box, paintMatrix_, geometryBounds());
+        if (!paintWarp_.isIdentity()) {
+            frame.warp = &paintWarp_;
+            frame.pad = item.kind == AppearanceKind::Stroke ? item.strokeWidth * 4.0 + 2.0 : 0.0;
+        }
         ctx.save();
         ctx.set_comp_op(kBlends[std::size_t(item.blendMode)].op);
         if (item.kind == AppearanceKind::Fill) {

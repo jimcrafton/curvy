@@ -552,7 +552,8 @@ namespace curvy {
 
             const BLMatrix2D& placed = object.paintToPage();
             const bool hasPlaced = version >= 3 && !(placed.m00 == 1.0 && placed.m01 == 0.0 && placed.m10 == 0.0 && placed.m11 == 1.0 && placed.m20 == 0.0 && placed.m21 == 0.0);
-            unsigned flags = (object.ownVisible() ? 1u : 0u) | (object.ownLocked() ? 2u : 0u) | (object.frameAngle() != 0.0 || hasPlaced ? 4u : 0u) |
+            const bool hasWarp = version >= 3 && !object.paintWarp().isIdentity();
+            unsigned flags = (object.ownVisible() ? 1u : 0u) | (object.ownLocked() ? 2u : 0u) | (object.frameAngle() != 0.0 || hasPlaced || hasWarp ? 4u : 0u) |
                 (object.groups().empty() ? 0u : 8u) | (object.isText() ? 16u : 0u) |
                 (object.isText() && !object.textStyle().isDefault() ? 32u : 0u) | (object.isSymbol() && object.symbol() ? 64u : 0u) |
                 (object.isText() && object.textWarp().active() ? 128u : 0u);
@@ -563,9 +564,14 @@ namespace curvy {
             if (flags & 4u) {
                 objects.f64(object.frameAngle());
                 if (version >= 3) {
-                    objects.u8(hasPlaced ? 1u : 0u);
+                    objects.u8((hasPlaced ? 1u : 0u) | (hasWarp ? 2u : 0u));
                     if (hasPlaced) {
                         for (double v : {placed.m00, placed.m01, placed.m10, placed.m11, placed.m20, placed.m21}) {
+                            objects.f64(v);
+                        }
+                    }
+                    if (hasWarp) {
+                        for (double v : object.paintWarp().m) {
                             objects.f64(v);
                         }
                     }
@@ -1095,9 +1101,18 @@ namespace curvy {
                     }
                     double frameAngle = (objectFlags & 4u) ? in.f64() : 0.0;
                     BLMatrix2D paintMatrix = BLMatrix2D::make_rotation(frameAngle);
-                    if ((objectFlags & 4u) && version >= 3 && in.u8() == 1u) {
-                        const double a = in.f64(), b = in.f64(), c = in.f64(), d = in.f64(), e = in.f64(), f = in.f64();
-                        paintMatrix = BLMatrix2D(a, b, c, d, e, f);
+                    PaintWarp paintWarp;
+                    if ((objectFlags & 4u) && version >= 3) {
+                        const unsigned placedBits = in.u8();
+                        if (placedBits & 1u) {
+                            const double a = in.f64(), b = in.f64(), c = in.f64(), d = in.f64(), e = in.f64(), f = in.f64();
+                            paintMatrix = BLMatrix2D(a, b, c, d, e, f);
+                        }
+                        if (placedBits & 2u) {
+                            for (double& value : paintWarp.m) {
+                                value = in.f64();
+                            }
+                        }
                     }
                     std::vector<std::size_t> objectGroups;
                     if (objectFlags & 8u) {
@@ -1183,6 +1198,7 @@ namespace curvy {
                     object->setLocked((objectFlags & 2u) != 0);
                     object->setFrameAngle(frameAngle);
                     object->setPaintMatrix(paintMatrix);
+                    object->setPaintWarp(paintWarp);
                     object->setGroups(objectGroups);
                     objects.push_back(std::move(object));
                     symbolRefs.push_back(symbolRef);

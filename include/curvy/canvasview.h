@@ -102,6 +102,10 @@ namespace curvy {
         void zoomToFit();
         // Zoom so the active artboard fills the drawing area, and centre it.
         void fitActiveArtboard();
+        // Direct select: adds the picked anchor to the document's active point tag (`on`) or takes it out; false when no anchor is picked.
+        bool tagPickedAnchor(bool on);
+        // Empties the active tag of the object whose anchor is picked.
+        bool clearPickedTag();
 
         // The active tool. Select: click/shift-click/marquee, drag to move, handles to resize/rotate.
         // Rectangle/Ellipse/Line: drag out a shape (Shift = square/circle/45 degrees). Hand: drag pans.
@@ -286,7 +290,7 @@ namespace curvy {
         void finishDrag(const newui::Point& pt, std::uint32_t keys);
         // Re-applies `matrix` to the pre-drag outlines; the frame angles become their old values + angleDelta.
         void applyToSelection(const BLMatrix2D& matrix, double angleDelta = 0.0);
-        void applyMapToSelection(const std::function<BLPoint(const BLPoint&)>& map, const QuadFrame& newQuad);
+        void applyMapToSelection(const std::function<BLPoint(const BLPoint&)>& map, const PaintWarp& page, const QuadFrame& newQuad);
         void paintOverlay(BLContext& ctx) const;
         // Chooses the cursor from the tool, an active pan / drag, or (Select tool) the handle under the pointer - resize arrows
         // that follow the frame's turn, the rotate knob, the pivot - and shows it. Cheap: nothing happens unless the name changes.

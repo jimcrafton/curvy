@@ -29,6 +29,8 @@ namespace curvy {
             std::function<void(double value)> change;
             // The button was let go. `changed` says whether `change` was called at all; this is where the drag becomes one undo step.
             std::function<void(bool changed)> end;
+            // When set, asked at every move for the plain step, instead of the `unit` given to attach (a field whose unit depends on its row).
+            std::function<double()> unit;
         };
 
         // Makes dragging `label` scrub, with `unit` as the plain step (see above) and the value kept within [minimum, maximum].

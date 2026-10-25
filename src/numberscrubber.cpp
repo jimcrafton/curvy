@@ -58,7 +58,7 @@ namespace curvy {
             if (!state->active) {
                 return newui::SyncReturn::Ignored;
             }
-            double step = NumberScrubber::stepFor(unit, keys);
+            double step = NumberScrubber::stepFor(callbacks.unit ? callbacks.unit() : unit, keys);
             state->raw += double(at.x - state->lastX) * step;
             state->lastX = at.x;
             state->raw = std::max(minimum, std::min(maximum, state->raw));

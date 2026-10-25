@@ -12,6 +12,7 @@
 #include "curvy/gzip.h"
 #include "curvy/sketchexport.h"
 #include "curvy/numberscrubber.h"
+#include "curvy/expressionfield.h"
 #include "curvy/radialmenu.h"
 #include "curvy/holdscrub.h"
 #include "curvy/workspacemodel.h"
@@ -6604,7 +6605,11 @@ TEST(TransformNode, HoldsWhereTheObjectSitsAndEditsBothWays) {
     EXPECT_NEAR(minX, box.x0, 1e-3);
     EXPECT_NEAR(maxX, box.x1, 1e-3);
 
-    doc.setGraphParam(place, "e", 100.0f);
+    const float pivotMoved = doc.network().node(place).baseFloat("translateX");   // translate moves the pivot, so it is not the matrix's e
+    EXPECT_NEAR(doc.network().node(place).baseFloat("shear"), std::atan(0.5) * 180.0 / 3.14159265358979, 1e-3);
+    EXPECT_NEAR(doc.network().node(place).baseFloat("pivotX"), 60.0f, 1e-3f) << "a new node pivots about the middle of the shape";
+    EXPECT_NEAR(doc.network().node(place).baseFloat("pivotY"), 35.0f, 1e-3f);
+    doc.setGraphParam(place, "translateX", pivotMoved + 60.0f);
     EXPECT_NEAR(doc.findById(id)->paintToPage().m20, 100.0, 1e-4);
     EXPECT_NEAR(doc.findById(id)->geometryBounds().x0, box.x0 + 60.0, 1e-3) << "editing the matrix in the graph moves the object";
     doc.undoStack().undo();
@@ -6615,6 +6620,563 @@ TEST(TransformNode, HoldsWhereTheObjectSitsAndEditsBothWays) {
     ASSERT_EQ(copy.objectCount(), 1u);
     EXPECT_NEAR(copy.object(0).paintToPage().m10, 0.5, 1e-5);
     EXPECT_NEAR(copy.object(0).geometryBounds().x0, box.x0, 1e-3);
+}
+
+TEST(TransformNode, ANewShapeStartsWithNothingToTransform) {
+    SketchDocument doc;
+    std::vector<BLPoint> corners;
+    for (int i = 0; i < 5; ++i) {
+        const double a = 6.283185307179586 * i / 5.0;
+        corners.push_back(BLPoint(400.0 + 90.0 * std::cos(a), 300.0 + 90.0 * std::sin(a)));
+    }
+    const std::size_t addedId = doc.addUndoable(SketchObject::makePolygon(corners), "Draw Polygon").id();
+    const jitnodes::NodeId place = doc.transformNodeOf(addedId);
+    ASSERT_NE(place, jitnodes::invalidNodeId);
+    const jitnodes::Node& node = doc.network().node(place);
+    for (const char* name : {"translateX", "translateY", "rotation", "shear"}) {
+        EXPECT_NEAR(node.baseFloat(name), 0.0f, 1e-4f) << name;
+    }
+    EXPECT_NEAR(node.baseFloat("scaleX"), 1.0f, 1e-5f);
+    EXPECT_NEAR(node.baseFloat("pivotX"), 400.0f, 90.0f);
+}
+
+TEST(TransformNode, ThePivotIsTheCanvasOriginAndSurvivesReselecting) {
+    SketchDocument doc;
+    const std::size_t id = doc.add(SketchObject::makeRect(10, 10, 100, 50)).id();
+    const std::size_t other = doc.add(SketchObject::makeRect(300, 10, 20, 20)).id();
+    doc.setSelection({id});
+    doc.transformObjects({id}, BLMatrix2D::make_translation(40.0, 0.0), "Move");
+    SelectionFrame frame;
+    ASSERT_TRUE(doc.selectionFrame(frame));
+    const BLBox before = doc.findById(id)->geometryBounds();
+
+    doc.setSelectionOrigin(frame, BLPoint(200.0, 90.0));
+    const BLPoint origin = doc.selectionOrigin(frame);
+    EXPECT_NEAR(origin.x, 200.0, 1e-3);
+    EXPECT_NEAR(origin.y, 90.0, 1e-3);
+    const jitnodes::NodeId place = doc.transformNodeOf(id);
+    ASSERT_NE(place, jitnodes::invalidNodeId);
+    const jitnodes::Node& node = doc.network().node(place);
+    EXPECT_NEAR(node.baseFloat("pivotX") + node.baseFloat("translateX"), 200.0, 1e-3) << "translate moves the pivot, which sits at the origin on the page";
+    EXPECT_NEAR(doc.findById(id)->geometryBounds().x0, before.x0, 1e-3) << "moving the pivot does not move the shape";
+
+    doc.undoStack().undo();
+    EXPECT_NEAR(doc.selectionOrigin(frame).x, before.x0 + 50.0, 1e-3) << "moving the pivot is one undo step, back to the middle";
+    doc.undoStack().redo();
+    EXPECT_NEAR(doc.selectionOrigin(frame).x, 200.0, 1e-3);
+
+    doc.setSelection({other});
+    doc.setSelection({id});
+    ASSERT_TRUE(doc.selectionFrame(frame));
+    EXPECT_NEAR(doc.selectionOrigin(frame).x, 200.0, 1e-3) << "the pivot is kept by the node, not reset to the middle";
+    doc.transformObjects({id}, BLMatrix2D::make_translation(5.0, 0.0), "Move");
+    EXPECT_NEAR(doc.selectionOrigin(frame).x, 205.0, 1e-3) << "and it travels with the shape";
+
+    doc.setSelectionOrigin(frame, BLPoint(210.0, 90.0), true);
+    doc.setSelectionOrigin(frame, BLPoint(220.0, 95.0), true);
+    doc.setSelectionOrigin(frame, BLPoint(230.0, 99.0), true);
+    doc.finishSelectionOrigin();
+    EXPECT_NEAR(doc.selectionOrigin(frame).x, 230.0, 1e-3);
+    doc.undoStack().undo();
+    EXPECT_NEAR(doc.selectionOrigin(frame).x, 205.0, 1e-3) << "a whole drag of the pivot is one undo step";
+}
+
+TEST(TransformNode, AChildFollowsItsParentAndOnlyThat) {
+    SketchDocument doc;
+    const std::size_t parent = doc.add(SketchObject::makeRect(0, 0, 100, 100)).id();
+    const std::size_t child = doc.add(SketchObject::makeRect(200, 0, 50, 50)).id();
+    auto placeOf = [&](std::size_t id) {
+        const jitnodes::NodeId shape = doc.findById(id)->graphNode();
+        for (jitnodes::NodeId n : doc.network().nodeIds()) {
+            if (doc.network().node(n).typeName() == kTransformNodeType && doc.network().inputOf(n, 0) == shape) {
+                return n;
+            }
+        }
+        return jitnodes::invalidNodeId;
+    };
+    auto x0 = [&](std::size_t id) { return doc.findById(id)->geometryBounds().x0; };
+    auto y0 = [&](std::size_t id) { return doc.findById(id)->geometryBounds().y0; };
+    auto agrees = [&](std::size_t id) {
+        const jitnodes::GeometryHandle out = doc.cook(placeOf(id));
+        BLBox box = doc.findById(id)->geometryBounds();
+        float lo = out->x()[0], hi = out->x()[0];
+        for (std::size_t i = 0; i < out->pointCount(); ++i) {
+            lo = std::min(lo, out->x()[i]);
+            hi = std::max(hi, out->x()[i]);
+        }
+        return std::fabs(lo - box.x0) < 1e-2 && std::fabs(hi - box.x1) < 1e-2;
+    };
+
+    EXPECT_FALSE(doc.setParent(parent, parent));
+    ASSERT_TRUE(doc.setParent(child, parent));
+    EXPECT_FALSE(doc.setParent(parent, child)) << "a loop is refused";
+    EXPECT_EQ(doc.network().inputOf(placeOf(child), 1), placeOf(parent)) << "the child's transform node hangs from the parent's";
+    EXPECT_NEAR(x0(child), 200.0, 1e-3) << "parenting keeps where the child sits";
+    EXPECT_TRUE(agrees(child));
+
+    const BLMatrix2D localBefore = transformOf(doc.network().node(placeOf(child)));
+    doc.transformObjects({parent}, BLMatrix2D::make_translation(30.0, 0.0), "Move");
+    EXPECT_NEAR(x0(parent), 30.0, 1e-3);
+    EXPECT_NEAR(x0(child), 230.0, 1e-3) << "moving the parent carries the child";
+    EXPECT_TRUE(agrees(child));
+    EXPECT_NEAR(transformOf(doc.network().node(placeOf(child))).m20, localBefore.m20, 1e-3) << "the child's own placement is unchanged";
+
+    BLMatrix2D turn = BLMatrix2D::make_rotation(1.5707963267948966, 80.0, 50.0);
+    doc.transformObjects({parent}, turn, "Rotate");
+    const BLPoint expected = turn.map_point(230.0, 50.0);   // the child's old corner
+    EXPECT_NEAR(doc.findById(child)->geometryBounds().x0 + doc.findById(child)->geometryBounds().x1,
+        2.0 * turn.map_point(255.0, 25.0).x, 1e-2) << "the child turns about the parent's pivot";
+    (void)expected;
+    EXPECT_TRUE(agrees(child));
+    EXPECT_TRUE(agrees(parent));
+
+    doc.transformObjects({child}, BLMatrix2D::make_translation(0.0, 10.0), "Move");
+    const double parentY = y0(parent);
+    doc.transformObjects({child}, BLMatrix2D::make_translation(0.0, 5.0), "Move");
+    EXPECT_NEAR(y0(parent), parentY, 1e-3) << "moving the child leaves the parent";
+    EXPECT_TRUE(agrees(child));
+
+    const double before = x0(child);
+    doc.setGraphParam(placeOf(parent), "translateX", doc.network().node(placeOf(parent)).baseFloat("translateX") + 10.0f);
+    EXPECT_NEAR(x0(child), before + 10.0, 1e-2) << "editing the parent's node in the graph moves the child";
+    EXPECT_TRUE(agrees(child));
+    doc.undoStack().undo();
+    EXPECT_NEAR(x0(child), before, 1e-2);
+
+    SketchDocument copy = roundTrip(doc);
+    ASSERT_EQ(copy.objectCount(), 2u);
+    EXPECT_EQ(copy.object(1).parent(), copy.object(0).id()) << "the link is in the graph, so a saved file keeps it";
+    EXPECT_NEAR(copy.object(1).geometryBounds().x0, x0(child), 1e-2);
+
+    doc.undoStack().undo();
+    doc.undoStack().undo();
+    doc.undoStack().undo();
+    doc.undoStack().undo();
+    EXPECT_TRUE(doc.setParent(child, 0));
+    EXPECT_EQ(doc.network().inputOf(placeOf(child), 1), jitnodes::invalidNodeId);
+    doc.transformObjects({parent}, BLMatrix2D::make_translation(5.0, 0.0), "Move");
+    EXPECT_NEAR(x0(child), 200.0, 1e-2) << "released, it stays";
+}
+
+TEST(TransformNode, ParentingTheSelectionIsOneUndoStep) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    const std::size_t b = doc.add(SketchObject::makeRect(100, 0, 10, 10)).id();
+    const std::size_t c = doc.add(SketchObject::makeRect(200, 0, 10, 10)).id();
+
+    doc.setSelection({a});
+    EXPECT_FALSE(doc.canParentSelection());
+    EXPECT_FALSE(doc.canReleaseParent());
+
+    doc.setSelection({a, b, c});
+    ASSERT_TRUE(doc.parentSelection());
+    EXPECT_EQ(doc.findById(a)->parent(), c);
+    EXPECT_EQ(doc.findById(b)->parent(), c) << "the last selected is the parent of all the others";
+    EXPECT_EQ(doc.findById(c)->parent(), 0u);
+    EXPECT_FALSE(doc.parentSelection()) << "nothing changes the second time";
+
+    doc.transformObjects({c}, BLMatrix2D::make_translation(7.0, 0.0), "Move");
+    EXPECT_NEAR(doc.findById(a)->geometryBounds().x0, 7.0, 1e-3);
+
+    doc.undoStack().undo();
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.findById(a)->parent(), 0u);
+    EXPECT_EQ(doc.findById(b)->parent(), 0u) << "one undo frees them all";
+    doc.undoStack().redo();
+    EXPECT_EQ(doc.findById(b)->parent(), c);
+
+    doc.setSelection({a});
+    EXPECT_TRUE(doc.canReleaseParent());
+    ASSERT_TRUE(doc.releaseParent());
+    EXPECT_EQ(doc.findById(a)->parent(), 0u);
+    EXPECT_EQ(doc.findById(b)->parent(), c) << "only the selection is released";
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.findById(a)->parent(), c);
+
+    doc.setSelection({c, a});
+    EXPECT_FALSE(doc.parentSelection()) << "the parent cannot become its own child's child";
+    EXPECT_EQ(doc.findById(c)->parent(), 0u);
+}
+
+namespace {
+    std::vector<int> pointIds(const SketchDocument& doc, std::size_t objectId) {
+        const jitnodes::GeometryHandle& curve = doc.network().node(doc.findById(objectId)->graphNode()).geometryParam("curve");
+        const jitnodes::AttribArray* ids = curve->findAttrib(jitnodes::AttribClass::point, kPointIdAttrib);
+        std::vector<int> result;
+        for (std::size_t i = 0; ids != nullptr && i < ids->size(); ++i) {
+            result.push_back(ids->ints()[i]);
+        }
+        return result;
+    }
+
+    std::vector<int> taggedPoints(const jitnodes::Geometry& geometry, const std::string& group) {
+        std::vector<int> flags;
+        const jitnodes::AttribArray* array = geometry.findAttrib(jitnodes::AttribClass::point, "group." + group);
+        for (std::size_t i = 0; array != nullptr && i < array->size(); ++i) {
+            flags.push_back(array->ints()[i]);
+        }
+        return flags;
+    }
+
+    jitnodes::NodeId addTag(SketchDocument& doc, std::size_t objectId, const std::map<std::string, std::string>& strings, float every = 0.0f) {
+        jitnodes::Network& net = doc.network();
+        const jitnodes::NodeId tag = net.addNode(kTagNodeType, net.uniqueName("tag"));
+        net.connect(doc.findById(objectId)->graphNode(), tag, 0);
+        for (const auto& [name, value] : strings) {
+            net.node(tag).setString(name, value);
+        }
+        net.node(tag).setFloat("every", every);
+        return tag;
+    }
+}
+
+TEST(PointIds, PointsKeepTheirIdsWhileTheShapeIsEdited) {
+    SketchDocument doc;
+    const std::size_t id = doc.add(SketchObject::makeRect(0, 0, 40, 20)).id();
+    EXPECT_EQ(pointIds(doc, id), (std::vector<int>{0, 1, 2, 3})) << "a new shape numbers its points";
+
+    SketchObject* object = doc.findById(id);
+    BLPath moved;
+    moved.move_to(0, 0);
+    moved.line_to(50, 0);
+    moved.line_to(40, 20);
+    moved.line_to(0, 20);
+    moved.close();
+    object->setGeometry(moved);
+    doc.touch();
+    EXPECT_EQ(pointIds(doc, id), (std::vector<int>{0, 1, 2, 3})) << "moving a point keeps the ids";
+
+    BLPath fewer;
+    fewer.move_to(0, 0);
+    fewer.line_to(50, 0);
+    fewer.line_to(0, 20);
+    fewer.close();
+    object->setGeometry(fewer);
+    doc.touch();
+    EXPECT_EQ(pointIds(doc, id), (std::vector<int>{0, 1, 3})) << "deleting the third point leaves the others their ids";
+
+    BLPath more;
+    more.move_to(0, 0);
+    more.line_to(25, 0);
+    more.line_to(50, 0);
+    more.line_to(0, 20);
+    more.close();
+    object->setGeometry(more);
+    doc.touch();
+    const std::vector<int> ids = pointIds(doc, id);
+    ASSERT_EQ(ids.size(), 4u);
+    EXPECT_EQ(ids[0], 0);
+    EXPECT_EQ(ids[2], 1);
+    EXPECT_EQ(ids[3], 3);
+    EXPECT_GT(ids[1], 3) << "the inserted point gets an id nobody had";
+
+    SketchDocument copy = roundTrip(doc);
+    ASSERT_EQ(copy.objectCount(), 1u);
+    EXPECT_EQ(pointIds(copy, copy.object(0).id()), ids) << "a saved file keeps the ids";
+}
+
+TEST(PointTags, TheTagNodeSelectsPointsByIdRuleAndRegion) {
+    SketchDocument doc;
+    const std::size_t rect = doc.add(SketchObject::makeRect(0, 0, 40, 20)).id();
+
+    jitnodes::NodeId tag = addTag(doc, rect, {{"group", "left"}, {"ids", "0,3"}});
+    EXPECT_EQ(taggedPoints(*doc.cook(tag), "left"), (std::vector<int>{1, 0, 0, 1})) << "by id";
+    EXPECT_EQ(doc.cook(tag)->pointCount(), 4u) << "the tag passes the shape through";
+
+    tag = addTag(doc, rect, {{"group", "even"}}, 2.0f);
+    EXPECT_EQ(taggedPoints(*doc.cook(tag), "even"), (std::vector<int>{1, 0, 1, 0})) << "every second point";
+
+    tag = addTag(doc, rect, {{"group", "top"}, {"box", "-1 -1 41 1"}});
+    EXPECT_EQ(taggedPoints(*doc.cook(tag), "top"), (std::vector<int>{1, 1, 0, 0})) << "inside a box";
+
+    tag = addTag(doc, rect, {{"group", "g"}, {"ids", "0-1"}});
+    const jitnodes::NodeId second = addTag(doc, rect, {{"group", "g"}, {"ids", "1-2"}, {"operation", "union"}});
+    doc.network().connect(tag, second, 0);
+    EXPECT_EQ(taggedPoints(*doc.cook(second), "g"), (std::vector<int>{1, 1, 1, 0})) << "union with the group already there";
+    doc.network().node(second).setString("operation", "subtract");
+    EXPECT_EQ(taggedPoints(*doc.cook(second), "g"), (std::vector<int>{1, 0, 0, 0})) << "subtract";
+    doc.network().node(second).setString("operation", "intersect");
+    EXPECT_EQ(taggedPoints(*doc.cook(second), "g"), (std::vector<int>{0, 1, 0, 0})) << "intersect";
+
+    const std::size_t ellipse = doc.add(SketchObject::makeEllipse(100, 0, 40, 40)).id();
+    tag = addTag(doc, ellipse, {{"group", "all"}, {"kind", "any"}}, 1.0f);
+    const jitnodes::GeometryHandle curve = doc.cook(tag);
+    ASSERT_EQ(curve->pointCount(), 12u) << "four curved segments: anchors and handles";
+    int tagged = 0;
+    for (int flag : taggedPoints(*curve, "all")) {
+        tagged += flag;
+    }
+    EXPECT_EQ(tagged, 12) << "handles follow their anchors";
+    doc.network().node(tag).setString("kind", "anchors");
+    tagged = 0;
+    for (int flag : taggedPoints(*doc.cook(tag), "all")) {
+        tagged += flag;
+    }
+    EXPECT_EQ(tagged, 4);
+    doc.network().node(tag).setString("kind", "corners");
+    tagged = 0;
+    for (int flag : taggedPoints(*doc.cook(tag), "all")) {
+        tagged += flag;
+    }
+    EXPECT_EQ(tagged, 0) << "an ellipse is all smooth";
+    doc.network().node(tag).setString("kind", "smooth");
+    tagged = 0;
+    for (int flag : taggedPoints(*doc.cook(tag), "all")) {
+        tagged += flag;
+    }
+    EXPECT_EQ(tagged, 12);
+}
+
+TEST(PointTags, TaggingPointsOfAnObjectIsUndoable) {
+    SketchDocument doc;
+    const std::size_t id = doc.add(SketchObject::makeRect(10, 10, 40, 20)).id();
+    const jitnodes::NodeId place = doc.transformNodeOf(id);
+
+    EXPECT_EQ(doc.pointIdNear(id, BLPoint(50, 10), 1.0), 1) << "the top right corner is point 1";
+    EXPECT_EQ(doc.pointIdNear(id, BLPoint(30, 20), 1.0), -1) << "nothing there";
+    EXPECT_TRUE(doc.tagNames(id).empty());
+
+    ASSERT_TRUE(doc.tagPoints(id, "pins", {1, 2}, true));
+    EXPECT_EQ(doc.tagNames(id), (std::vector<std::string>{"pins"}));
+    EXPECT_EQ(doc.taggedIds(id, "pins"), (std::vector<int>{1, 2}));
+    EXPECT_EQ(doc.transformNodeOf(id), place) << "the tag sits in the chain without displacing the placement";
+    EXPECT_EQ(taggedPoints(*doc.cook(place), "pins"), (std::vector<int>{0, 1, 1, 0}));
+    EXPECT_EQ(doc.taggedPositions(id, "pins").size(), 2u);
+    EXPECT_FALSE(doc.tagPoints(id, "pins", {1}, true)) << "already tagged: nothing to do";
+
+    doc.transformObjects({id}, BLMatrix2D::make_translation(100.0, 0.0), "Move");
+    EXPECT_NEAR(doc.taggedPositions(id, "pins")[0].x, 150.0, 1e-3) << "tagged points are reported where they are on the page";
+    EXPECT_EQ(doc.pointIdNear(id, BLPoint(150, 10), 1.0), 1);
+    doc.undoStack().undo();
+
+    ASSERT_TRUE(doc.tagPoints(id, "pins", {1}, false));
+    EXPECT_EQ(doc.taggedIds(id, "pins"), (std::vector<int>{2}));
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.taggedIds(id, "pins"), (std::vector<int>{1, 2})) << "untagging is one undo step";
+
+    ASSERT_TRUE(doc.tagPoints(id, "other", {0}, true));
+    EXPECT_EQ(doc.tagNames(id).size(), 2u) << "tags chain; each keeps its own group";
+    ASSERT_TRUE(doc.clearTag(id, "pins"));
+    EXPECT_EQ(doc.tagNames(id), (std::vector<std::string>{"other"}));
+    EXPECT_EQ(doc.transformNodeOf(id), place);
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.taggedIds(id, "pins"), (std::vector<int>{1, 2})) << "clearing a tag is undoable";
+
+    SketchDocument copy = roundTrip(doc);
+    ASSERT_EQ(copy.objectCount(), 1u);
+    EXPECT_EQ(copy.taggedIds(copy.object(0).id(), "pins"), (std::vector<int>{1, 2})) << "a saved file keeps the tags";
+    EXPECT_NE(copy.transformNodeOf(copy.object(0).id()), jitnodes::invalidNodeId);
+}
+
+TEST(Expressions, FieldTextIsANumberOrAnExpression) {
+    EXPECT_EQ(parseFieldEntry("  ").kind, FieldEntry::Kind::Nothing);
+    EXPECT_EQ(parseFieldEntry("").kind, FieldEntry::Kind::Nothing);
+    FieldEntry number = parseFieldEntry(" -12.5 ");
+    EXPECT_EQ(number.kind, FieldEntry::Kind::Number);
+    EXPECT_DOUBLE_EQ(number.number, -12.5);
+    EXPECT_EQ(parseFieldEntry("1e-3").kind, FieldEntry::Kind::Number) << "scientific notation is still a number";
+    FieldEntry plain = parseFieldEntry("sin(time) * 50");
+    EXPECT_EQ(plain.kind, FieldEntry::Kind::Expression) << "text that is not a number is an expression";
+    EXPECT_EQ(plain.expression, "sin(time) * 50");
+    FieldEntry marked = parseFieldEntry("= frame / 2");
+    EXPECT_EQ(marked.kind, FieldEntry::Kind::Expression);
+    EXPECT_EQ(marked.expression, "frame / 2") << "the = is not part of the expression";
+    FieldEntry cleared = parseFieldEntry("=");
+    EXPECT_EQ(cleared.kind, FieldEntry::Kind::Expression);
+    EXPECT_TRUE(cleared.expression.empty()) << "a lone = takes the expression away";
+    EXPECT_EQ(parseFieldEntry("12abc").kind, FieldEntry::Kind::Expression) << "half a number is not a number";
+}
+
+TEST(Expressions, AnExpressionOnAPlacementFollowsTheTime) {
+    SketchDocument doc;
+    const std::size_t id = doc.add(SketchObject::makeRect(10, 10, 40, 20)).id();
+    const std::size_t child = doc.add(SketchObject::makeRect(200, 10, 10, 10)).id();
+    ASSERT_TRUE(doc.setParent(child, id));
+    const jitnodes::NodeId place = doc.transformNodeOf(id);
+    auto left = [&](std::size_t object) { return doc.findById(object)->geometryBounds().x0; };
+
+    EXPECT_EQ(doc.setGraphExpression(place, "translateX", "sin(time)*50"), "");
+    doc.setTime(0.0);
+    EXPECT_NEAR(left(id), 10.0, 1e-3);
+    doc.setTime(1.5707963267948966);
+    EXPECT_NEAR(left(id), 60.0, 1e-2) << "sin(pi/2) * 50 further along";
+    EXPECT_NEAR(left(child), 250.0, 1e-2) << "a child of an animated parent follows it";
+    doc.setTime(1.0);
+    EXPECT_NEAR(left(id), 10.0 + 50.0 * std::sin(1.0), 1e-2);
+    EXPECT_NEAR(doc.time(), 1.0, 1e-9);
+
+    EXPECT_NE(doc.setGraphExpression(place, "translateX", "sin(("), "") << "a bad expression is refused with a message";
+    EXPECT_EQ(doc.network().node(place).expression("translateX"), "sin(time)*50") << "and changes nothing";
+    EXPECT_NEAR(left(id), 10.0 + 50.0 * std::sin(1.0), 1e-2);
+
+    SketchDocument copy = roundTrip(doc);
+    ASSERT_EQ(copy.objectCount(), 2u);
+    const jitnodes::NodeId copyPlace = copy.transformNodeOf(copy.object(0).id());
+    EXPECT_EQ(copy.network().node(copyPlace).expression("translateX"), "sin(time)*50") << "a saved file keeps the expression";
+    copy.setTime(1.5707963267948966);
+    EXPECT_NEAR(copy.object(0).geometryBounds().x0, 60.0, 1e-2);
+
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.network().node(place).expression("translateX"), "") << "undo takes the expression away";
+    doc.setTime(2.0);
+    EXPECT_NEAR(left(id), 10.0, 1e-3) << "and the object stops following the time";
+    doc.undoStack().redo();
+    EXPECT_NEAR(left(id), 10.0 + 50.0 * std::sin(2.0), 1e-2) << "redo brings it back, at the current time";
+
+    EXPECT_EQ(doc.setGraphExpression(place, "translateX", ""), "");
+    doc.setTime(0.5);
+    EXPECT_NEAR(left(id), 10.0, 1e-3);
+}
+
+TEST(PointTags, MovePointsMovesOnlyTheTaggedPointsAndTheObjectFollows) {
+    SketchDocument doc;
+    const std::size_t id = doc.add(SketchObject::makeRect(10, 10, 40, 20)).id();
+    const jitnodes::NodeId place = doc.transformNodeOf(id);
+    ASSERT_TRUE(doc.tagPoints(id, "pins", {1, 2}, true));
+
+    const jitnodes::NodeId mover = doc.addMovePoints(id, "pins");
+    ASSERT_NE(mover, jitnodes::invalidNodeId);
+    EXPECT_EQ(doc.transformNodeOf(id), place);
+    EXPECT_NEAR(doc.network().node(mover).baseFloat("pivotX"), 50.0, 1e-3) << "pivots about the middle of the points it moves";
+
+    doc.setGraphParam(mover, "translateX", 15.0f);
+    BLBox box = doc.findById(id)->geometryBounds();
+    EXPECT_NEAR(box.x0, 10.0, 1e-3) << "the untagged left edge stays";
+    EXPECT_NEAR(box.x1, 65.0, 1e-3) << "the tagged right edge moved";
+    const jitnodes::GeometryHandle& shape = doc.network().node(doc.findById(id)->graphNode()).geometryParam("curve");
+    EXPECT_NEAR(shape->x()[1], 50.0, 1e-3) << "the shape node keeps what was drawn";
+
+    doc.transformObjects({id}, BLMatrix2D::make_translation(100.0, 0.0), "Move");
+    box = doc.findById(id)->geometryBounds();
+    EXPECT_NEAR(box.x0, 110.0, 1e-3);
+    EXPECT_NEAR(box.x1, 165.0, 1e-3) << "moving a driven object keeps its deformation";
+    EXPECT_NEAR(doc.network().node(doc.findById(id)->graphNode()).geometryParam("curve")->x()[1], 50.0, 1e-3) << "and still leaves the shape alone";
+
+    doc.undoStack().undo();
+    box = doc.findById(id)->geometryBounds();
+    EXPECT_NEAR(box.x0, 10.0, 1e-3);
+    EXPECT_NEAR(box.x1, 65.0, 1e-3);
+
+    doc.setGraphString(mover, "group", "nobody");
+    EXPECT_NEAR(doc.findById(id)->geometryBounds().x1, 50.0, 1e-3) << "a group nobody is in moves nothing";
+    doc.setGraphString(mover, "group", "pins");
+
+    SketchDocument copy = roundTrip(doc);
+    ASSERT_EQ(copy.objectCount(), 1u);
+    EXPECT_NEAR(copy.object(0).geometryBounds().x1, 65.0, 1e-2) << "a saved file keeps the deformed outline";
+    doc.setGraphParam(mover, "translateX", 0.0f);
+    EXPECT_NEAR(doc.findById(id)->geometryBounds().x1, 50.0, 1e-3);
+}
+
+TEST(PointTags, ATagBetweenAShapeAndItsTransformChangesNothingElse) {
+    SketchDocument doc;
+    const std::size_t id = doc.add(SketchObject::makeRect(10, 10, 40, 20)).id();
+    const jitnodes::NodeId place = doc.transformNodeOf(id);
+    const jitnodes::NodeId shape = doc.findById(id)->graphNode();
+    ASSERT_NE(place, jitnodes::invalidNodeId);
+
+    jitnodes::Network& net = doc.network();
+    const jitnodes::NodeId tag = net.addNode(kTagNodeType, net.uniqueName("tag"));
+    net.node(tag).setString("group", "pins");
+    net.node(tag).setString("ids", "1");
+    net.connect(shape, tag, 0);
+    net.connect(tag, place, 0);
+    doc.touch();
+
+    EXPECT_EQ(doc.transformNodeOf(id), place) << "the object still finds its placement node through the tag";
+    EXPECT_EQ(doc.objectOfNode(tag) == 0 || doc.objectOfNode(place) == id, true);
+    doc.transformObjects({id}, BLMatrix2D::make_translation(5.0, 0.0), "Move");
+    EXPECT_NEAR(doc.findById(id)->geometryBounds().x0, 15.0, 1e-3);
+    EXPECT_EQ(net.inputOf(place, 0), tag) << "syncing leaves the tag where the user put it";
+    EXPECT_EQ(taggedPoints(*doc.cook(place), "pins"), (std::vector<int>{0, 1, 0, 0})) << "and the tag reaches the placed shape";
+}
+
+TEST(NodeSelection, SelectionAndPickingGoByNode) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 40, 40)).id();
+    const std::size_t b = doc.add(SketchObject::makeRect(100, 0, 40, 40)).id();
+    const jitnodes::NodeId placeA = doc.transformNodeOf(a), placeB = doc.transformNodeOf(b);
+    ASSERT_NE(placeA, jitnodes::invalidNodeId);
+    ASSERT_NE(placeB, jitnodes::invalidNodeId);
+
+    EXPECT_EQ(doc.hitTestNode(BLPoint(20, 20), 0.0), placeA);
+    EXPECT_EQ(doc.hitTestNode(BLPoint(120, 20), 0.0), placeB);
+    EXPECT_EQ(doc.hitTestNode(BLPoint(70, 20), 0.0), jitnodes::invalidNodeId);
+
+    EXPECT_EQ(doc.objectOfNode(placeB), b);
+    EXPECT_EQ(doc.objectOfNode(doc.findById(b)->graphNode()), b) << "the shape node belongs to the object too";
+    EXPECT_EQ(doc.objectOfNode(jitnodes::invalidNodeId), 0u);
+
+    doc.setSelectedNodes({placeB, placeA});
+    EXPECT_EQ(doc.selection(), (std::vector<std::size_t>{b, a}));
+    EXPECT_EQ(doc.selectedNodes(), (std::vector<jitnodes::NodeId>{placeB, placeA}));
+
+    // The outline picking reads is the nodes': a translate typed into the placement node moves what can be picked.
+    doc.setGraphParam(placeA, "translateX", 200.0f);
+    EXPECT_EQ(doc.hitTestNode(BLPoint(220, 20), 0.0), placeA);
+    EXPECT_EQ(doc.hitTestNode(BLPoint(20, 20), 0.0), jitnodes::invalidNodeId);
+    BLBox outline(0, 0, 0, 0);
+    doc.placedOutline(*doc.findById(a)).get_bounding_box(&outline);
+    EXPECT_NEAR(outline.x0, doc.findById(a)->geometryBounds().x0, 1e-2) << "the nodes and the object agree";
+
+    EXPECT_TRUE(doc.selectInRect(BLBox(190, -5, 250, 50), false));
+    EXPECT_EQ(doc.selection(), (std::vector<std::size_t>{a}));
+}
+
+TEST(PaintWarp, AGradientFollowsAPerspectiveWarpOfItsShape) {
+    SketchDocument doc;
+    SketchGradient gradient;
+    gradient.stops.push_back({0.0, SketchColor::rgb(1, 0, 0)});
+    gradient.stops.push_back({1.0, SketchColor::rgb(0, 0, 1)});
+    SketchObject& rect = doc.add(SketchObject::makeRect(20, 20, 100, 60));
+    rect.setStroke(SketchPaint::none());
+    rect.setFill(SketchPaint::linear(gradient));
+    const std::size_t id = rect.id();
+
+    const BLPoint from[4] = {{20, 20}, {120, 20}, {120, 80}, {20, 80}};
+    const BLPoint to[4] = {{20, 20}, {120, 35}, {120, 65}, {20, 80}};
+    const PaintWarp page = PaintWarp::between(from, to);
+    EXPECT_NEAR(page.map(from[1]).y, 35.0, 1e-6);
+    EXPECT_NEAR(page.map(from[3]).x, 20.0, 1e-6);
+
+    doc.setSelection({id});
+    const std::vector<GeometryState> start = doc.snapshotSelection();
+    doc.findById(id)->warp([&](const BLPoint& p) { return page.map(p); }, page);
+    ASSERT_FALSE(doc.findById(id)->paintWarp().isIdentity());
+    const BLBox frame = doc.findById(id)->paintFrameBounds();
+    EXPECT_NEAR(frame.x1 - frame.x0, 100.0, 1e-3) << "the paint frame is the shape before the warp";
+    EXPECT_NEAR(frame.y1 - frame.y0, 60.0, 1e-3);
+
+    PaintWarp unwarp;
+    ASSERT_TRUE(page.inverted(unwarp));
+    double biggest = 0.0;
+    for (const BLPoint& at : {BLPoint(30, 50), BLPoint(70, 50), BLPoint(100, 45), BLPoint(110, 55), BLPoint(60, 30)}) {
+        const double t = (unwarp.map(at).x - 20.0) / 100.0;
+        const std::uint32_t pixel = pixelAt(*doc.findById(id), 160, int(at.x), int(at.y));
+        EXPECT_NEAR(double(pixel & 0xFFu), 255.0 * t, 10.0) << "blue rises along the pre-warp x at " << at.x << "," << at.y;
+        biggest = std::max(biggest, std::fabs(t - (at.x - 20.0) / 100.0));
+    }
+    EXPECT_GT(biggest, 0.05) << "the warp really moves the colours, which a flat gradient would not";
+
+    EXPECT_NE(svgFromDocument(doc).find("data-paint-warp"), std::string::npos) << "the SVG carries the warp";    SketchDocument viaSvg = roundTrip(doc);
+    ASSERT_EQ(viaSvg.objectCount(), 1u);
+    for (int i = 0; i < 9; ++i) {
+        EXPECT_NEAR(viaSvg.object(0).paintWarp().m[i], page.m[i], 1e-4) << "SVG keeps the warp, entry " << i;
+    }
+    SketchDocument viaBinary;
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc), viaBinary));
+    ASSERT_EQ(viaBinary.objectCount(), 1u);
+    EXPECT_TRUE(viaBinary.object(0).paintWarp() == page) << "so does the binary format";
+
+    doc.findById(id)->transform(BLMatrix2D::make_translation(10.0, 0.0));
+    EXPECT_NEAR(double(pixelAt(*doc.findById(id), 160, 80, 50) & 0xFFu), 255.0 * ((unwarp.map(BLPoint(70, 50)).x - 20.0) / 100.0), 10.0)
+        << "a move after the warp carries the colours with the shape";
+
+    doc.commitGeometry(start, "Warp", doc.frameState());
+    doc.undoStack().undo();
+    EXPECT_TRUE(doc.findById(id)->paintWarp().isIdentity()) << "undoing the warp unbends the paint too";
+    doc.undoStack().redo();
+    EXPECT_TRUE(doc.findById(id)->paintWarp() == page);
 }
 
 TEST(PathNode, AThousandsObjectDocumentStaysResponsive) {

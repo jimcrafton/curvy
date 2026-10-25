@@ -23,7 +23,7 @@ namespace curvy {
         if (!hasLastTransform_) {
             return false;
         }
-        std::vector<GeometryState> before = snapshotSelection();
+        std::vector<GeometryState> before = snapshotSelection(true);
         if (before.empty()) {
             return false;
         }
@@ -55,6 +55,7 @@ namespace curvy {
             if (SketchObject* object = findById(entry.id)) {
                 object->setGeometry(entry.path);
                 object->setPaintMatrix(entry.paintMatrix);
+                object->setPaintWarp(entry.paintWarp);
                 object->setTextMatrix(entry.textMatrix);
                 object->transform(matrix);
                 object->setFrameAngle(entry.angle + angleDelta);

@@ -5,8 +5,10 @@
 
 #include <jitnodes/graph/network.h>
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <memory>
 #include <sstream>
@@ -145,54 +147,424 @@ namespace curvy {
     }
 
     namespace {
-        constexpr const char* kMatrixNames[6] = {"a", "b", "c", "d", "e", "f"};
+        constexpr double kDegrees = 57.295779513082320876798;
+
+        // The placement is translate * pivot * rotate * shear(x) * scale * pivot^-1, which can express any 2D affine matrix; a flip is a
+        // negative scale. The pivot is where rotate, shear and scale hold still; translate moves the pivot itself.
+        struct Placement {
+            float translateX = 0, translateY = 0, rotation = 0, scaleX = 1, scaleY = 1, shear = 0, pivotX = 0, pivotY = 0;
+        };
+
+        Placement placementOf(const BLMatrix2D& m, float pivotX, float pivotY) {
+            Placement p;
+            p.pivotX = pivotX;
+            p.pivotY = pivotY;
+            double angle, sx, sy, k = 0.0;
+            sx = std::hypot(m.m00, m.m01);
+            if (sx > 1e-12) {
+                angle = std::atan2(m.m01, m.m00);
+                const double ux = m.m00 / sx, uy = m.m01 / sx;
+                sy = ux * m.m11 - uy * m.m10;
+                if (std::fabs(sy) > 1e-12) {
+                    k = (ux * m.m10 + uy * m.m11) / sy;
+                }
+            } else {
+                angle = std::atan2(-m.m10, m.m11);
+                sy = std::hypot(m.m10, m.m11);
+            }
+            p.rotation = float(angle * kDegrees);
+            p.scaleX = float(sx);
+            p.scaleY = float(sy);
+            p.shear = float(std::atan(k) * kDegrees);
+            p.translateX = float(m.m20 - pivotX + m.m00 * pivotX + m.m10 * pivotY);
+            p.translateY = float(m.m21 - pivotY + m.m01 * pivotX + m.m11 * pivotY);
+            return p;
+        }
+
+        BLMatrix2D matrixOf(const Placement& p) {
+            const double angle = double(p.rotation) / kDegrees;
+            const double c = std::cos(angle), s = std::sin(angle), k = std::tan(double(p.shear) / kDegrees);
+            const double sx = p.scaleX, sy = p.scaleY;
+            const double m00 = c * sx, m01 = s * sx, m10 = (c * k - s) * sy, m11 = (s * k + c) * sy;
+            return BLMatrix2D(m00, m01, m10, m11, p.translateX + p.pivotX - (m00 * p.pivotX + m10 * p.pivotY),
+                p.translateY + p.pivotY - (m01 * p.pivotX + m11 * p.pivotY));
+        }
+
+        void movePoints(jitnodes::Geometry& geometry, const BLMatrix2D& matrix) {
+            if (geometry.pointCount() > 0) {
+                float* x = geometry.x();
+                float* y = geometry.y();
+                for (std::size_t i = 0; i < geometry.pointCount(); ++i) {
+                    const BLPoint p = matrix.map_point(double(x[i]), double(y[i]));
+                    x[i] = float(p.x);
+                    y[i] = float(p.y);
+                }
+            }
+        }
+
+        constexpr const char* kWorldDetails[6] = {"w0", "w1", "w2", "w3", "w4", "w5"};
+
+        // A transform node's output carries where its shape sits on the page (its own placement after its parent's), which is what a child's
+        // node reads from its second input.
+        BLMatrix2D worldFromDetails(const jitnodes::Geometry& geometry) {
+            const BLMatrix2D identity = BLMatrix2D::make_identity();
+            BLMatrix2D world;
+            for (int i = 0; i < 6; ++i) {
+                world.m[i] = double(geometry.detail(kWorldDetails[i], float(identity.m[i])));
+            }
+            return world;
+        }
 
         class TransformNode : public jitnodes::Node {
         public:
             TransformNode() : Node(kTransformNodeType, 1) {
-                const BLMatrix2D identity = BLMatrix2D::make_identity();
-                for (int i = 0; i < 6; ++i) {
-                    declareFloat(kMatrixNames[i], float(identity.m[i]));
+                const Placement none;
+                declareFloat("translateX", none.translateX);
+                declareFloat("translateY", none.translateY);
+                declareFloat("rotation", none.rotation);
+                declareFloat("scaleX", none.scaleX);
+                declareFloat("scaleY", none.scaleY);
+                declareFloat("shear", none.shear);
+                declareFloat("pivotX", none.pivotX);
+                declareFloat("pivotY", none.pivotY);
+            }
+
+            // Input 0 is the shape; input 1, when connected, is the parent's transform node.
+            bool hasVariableInputs() const override { return true; }
+
+            jitnodes::GeometryHandle cook(jitnodes::CookContext&, const std::vector<jitnodes::GeometryHandle>& inputs) override {
+                if (inputs.empty() || !inputs.front()) {
+                    return std::make_shared<jitnodes::Geometry>();
                 }
+                BLMatrix2D world = resolvedTransformOf(*this);
+                if (inputs.size() > 1 && inputs[1]) {
+                    world.post_transform(worldFromDetails(*inputs[1]));
+                }
+                auto placed = std::make_shared<jitnodes::Geometry>(*inputs.front());
+                movePoints(*placed, world);
+                for (int i = 0; i < 6; ++i) {
+                    placed->setDetail(kWorldDetails[i], float(world.m[i]));
+                }
+                return placed;
+            }
+        };
+    }
+
+    namespace {
+        class MovePointsNode : public jitnodes::Node {
+        public:
+            MovePointsNode() : Node(kMovePointsNodeType, 1) {
+                const Placement none;
+                declareFloat("translateX", none.translateX);
+                declareFloat("translateY", none.translateY);
+                declareFloat("rotation", none.rotation);
+                declareFloat("scaleX", none.scaleX);
+                declareFloat("scaleY", none.scaleY);
+                declareFloat("shear", none.shear);
+                declareFloat("pivotX", none.pivotX);
+                declareFloat("pivotY", none.pivotY);
+                declareString("group", "");
             }
 
             jitnodes::GeometryHandle cook(jitnodes::CookContext&, const std::vector<jitnodes::GeometryHandle>& inputs) override {
                 if (inputs.empty() || !inputs.front()) {
                     return std::make_shared<jitnodes::Geometry>();
                 }
-                return placeGeometry(*inputs.front(), transformOf(*this));
+                auto moved = std::make_shared<jitnodes::Geometry>(*inputs.front());
+                const std::string& group = getString("group");
+                const jitnodes::AttribArray* flags = group.empty() ? nullptr : moved->findAttrib(jitnodes::AttribClass::point, "group." + group);
+                if (moved->pointCount() == 0 || (!group.empty() && flags == nullptr)) {
+                    return moved;
+                }
+                const BLMatrix2D matrix = resolvedTransformOf(*this);
+                float* x = moved->x();
+                float* y = moved->y();
+                for (std::size_t i = 0; i < moved->pointCount(); ++i) {
+                    if (flags == nullptr || flags->ints()[i] != 0) {
+                        const BLPoint p = matrix.map_point(double(x[i]), double(y[i]));
+                        x[i] = float(p.x);
+                        y[i] = float(p.y);
+                    }
+                }
+                return moved;
             }
         };
     }
 
-    BLMatrix2D transformOf(const jitnodes::Node& node) {
-        BLMatrix2D matrix;
-        for (int i = 0; i < 6; ++i) {
-            matrix.m[i] = double(node.baseFloat(kMatrixNames[i]));
+    namespace {
+        // Which points of a primitive are anchors; a cubic's handles sit between them (out handle after its anchor, in handle before the next).
+        bool isAnchor(const jitnodes::Primitive& prim, std::uint32_t local) {
+            return prim.kind != jitnodes::PrimKind::cubic || local % 3 == 0;
         }
-        return matrix;
+
+        // The anchor a handle belongs to, for the tag to follow.
+        std::uint32_t anchorOf(const jitnodes::Primitive& prim, std::uint32_t local) {
+            if (isAnchor(prim, local)) {
+                return local;
+            }
+            return local % 3 == 1 ? local - 1 : (local + 1) % prim.count;
+        }
+
+        bool parseIds(const std::string& text, std::vector<std::pair<long, long>>& ranges) {
+            std::string token;
+            auto flush = [&]() {
+                if (token.empty()) {
+                    return;
+                }
+                char* end = nullptr;
+                const long first = std::strtol(token.c_str(), &end, 10);
+                long last = first;
+                if (end != token.c_str() && *end == '-') {
+                    last = std::strtol(end + 1, nullptr, 10);
+                }
+                ranges.push_back({std::min(first, last), std::max(first, last)});
+                token.clear();
+            };
+            for (char c : text) {
+                if (c == ',' || c == ' ') {
+                    flush();
+                } else {
+                    token += c;
+                }
+            }
+            flush();
+            return !ranges.empty();
+        }
+
+        class TagNode : public jitnodes::Node {
+        public:
+            TagNode() : Node(kTagNodeType, 1) {
+                declareString("group", "group1");
+                declareString("ids", "");
+                declareFloat("every", 0.0f);
+                declareFloat("offset", 0.0f);
+                declareString("box", "");
+                declareString("kind", "any");
+                declareString("operation", "replace");
+            }
+
+            jitnodes::GeometryHandle cook(jitnodes::CookContext&, const std::vector<jitnodes::GeometryHandle>& inputs) override {
+                if (inputs.empty() || !inputs.front()) {
+                    return std::make_shared<jitnodes::Geometry>();
+                }
+                const std::string& name = getString("group");
+                if (name.empty()) {
+                    return inputs.front();
+                }
+                auto tagged = std::make_shared<jitnodes::Geometry>(*inputs.front());
+                const std::size_t count = tagged->pointCount();
+                const jitnodes::AttribArray* idArray = tagged->findAttrib(jitnodes::AttribClass::point, kPointIdAttrib);
+                std::vector<std::pair<long, long>> idRanges;
+                const bool byIds = parseIds(getString("ids"), idRanges);
+                const int every = int(std::lround(baseFloat("every"))), offset = int(std::lround(baseFloat("offset")));
+                double box[4] = {0, 0, 0, 0};
+                bool byBox = false;
+                {
+                    std::istringstream in(getString("box"));
+                    byBox = bool(in >> box[0] >> box[1] >> box[2] >> box[3]) && box[2] > box[0] && box[3] > box[1];
+                }
+                const std::string& kind = getString("kind");
+
+                std::vector<char> member(count, 0);
+                auto matches = [&](std::size_t point, std::uint32_t anchorNumber) {
+                    if (byIds) {
+                        const long id = idArray != nullptr && idArray->type() == jitnodes::AttribType::int32 ? long(idArray->ints()[point]) : long(point);
+                        for (const auto& range : idRanges) {
+                            if (id >= range.first && id <= range.second) {
+                                return true;
+                            }
+                        }
+                    }
+                    if (every > 0 && int(anchorNumber) >= offset && (int(anchorNumber) - offset) % every == 0) {
+                        return true;
+                    }
+                    return byBox && tagged->x()[point] >= box[0] && tagged->x()[point] <= box[2] && tagged->y()[point] >= box[1] && tagged->y()[point] <= box[3];
+                };
+                auto sameSpot = [&](std::size_t a, std::size_t b) { return tagged->x()[a] == tagged->x()[b] && tagged->y()[a] == tagged->y()[b]; };
+                auto isCorner = [&](const jitnodes::Primitive& prim, std::uint32_t local) {
+                    if (prim.kind != jitnodes::PrimKind::cubic) {
+                        return true;
+                    }
+                    const std::size_t at = prim.start + local;
+                    const bool outFlat = local + 1 >= prim.count && !prim.closed ? true : sameSpot(at, prim.start + (local + 1) % prim.count);
+                    const bool inFlat = local == 0 && !prim.closed ? true : sameSpot(at, prim.start + (local + prim.count - 1) % prim.count);
+                    return outFlat && inFlat;
+                };
+
+                std::vector<char> covered(count, 0);
+                for (const jitnodes::Primitive& prim : tagged->primitives()) {
+                    if (std::size_t(prim.start) + prim.count > count) {
+                        continue;
+                    }
+                    std::uint32_t anchorNumber = 0;
+                    std::vector<char> matched(prim.count, 0);   // by anchor: did a selector pick it
+                    for (std::uint32_t local = 0; local < prim.count; ++local) {
+                        covered[prim.start + local] = 1;
+                        if (!isAnchor(prim, local)) {
+                            continue;
+                        }
+                        const bool in = matches(prim.start + local, anchorNumber++);
+                        matched[local] = in ? 1 : 0;
+                        const bool kept = kind == "handles" ? false : kind == "corners" ? in && isCorner(prim, local) : kind == "smooth" ? in && !isCorner(prim, local) : in;
+                        member[prim.start + local] = kept ? 1 : 0;
+                    }
+                    const bool handlesFollow = kind != "anchors" && kind != "corners";
+                    for (std::uint32_t local = 0; local < prim.count; ++local) {
+                        if (!isAnchor(prim, local)) {
+                            const std::uint32_t owner = anchorOf(prim, local);
+                            const bool ownerIn = kind == "smooth" ? member[prim.start + owner] != 0 : matched[owner] != 0;
+                            member[prim.start + local] = handlesFollow && ownerIn ? 1 : 0;
+                        }
+                    }
+                }
+                for (std::size_t i = 0; i < count; ++i) {
+                    if (!covered[i]) {
+                        member[i] = matches(i, std::uint32_t(i)) && kind != "handles" ? 1 : 0;
+                    }
+                }
+
+                const std::string& operation = getString("operation");
+                const bool existed = tagged->hasAttrib(jitnodes::AttribClass::point, "group." + name);
+                jitnodes::AttribArray& group = tagged->createGroup(jitnodes::AttribClass::point, name);
+                int* flags = group.ints().data();
+                for (std::size_t i = 0; i < count; ++i) {
+                    const bool before = existed && flags[i] != 0, now = member[i] != 0;
+                    bool result = now;
+                    if (operation == "union") {
+                        result = before || now;
+                    } else if (operation == "subtract") {
+                        result = before && !now;
+                    } else if (operation == "intersect") {
+                        result = before && now;
+                    }
+                    flags[i] = result ? 1 : 0;
+                }
+                return tagged;
+            }
+        };
+    }
+
+    std::vector<int> pointIdList(const std::string& text) {
+        std::vector<std::pair<long, long>> ranges;
+        std::vector<int> ids;
+        if (parseIds(text, ranges)) {
+            for (const auto& range : ranges) {
+                for (long id = std::max(0L, range.first); id <= std::min(range.second, range.first + 1000000L); ++id) {
+                    ids.push_back(int(id));
+                }
+            }
+        }
+        std::sort(ids.begin(), ids.end());
+        ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+        return ids;
+    }
+
+    std::string pointIdText(std::vector<int> ids) {
+        std::sort(ids.begin(), ids.end());
+        ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+        std::string out;
+        for (std::size_t i = 0; i < ids.size();) {
+            std::size_t last = i;
+            while (last + 1 < ids.size() && ids[last + 1] == ids[last] + 1) {
+                ++last;
+            }
+            out += (out.empty() ? "" : ",") + std::to_string(ids[i]);
+            if (last > i) {
+                out += "-" + std::to_string(ids[last]);
+            }
+            i = last + 1;
+        }
+        return out;
+    }
+
+    jitnodes::NodeId shapeBehind(const jitnodes::Network& network, jitnodes::NodeId node) {
+        auto passes = [&network](jitnodes::NodeId at) { return network.node(at).typeName() == kTagNodeType || network.node(at).typeName() == kMovePointsNodeType; };
+        for (int guard = 0; node != jitnodes::invalidNodeId && guard < 1000 && passes(node); ++guard) {
+            node = network.inputOf(node, 0);
+        }
+        return node;
+    }
+
+    namespace {
+        Placement placementFrom(const jitnodes::Node& node, bool resolved) {
+            auto value = [&](const char* name) { return resolved ? node.getFloat(name) : node.baseFloat(name); };
+            Placement p;
+            p.translateX = value("translateX");
+            p.translateY = value("translateY");
+            p.rotation = value("rotation");
+            p.scaleX = value("scaleX");
+            p.scaleY = value("scaleY");
+            p.shear = value("shear");
+            p.pivotX = value("pivotX");
+            p.pivotY = value("pivotY");
+            return p;
+        }
+    }
+
+    BLMatrix2D transformOf(const jitnodes::Node& node) {
+        return matrixOf(placementFrom(node, false));
+    }
+
+    BLMatrix2D resolvedTransformOf(const jitnodes::Node& node) {
+        return matrixOf(placementFrom(node, true));
+    }
+
+    void setTransformPivot(jitnodes::Node& node, double x, double y) {
+        const BLMatrix2D held = transformOf(node);
+        const float px = float(x), py = float(y);
+        node.setFloat("pivotX", px);
+        node.setFloat("pivotY", py);
+        node.setFloat("translateX", float(held.m20 - px + held.m00 * px + held.m10 * py));
+        node.setFloat("translateY", float(held.m21 - py + held.m01 * px + held.m11 * py));
+    }
+
+    void centerTransformPivot(jitnodes::Node& node, const jitnodes::Geometry& shape) {
+        if (shape.pointCount() == 0) {
+            return;
+        }
+        float x0 = shape.x()[0], x1 = x0, y0 = shape.y()[0], y1 = y0;
+        for (std::size_t i = 1; i < shape.pointCount(); ++i) {
+            x0 = std::min(x0, shape.x()[i]);
+            x1 = std::max(x1, shape.x()[i]);
+            y0 = std::min(y0, shape.y()[i]);
+            y1 = std::max(y1, shape.y()[i]);
+        }
+        node.setFloat("pivotX", (x0 + x1) * 0.5f);
+        node.setFloat("pivotY", (y0 + y1) * 0.5f);
     }
 
     void storeTransform(jitnodes::Node& node, const BLMatrix2D& matrix) {
+        // A node whose own numbers already give this matrix keeps them (a scale of -1 would otherwise come back as a turn and a flip).
+        const BLMatrix2D held = transformOf(node);
+        bool same = true;
         for (int i = 0; i < 6; ++i) {
-            if (node.baseFloat(kMatrixNames[i]) != float(matrix.m[i])) {
-                node.setFloat(kMatrixNames[i], float(matrix.m[i]));
+            same = same && std::fabs(held.m[i] - matrix.m[i]) <= 1e-6 * (1.0 + std::fabs(matrix.m[i]));
+        }
+        if (same) {
+            return;
+        }
+        const Placement p = placementOf(matrix, node.baseFloat("pivotX"), node.baseFloat("pivotY"));
+        const std::pair<const char*, float> values[6] = {{"translateX", p.translateX}, {"translateY", p.translateY}, {"rotation", p.rotation},
+                                                         {"scaleX", p.scaleX}, {"scaleY", p.scaleY}, {"shear", p.shear}};
+        for (const auto& [name, value] : values) {
+            if (node.baseFloat(name) != value) {
+                node.setFloat(name, value);
             }
         }
     }
 
     jitnodes::GeometryHandle placeGeometry(const jitnodes::Geometry& geometry, const BLMatrix2D& matrix) {
         auto placed = std::make_shared<jitnodes::Geometry>(geometry);
-        if (placed->pointCount() > 0) {
-            float* x = placed->x();
-            float* y = placed->y();
-            for (std::size_t i = 0; i < placed->pointCount(); ++i) {
-                const BLPoint p = matrix.map_point(double(x[i]), double(y[i]));
-                x[i] = float(p.x);
-                y[i] = float(p.y);
-            }
-        }
+        movePoints(*placed, matrix);
         return placed;
+    }
+
+    BLMatrix2D worldTransformOf(const jitnodes::Network& network, jitnodes::NodeId place) {
+        BLMatrix2D world = resolvedTransformOf(network.node(place));
+        for (jitnodes::NodeId up = network.inputOf(place, 1); up != jitnodes::invalidNodeId; up = network.inputOf(up, 1)) {
+            world.post_transform(resolvedTransformOf(network.node(up)));
+        }
+        return world;
     }
 
     void registerCurvyNodes() {
@@ -205,6 +577,8 @@ namespace curvy {
             registry.registerType(kSymbolNodeType, [] { return std::make_unique<PathNode>(kSymbolNodeType, Extras{"symbol"}); });
             registry.registerType(kImageNodeType, [] { return std::make_unique<PathNode>(kImageNodeType, Extras{"image"}); });
             registry.registerType(kTransformNodeType, [] { return std::make_unique<TransformNode>(); });
+            registry.registerType(kTagNodeType, [] { return std::make_unique<TagNode>(); });
+            registry.registerType(kMovePointsNodeType, [] { return std::make_unique<MovePointsNode>(); });
             registerAppearanceNodes();
         });
     }
@@ -330,12 +704,68 @@ namespace curvy {
     jitnodes::GeometryHandle geometryFromPath(const BLPath& path, const jitnodes::Geometry* keepAttributes) {
         auto geometry = std::make_shared<jitnodes::Geometry>();
         fillFigures(*geometry, path);
+        const std::size_t count = geometry->pointCount();
         // Attributes on anchors (pressure, width...) belong to the node, not to the object; they stay while only positions move.
-        if (keepAttributes != nullptr && keepAttributes->pointCount() == geometry->pointCount() && sameCurveShape(*keepAttributes, *geometry, 0.0, false)) {
+        if (keepAttributes != nullptr && keepAttributes->pointCount() == count && sameCurveShape(*keepAttributes, *geometry, 0.0, false)) {
             for (const auto& [name, array] : keepAttributes->attribs(jitnodes::AttribClass::point)) {
                 if (name != "x" && name != "y") {
                     geometry->attrib(jitnodes::AttribClass::point, name, array.type()) = array;
                 }
+            }
+        } else if (keepAttributes != nullptr && keepAttributes->pointCount() > 0 && count > 0) {
+            // Points were added or taken away: the ones still where they were (met in the same order, so a gap is skipped over) keep their
+            // attributes and the rest start from zero.
+            const jitnodes::Geometry& old = *keepAttributes;
+            constexpr std::size_t kLookahead = 64;
+            std::vector<std::size_t> from(count, old.pointCount());
+            std::size_t next = 0;
+            for (std::size_t i = 0; i < count; ++i) {
+                for (std::size_t j = next; j < std::min(old.pointCount(), next + kLookahead); ++j) {
+                    const double slack = 1e-4 * (1.0 + std::max(std::fabs(double(old.x()[j])), std::fabs(double(old.y()[j]))));
+                    if (std::fabs(double(old.x()[j]) - geometry->x()[i]) <= slack && std::fabs(double(old.y()[j]) - geometry->y()[i]) <= slack) {
+                        from[i] = j;
+                        next = j + 1;
+                        break;
+                    }
+                }
+            }
+            for (const auto& [name, array] : old.attribs(jitnodes::AttribClass::point)) {
+                if (name == "x" || name == "y") {
+                    continue;
+                }
+                jitnodes::AttribArray& target = geometry->attrib(jitnodes::AttribClass::point, name, array.type());
+                for (std::size_t i = 0; i < count; ++i) {
+                    if (from[i] == old.pointCount()) {
+                        continue;
+                    }
+                    if (array.type() == jitnodes::AttribType::int32) {
+                        target.ints()[i] = array.ints()[from[i]];
+                    } else {
+                        target.floats()[i] = array.floats()[from[i]];
+                    }
+                }
+            }
+            // Fresh ids for the new points, above every id the old shape had.
+            const jitnodes::AttribArray* oldIds = old.findAttrib(jitnodes::AttribClass::point, kPointIdAttrib);
+            if (oldIds != nullptr && oldIds->type() == jitnodes::AttribType::int32) {
+                std::int32_t top = -1;
+                for (std::size_t j = 0; j < old.pointCount(); ++j) {
+                    top = std::max(top, oldIds->ints()[j]);
+                }
+                std::int32_t* ids = geometry->attrib(jitnodes::AttribClass::point, kPointIdAttrib, jitnodes::AttribType::int32).ints().data();
+                for (std::size_t i = 0; i < count; ++i) {
+                    if (from[i] == old.pointCount()) {
+                        ids[i] = ++top;
+                    }
+                }
+                return geometry;
+            }
+        }
+        const jitnodes::AttribArray* ids = geometry->findAttrib(jitnodes::AttribClass::point, kPointIdAttrib);
+        if (ids == nullptr && count > 0) {
+            std::int32_t* fresh = geometry->attrib(jitnodes::AttribClass::point, kPointIdAttrib, jitnodes::AttribType::int32).ints().data();
+            for (std::size_t i = 0; i < count; ++i) {
+                fresh[i] = std::int32_t(i);
             }
         }
         return geometry;

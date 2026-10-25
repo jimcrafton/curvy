@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>curvy timeline bar</title>
+<!-- The transport strip of the timeline (the full timeline with keyed rows, ruler and dopesheet is animation.html; this is its first slice): First, Previous, Play/Stop,
+     Next, Last, the frame being shown, a scrubber over the frame range, the last frame and the frame rate. Docked along the bottom of the canvas by TimelineBar
+     (src/timelinebar.cpp), which owns the playhead: Play advances it with a timer at the document's frame rate, the scrubber and the frame field move it by hand, and
+     every move calls SketchDocument::setTime so expressions that read `time` or `frame` follow.
+     Theme tokens (include/curvy/theme.h): bgSurface at 60% for the bar, bgApp for the field, textMuted for captions.
+     Convert: python .claude/skills/html-mockup-to-newui/scripts/html2newui.py docs/mockups/timelineBar.html -o Resources/timelineBar.newui --name timelineBar --fragment -->
+<style>
+  body { width: 900px; height: 36px; margin: 0; font-family: "Segoe UI", sans-serif; font-size: 12px; color: #F0F0F0; }
+  #timelineBarBox { display: flex; flex-direction: row; align-items: center; gap: 6px; padding: 0 8px; height: 36px; background: #1E1E1E99; border-top: 1px solid #4A4A4A; }
+  .step { width: 30px; height: 24px; }
+  #timelinePlay { width: 64px; height: 24px; }
+  #timelineFrame { width: 52px; height: 22px; background: #121212; color: #F0F0F0; }
+  .caption { color: #A0A0A0; }
+  #timelineScrub { flex-grow: 1; height: 20px; }
+  #timelineEnd { width: 36px; }
+  #timelineFps { width: 54px; }
+</style>
+</head>
+<body>
+  <div id="timelineBarBox">
+    <button id="timelineFirst" class="step">|&lt;</button>
+    <button id="timelinePrev" class="step">&lt;</button>
+    <button id="timelinePlay">Play</button>
+    <button id="timelineNext" class="step">&gt;</button>
+    <button id="timelineLast" class="step">&gt;|</button>
+    <span id="timelineFrameCaption" class="caption">Frame</span>
+    <input id="timelineFrame" type="text" value="0">
+    <input id="timelineScrub" type="range" min="0" max="100" value="0">
+    <span id="timelineEnd" class="caption">/ 48</span>
+    <span id="timelineFps" class="caption">24 fps</span>
+  </div>
+</body>
+</html>

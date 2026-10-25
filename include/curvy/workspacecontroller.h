@@ -10,6 +10,7 @@
 #include "curvy/sketchcommands.h"
 #include "curvy/sketchcontroller.h"
 #include "curvy/sketchdocument.h"
+#include "curvy/timelinebar.h"
 #include "curvy/workspacemodel.h"
 
 #include <newui/controllers.h>
@@ -66,6 +67,7 @@ namespace curvy {
         RadialMenu& menu() { return *menu_; }
         DockController& dock() { return *dock_; }
         GraphDock& graph() { return *graph_; }
+        TimelineBar& timeline() { return *timeline_; }
         ToolOptionsCard& toolOptions() { return *options_; }
         SketchCommandController& commands() { return *commands_; }
         SketchDocumentController& files() { return *files_; }
@@ -122,6 +124,7 @@ namespace curvy {
         std::unique_ptr<SketchCommandController> commands_;
         std::unique_ptr<DockController> dock_;
         std::unique_ptr<GraphDock> graph_;
+        std::unique_ptr<TimelineBar> timeline_;
         std::unique_ptr<ToolOptionsCard> options_;
         HoldScrub scrub_;
         void autosaveTick();

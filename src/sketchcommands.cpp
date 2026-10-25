@@ -149,7 +149,14 @@ namespace curvy {
         add("object.flipHorizontal", [this]() { document_.flipSelection(true); });
         add("object.flipVertical", [this]() { document_.flipSelection(false); });
         add("object.transformAgain", [this]() { document_.transformAgain(); }, [this]() { return document_.canTransformAgain() && !document_.selection().empty(); });
-        add("object.resetBoundingBox", [this]() { document_.resetBoundingBox(); });
+        add("object.parent", [this]() { document_.parentSelection(); }, [this]() { return document_.canParentSelection(); });
+        add("object.releaseParent", [this]() { document_.releaseParent(); }, [this]() { return document_.canReleaseParent(); });
+        add("points.tag", [this]() { canvas_.tagPickedAnchor(true); });
+        add("points.untag", [this]() { canvas_.tagPickedAnchor(false); });
+        add("points.clearTag", [this]() { canvas_.clearPickedTag(); });
+        add("points.move", [this]() { document_.addMovePoints(document_.selection().front(), document_.activeTag()); },
+            [this]() { return document_.selection().size() == 1 && !document_.taggedIds(document_.selection().front(), document_.activeTag()).empty(); });
+        add("object.resetBoundingBox",[this]() { document_.resetBoundingBox(); });
         // Pathfinder works on two or more selected objects.
         auto twoSelected = [this]() { return document_.selection().size() >= 2; };
         add("pathfinder.unite", [this]() { document_.combineSelection(BoolOp::Union); }, twoSelected);

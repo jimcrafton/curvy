@@ -125,7 +125,7 @@ namespace curvy {
             if (updating_ || !document_.selectionBounds(scrub_.box)) {
                 return false;
             }
-            scrub_.before = document_.snapshotSelection();
+            scrub_.before = document_.snapshotSelection(true);
             scrub_.frameBefore = document_.frameState();
             SelectionFrame frame;
             scrub_.angle = document_.selectionFrame(frame) ? frame.angle : 0.0;

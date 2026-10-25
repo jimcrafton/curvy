@@ -267,7 +267,7 @@ namespace curvy {
         std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> placed;
         for (jitnodes::NodeId id : ids) {
             if (network.node(id).typeName() == kTransformNodeType) {
-                placed.emplace(network.inputOf(id, 0), id);
+                placed.emplace(shapeBehind(network, network.inputOf(id, 0)), id);
             }
         }
         return placed;

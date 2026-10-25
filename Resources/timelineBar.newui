@@ -1,0 +1,211 @@
+{
+  meta: {
+    author: "",
+    date: "2026-10-25",
+    copyright: "",
+    version: "0.1.0.900"
+  },
+  type: "SubView",
+  bounds: {
+    type: "Rect",
+    pos: { type: "Point", x: 0, y: 0 },
+    size: { type: "Size", width: 900, height: 36 }
+  },
+  visible: true,
+  name: "timelineBar",
+  childViews: [
+    {
+      type: "SubView",
+      bounds: {
+        type: "Rect",
+        pos: { type: "Point", x: 0, y: 0 },
+        size: { type: "Size", width: 900, height: 36 }
+      },
+      visible: true,
+      name: "timelineBarBox",
+      layout: {
+        type: "FlexLayout",
+        orientation: "Horizontal",
+        crossAxisAlignment: "Center",
+        spacing: 6,
+        padding: 4
+      },
+      style: {
+        type: "ViewStyle",
+        backgroundFill: { type: "Fill", kind: "Color", color: "#1e1e1e99" }
+      },
+      desiredSize: { type: "Size", width: 900, height: 36 },
+      desiredSizeOverride: true,
+      childViews: [
+        {
+          type: "Button",
+          text: "|<",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 4, y: 6 },
+            size: { type: "Size", width: 30, height: 24 }
+          },
+          name: "timelineFirst",
+          style: {
+            type: "ThemedButtonStyle",
+            font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+          },
+          desiredSize: { type: "Size", width: 30, height: 24 },
+          desiredSizeOverride: true
+        },
+        {
+          type: "Button",
+          text: "<",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 40, y: 6 },
+            size: { type: "Size", width: 30, height: 24 }
+          },
+          name: "timelinePrev",
+          style: {
+            type: "ThemedButtonStyle",
+            font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+          },
+          desiredSize: { type: "Size", width: 30, height: 24 },
+          desiredSizeOverride: true
+        },
+        {
+          type: "Button",
+          text: "Play",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 76, y: 6 },
+            size: { type: "Size", width: 64, height: 24 }
+          },
+          name: "timelinePlay",
+          style: {
+            type: "ThemedButtonStyle",
+            font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+          },
+          desiredSize: { type: "Size", width: 64, height: 24 },
+          desiredSizeOverride: true
+        },
+        {
+          type: "Button",
+          text: ">",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 146, y: 6 },
+            size: { type: "Size", width: 30, height: 24 }
+          },
+          name: "timelineNext",
+          style: {
+            type: "ThemedButtonStyle",
+            font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+          },
+          desiredSize: { type: "Size", width: 30, height: 24 },
+          desiredSizeOverride: true
+        },
+        {
+          type: "Button",
+          text: ">|",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 182, y: 6 },
+            size: { type: "Size", width: 30, height: 24 }
+          },
+          name: "timelineLast",
+          style: {
+            type: "ThemedButtonStyle",
+            font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+          },
+          desiredSize: { type: "Size", width: 30, height: 24 },
+          desiredSizeOverride: true
+        },
+        {
+          type: "Label",
+          text: "Frame",
+          textAlignment: "Left",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 218, y: 9 },
+            size: { type: "Size", width: 36, height: 17 }
+          },
+          name: "timelineFrameCaption",
+          style: {
+            type: "LabelStyle",
+            text: "Frame",
+            wordWrap: true,
+            font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+            textColor: "#a0a0a0",
+            textAlignment: "Left"
+          }
+        },
+        {
+          type: "TextField",
+          text: "0",
+          font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+          textColor: "#f0f0f0",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 260, y: 7 },
+            size: { type: "Size", width: 52, height: 22 }
+          },
+          name: "timelineFrame",
+          desiredSize: { type: "Size", width: 52, height: 22 },
+          desiredSizeOverride: true
+        },
+        {
+          type: "Slider",
+          value: 0,
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 318, y: 8 },
+            size: { type: "Size", width: 476, height: 20 }
+          },
+          name: "timelineScrub",
+          layoutParams: { type: "FlexLayoutParams", weight: 1 },
+          desiredSize: { type: "Size", width: 476, height: 20 },
+          desiredSizeOverride: true
+        },
+        {
+          type: "Label",
+          text: "/ 48",
+          textAlignment: "Left",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 800, y: 9 },
+            size: { type: "Size", width: 36, height: 17 }
+          },
+          name: "timelineEnd",
+          style: {
+            type: "LabelStyle",
+            text: "/ 48",
+            wordWrap: true,
+            font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+            textColor: "#a0a0a0",
+            textAlignment: "Left"
+          },
+          desiredSize: { type: "Size", width: 36, height: 17 },
+          desiredSizeOverride: true
+        },
+        {
+          type: "Label",
+          text: "24 fps",
+          textAlignment: "Left",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 842, y: 9 },
+            size: { type: "Size", width: 54, height: 17 }
+          },
+          name: "timelineFps",
+          style: {
+            type: "LabelStyle",
+            text: "24 fps",
+            wordWrap: true,
+            font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+            textColor: "#a0a0a0",
+            textAlignment: "Left"
+          },
+          desiredSize: { type: "Size", width: 54, height: 17 },
+          desiredSizeOverride: true
+        }
+      ]
+    }
+  ]
+}

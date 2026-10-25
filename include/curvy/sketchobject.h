@@ -36,6 +36,23 @@ namespace curvy {
         bool operator==(const GradientPoint& other) const { return x == other.x && y == other.y && radius == other.radius && color == other.color; }
     };
 
+    // A projective map of the plane (a 3x3 matrix on [x y 1], row major): what a perspective warp does to the points it moves.
+    // @reflect ignore=true
+    struct PaintWarp {
+        double m[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+
+        bool isIdentity() const;
+        BLPoint map(const BLPoint& p) const;
+        // False when the map has no inverse.
+        bool inverted(PaintWarp& out) const;
+        // This map followed by `next`.
+        PaintWarp then(const PaintWarp& next) const;
+        static PaintWarp fromMatrix(const BLMatrix2D& matrix);
+        // The map taking quad `from` (TL, TR, BR, BL) onto quad `to`; the identity when `from` is degenerate.
+        static PaintWarp between(const BLPoint* from, const BLPoint* to);
+        bool operator==(const PaintWarp& other) const;
+    };
+
     struct SymbolDef;
     struct BrushDef;
     class SketchDocument;
@@ -509,6 +526,10 @@ namespace curvy {
         std::uint64_t geometryRevision() const { return geometryRevision_; }
         std::uint64_t nodeRevision() const { return nodeRevision_; }
         void setNodeRevision(std::uint64_t revision) { nodeRevision_ = revision; }
+        // The object this one hangs from (0: none). Transforming the parent carries the child along; the child's own transform node holds
+        // its placement relative to the parent's.
+        std::size_t parent() const { return parent_; }
+        void setParent(std::size_t id) { parent_ = id; }
         // Bakes a transform into the outline - move/resize/rotate all go through here, so stroke width
         // stays put and handles are always axis-aligned on geometryBounds().
         void transform(const BLMatrix2D& matrix);
@@ -524,10 +545,16 @@ namespace curvy {
         // was before them (paintFrameBounds()) and carried to the page by paintToPage(). A warp is not a matrix, so it is not in it.
         const BLMatrix2D& paintToPage() const { return paintMatrix_; }
         void setPaintMatrix(const BLMatrix2D& matrix) { paintMatrix_ = matrix; }
+        // A perspective warp bends the outline but not the paints, which are not a point list: the paint sits at paintToPage() after this
+        // map of the plane it was laid out on, so a gradient or pattern is drawn flat and resampled through it. Identity when never warped.
+        const PaintWarp& paintWarp() const { return paintWarp_; }
+        void setPaintWarp(const PaintWarp& warp) { paintWarp_ = warp; }
+        // The box the paints are laid out on: the outline as it was before every transform and warp.
         BLBox paintFrameBounds() const;
         // Moves every outline vertex (curve control points included) through `map` - how a perspective
         // warp is applied. Control points are mapped, not re-fitted, so strong distortion of a curve is approximate.
-        void warp(const std::function<BLPoint(const BLPoint&)>& map);
+        // `page` is the projective map `map` stands for (page to page), which the paints follow.
+        void warp(const std::function<BLPoint(const BLPoint&)>& map, const PaintWarp& page = PaintWarp());
         // Axis-aligned bounds of the outline alone (no stroke) - what the selection frame wraps.
         BLBox geometryBounds() const;
         // A copy with id 0 (the document assigns one on add) and the same appearance.
@@ -541,6 +568,8 @@ namespace curvy {
 
         // Axis-aligned bounds of the geometry plus half the stroke width.
         BLBox bounds() const;
+        // The same for an outline other than the object's own (the one its graph nodes make).
+        BLBox boundsOf(const BLPath& outline) const;
 
         // The point and unit "left" normal at fraction t (0..1 of the length) along the first subpath, flattened;
         // false when the outline has no subpath. The sides of a WidthPoint are offsets along +normal (left) and -normal.
@@ -549,7 +578,8 @@ namespace curvy {
         bool nearestOnPath(const BLPoint& point, double& t, double& distance) const;
 
         // True when point (document units) is on the fill or within tolerance of the stroke.
-        bool hitTest(const BLPoint& point, double tolerance) const;
+        // `outline` replaces the object's own path when given: the document passes the one its graph nodes make.
+        bool hitTest(const BLPoint& point, double tolerance, const BLPath* outline = nullptr) const;
 
         // Fills and strokes in stacking order; with an object opacity below 1 or a blend mode the whole object is drawn
         // through paintIsolated().
@@ -585,6 +615,7 @@ namespace curvy {
         std::uint32_t graphNode_ = 0;
         std::uint64_t geometryRevision_ = 1;
         std::uint64_t nodeRevision_ = 0;
+        std::size_t parent_ = 0;
         std::string name_;
         bool visible_ = true;
         bool locked_ = false;
@@ -601,6 +632,7 @@ namespace curvy {
         std::size_t activeEffect_ = 0;
         double frameAngle_ = 0.0;
         BLMatrix2D paintMatrix_ = BLMatrix2D::make_identity();
+        PaintWarp paintWarp_;
         std::string text_;
         std::string fontName_;
         double fontSize_ = 24.0;

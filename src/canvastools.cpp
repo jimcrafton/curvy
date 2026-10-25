@@ -459,6 +459,16 @@ namespace curvy {
             if (ref.sub >= subs.size() || ref.anchor >= subs[ref.sub].anchors.size()) {
                 return;
             }
+            if (ref.part == 0 && (keys & kmCtrl) != 0) {
+                directSelected_ = ref;   // Ctrl-click tags the point, or takes it out of the tag
+                const std::vector<int> held = document_->taggedIds(ref.object, document_->activeTag());
+                const int id = document_->pointIdNear(ref.object, subs[ref.sub].anchors[ref.anchor].point, 0.5);
+                if (id >= 0) {
+                    document_->tagPoints(ref.object, document_->activeTag(), {id}, !std::binary_search(held.begin(), held.end(), id));
+                }
+                style().markDirty();
+                return;
+            }
             if (ref.part == 0) {
                 directSelected_ = ref;
                 const PenAnchor& anchor = subs[ref.sub].anchors[ref.anchor];
@@ -538,6 +548,27 @@ namespace curvy {
         style().markDirty();
     }
 
+    bool CanvasView::tagPickedAnchor(bool on) {
+        if (!directSelected_.valid) {
+            return false;
+        }
+        const SketchObject* object = document_->findById(directSelected_.object);
+        const std::vector<SubPath> subs = object != nullptr ? pathToSubPaths(object->geometry()) : std::vector<SubPath>();
+        if (directSelected_.sub >= subs.size() || directSelected_.anchor >= subs[directSelected_.sub].anchors.size()) {
+            return false;
+        }
+        const int id = document_->pointIdNear(object->id(), subs[directSelected_.sub].anchors[directSelected_.anchor].point, 0.5);
+        const bool changed = id >= 0 && document_->tagPoints(object->id(), document_->activeTag(), {id}, on);
+        style().markDirty();
+        return changed;
+    }
+
+    bool CanvasView::clearPickedTag() {
+        const bool cleared = directSelected_.valid && document_->clearTag(directSelected_.object, document_->activeTag());
+        style().markDirty();
+        return cleared;
+    }
+
     // Delete with an anchor picked removes it (and the outline, or the whole object, if too little would be left).
     bool CanvasView::deleteDirectAnchor() {
         if (!directSelected_.valid) {
@@ -573,11 +604,19 @@ namespace curvy {
     }
 
     void CanvasView::paintDirectOverlay(BLContext& ctx) const {
-        const BLRgba32 accent(0xFF1E6FE0u);
+        const BLRgba32 accent(0xFF1E6FE0u), tagColor(0xFFF28C1Eu);
         for (std::size_t id : document_->selection()) {
             const SketchObject* object = document_->findById(id);
             if (object == nullptr) {
                 continue;
+            }
+            // The points of the active tag: an orange ring round the anchor.
+            for (const BLPoint& spot : document_->taggedPositions(id, document_->activeTag())) {
+                const BLPoint at = toView(spot);
+                ctx.set_stroke_style(tagColor);
+                ctx.set_stroke_width(2.0);
+                ctx.stroke_circle(BLCircle(at.x, at.y, 7.0));
+                ctx.set_stroke_width(1.0);
             }
             std::vector<SubPath> subs = pathToSubPaths(object->geometry());
             for (std::size_t s = 0; s < subs.size(); ++s) {

@@ -118,6 +118,19 @@ namespace curvy {
             return " data-paint-matrix=\"" + num(m.m00) + " " + num(m.m01) + " " + num(m.m10) + " " + num(m.m11) + " " + num(m.m20) + " " + num(m.m21) + "\"";
         }
 
+        // How a perspective warp bent the paints (SketchObject::paintWarp), written only when the object was warped.
+        std::string paintWarpAttr(const SketchObject& object) {
+            const PaintWarp& warp = object.paintWarp();
+            if (warp.isIdentity()) {
+                return std::string();
+            }
+            std::string text = " data-paint-warp=\"";
+            for (int i = 0; i < 9; ++i) {
+                text += (i > 0 ? " " : "") + num(warp.m[i]);
+            }
+            return text + "\"";
+        }
+
         // The attribute(s) for one paint ("fill" or "stroke"); a gradient adds its element to `defs`.
         std::string paintAttrs(const char* name, const SketchPaint& paint, const BLBox& box, std::ostringstream& defs, int& gradientCount, const BLMatrix2D& toPage = BLMatrix2D::make_identity()) {
             std::string prefix = name;
@@ -1104,6 +1117,14 @@ namespace curvy {
         // A paint value ("none", color, "url(#id)") for an object whose outline bounds are `box`.
         // Files from before the matrix kept only the frame angle: that turn about the origin is what the paints followed.
         void readPaintMatrix(const XmlNode& node, SketchObject& object) {
+            if (const std::string* warp = node.attr("data-paint-warp")) {
+                const std::vector<double> v = numberList(*warp);
+                if (v.size() == 9) {
+                    PaintWarp read;
+                    std::copy(v.begin(), v.end(), read.m);
+                    object.setPaintWarp(read);
+                }
+            }
             if (const std::string* own = node.attr("data-paint-matrix")) {
                 const std::vector<double> v = numberList(*own);
                 if (v.size() == 6) {
@@ -2207,7 +2228,7 @@ namespace curvy {
                     if (object.frameAngle() != 0.0) {
                         body << " data-frame-angle=\"" << num(object.frameAngle()) << "\"";
                     }
-                    body << paintMatrixAttr(object);
+                    body << paintMatrixAttr(object) << paintWarpAttr(object);
                     if (object.opacity() < 1.0) {
                         body << " opacity=\"" << num(object.opacity()) << "\"";
                     }
@@ -2277,7 +2298,7 @@ namespace curvy {
             if (object.frameAngle() != 0.0) {
                 body << " data-frame-angle=\"" << num(object.frameAngle()) << "\"";
             }
-            body << paintMatrixAttr(object);
+            body << paintMatrixAttr(object) << paintWarpAttr(object);
             SketchPaint fill = object.isClosed() ? object.fill() : SketchPaint::none();
             body << paintAttrs("fill", fill, box, defs, gradientCount, object.paintToPage());
             body << paintAttrs("stroke", object.stroke(), box, defs, gradientCount, object.paintToPage());

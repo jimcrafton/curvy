@@ -175,6 +175,31 @@ class GraphDock(CurvyCase):
         self.app.key("ctrl+z")
         self.app.wait_until(lambda: float(self.app.prop("graphDetailField2", "text")) == before, "one undo to bring the width back")
 
+    def transform_fields(self):
+        names = [self.app.prop("graphDetailCaption%d" % i, "text") for i in range(8)]
+        values = [self.app.prop("graphDetailField%d" % i, "text") for i in range(8)]
+        return dict(zip(names, values))
+
+    def test_a_new_polygon_has_an_identity_transform_node(self):
+        self.new_a4()
+        self.app.click("toolbarToggle")
+        canvas = self.app.find("canvas")
+        self.app.click("polygonTool")
+        self.app.drag((canvas.x + 300, canvas.y + 250), (canvas.x + 380, canvas.y + 250))
+        self.app.click("selectTool")
+        self.app.click("graphToggle")
+        self.app.wait_until(lambda: self.app.prop("graphToggle", "checked"), "the toggle to check")
+        self.app.click_segment("graphModeControl", 1)                  # the Flow view lists the transform node; Document shows shapes and looks
+        self.app.wait_until(lambda: "nobody uses" in self.app.prop("graphStatus", "text"), "the Flow view")
+        self.app.click_row("graphTree", "Transform")
+        self.app.wait_until(lambda: self.app.prop("graphDetailCaption0", "text") == "translateX", "the transform node's box")
+        fields = self.transform_fields()
+        self.assertEqual(["translateX", "translateY", "rotation", "scaleX", "scaleY", "shear", "pivotX", "pivotY"], list(fields))
+        for name in ("translateX", "translateY", "rotation", "shear"):
+            self.assertEqual("0", fields[name], name)
+        self.assertEqual("1", fields["scaleX"])
+        self.assertEqual("1", fields["scaleY"])
+
     def test_clicking_the_colour_swatch_of_a_fill_opens_the_colour_card(self):
         self.new_a4()
         self.app.click("toolbarToggle")

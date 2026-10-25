@@ -354,7 +354,7 @@ namespace curvy {
             if (document_->isSelected(hit->id())) {
                 drag_ = Drag::Move;
                 document_->selectionBounds(dragBounds_);
-                dragBefore_ = document_->snapshotSelection();
+                dragBefore_ = document_->snapshotSelection(true);
                 dragFrameBefore_ = document_->frameState();
                 document_->selectionFrame(dragFrame_);
                 refreshCursor(pt, keys);   // the move cursor for the drag
@@ -371,7 +371,7 @@ namespace curvy {
 
     void CanvasView::beginResize(int handle, std::uint32_t keys) {
         dragHandle_ = handle;
-        dragBefore_ = document_->snapshotSelection();
+        dragBefore_ = document_->snapshotSelection(true);
         dragFrameBefore_ = document_->frameState();
         document_->selectionFrame(dragFrame_);
         dragOrigin_ = document_->selectionOrigin(dragFrame_);
@@ -394,13 +394,14 @@ namespace curvy {
         }
     }
 
-    void CanvasView::applyMapToSelection(const std::function<BLPoint(const BLPoint&)>& map, const QuadFrame& newQuad) {
+    void CanvasView::applyMapToSelection(const std::function<BLPoint(const BLPoint&)>& map, const PaintWarp& page, const QuadFrame& newQuad) {
         for (const GeometryState& entry : dragBefore_) {
             if (SketchObject* object = document_->findById(entry.id)) {
                 object->setGeometry(entry.path);
                 object->setPaintMatrix(entry.paintMatrix);
+                object->setPaintWarp(entry.paintWarp);
                 object->setTextMatrix(entry.textMatrix);
-                object->warp(map);
+                object->warp(map, page);
                 object->setFrameAngle(entry.angle);
             }
         }
@@ -415,6 +416,7 @@ namespace curvy {
             if (SketchObject* object = document_->findById(entry.id)) {
                 object->setGeometry(entry.path);
                 object->setPaintMatrix(entry.paintMatrix);
+                object->setPaintWarp(entry.paintWarp);
                 object->setTextMatrix(entry.textMatrix);
                 object->transform(matrix);
                 object->setFrameAngle(entry.angle + angleDelta);
@@ -602,11 +604,11 @@ namespace curvy {
                     return dest.map(u, v);
                 };
                 dragMoved_ = true;
-                applyMapToSelection(map, dest);
+                applyMapToSelection(map, PaintWarp::between(source.p, dest.p), dest);
                 break;
             }
             case Drag::Origin:
-                document_->setSelectionOrigin(dragFrame_, dragNowDoc_);
+                document_->setSelectionOrigin(dragFrame_, dragNowDoc_, true);
                 break;
             case Drag::Draw: {
                 dragNowDoc_ = snapPoint(dragNowDoc_);  // the rubber band shows the snapped corner too
@@ -701,6 +703,7 @@ namespace curvy {
                 }
                 break;
             case Drag::Origin:
+                document_->finishSelectionOrigin();
                 break;
             case Drag::Marquee: {
                 BLBox box = normalizedBox(dragStartDoc_, dragNowDoc_);

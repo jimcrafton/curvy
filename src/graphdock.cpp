@@ -38,6 +38,8 @@ namespace curvy {
             if (nodeType == kSymbolNodeType) return "Symbol";
             if (nodeType == kImageNodeType) return "Image";
             if (nodeType == kTransformNodeType) return "Transform";
+            if (nodeType == kTagNodeType) return "Tag";
+            if (nodeType == kMovePointsNodeType) return "Move Points";
             if (nodeType == kFillNodeType) return "Fill";
             if (nodeType == kStrokeNodeType) return "Stroke";
             if (nodeType == kEffectNodeType) return "Effect";
@@ -72,9 +74,15 @@ namespace curvy {
         }
 
         std::string numberText(double value) {
-            char buffer[32];
-            std::snprintf(buffer, sizeof(buffer), "%g", value);
-            return buffer;
+            // Plain decimals: float residue such as 3e-07 reads as 0, never as scientific notation.
+            char buffer[48];
+            std::snprintf(buffer, sizeof(buffer), "%.4f", std::fabs(value) < 5e-5 ? 0.0 : value);
+            std::string text = buffer;
+            text.erase(text.find_last_not_of('0') + 1);
+            if (!text.empty() && text.back() == '.') {
+                text.pop_back();
+            }
+            return text;
         }
 
         bool parseNumber(const std::string& text, double& value) {
@@ -190,7 +198,7 @@ namespace curvy {
             row.caption->setName("graphDetailCaption" + std::to_string(i));
             row.caption->setVisible(false);
             detail_->addChild(row.caption);
-            row.field = new TextField();
+            row.field = new ExpressionField();
             row.field->setName("graphDetailField" + std::to_string(i));
             row.field->setVisible(false);
             detail_->addChild(row.field);
@@ -236,6 +244,7 @@ namespace curvy {
                 }
                 scrubBefore_.reset();
             };
+            scrub.unit = [this, i]() { return detailRows_[i].unit; };
             NumberScrubber::attach(*row.caption, 1.0, -1e9, 1e9, std::move(scrub));
             row.slider->onValueChanged += [this, i](Slider& slider) {
                 detailRows_[i].percent->setText(numberText(std::round(slider.value())) + "%");
@@ -250,17 +259,11 @@ namespace curvy {
                 return SyncReturn::Ignored;
             };
             auto apply = [this, i](View&) {
-                DetailRow& r = detailRows_[i];
-                if (!updating_ && r.apply) {
-                    r.apply(wideToUtf8(r.field->text()));
-                }
+                commitDetail(i);
                 return SyncReturn::Handled;
             };
             row.field->onReturnPressed += [this, i](TextField&) {
-                DetailRow& r = detailRows_[i];
-                if (!updating_ && r.apply) {
-                    r.apply(wideToUtf8(r.field->text()));
-                }
+                commitDetail(i);
                 return SyncReturn::Handled;
             };
             row.field->onLostFocus += apply;
@@ -307,6 +310,16 @@ namespace curvy {
             detail_->addChild(button);
             pathButtons_.push_back(button);
         }
+        resetButton_ = new Button();
+        resetButton_->setText("Reset");
+        resetButton_->setVisible(false);
+        detail_->addChild(resetButton_);
+        resetButton_->onClick += [this](Control&) {
+            if (detailNode_ != 0) {
+                resetTransform(detailNode_);
+            }
+            return SyncReturn::Handled;
+        };
         pathButtons_[0]->onClick += [this](Control&) {
             if (detailObject_ != 0) {
                 document_.setSelection({detailObject_});
@@ -371,6 +384,10 @@ namespace curvy {
                 y += kRowHeight;
             }
         }
+        if (resetButton_->isVisible()) {
+            resetButton_->setBounds(Rect(fieldLeft, y, 64.0f, 22.0f));
+            y += kRowHeight;
+        }
         auto section = [&](Label* header, Label* none, std::vector<LinkRow>& links) {
             if (!header->isVisible()) {
                 return;
@@ -394,6 +411,17 @@ namespace curvy {
         };
         section(inputsHeader_, noInputs_, inputRows_);
         section(usersHeader_, noUsers_, userRows_);
+
+        // The box is as tall as what it shows, so the tree gets the rest; a long one never takes more than 60% of the dock.
+        View* box = dock_->findView("graphDockBox");
+        const float limit = box != nullptr ? box->bounds().size().height * 0.6f : 230.0f;
+        const float wanted = std::clamp(y + 8.0f, 40.0f, std::max(40.0f, limit));
+        if (std::fabs(detail_->desiredSize().height - wanted) > 0.5f) {
+            detail_->setDesiredSize(Size(detail_->desiredSize().width, wanted));
+            if (box != nullptr) {
+                box->updateLayout();
+            }
+        }
     }
 
     void GraphDock::layout() {
@@ -468,7 +496,7 @@ namespace curvy {
         for (DetailRow& row : detailRows_) {
             row.caption->setTextColor(rgb(theme.textMuted));
             row.field->style().setBackgroundColor(tint(theme.bgApp));
-            row.field->setTextColor(rgb(theme.textPrimary));
+            row.field->setColours(rgb(theme.textPrimary), rgb(theme.accent));
             row.percent->setTextColor(rgb(theme.textPrimary));
         }
         for (Label* label : {inputsHeader_, usersHeader_, noInputs_, noUsers_}) {
@@ -786,12 +814,88 @@ namespace curvy {
         }
     }
 
+    void GraphDock::refreshDetailValues() {
+        if (updating_ || scrubBefore_ || detailNode_ == 0) {
+            return;
+        }
+        const std::vector<jitnodes::NodeId> ids = document_.network().nodeIds();
+        if (std::find(ids.begin(), ids.end(), detailNode_) == ids.end()) {
+            return;
+        }
+        const jitnodes::Node& node = document_.network().node(detailNode_);
+        if (node.typeName() != kTransformNodeType) {
+            return;
+        }
+        updating_ = true;
+        for (DetailRow& row : detailRows_) {
+            if (row.node == detailNode_ && row.scrub && row.kind == DetailRow::Kind::Text) {
+                showParam(row);
+            }
+        }
+        updating_ = false;
+    }
+
+    void GraphDock::showParam(DetailRow& row) {
+        const std::vector<jitnodes::NodeId> ids = document_.network().nodeIds();
+        if (row.node == 0 || std::find(ids.begin(), ids.end(), row.node) == ids.end()) {
+            return;
+        }
+        const jitnodes::Node& node = document_.network().node(row.node);
+        if (!node.hasFloat(row.param)) {
+            return;
+        }
+        const std::string& expression = node.expression(row.param);
+        const std::wstring text = utf8ToWide(expression.empty() ? numberText(node.baseFloat(row.param)) : "=" + expression);
+        const bool was = updating_;
+        updating_ = true;
+        row.field->setExpressionMode(!expression.empty());
+        if (row.field->text() != text) {
+            row.field->setText(text);
+        }
+        updating_ = was;
+    }
+
+    void GraphDock::commitDetail(std::size_t index) {
+        if (updating_ || index >= detailRows_.size()) {
+            return;
+        }
+        DetailRow& row = detailRows_[index];
+        const std::string text = wideToUtf8(row.field->text());
+        if (!(row.scrub && row.kind == DetailRow::Kind::Text && row.node != 0)) {
+            if (row.apply) {
+                row.apply(text);
+            }
+            return;
+        }
+        const FieldEntry entry = parseFieldEntry(text);
+        const jitnodes::NodeId id = row.node;
+        const std::string param = row.param;
+        if (entry.kind == FieldEntry::Kind::Number) {
+            jitnodes::Node& node = document_.network().node(id);
+            if (node.expression(param).empty()) {
+                document_.setGraphParam(id, param, float(entry.number));
+            } else {
+                const jitnodes::GraphSnapshot before = document_.snapshotGraph();   // typing a number takes the expression away
+                node.setExpression(param, "");
+                node.setFloat(param, float(entry.number));
+                document_.network().markDirty(id);
+                document_.commitGraphEdit(before, "Change " + param);
+            }
+            status_->setText("");
+        } else if (entry.kind == FieldEntry::Kind::Expression) {
+            const std::string error = document_.setGraphExpression(id, param, entry.expression);
+            status_->setText(error.empty() ? "" : "Expression: " + error);
+        }
+        showParam(detailRows_[index]);
+    }
+
     void GraphDock::refresh() {
         if (dock_ == nullptr || tree_ == nullptr) {
             return;
         }
         const std::size_t sig = signature();
         if (built_ && sig == lastSignature_) {
+            refreshDetailValues();
             return;
         }
         built_ = true;
@@ -978,6 +1082,8 @@ namespace curvy {
             }
         } else {
             detailRows_[index].field->setText(utf8ToWide(text));
+            commitDetail(index);
+            return;
         }
         if (detailRows_[index].apply) {
             detailRows_[index].apply(text);
@@ -1010,6 +1116,38 @@ namespace curvy {
         for (Button* button : pathButtons_) {
             button->setVisible(false);
         }
+        if (resetButton_ != nullptr) {
+            resetButton_->setVisible(false);
+        }
+    }
+
+    void GraphDock::resetTransform(jitnodes::NodeId id) {
+        jitnodes::Network& net = document_.network();
+        const std::vector<jitnodes::NodeId> ids = net.nodeIds();
+        if (std::find(ids.begin(), ids.end(), id) == ids.end() || net.node(id).typeName() != kTransformNodeType) {
+            return;
+        }
+        // The pivot goes back to the middle of the shape, the rest to doing nothing; one undo step.
+        float pivotX = 0.0f, pivotY = 0.0f;
+        const jitnodes::NodeId shape = shapeBehind(net, net.inputOf(id, 0));
+        if (shape != jitnodes::invalidNodeId && net.node(shape).hasGeometryParam("curve")) {
+            const jitnodes::Geometry& curve = *net.node(shape).geometryParam("curve");
+            if (curve.pointCount() > 0) {
+                const auto [minX, maxX] = std::minmax_element(curve.x(), curve.x() + curve.pointCount());
+                const auto [minY, maxY] = std::minmax_element(curve.y(), curve.y() + curve.pointCount());
+                pivotX = (*minX + *maxX) * 0.5f;
+                pivotY = (*minY + *maxY) * 0.5f;
+            }
+        }
+        const jitnodes::GraphSnapshot before = document_.snapshotGraph();
+        const std::pair<const char*, float> values[8] = {{"translateX", 0.0f}, {"translateY", 0.0f}, {"rotation", 0.0f}, {"scaleX", 1.0f},
+                                                         {"scaleY", 1.0f}, {"shear", 0.0f}, {"pivotX", pivotX}, {"pivotY", pivotY}};
+        for (const auto& [name, value] : values) {
+            net.node(id).setExpression(name, "");
+            document_.setGraphFloatLive(id, name, value);
+        }
+        document_.commitGraphEdit(before, "Reset transform");
+        status_->setText("Transform reset");
     }
 
     void GraphDock::setRow(std::size_t index, const std::string& caption, const std::string& value, std::function<void(const std::string&)> apply) {
@@ -1145,6 +1283,8 @@ namespace curvy {
             row.minimum = minimum;
             row.maximum = maximum;
             row.scale = scale;
+            row.unit = param == "scaleX" || param == "scaleY" ? 0.1 : 1.0;
+            showParam(row);
         }
     }
 
@@ -1277,9 +1417,39 @@ namespace curvy {
                 setRow(at++, "Picture", node.getString("image"), nullptr);
             } else if (isAppearanceNodeType(type)) {
                 lookRows(node, id, at);
+            } else if (type == kTagNodeType || type == kMovePointsNodeType) {
+                auto textRow = [&](const char* caption, const char* name) {
+                    setRow(at++, caption, node.getString(name), [this, id, name](const std::string& value) { document_.setGraphString(id, name, value); });
+                };
+                auto numberRow = [&](const std::string& name) {
+                    setRow(at++, name, numberText(node.baseFloat(name)), [this, id, name](const std::string& value) {
+                        double number = 0.0;
+                        if (parseNumber(value, number)) {
+                            document_.setGraphParam(id, name, float(number));
+                        }
+                    });
+                    scrubRow(at - 1, id, name, -100000.0, 100000.0);
+                };
+                textRow("group", "group");
+                if (type == kTagNodeType) {
+                    textRow("ids", "ids");
+                    numberRow("every");
+                    numberRow("offset");
+                    textRow("box", "box");
+                    textRow("kind", "kind");
+                    textRow("operation", "operation");
+                } else {
+                    for (const char* name : {"translateX", "translateY", "rotation", "scaleX", "scaleY", "shear", "pivotX", "pivotY"}) {
+                        numberRow(name);
+                    }
+                }
             } else {
-                for (const std::string& name : node.floatNames()) {
-                    if (at >= 4) {
+                std::vector<std::string> names = node.floatNames();
+                if (type == kTransformNodeType) {
+                    names = {"translateX", "translateY", "rotation", "scaleX", "scaleY", "shear", "pivotX", "pivotY"};
+                }
+                for (const std::string& name : names) {
+                    if (at >= (type == kTransformNodeType ? kDetailRows : 4)) {
                         break;
                     }
                     setRow(at++, name, numberText(node.baseFloat(name)), [this, id, name](const std::string& value) {
@@ -1289,6 +1459,9 @@ namespace curvy {
                         }
                     });
                     scrubRow(at - 1, id, name, -100000.0, 100000.0);
+                }
+                if (type == kTransformNodeType) {
+                    resetButton_->setVisible(true);
                 }
             }
             showLinks(id);

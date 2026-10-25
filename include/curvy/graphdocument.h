@@ -31,6 +31,13 @@ namespace curvy {
         void setGraphString(jitnodes::NodeId id, const std::string& name, const std::string& value);
         void setGraphGeometry(jitnodes::NodeId id, const std::string& name, jitnodes::GeometryHandle geometry);
         void renameGraphNode(jitnodes::NodeId id, const std::string& name);
+        // Gives a float parameter an expression (empty text clears it, back to its stored value) as one undo step. Returns the parser's message
+        // when the expression is not valid, and changes nothing then.
+        std::string setGraphExpression(jitnodes::NodeId id, const std::string& name, const std::string& expression);
+
+        // The time (seconds) expressions and keys are evaluated at. Moving it is not an undo step; everything that depends on it follows.
+        double time() const { return network_->time(); }
+        void setTime(double seconds);
 
         // For a drag: edit the network directly, then record the finished edit from the snapshot taken first.
         jitnodes::GraphSnapshot snapshotGraph() const { return jitnodes::snapshotNetwork(*network_); }
@@ -52,6 +59,8 @@ namespace curvy {
     protected:
         // The graph changed (an edit, undo or redo); derived documents refresh what depends on it.
         virtual void graphChanged();
+        // The time moved; derived documents refresh what shows time-dependent values.
+        virtual void timeChanged() {}
 
         // A document of only a graph is saved as the graph text; derived documents with another format override these.
         bool readFromFile(const std::string& path) override;

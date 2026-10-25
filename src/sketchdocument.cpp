@@ -1,5 +1,6 @@
 #include "curvy/sketchdocument.h"
 #include "curvy/gzip.h"
+#include "curvy/pathnode.h"
 #include "curvy/sketchbin.h"
 #include "curvy/sketchsvg.h"
 
@@ -95,7 +96,16 @@ namespace curvy {
     SketchObject* SketchDocument::hitTest(const BLPoint& point, double tolerance) const {
         for (std::size_t i = objects_.size(); i > 0; --i) {
             SketchObject* object = objects_[i - 1].get();
-            if (object->isVisible() && !object->isLocked() && object->hitTest(point, tolerance)) {
+            if (!object->isVisible() || object->isLocked()) {
+                continue;
+            }
+            // The object's cached bounds only rule out the far ones; the nodes' outline decides.
+            const BLBox cached = object->bounds();
+            if (point.x < cached.x0 - tolerance || point.x > cached.x1 + tolerance || point.y < cached.y0 - tolerance || point.y > cached.y1 + tolerance) {
+                continue;
+            }
+            const BLPath outline = placedOutline(*object);
+            if (object->hitTest(point, tolerance, &outline)) {
                 // Inside a clipping group only what shows through the mask can be hit.
                 bool cutAway = false;
                 for (std::size_t group : object->groups()) {
@@ -115,6 +125,7 @@ namespace curvy {
     void SketchDocument::clearObjects() {
         objects_.clear();
         clearGraph();
+        drivenDirty_ = true;
         nextId_ = 1;
         selection_.clear();
         guides_.clear();
@@ -454,10 +465,43 @@ namespace curvy {
     }
 
     BLPoint SketchDocument::selectionOrigin(const SelectionFrame& frame) const {
+        if (selection_.size() == 1) {
+            const jitnodes::NodeId place = transformNodeOf(selection_.front());
+            if (place != jitnodes::invalidNodeId) {
+                const jitnodes::Node& node = network().node(place);
+                return findById(selection_.front())->paintToPage().map_point(node.baseFloat("pivotX"), node.baseFloat("pivotY"));
+            }
+        }
         return frame.pointAt(originU_, originV_);
     }
 
-    void SketchDocument::setSelectionOrigin(const SelectionFrame& frame, const BLPoint& world) {
+    void SketchDocument::finishSelectionOrigin() {
+        if (pivotBefore_ != nullptr) {
+            commitGraphEdit(*pivotBefore_, "Move Pivot");
+            pivotBefore_.reset();
+        }
+    }
+
+    void SketchDocument::setSelectionOrigin(const SelectionFrame& frame, const BLPoint& world, bool live) {
+        if (selection_.size() == 1) {
+            const jitnodes::NodeId place = transformNodeOf(selection_.front());
+            BLMatrix2D back = findById(selection_.front())->paintToPage();
+            if (place != jitnodes::invalidNodeId && back.invert() == BL_SUCCESS) {
+                const BLPoint local = back.map_point(world.x, world.y);
+                if (live) {
+                    if (pivotBefore_ == nullptr) {
+                        pivotBefore_ = std::make_shared<jitnodes::GraphSnapshot>(snapshotGraph());
+                    }
+                    setTransformPivot(network().node(place), local.x, local.y);
+                    changed();
+                    return;
+                }
+                const jitnodes::GraphSnapshot before = snapshotGraph();
+                setTransformPivot(network().node(place), local.x, local.y);
+                commitGraphEdit(before, "Move Pivot");
+                return;
+            }
+        }
         double u = 0.5, v = 0.5;
         if (frame.unmapPoint(world, u, v)) {
             originU_ = u;
@@ -706,11 +750,11 @@ namespace curvy {
         return true;
     }
 
-    std::vector<GeometryState> SketchDocument::snapshotSelection() const {
+    std::vector<GeometryState> SketchDocument::snapshotSelection(bool withChildren) const {
         std::vector<GeometryState> result;
-        for (std::size_t id : selection_) {
+        for (std::size_t id : withChildren ? withDescendants(selection_) : selection_) {
             if (const SketchObject* object = findById(id)) {
-                result.push_back({id, object->geometry(), object->frameAngle(), object->textMatrix(), object->paintToPage()});
+                result.push_back({id, object->geometry(), object->frameAngle(), object->textMatrix(), object->paintToPage(), object->paintWarp()});
             }
         }
         return result;
@@ -722,7 +766,7 @@ namespace curvy {
         std::vector<GeometryState> after;
         for (const GeometryState& entry : before) {
             if (const SketchObject* object = findById(entry.id)) {
-                after.push_back({entry.id, object->geometry(), object->frameAngle(), object->textMatrix(), object->paintToPage()});
+                after.push_back({entry.id, object->geometry(), object->frameAngle(), object->textMatrix(), object->paintToPage(), object->paintWarp()});
             }
         }
         auto apply = [this](const std::vector<GeometryState>& state, const FrameState& frame) {
@@ -730,6 +774,7 @@ namespace curvy {
                 if (SketchObject* object = findById(entry.id)) {
                     object->setGeometry(entry.path);
                     object->setPaintMatrix(entry.paintMatrix);
+                    object->setPaintWarp(entry.paintWarp);
                     object->setTextMatrix(entry.textMatrix);
                     object->setFrameAngle(entry.angle);
                 }
@@ -747,9 +792,9 @@ namespace curvy {
     void SketchDocument::transformObjects(const std::vector<std::size_t>& ids, const BLMatrix2D& matrix, const std::string& description) {
         std::vector<GeometryState> before;
         FrameState frameBefore = frameState();
-        for (std::size_t id : ids) {
+        for (std::size_t id : withDescendants(ids)) {
             if (SketchObject* object = findById(id)) {
-                before.push_back({id, object->geometry(), object->frameAngle(), object->textMatrix(), object->paintToPage()});
+                before.push_back({id, object->geometry(), object->frameAngle(), object->textMatrix(), object->paintToPage(), object->paintWarp()});
                 object->transform(matrix);
             }
         }
@@ -1042,7 +1087,7 @@ namespace curvy {
 
     bool SketchDocument::rotateSelection90(bool clockwise) {
         BLBox box;
-        std::vector<GeometryState> before = snapshotSelection();
+        std::vector<GeometryState> before = snapshotSelection(true);
         if (before.empty() || !selectionBounds(box)) {
             return false;
         }
@@ -1066,7 +1111,7 @@ namespace curvy {
 
     bool SketchDocument::flipSelection(bool horizontal) {
         BLBox box;
-        std::vector<GeometryState> before = snapshotSelection();
+        std::vector<GeometryState> before = snapshotSelection(true);
         if (before.empty() || !selectionBounds(box)) {
             return false;
         }

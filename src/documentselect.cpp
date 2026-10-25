@@ -130,13 +130,14 @@ namespace curvy {
                 }
                 bool hit = false;
                 std::vector<bool> closed;
-                for (const std::vector<BLPoint>& line : flattenToLines(object->geometry(), closed, 0.5)) {
+                const BLPath outline = placedOutline(*object);
+                for (const std::vector<BLPoint>& line : flattenToLines(outline, closed, 0.5)) {
                     for (const BLPoint& p : line) {
                         hit = hit || pointInLoops(p, lasso);
                     }
                 }
                 for (std::size_t i = 0; !hit && i < polygon.size(); ++i) {
-                    hit = object->hitTest(polygon[i], 0.5);
+                    hit = object->hitTest(polygon[i], 0.5, &outline);
                 }
                 if (hit) {
                     ids.push_back(object->id());
@@ -156,7 +157,8 @@ namespace curvy {
             }
             bool hit = false;
             std::vector<bool> closed;
-            for (const std::vector<BLPoint>& line : flattenToLines(object->geometry(), closed, 0.5)) {
+            const BLPath outline = placedOutline(*object);
+            for (const std::vector<BLPoint>& line : flattenToLines(outline, closed, 0.5)) {
                 for (std::size_t i = 0; !hit && i < line.size(); ++i) {
                     hit = segmentTouchesRect(line[i], line[i > 0 ? i - 1 : 0], rect);
                 }
@@ -166,10 +168,10 @@ namespace curvy {
             }
             // The rectangle may sit wholly inside a filled shape.
             for (std::size_t i = 0; !hit && i < 4; ++i) {
-                hit = object->hitTest(corners[i], 0.0);
+                hit = object->hitTest(corners[i], 0.0, &outline);
             }
             if (!hit) {
-                hit = object->hitTest(BLPoint((rect.x0 + rect.x1) * 0.5, (rect.y0 + rect.y1) * 0.5), 0.0);
+                hit = object->hitTest(BLPoint((rect.x0 + rect.x1) * 0.5, (rect.y0 + rect.y1) * 0.5), 0.0, &outline);
             }
             if (hit) {
                 ids.push_back(object->id());

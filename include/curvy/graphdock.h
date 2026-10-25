@@ -2,6 +2,7 @@
 
 #include "curvy/canvasview.h"
 #include "curvy/dockcontroller.h"
+#include "curvy/expressionfield.h"
 #include "curvy/graphtree.h"
 #include "curvy/sketchdocument.h"
 #include "curvy/workspacemodel.h"
@@ -76,7 +77,7 @@ namespace curvy {
         void setDetailValue(std::size_t index, const std::string& text);
         std::string title() const;
 
-        static constexpr std::size_t kDetailRows = 6;
+        static constexpr std::size_t kDetailRows = 9;
         static constexpr std::size_t kLinkRows = 3;
 
     private:
@@ -84,7 +85,7 @@ namespace curvy {
             enum class Kind { Text, Colour, Gradient, Slider };
             Kind kind = Kind::Text;
             newui::Label* caption = nullptr;
-            newui::TextField* field = nullptr;
+            ExpressionField* field = nullptr;
             ColourChip* chip = nullptr;         // beside the hex of a colour
             newui::Slider* slider = nullptr;    // a 0..100 value with its percent
             newui::Label* percent = nullptr;
@@ -95,6 +96,7 @@ namespace curvy {
             jitnodes::NodeId node = 0;
             std::string param;
             double minimum = 0.0, maximum = 0.0, scale = 1.0;
+            double unit = 1.0;                  // the plain drag step of the box's number
         };
         // One line of the Inputs and Used by lists: where it goes, and the node it names.
         struct LinkRow {
@@ -119,7 +121,15 @@ namespace curvy {
         void setGradientRow(std::size_t index, const std::string& caption, const SketchPaint& paint, std::function<void(const std::string&)> apply);
         void scrubRow(std::size_t index, jitnodes::NodeId id, const std::string& param, double minimum, double maximum, double scale = 1.0);
         void commitSlider(std::size_t index);
+        // The text of a detail row was entered: a number or expression for a parameter row, otherwise the row's own apply.
+        void commitDetail(std::size_t index);
+        // A parameter row shows "=expression" (in the expression colour) while one drives the parameter, otherwise its number.
+        void showParam(DetailRow& row);
         void clearDetail();
+        // Puts a transform node back to doing nothing, its pivot in the middle of its shape.
+        void resetTransform(jitnodes::NodeId id);
+        // The numbers of the shown node change while the shape is dragged on the canvas; the rows follow without rebuilding the tree.
+        void refreshDetailValues();
         std::vector<GraphRow> buildRows() const;
         std::vector<GraphRow> documentRows() const;
         std::vector<GraphRow> flowRowsFromGraph() const;
@@ -149,6 +159,7 @@ namespace curvy {
         std::shared_ptr<GraphTreeController> controller_;
         std::vector<DetailRow> detailRows_;
         std::vector<newui::Button*> pathButtons_;
+        newui::Button* resetButton_ = nullptr;
         std::vector<LinkRow> inputRows_, userRows_;
         std::shared_ptr<jitnodes::GraphSnapshot> scrubBefore_;   // the graph when the drag started
         newui::Label* inputsHeader_ = nullptr;

@@ -15,6 +15,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <unordered_set>
 #include <vector>
 
 namespace curvy {
@@ -27,6 +28,7 @@ namespace curvy {
         double angle = 0.0;
         BLMatrix2D textMatrix = BLMatrix2D::make_identity();   // a Text object's placement (see SketchObject::textMatrix)
         BLMatrix2D paintMatrix = BLMatrix2D::make_identity();  // where its paints sit (see SketchObject::paintToPage)
+        PaintWarp paintWarp;                                   // and how a perspective warp bent them (see SketchObject::paintWarp)
     };
 
     // Four world-space corners (TL, TR, BR, BL) of a possibly distorted frame, with the projective map
@@ -234,6 +236,40 @@ namespace curvy {
 
         // Topmost visible, unlocked object under point (document units), or nullptr.
         SketchObject* hitTest(const BLPoint& point, double tolerance) const;
+        // ---- Point tags: named groups of an object's points, kept by a tag node between its shape and placement nodes ----
+        // The tag the canvas adds points to (a name, "tag1" to start with).
+        const std::string& activeTag() const { return activeTag_; }
+        void setActiveTag(const std::string& name) { activeTag_ = name.empty() ? "tag1" : name; }
+        // The object's tag node for `group`; made (and wired in just before the placement node) when `create` is set. invalidNodeId when none.
+        jitnodes::NodeId tagNodeOf(std::size_t objectId, const std::string& group, bool create);
+        // The ids (SketchObject points' `id` attribute) the tag lists.
+        std::vector<int> taggedIds(std::size_t objectId, const std::string& group) const;
+        // Adds the ids to the tag (`on`) or takes them away, as one undo step. False when nothing changed.
+        bool tagPoints(std::size_t objectId, const std::string& group, const std::vector<int>& ids, bool on);
+        // Empties the tag (removes its node), as one undo step.
+        bool clearTag(std::size_t objectId, const std::string& group);
+        // The id of the anchor of the object nearest `world` within `reach` (document units); -1 when none.
+        int pointIdNear(std::size_t objectId, const BLPoint& world, double reach) const;
+        // Where the anchors tagged in `group` are on the page.
+        std::vector<BLPoint> taggedPositions(std::size_t objectId, const std::string& group) const;
+        // The names of the tags the object has.
+        std::vector<std::string> tagNames(std::size_t objectId) const;
+        // Adds a move-points node for `group` (every point when empty) just before the object's placement node, as one undo step, and returns it.
+        // The object is driven from then on: it shows what its chain cooks (see kMovePointsNodeType).
+        jitnodes::NodeId addMovePoints(std::size_t objectId, const std::string& group);
+
+        // ---- Nodes: what is selected and picked is the placement (transform) node of a shape ----
+        // The outline the graph makes for the object (its shape node's curve carried by the page matrix of its transform node); the object's own
+        // path when it has no nodes yet. Picking and the marquee read this; the object's cached bounds only rule out the far objects first.
+        BLPath placedOutline(const SketchObject& object) const;
+        // The object a shape, placement or appearance node belongs to (0 for any other node).
+        std::size_t objectOfNode(jitnodes::NodeId node) const;
+        // The node of the topmost visible, unlocked object under the point (invalidNodeId when none).
+        jitnodes::NodeId hitTestNode(const BLPoint& point, double tolerance) const;
+        // The placement nodes of the selected objects, in selection order.
+        std::vector<jitnodes::NodeId> selectedNodes() const;
+        // Selects the objects the nodes belong to (a node of no object is ignored).
+        void setSelectedNodes(const std::vector<jitnodes::NodeId>& nodes);
 
         // ---- Groups ----
         // A group is a set of objects sharing a group id in SketchObject::groups() (nested groups: several ids), kept
@@ -408,7 +444,10 @@ namespace curvy {
         // The transform origin (rotate/shear pivot): kept as a fraction of the frame's box so it rides along
         // with moves, resizes and rotations; back to the center whenever the selection changes. View state - not undoable.
         BLPoint selectionOrigin(const SelectionFrame& frame) const;
-        void setSelectionOrigin(const SelectionFrame& frame, const BLPoint& world);
+        // With one object selected the origin is its transform node's pivot and moving it is an undo step. While dragging it pass `live`
+        // (the steps are not recorded) and call finishSelectionOrigin() on release, which records the whole drag as one.
+        void setSelectionOrigin(const SelectionFrame& frame, const BLPoint& world, bool live = false);
+        void finishSelectionOrigin();
         typedef newui::Delegate<SketchDocument> SelectionChangedDelegate;
         SelectionChangedDelegate onSelectionChanged;
 
@@ -435,7 +474,21 @@ namespace curvy {
         // Applies `matrix` to the given objects as one undo step.
         void transformObjects(const std::vector<std::size_t>& ids, const BLMatrix2D& matrix, const std::string& description);
         // Selected objects' ids and current outlines - the `before` for a drag.
-        std::vector<GeometryState> snapshotSelection() const;
+        // `withChildren` also records the objects hanging from the selection, for edits that carry them along (a move, resize, rotate or flip).
+        std::vector<GeometryState> snapshotSelection(bool withChildren = false) const;
+        // The transform node that places an object's shape (invalidNodeId when it has none). With one object selected the transform origin
+        // is that node's pivot, so the canvas and the node show and edit the same point.
+        jitnodes::NodeId transformNodeOf(std::size_t objectId) const;
+        // Makes `child` hang from `parent` (0 releases it), keeping where it sits; refused for itself, a missing object or a loop. Undoable.
+        bool setParent(std::size_t child, std::size_t parent);
+        // The last object selected becomes the parent of the others (loops refused), as one undo step.
+        bool parentSelection();
+        // Frees every selected object from its parent, as one undo step.
+        bool releaseParent();
+        bool canParentSelection() const { return selection_.size() >= 2; }
+        bool canReleaseParent() const;
+        // `ids` followed by every object that hangs from one of them, directly or not.
+        std::vector<std::size_t> withDescendants(const std::vector<std::size_t>& ids) const;
         // ---- Live shapes: objects whose outline is the cooked polyline of a graph node ----
         // Adds a graph node of `nodeType` (a closed polyline generator such as "circle"), cooks it and adds an object that follows it,
         // as one undo step. Returns the object, or null when the node cooks to nothing.
@@ -784,6 +837,13 @@ namespace curvy {
         // Adopts the curves of every path node whose text no longer matches its object (a graph edit, undo or redo wrote it), unless the
         // object itself changed since the node was written.
         void pullPathNodes();
+        void timeChanged() override;
+        // Makes a driven object show what the chain ending at its placement node cooks; false when the chain cooks to nothing usable.
+        bool adoptChain(SketchObject& object, jitnodes::NodeId place);
+        // Whether the object placed by `place` is driven (a move-points node or an expression or keys on the way). Worked out once per graph change.
+        bool drivenPlace(jitnodes::NodeId place) const;
+        mutable std::unordered_set<jitnodes::NodeId> drivenPlaces_;
+        mutable bool drivenDirty_ = true;
         // Writes the curves of every path object edited since its node was written into that node, so a geometry commit (and its undo and
         // redo) lands in the graph in the same step instead of waiting for changed().
         void writePathNodes();
@@ -806,6 +866,8 @@ namespace curvy {
         };
         std::map<std::uint32_t, AppearanceChain> appearanceChains_;
         std::size_t appearanceObjectCount_ = 0;
+        std::string activeTag_ = "tag1";
+        std::shared_ptr<jitnodes::GraphSnapshot> pivotBefore_;   // the graph when a live pivot drag started
         std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> placedCache_;   // a shape node's transform node, rebuilt when the graph's wiring may have changed
         // Puts the objects in the stacking order given by ids (all of them, back to front).
         void reorder(const std::vector<std::size_t>& ids);
