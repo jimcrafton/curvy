@@ -1,5 +1,6 @@
 #pragma once
 
+#include "curvy/appearancenode.h"
 #include "curvy/brush.h"
 #include "curvy/graphdocument.h"
 #include "curvy/pathops.h"
@@ -543,6 +544,8 @@ namespace curvy {
         bool selectSimilar(std::size_t sourceId, bool add, double tolerance);
         // The Lasso: selects the objects touched by the freehand polygon (document units); `add` keeps the current selection too.
         bool selectInPolygon(const std::vector<BLPoint>& polygon, bool add);
+        // The marquee: selects the objects whose stroke or filled area the rectangle touches (not their bounding boxes).
+        bool selectInRect(const BLBox& rect, bool add);
 
         // ---- Swatches and the Eyedropper (documentswatches.cpp) ----
         // Saved colors as "#rrggbb" text, at most 24, shown in the Color panel. Each edit is one undo step; false when nothing changed
@@ -786,6 +789,22 @@ namespace curvy {
         // Mirrors every path object into a curvyPath node holding its curves: creates the missing nodes, rewrites the ones whose outline
         // changed since they were written and removes those whose object is gone. A deleted-then-restored object gets its node id back.
         void syncPathNodes();
+        // The same for the look: each object's fills, strokes and effects are curvyFill / curvyStroke / curvyEffect nodes chained after its
+        // shape node. syncAppearanceNodes creates, retypes and removes them to match the objects and writes the objects' looks into them;
+        // pullAppearanceNodes adopts what a graph edit or undo changed in them. appearanceSynced_ is what each node held when object and node
+        // last agreed, which is how the two tell who changed.
+        // `scan` looks for appearance nodes nothing owns any more (after objects went away).
+        void syncAppearanceNodes(bool scan);
+        void pullAppearanceNodes();
+        std::map<std::uint32_t, AppearanceParams> appearanceSynced_;
+        // What each shape node's chain looked like at the last sync, so an object whose look did not change is passed over without touching
+        // the graph (a thousand-object document syncs on every edit). A graph change throws it away.
+        struct AppearanceChain {
+            std::vector<std::uint32_t> nodes;
+            std::vector<AppearanceItem> items;
+        };
+        std::map<std::uint32_t, AppearanceChain> appearanceChains_;
+        std::size_t appearanceObjectCount_ = 0;
         // Puts the objects in the stacking order given by ids (all of them, back to front).
         void reorder(const std::vector<std::size_t>& ids);
         // Records a visible/locked change of some objects (already applied) as one undo step.

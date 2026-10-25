@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace curvy {
@@ -70,6 +71,7 @@ namespace curvy {
     }
 
     void SketchDocument::graphChanged() {
+        appearanceChains_.clear();
         pullPathNodes();
         refreshLiveShapes();
         changed();
@@ -121,6 +123,126 @@ namespace curvy {
                 object->setNodeRevision(object->geometryRevision());   // the node already holds it
             }
         }
+        pullAppearanceNodes();
+    }
+
+    void SketchDocument::pullAppearanceNodes() {
+        const jitnodes::Network& net = network();
+        const std::vector<jitnodes::NodeId> ids = net.nodeIds();
+        const std::unordered_set<jitnodes::NodeId> existing(ids.begin(), ids.end());
+        const auto next = appearanceSuccessors(net, ids);
+        const AppearanceLibrary library{[this](std::size_t id) { return findPattern(id); }, [this](std::size_t id) { return findBrush(id); }};
+        for (const std::unique_ptr<SketchObject>& object : objects_) {
+            const jitnodes::NodeId shape = object->graphNode();
+            if (shape == jitnodes::invalidNodeId || existing.count(shape) == 0) {
+                continue;
+            }
+            const std::vector<jitnodes::NodeId> chain = appearanceChain(next, shape);
+            std::vector<AppearanceItem> items = object->appearance();
+            if (chain.size() != items.size()) {
+                continue;
+            }
+            bool adopted = false;
+            for (std::size_t i = 0; i < items.size(); ++i) {
+                const jitnodes::Node& node = net.node(chain[i]);
+                const auto held = appearanceSynced_.find(chain[i]);
+                if (held == appearanceSynced_.end() || node.typeName() != appearanceNodeType(items[i].kind)) {
+                    continue;
+                }
+                const AppearanceParams have = paramsOf(node), want = paramsOf(items[i]);
+                if (have != held->second && want == held->second) {
+                    items[i] = itemFrom(have, want, items[i], library);
+                    held->second = paramsOf(items[i]);
+                    adopted = true;
+                }
+            }
+            if (adopted) {
+                const std::size_t fill = object->activeFillIndex(), stroke = object->activeStrokeIndex(), effect = object->activeEffectIndex();
+                object->setAppearance(items);
+                object->setActiveIndices(fill, stroke, effect);
+            }
+        }
+    }
+
+    void SketchDocument::syncAppearanceNodes(bool scan) {
+        jitnodes::Network& net = network();
+        std::vector<jitnodes::NodeId> ids;
+        std::unordered_set<jitnodes::NodeId> existing;
+        std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> next;
+        bool loaded = false;
+        auto load = [&] {
+            if (!loaded) {
+                loaded = true;
+                ids = net.nodeIds();
+                existing.insert(ids.begin(), ids.end());
+                next = appearanceSuccessors(net, ids);
+            }
+        };
+        scan = scan || appearanceObjectCount_ != objects_.size();
+        appearanceObjectCount_ = objects_.size();
+        for (const std::unique_ptr<SketchObject>& object : objects_) {
+            const jitnodes::NodeId shape = object->graphNode();
+            const std::vector<AppearanceItem>& items = object->appearance();
+            const auto cached = appearanceChains_.find(shape);
+            if (cached != appearanceChains_.end() && cached->second.items == items) {
+                continue;
+            }
+            load();
+            if (shape == jitnodes::invalidNodeId || existing.count(shape) == 0) {
+                continue;
+            }
+            scan = true;
+            std::vector<jitnodes::NodeId> chain = appearanceChain(next, shape);
+            std::size_t keep = 0;
+            while (keep < chain.size() && keep < items.size() && net.node(chain[keep]).typeName() == appearanceNodeType(items[keep].kind)) {
+                ++keep;
+            }
+            while (chain.size() > keep) {
+                net.removeNode(chain.back());
+                appearanceSynced_.erase(chain.back());
+                chain.pop_back();
+            }
+            while (chain.size() < items.size()) {
+                const AppearanceKind kind = items[chain.size()].kind;
+                const jitnodes::NodeId node = net.addNode(appearanceNodeType(kind), net.uniqueName(kind == AppearanceKind::Stroke ? "stroke" : kind == AppearanceKind::Effect ? "effect" : "fill"));
+                net.connect(chain.empty() ? shape : chain.back(), node, 0);
+                chain.push_back(node);
+            }
+            for (std::size_t i = 0; i < items.size(); ++i) {
+                jitnodes::Node& node = net.node(chain[i]);
+                const AppearanceParams want = paramsOf(items[i]);
+                const auto held = appearanceSynced_.find(chain[i]);
+                if (held == appearanceSynced_.end() || held->second != want) {
+                    if (paramsOf(node) != want) {
+                        store(node, want);
+                    }
+                    appearanceSynced_[chain[i]] = want;
+                }
+            }
+            appearanceChains_[shape] = AppearanceChain{chain, items};
+        }
+        if (!scan) {
+            return;
+        }
+        std::unordered_set<jitnodes::NodeId> shapes;
+        for (const std::unique_ptr<SketchObject>& object : objects_) {
+            shapes.insert(object->graphNode());
+        }
+        std::unordered_set<jitnodes::NodeId> used;
+        for (auto it = appearanceChains_.begin(); it != appearanceChains_.end();) {
+            if (shapes.count(it->first) == 0) {
+                it = appearanceChains_.erase(it);
+            } else {
+                used.insert(it->second.nodes.begin(), it->second.nodes.end());
+                ++it;
+            }
+        }
+        for (jitnodes::NodeId id : net.nodeIds()) {
+            if (used.count(id) == 0 && isAppearanceNodeType(net.node(id).typeName())) {
+                net.removeNode(id);
+                appearanceSynced_.erase(id);
+            }
+        }
     }
 
     void SketchDocument::writePathNodes() {
@@ -136,6 +258,7 @@ namespace curvy {
     }
 
     void SketchDocument::syncPathNodes() {
+        bool removedShape = false;
         jitnodes::Network& net = network();
         const std::vector<jitnodes::NodeId> ids = net.nodeIds();
         const std::unordered_set<jitnodes::NodeId> existing(ids.begin(), ids.end());
@@ -162,8 +285,10 @@ namespace curvy {
         for (jitnodes::NodeId id : ids) {
             if (used.count(id) == 0 && isShapeNodeType(net.node(id).typeName())) {
                 net.removeNode(id);
+                removedShape = true;
             }
         }
+        syncAppearanceNodes(removedShape);
     }
 
     SketchObject* SketchDocument::addLiveShape(const std::string& nodeType, const std::map<std::string, float>& params, const std::string& description) {

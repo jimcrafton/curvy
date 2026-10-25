@@ -15,6 +15,30 @@ namespace curvy {
             return object.isVisible() && !object.isLocked();
         }
 
+        bool segmentTouchesRect(BLPoint a, BLPoint b, const BLBox& r) {
+            double t0 = 0.0, t1 = 1.0;
+            const double d[2] = {b.x - a.x, b.y - a.y};
+            const double lo[2] = {r.x0 - a.x, r.y0 - a.y}, hi[2] = {r.x1 - a.x, r.y1 - a.y};
+            for (int i = 0; i < 2; ++i) {
+                if (d[i] == 0.0) {
+                    if (lo[i] > 0.0 || hi[i] < 0.0) {
+                        return false;
+                    }
+                    continue;
+                }
+                double u = lo[i] / d[i], v = hi[i] / d[i];
+                if (u > v) {
+                    std::swap(u, v);
+                }
+                t0 = std::max(t0, u);
+                t1 = std::min(t1, v);
+                if (t0 > t1) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
         // Two paints match when they are of the same kind and, for solid colors, no component of red, green or blue is further apart than
         // `tolerance` (0..1); gradients must be identical.
         bool paintsMatch(const SketchPaint& a, const SketchPaint& b, double tolerance) {
@@ -117,6 +141,38 @@ namespace curvy {
                 if (hit) {
                     ids.push_back(object->id());
                 }
+            }
+        }
+        setSelection(withGroupMembers(ids));
+        return !ids.empty();
+    }
+
+    bool SketchDocument::selectInRect(const BLBox& rect, bool add) {
+        std::vector<std::size_t> ids = add ? selection_ : std::vector<std::size_t>();
+        const BLPoint corners[4] = {BLPoint(rect.x0, rect.y0), BLPoint(rect.x1, rect.y0), BLPoint(rect.x1, rect.y1), BLPoint(rect.x0, rect.y1)};
+        for (const std::unique_ptr<SketchObject>& object : objects_) {
+            if (!selectable(*object) || std::find(ids.begin(), ids.end(), object->id()) != ids.end()) {
+                continue;
+            }
+            bool hit = false;
+            std::vector<bool> closed;
+            for (const std::vector<BLPoint>& line : flattenToLines(object->geometry(), closed, 0.5)) {
+                for (std::size_t i = 0; !hit && i < line.size(); ++i) {
+                    hit = segmentTouchesRect(line[i], line[i > 0 ? i - 1 : 0], rect);
+                }
+                if (!hit && line.size() > 2) {
+                    hit = segmentTouchesRect(line.back(), line.front(), rect) && object->isClosed();
+                }
+            }
+            // The rectangle may sit wholly inside a filled shape.
+            for (std::size_t i = 0; !hit && i < 4; ++i) {
+                hit = object->hitTest(corners[i], 0.0);
+            }
+            if (!hit) {
+                hit = object->hitTest(BLPoint((rect.x0 + rect.x1) * 0.5, (rect.y0 + rect.y1) * 0.5), 0.0);
+            }
+            if (hit) {
+                ids.push_back(object->id());
             }
         }
         setSelection(withGroupMembers(ids));

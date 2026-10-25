@@ -1,5 +1,6 @@
 #include "curvy/pathnode.h"
 
+#include "curvy/appearancenode.h"
 #include "curvy/sketchobject.h"
 
 #include <jitnodes/graph/network.h>
@@ -152,6 +153,7 @@ namespace curvy {
             registry.registerType(kTextNodeType, [] { return std::make_unique<PathNode>(kTextNodeType, Extras{"text", "font", "size", "matrix", "style", "warp"}); });
             registry.registerType(kSymbolNodeType, [] { return std::make_unique<PathNode>(kSymbolNodeType, Extras{"symbol"}); });
             registry.registerType(kImageNodeType, [] { return std::make_unique<PathNode>(kImageNodeType, Extras{"image"}); });
+            registerAppearanceNodes();
         });
     }
 

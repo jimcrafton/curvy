@@ -1,5 +1,7 @@
 #include "curvy/graphdock.h"
 
+#include "curvy/appearancenode.h"
+#include "curvy/numberscrubber.h"
 #include "curvy/pathnode.h"
 #include "curvy/theme.h"
 
@@ -34,6 +36,9 @@ namespace curvy {
             if (nodeType == kTextNodeType) return "Text";
             if (nodeType == kSymbolNodeType) return "Symbol";
             if (nodeType == kImageNodeType) return "Image";
+            if (nodeType == kFillNodeType) return "Fill";
+            if (nodeType == kStrokeNodeType) return "Stroke";
+            if (nodeType == kEffectNodeType) return "Effect";
             return nodeType;
         }
 
@@ -42,6 +47,9 @@ namespace curvy {
             if (nodeType == kTextNodeType) return "icons/node-text.svg";
             if (nodeType == kSymbolNodeType) return "icons/node-symbol.svg";
             if (nodeType == kImageNodeType) return "icons/node-image.svg";
+            if (nodeType == kFillNodeType) return "icons/node-fill.svg";
+            if (nodeType == kStrokeNodeType) return "icons/node-stroke.svg";
+            if (nodeType == kEffectNodeType) return "icons/node-effect.svg";
             return "icons/node-shape.svg";
         }
 
@@ -182,6 +190,56 @@ namespace curvy {
             row.field = new TextField();
             row.field->setVisible(false);
             detail_->addChild(row.field);
+            row.chip = new ColourChip();
+            row.chip->setVisible(false);
+            detail_->addChild(row.chip);
+            row.slider = new Slider();
+            row.slider->setRange(0.0f, 100.0f);
+            row.slider->setVisible(false);
+            detail_->addChild(row.slider);
+            row.percent = new Label();
+            row.percent->setTextAlignment(TextAlignment::Right);
+            row.percent->setVisible(false);
+            detail_->addChild(row.percent);
+            NumberScrubber::Callbacks scrub;
+            scrub.begin = [this, i](double& value) {
+                const DetailRow& r = detailRows_[i];
+                if (!r.scrub || r.node == 0) {
+                    return false;
+                }
+                value = r.scale * document_.network().node(r.node).baseFloat(r.param);
+                scrubBefore_ = std::make_shared<jitnodes::GraphSnapshot>(document_.snapshotGraph());
+                return true;
+            };
+            scrub.change = [this, i](double value) {
+                DetailRow& r = detailRows_[i];
+                value = std::clamp(value, r.minimum, r.maximum);
+                document_.setGraphFloatLive(r.node, r.param, float(value / r.scale));
+                if (r.kind == DetailRow::Kind::Slider) {
+                    r.slider->setValue(float(value));
+                } else {
+                    r.field->setText(utf8ToWide(numberText(value)));
+                }
+            };
+            scrub.end = [this, i](bool changed) {
+                if (changed && scrubBefore_) {
+                    document_.commitGraphEdit(*scrubBefore_, "Change " + detailRows_[i].param);
+                }
+                scrubBefore_.reset();
+            };
+            NumberScrubber::attach(*row.caption, 1.0, -1e9, 1e9, std::move(scrub));
+            row.slider->onValueChanged += [this, i](Slider& slider) {
+                detailRows_[i].percent->setText(numberText(std::round(slider.value())) + "%");
+                return SyncReturn::Handled;
+            };
+            row.slider->onMouseUp += [this, i](View&, const Point&, std::uint32_t, std::uint32_t) {
+                commitSlider(i);
+                return SyncReturn::Ignored;
+            };
+            row.slider->onKeyUp += [this, i](View&, std::uint32_t, int, int, std::uint32_t) {
+                commitSlider(i);
+                return SyncReturn::Ignored;
+            };
             auto apply = [this, i](View&) {
                 DetailRow& r = detailRows_[i];
                 if (!updating_ && r.apply) {
@@ -197,6 +255,40 @@ namespace curvy {
                 return SyncReturn::Handled;
             };
             row.field->onLostFocus += apply;
+        }
+        auto makeLabel = [this](bool link) {
+            auto* label = new Label();
+            label->setVisible(false);
+            if (link) {
+                label->setHotLink(true);
+                label->setTextAlignment(TextAlignment::Right);
+            } else {
+                label->setTextAlignment(TextAlignment::Left);
+            }
+            detail_->addChild(label);
+            return label;
+        };
+        inputsHeader_ = makeLabel(false);
+        inputsHeader_->setText("INPUTS");
+        usersHeader_ = makeLabel(false);
+        usersHeader_->setText("USED BY");
+        noInputs_ = makeLabel(false);
+        noInputs_->setText("None");
+        noUsers_ = makeLabel(false);
+        noUsers_->setText("Nothing");
+        for (std::vector<LinkRow>* list : {&inputRows_, &userRows_}) {
+            list->resize(kLinkRows);
+            for (std::size_t k = 0; k < kLinkRows; ++k) {
+                LinkRow& link = (*list)[k];
+                link.index = makeLabel(false);
+                link.name = makeLabel(false);
+                link.go = makeLabel(true);
+                link.go->setText("Go to");
+                link.go->onLinkClicked += [this, list, k](Label&) {
+                    selectNode((*list)[k].node);
+                    return SyncReturn::Handled;
+                };
+            }
         }
         const char* names[3] = {"Edit", "Copy", "Paste"};
         for (int k = 0; k < 3; ++k) {
@@ -242,16 +334,55 @@ namespace curvy {
             return;
         }
         const float width = detail_->bounds().size().width;
+        const float fieldLeft = 8.0f + kCaptionWidth, fieldWidth = std::max(40.0f, width - fieldLeft - 8.0f);
         float y = 4.0f;
-        for (DetailRow& row : detailRows_) {
+        for (std::size_t i = 0; i < detailRows_.size(); ++i) {
+            DetailRow& row = detailRows_[i];
+            if (!row.caption->isVisible()) {
+                continue;
+            }
             row.caption->setBounds(Rect(8.0f, y, kCaptionWidth, 20.0f));
-            row.field->setBounds(Rect(8.0f + kCaptionWidth, y, std::max(40.0f, width - kCaptionWidth - 16.0f), 20.0f));
+            if (row.kind == DetailRow::Kind::Colour) {
+                row.chip->setBounds(Rect(fieldLeft, y + 1.0f, 28.0f, 18.0f));
+                row.field->setBounds(Rect(fieldLeft + 34.0f, y, std::max(40.0f, fieldWidth - 34.0f), 20.0f));
+            } else if (row.kind == DetailRow::Kind::Slider) {
+                row.slider->setBounds(Rect(fieldLeft, y, std::max(40.0f, fieldWidth - 40.0f), 20.0f));
+                row.percent->setBounds(Rect(width - 8.0f - 38.0f, y, 38.0f, 20.0f));
+            } else {
+                row.field->setBounds(Rect(fieldLeft, y, fieldWidth, 20.0f));
+            }
             y += kRowHeight;
+            if (i == 0 && pathButtons_.front()->isVisible()) {
+                const float buttonWidth = 64.0f;
+                for (std::size_t k = 0; k < pathButtons_.size(); ++k) {
+                    pathButtons_[k]->setBounds(Rect(fieldLeft + float(k) * (buttonWidth + 6.0f), y, buttonWidth, 22.0f));
+                }
+                y += kRowHeight;
+            }
         }
-        const float buttonWidth = 64.0f;
-        for (std::size_t k = 0; k < pathButtons_.size(); ++k) {
-            pathButtons_[k]->setBounds(Rect(8.0f + kCaptionWidth + float(k) * (buttonWidth + 6.0f), 4.0f + kRowHeight, buttonWidth, 22.0f));   // under the first row
-        }
+        auto section = [&](Label* header, Label* none, std::vector<LinkRow>& links) {
+            if (!header->isVisible()) {
+                return;
+            }
+            y += 4.0f;
+            header->setBounds(Rect(8.0f, y, width - 16.0f, 18.0f));
+            y += 20.0f;
+            if (none->isVisible()) {
+                none->setBounds(Rect(8.0f, y, width - 16.0f, 20.0f));
+                y += kRowHeight;
+            }
+            for (LinkRow& link : links) {
+                if (!link.name->isVisible()) {
+                    continue;
+                }
+                link.index->setBounds(Rect(8.0f, y, 20.0f, 20.0f));
+                link.name->setBounds(Rect(fieldLeft, y, std::max(40.0f, fieldWidth - 52.0f), 20.0f));
+                link.go->setBounds(Rect(width - 8.0f - 48.0f, y, 48.0f, 20.0f));
+                y += kRowHeight;
+            }
+        };
+        section(inputsHeader_, noInputs_, inputRows_);
+        section(usersHeader_, noUsers_, userRows_);
     }
 
     void GraphDock::layout() {
@@ -327,6 +458,20 @@ namespace curvy {
             row.caption->setTextColor(rgb(theme.textMuted));
             row.field->style().setBackgroundColor(tint(theme.bgApp));
             row.field->setTextColor(rgb(theme.textPrimary));
+            row.percent->setTextColor(rgb(theme.textPrimary));
+        }
+        for (Label* label : {inputsHeader_, usersHeader_, noInputs_, noUsers_}) {
+            if (label != nullptr) {
+                label->setTextColor(rgb(theme.textMuted));
+            }
+        }
+        for (std::vector<LinkRow>* list : {&inputRows_, &userRows_}) {
+            for (LinkRow& link : *list) {
+                link.index->setTextColor(rgb(theme.textMuted));
+                link.name->setTextColor(rgb(theme.textPrimary));
+                link.go->setLinkColor(rgb(theme.accent));
+                link.go->setHoveredLinkColor(rgb(theme.accentHover));
+            }
         }
         if (tree_ != nullptr) {
             tree_->style().markDirty();
@@ -367,11 +512,74 @@ namespace curvy {
         return 0;
     }
 
+    const AppearanceItem* GraphDock::itemOfNode(jitnodes::NodeId node, std::size_t* objectId) const {
+        const jitnodes::Network& net = document_.network();
+        std::size_t steps = 0;
+        jitnodes::NodeId at = node;
+        while (isAppearanceNodeType(net.node(at).typeName()) && steps < 1000) {
+            at = net.inputOf(at, 0);
+            ++steps;
+            if (at == jitnodes::invalidNodeId) {
+                return nullptr;
+            }
+        }
+        const SketchObject* object = document_.findById(objectOfNode(at));
+        if (object == nullptr || steps == 0 || steps > object->appearance().size()) {
+            return nullptr;
+        }
+        if (objectId != nullptr) {
+            *objectId = object->id();
+        }
+        return &object->appearance()[steps - 1];
+    }
+
+    void GraphDock::describeLook(GraphRow& row, jitnodes::NodeId node) const {
+        const jitnodes::Network& net = document_.network();
+        const std::string type = net.node(node).typeName();
+        row.look = true;
+        row.text = typeLabel(type);
+        std::size_t objectId = 0;
+        const AppearanceItem* item = itemOfNode(node, &objectId);
+        row.objectId = objectId;
+        if (item == nullptr) {
+            return;
+        }
+        if (type == kEffectNodeType) {
+            row.text = effectName(item->effect);
+            if (item->effect != EffectKind::RoundCorners) {
+                row.summary = numberText(isGeometryEffect(item->effect) ? item->radius : item->softness) + " px";
+            }
+        } else {
+            const SketchPaint& paint = item->paint;
+            if (paint.kind() == SketchPaint::Kind::Solid) {
+                row.chip = true;
+                row.chipColor = paint.color().toRgba32().value & 0x00FFFFFFu;
+                row.chipAlpha = paint.color().alpha();
+            } else if (paint.kind() == SketchPaint::Kind::Linear || paint.kind() == SketchPaint::Kind::Radial) {
+                row.summary = paint.kind() == SketchPaint::Kind::Linear ? "Linear gradient" : "Radial gradient";
+            } else if (paint.isPattern()) {
+                row.summary = "Pattern";
+            } else if (type == kFillNodeType) {
+                row.summary = "None";
+            }
+            if (type == kStrokeNodeType && !paint.isNone()) {
+                row.summary = numberText(item->strokeWidth) + " px";
+            }
+        }
+        if (!item->visible) {
+            row.text += " (hidden)";
+        }
+    }
+
     void GraphDock::describe(GraphRow& row, jitnodes::NodeId node) const {
         row.node = node;
         const jitnodes::Network& net = document_.network();
         const std::string type = net.node(node).typeName();
         row.icon = iconForType(type);
+        if (isAppearanceNodeType(type)) {
+            describeLook(row, node);
+            return;
+        }
         const std::size_t objectId = objectOfNode(node);
         const SketchObject* object = objectId != 0 ? document_.findById(objectId) : nullptr;
         row.objectId = objectId;
@@ -398,6 +606,9 @@ namespace curvy {
 
     std::vector<GraphRow> GraphDock::documentRows() const {
         std::vector<GraphRow> rows;
+        const jitnodes::Network& net = document_.network();
+        const std::vector<jitnodes::NodeId> nodeIds = net.nodeIds();
+        const auto successors = appearanceSuccessors(net, nodeIds);
         std::function<void(std::size_t, std::size_t)> addLayer = [&](std::size_t parent, std::size_t depth) {
             const std::vector<std::size_t> ids = document_.layerChildren(parent);
             for (std::size_t i = ids.size(); i > 0; --i) {
@@ -448,6 +659,17 @@ namespace curvy {
                     }
                     node.objectId = object.id();
                     rows.push_back(node);
+                    if (object.graphNode() != 0) {
+                        const std::vector<jitnodes::NodeId> chain = appearanceChain(successors, object.graphNode());
+                        for (std::size_t c = chain.size(); c > 0; --c) {
+                            GraphRow look;
+                            look.depth = node.depth + 1;
+                            look.layerId = layer.id;
+                            look.key = node.key + "/" + std::to_string(chain[c - 1]);
+                            describe(look, chain[c - 1]);
+                            rows.push_back(look);
+                        }
+                    }
                 }
                 addLayer(layer.id, depth + 1);
             }
@@ -505,6 +727,7 @@ namespace curvy {
             if (fill.kind() == SketchPaint::Kind::Solid) {
                 mix(fill.color().toRgba32().value);
             }
+            mix(std::size_t(std::lround(object.strokeWidth() * 100.0)));
             const SketchPaint& stroke = object.stroke();
             mix(std::size_t(stroke.kind()));
             if (stroke.kind() == SketchPaint::Kind::Solid) {
@@ -521,6 +744,7 @@ namespace curvy {
             mix(hashText(key));
         }
         mix(detailNode_);
+        mix(hashText(selectedKey_));
         return h;
     }
 
@@ -564,9 +788,16 @@ namespace curvy {
         // The selection of the document is the selection of the tree.
         std::optional<std::vector<std::size_t>> selected;
         const std::vector<std::size_t>& chosen = document_.selection();
-        for (std::size_t i = 0; i < rows_.size() && !selected.has_value(); ++i) {
-            if (rows_[i].kind == GraphRow::Kind::Node && std::find(chosen.begin(), chosen.end(), rows_[i].objectId) != chosen.end() && rows_[i].objectId != 0) {
-                selected = raw->pathOf(i);
+        for (int pass = 0; pass < 2; ++pass) {
+            if (pass == 1 && !selected.has_value()) {
+                selectedKey_.clear();   // its object was deselected: the next time the object is picked, its own row shows
+            }
+            for (std::size_t i = 0; i < rows_.size() && !selected.has_value(); ++i) {
+                const GraphRow& candidate = rows_[i];
+                const bool wanted = pass == 0 ? candidate.key == selectedKey_ : !candidate.look;
+                if (wanted && candidate.kind == GraphRow::Kind::Node && candidate.objectId != 0 && std::find(chosen.begin(), chosen.end(), candidate.objectId) != chosen.end()) {
+                    selected = raw->pathOf(i);
+                }
             }
         }
         tree_->clearSelection();
@@ -588,26 +819,42 @@ namespace curvy {
         }
         GraphTreeModel* model = controller_->graphModel();
         const auto path = tree_->selectedPath();
-        const GraphRow* row = path.has_value() && model != nullptr ? model->rowAt(*path) : nullptr;
-        if (row == nullptr) {
+        const GraphRow* found = path.has_value() && model != nullptr ? model->rowAt(*path) : nullptr;
+        if (found == nullptr) {
             return;
         }
+        // Changing the selection rebuilds the tree and frees the model the row lives in.
+        const GraphRow row = *found;
+        selectedKey_ = row.key;
         updating_ = true;
-        if (row->kind == GraphRow::Kind::Layer) {
-            document_.setActiveLayer(row->layerId);
-        } else if (row->kind == GraphRow::Kind::Group) {
-            document_.setSelection(document_.groupMembers(row->groupId));
-        } else if (row->objectId != 0) {
-            document_.setActiveLayer(row->layerId != 0 ? row->layerId : document_.activeLayer());
-            document_.setSelection({row->objectId});
+        if (row.kind == GraphRow::Kind::Layer) {
+            document_.setActiveLayer(row.layerId);
+        } else if (row.kind == GraphRow::Kind::Group) {
+            document_.setSelection(document_.groupMembers(row.groupId));
+        } else if (row.objectId != 0) {
+            document_.setActiveLayer(row.layerId != 0 ? row.layerId : document_.activeLayer());
+            document_.setSelection({row.objectId});
         }
         updating_ = false;
-        showDetail(row);
+        showDetail(&row);
     }
 
     bool GraphDock::selectObject(std::size_t objectId) {
         for (const GraphRow& row : rows_) {
             if (row.kind == GraphRow::Kind::Node && row.objectId == objectId) {
+                document_.setSelection({objectId});
+                refresh();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool GraphDock::selectRow(const std::string& key) {
+        for (const GraphRow& row : rows_) {
+            if (row.key == key && row.kind == GraphRow::Kind::Node && row.objectId != 0) {
+                const std::size_t objectId = row.objectId;
+                selectedKey_ = key;
                 document_.setSelection({objectId});
                 refresh();
                 return true;
@@ -625,18 +872,55 @@ namespace curvy {
     }
 
     std::string GraphDock::detailValue(std::size_t index) const {
-        return index < detailRows_.size() ? wideToUtf8(detailRows_[index].field->text()) : std::string();
+        if (index >= detailRows_.size()) {
+            return std::string();
+        }
+        const DetailRow& row = detailRows_[index];
+        return row.kind == DetailRow::Kind::Slider ? row.percent->text() : wideToUtf8(row.field->text());
+    }
+
+    std::vector<std::string> GraphDock::detailLinks(bool inputs) const {
+        std::vector<std::string> names;
+        for (const LinkRow& link : inputs ? inputRows_ : userRows_) {
+            if (link.name->isVisible()) {
+                names.push_back(link.name->text());
+            }
+        }
+        return names;
+    }
+
+    bool GraphDock::selectNode(jitnodes::NodeId node) {
+        for (const GraphRow& row : rows_) {
+            if (row.node == node && row.kind == GraphRow::Kind::Node && row.objectId != 0) {
+                return selectRow(row.key);
+            }
+        }
+        return false;
+    }
+
+    void GraphDock::commitSlider(std::size_t index) {
+        if (updating_ || index >= detailRows_.size() || !detailRows_[index].apply) {
+            return;
+        }
+        detailRows_[index].apply(numberText(std::round(detailRows_[index].slider->value())));
     }
 
     bool GraphDock::detailShown(std::size_t index) const {
-        return index < detailRows_.size() && detailRows_[index].field->isVisible();
+        return index < detailRows_.size() && detailRows_[index].caption->isVisible();
     }
 
     void GraphDock::setDetailValue(std::size_t index, const std::string& text) {
         if (index >= detailRows_.size()) {
             return;
         }
-        detailRows_[index].field->setText(utf8ToWide(text));
+        if (detailRows_[index].kind == DetailRow::Kind::Slider) {
+            double percent = 0.0;
+            if (parseNumber(text, percent)) {
+                detailRows_[index].slider->setValue(float(percent));
+            }
+        } else {
+            detailRows_[index].field->setText(utf8ToWide(text));
+        }
         if (detailRows_[index].apply) {
             detailRows_[index].apply(text);
         }
@@ -646,7 +930,24 @@ namespace curvy {
         for (DetailRow& row : detailRows_) {
             row.caption->setVisible(false);
             row.field->setVisible(false);
+            row.chip->setVisible(false);
+            row.slider->setVisible(false);
+            row.percent->setVisible(false);
+            row.kind = DetailRow::Kind::Text;
+            row.scrub = false;
             row.apply = nullptr;
+        }
+        for (Label* label : {inputsHeader_, usersHeader_, noInputs_, noUsers_}) {
+            if (label != nullptr) {
+                label->setVisible(false);
+            }
+        }
+        for (std::vector<LinkRow>* list : {&inputRows_, &userRows_}) {
+            for (LinkRow& link : *list) {
+                link.index->setVisible(false);
+                link.name->setVisible(false);
+                link.go->setVisible(false);
+            }
         }
         for (Button* button : pathButtons_) {
             button->setVisible(false);
@@ -666,6 +967,150 @@ namespace curvy {
         row.apply = std::move(apply);
     }
 
+    void GraphDock::lookRows(const jitnodes::Node& node, jitnodes::NodeId id, std::size_t& at) {
+        auto number = [&](const char* caption, const char* name, double lowest = 0.0) {
+            setRow(at++, caption, numberText(node.baseFloat(name)), [this, id, key = std::string(name)](const std::string& value) {
+                double parsed = 0.0;
+                if (parseNumber(value, parsed)) {
+                    document_.setGraphParam(id, key, float(parsed));
+                }
+            });
+            scrubRow(at - 1, id, name, lowest, 10000.0);
+        };
+        auto choice = [&](const char* caption, const char* name, std::vector<std::string> names) {
+            const std::size_t current = std::size_t(std::max(0L, std::lround(node.baseFloat(name))));
+            setRow(at++, caption, current < names.size() ? names[current] : std::string(), [this, id, key = std::string(name), names](const std::string& value) {
+                for (std::size_t i = 0; i < names.size(); ++i) {
+                    if (names[i] == value) {
+                        document_.setGraphParam(id, key, float(i));
+                    }
+                }
+            });
+        };
+        auto slider = [&](const char* caption, const char* name) {
+            setSliderRow(at++, caption, std::clamp(double(node.baseFloat(name)), 0.0, 1.0), [this, id, key = std::string(name)](const std::string& value) {
+                double percent = 0.0;
+                if (parseNumber(value, percent)) {
+                    document_.setGraphParam(id, key, float(std::clamp(percent, 0.0, 100.0) / 100.0));
+                }
+            });
+            scrubRow(at - 1, id, name, 0.0, 100.0, 100.0);
+        };
+        const std::string type = node.typeName();
+        if (type == kEffectNodeType) {
+            std::size_t objectId = 0;
+            const AppearanceItem* item = itemOfNode(id, &objectId);
+            setRow(at++, "Effect", item != nullptr ? effectName(item->effect) : "", nullptr);
+            slider("Amount", "opacity");
+            number("Softness", "softness");
+            number("Offset X", "offsetX", -10000.0);
+            number("Offset Y", "offsetY", -10000.0);
+            number("Radius", "radius");
+            return;
+        }
+        const int paint = int(std::lround(node.baseFloat("paint")));
+        const AppearanceItem* item = itemOfNode(id);
+        if (paint == 1 && item != nullptr) {
+            setColourRow(at++, "Colour", item->paint.color(), [this, id](const std::string& value) {
+                try {
+                    const SketchColor parsed = SketchColor::fromHex(value);
+                    float r = 0.0f, g = 0.0f, b = 0.0f;
+                    parsed.toRgb(r, g, b);
+                    document_.setGraphFloats(id, {{"space", 0.0f}, {"c0", r}, {"c1", g}, {"c2", b}, {"c3", 0.0f}, {"alpha", parsed.alpha()}}, "Change Colour");
+                } catch (const std::exception&) {
+                }
+            });
+        } else {
+            choice("Paint", "paint", {"None", "Solid", "Linear", "Radial", "Pattern"});
+        }
+        if (type == kStrokeNodeType) {
+            number("Width", "width");
+        }
+        slider("Opacity", "opacity");
+    }
+
+    void GraphDock::setColourRow(std::size_t index, const std::string& caption, const SketchColor& color, std::function<void(const std::string&)> apply) {
+        if (index >= detailRows_.size()) {
+            return;
+        }
+        std::string hex = color.toHex();
+        if (color.alpha() < 1.0f) {
+            char alpha[4];
+            std::snprintf(alpha, sizeof(alpha), "%02x", int(std::lround(color.alpha() * 255.0f)));
+            hex += alpha;
+        }
+        setRow(index, caption, hex, std::move(apply));
+        DetailRow& row = detailRows_[index];
+        row.kind = DetailRow::Kind::Colour;
+        row.chip->setColour(color.toRgba32().value & 0x00FFFFFFu, color.alpha());
+        row.chip->setVisible(true);
+    }
+
+    void GraphDock::setSliderRow(std::size_t index, const std::string& caption, double value, std::function<void(const std::string&)> apply) {
+        if (index >= detailRows_.size()) {
+            return;
+        }
+        setRow(index, caption, "", std::move(apply));
+        DetailRow& row = detailRows_[index];
+        row.kind = DetailRow::Kind::Slider;
+        row.field->setVisible(false);
+        row.slider->setValue(float(value * 100.0));
+        row.slider->setVisible(true);
+        row.percent->setText(numberText(std::round(value * 100.0)) + "%");
+        row.percent->setVisible(true);
+    }
+
+    void GraphDock::scrubRow(std::size_t index, jitnodes::NodeId id, const std::string& param, double minimum, double maximum, double scale) {
+        if (index < detailRows_.size()) {
+            DetailRow& row = detailRows_[index];
+            row.scrub = true;
+            row.node = id;
+            row.param = param;
+            row.minimum = minimum;
+            row.maximum = maximum;
+            row.scale = scale;
+        }
+    }
+
+    void GraphDock::showLinks(jitnodes::NodeId id) {
+        const jitnodes::Network& net = document_.network();
+        inputNodes_.clear();
+        userNodes_.clear();
+        for (int i = 0; i < net.node(id).inputCount(); ++i) {
+            const jitnodes::NodeId from = net.inputOf(id, i);
+            if (from != jitnodes::invalidNodeId) {
+                inputNodes_.push_back(from);
+            }
+        }
+        for (jitnodes::NodeId other : net.nodeIds()) {
+            for (int i = 0; i < net.node(other).inputCount(); ++i) {
+                if (net.inputOf(other, i) == id) {
+                    userNodes_.push_back(other);
+                    break;
+                }
+            }
+        }
+        auto fill = [&](Label* header, Label* none, std::vector<LinkRow>& rows, const std::vector<jitnodes::NodeId>& nodes, bool numbered) {
+            header->setVisible(true);
+            none->setVisible(nodes.empty());
+            for (std::size_t k = 0; k < rows.size(); ++k) {
+                const bool shown = k < nodes.size();
+                rows[k].index->setVisible(shown && numbered);
+                rows[k].name->setVisible(shown);
+                rows[k].go->setVisible(shown);
+                if (shown) {
+                    GraphRow described;
+                    describe(described, nodes[k]);
+                    rows[k].node = nodes[k];
+                    rows[k].index->setText(std::to_string(k + 1));
+                    rows[k].name->setText(described.text);
+                }
+            }
+        };
+        fill(inputsHeader_, noInputs_, inputRows_, inputNodes_, true);
+        fill(usersHeader_, noUsers_, userRows_, userNodes_, false);
+    }
+
     void GraphDock::showDetail(const GraphRow* row) {
         if (detail_ == nullptr) {
             return;
@@ -680,7 +1125,7 @@ namespace curvy {
         } else if (row->kind == GraphRow::Kind::Layer || row->kind == GraphRow::Kind::Group) {
             detailTitle_->setText(row->text);
             detailKind_->setText(row->kind == GraphRow::Kind::Layer ? "Layer" : "Group");
-        } else if (row->node != 0 && document_.network().nodeIds().end() != std::find(document_.network().nodeIds().begin(), document_.network().nodeIds().end(), row->node)) {
+        } else if (row->node != 0 && [&] { const std::vector<jitnodes::NodeId> ids = document_.network().nodeIds(); return std::find(ids.begin(), ids.end(), row->node) != ids.end(); }()) {
             detailNode_ = row->node;
             detailObject_ = row->objectId;
             jitnodes::Node& node = document_.network().node(row->node);
@@ -708,6 +1153,8 @@ namespace curvy {
                 setRow(at++, "Symbol", node.getString("symbol"), nullptr);
             } else if (type == kImageNodeType) {
                 setRow(at++, "Picture", node.getString("image"), nullptr);
+            } else if (isAppearanceNodeType(type)) {
+                lookRows(node, id, at);
             } else {
                 for (const std::string& name : node.floatNames()) {
                     if (at >= 4) {
@@ -719,25 +1166,10 @@ namespace curvy {
                             document_.setGraphParam(id, name, float(number));
                         }
                     });
+                    scrubRow(at - 1, id, name, -100000.0, 100000.0);
                 }
             }
-            const jitnodes::Network& net = document_.network();
-            std::string inputs, users;
-            for (int i = 0; i < node.inputCount(); ++i) {
-                const jitnodes::NodeId from = net.inputOf(id, i);
-                if (from != jitnodes::invalidNodeId) {
-                    inputs += (inputs.empty() ? "" : ", ") + net.node(from).name();
-                }
-            }
-            for (jitnodes::NodeId other : net.nodeIds()) {
-                for (int i = 0; i < net.node(other).inputCount(); ++i) {
-                    if (net.inputOf(other, i) == id) {
-                        users += (users.empty() ? "" : ", ") + net.node(other).name();
-                    }
-                }
-            }
-            setRow(at, "Inputs", inputs.empty() ? "None" : inputs, nullptr);
-            setRow(at + 1, "Used by", users.empty() ? "Nothing" : users, nullptr);
+            showLinks(id);
         } else {
             detailTitle_->setText(row->text);
             detailKind_->setText("");

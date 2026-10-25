@@ -331,6 +331,10 @@ namespace curvy {
                 const std::size_t textId = doc_->add(SketchObject::makeText("Hello", "", 20.0, BLPoint(10, 100))).id();
                 toggle->onClick(*toggle);
                 expect(model_->graphVisible() && graph.dock()->isVisible() && toggle->isChecked(), "the Graph toggle shows the dock");
+                w_.frame().rootView().setFocusedSubView(toggle);
+                toggle->onClick(*toggle);
+                expect(w_.frame().rootView().focusedSubView() != toggle, "a clicked top bar button gives the keyboard back to the canvas");
+                toggle->onClick(*toggle);
                 const newui::Rect client = canvas_->getClientBounds();
                 expect(graph.dock()->bounds().left() + graph.dock()->bounds().width() == client.width(), "it sits flush right while the property dock is off");
                 w_.runCommand("view.properties");
@@ -351,10 +355,35 @@ namespace curvy {
                 expect(row("\"Hello\"") != nullptr && row("\"Hello\"")->icon == "icons/node-text.svg", "an unnamed text is listed by its words, with the text icon");
                 expect(row("Box")->depth == 1 && row("Box")->objectId == rectId, "objects sit one level under their layer and know their object");
 
+                auto lookRow = [&](std::size_t object, const std::string& text) -> const GraphRow* {
+                    for (const GraphRow& r : graph.rows()) {
+                        if (r.look && r.objectId == object && r.text == text) {
+                            return &r;
+                        }
+                    }
+                    return nullptr;
+                };
+                const GraphRow* fillRow = lookRow(rectId, "Fill");
+                const GraphRow* strokeRow = lookRow(rectId, "Stroke");
+                expect(fillRow != nullptr && fillRow->chip && fillRow->chipColor == 0xFF0000 && fillRow->depth == 2 && fillRow->icon == "icons/node-fill.svg",
+                    "an object's fill is a row under it, with its colour chip and icon");
+                expect(strokeRow != nullptr && strokeRow->depth == 2 && strokeRow->icon == "icons/node-stroke.svg", "and so is its stroke");
+
                 doc_->setSelection({rectId});
                 expect(graph.detailNode() == rect.graphNode() && graph.title() == "Box", "selecting an object on the canvas shows its node");
+                if (strokeRow != nullptr) {
+                    const double width = rect.strokeWidth();
+                    expect(graph.selectRow(strokeRow->key) && graph.title() == "Stroke" && graph.detailCaption(1) == "Width", "selecting the stroke row shows the stroke node");
+                    graph.setDetailValue(1, "6");
+                    expect(doc_->findById(rectId)->strokeWidth() == 6.0, "editing the width in the box changes the stroke");
+                    expect(graph.title() == "Stroke" && graph.detailValue(1) == "6", "the box stays on the stroke row");
+                    doc_->undoStack().undo();
+                    expect(doc_->findById(rectId)->strokeWidth() == width, "which is one undo step");
+                }
+                doc_->setSelection({textId});
+                doc_->setSelection({rectId});
                 expect(graph.detailCaption(0) == "Curves" && graph.detailValue(0) == "4 anchors, closed, 50 x 30", "a path node shows its curves as a summary, not as text");
-                expect(graph.detailCaption(2) == "Inputs" && graph.detailValue(2) == "None", "and what feeds it, right under the buttons");
+                expect(graph.detailLinks(true).empty() && graph.detailLinks(false).size() == 1 && graph.detailLinks(false)[0] == "Fill", "and what feeds it and what uses it, as lists under the values");
 
                 doc_->setSelection({textId});
                 expect(graph.detailCaption(0) == "Words" && graph.detailValue(0) == "Hello" && graph.detailShown(2), "a text node shows words, font and size");

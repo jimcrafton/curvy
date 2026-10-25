@@ -2946,6 +2946,10 @@ namespace {
         if (start != std::string::npos && end != std::string::npos) {
             svg.erase(start, end + 11 - start);
         }
+        // The ids of the nodes depend on how many the document had when each object was added.
+        for (std::size_t at = svg.find(" data-graph-node=\""); at != std::string::npos; at = svg.find(" data-graph-node=\"", at)) {
+            svg.erase(at, svg.find('"', at + 18) + 1 - at);
+        }
         return svg;
     }
 
@@ -4183,6 +4187,25 @@ TEST(SketchSelect, SameWandAndLasso) {
     EXPECT_EQ(doc.selection().size(), 3u) << "a loop wholly inside a shape touches it";
     doc.selectInPolygon({BLPoint(500, 500), BLPoint(510, 500), BLPoint(510, 510)}, false);
     EXPECT_TRUE(doc.selection().empty());
+}
+
+TEST(SketchSelect, MarqueeTouchesStrokesAndFillsNotBoundingBoxes) {
+    SketchDocument doc;
+    SketchObject& ring = doc.add(SketchObject::makeRect(0, 0, 100, 100));
+    ring.setFill(SketchPaint::none());
+    ring.setStroke(SketchPaint::solid(SketchColor::fromHex("#000000")));
+    ring.setStrokeWidth(2.0);
+    SketchObject& disc = doc.add(SketchObject::makeRect(300, 0, 100, 100));
+    disc.setFill(SketchPaint::solid(SketchColor::fromHex("#ff0000")));
+
+    EXPECT_FALSE(doc.selectInRect(BLBox(40, 40, 60, 60), false)) << "inside an unfilled outline's box, touching nothing";
+    EXPECT_TRUE(doc.selectInRect(BLBox(-10, 40, 10, 60), false)) << "crosses the stroke";
+    EXPECT_TRUE(doc.isSelected(ring.id()));
+    EXPECT_FALSE(doc.isSelected(disc.id()));
+    EXPECT_TRUE(doc.selectInRect(BLBox(340, 40, 360, 60), false)) << "wholly inside a fill";
+    EXPECT_TRUE(doc.isSelected(disc.id()));
+    EXPECT_TRUE(doc.selectInRect(BLBox(-10, -10, 500, 500), false));
+    EXPECT_EQ(doc.selection().size(), 2u) << "a rectangle round everything";
 }
 
 // ---- text style ----
@@ -6180,10 +6203,11 @@ TEST(LiveShape, OutlineFollowsTheNodeAndUndo) {
     EXPECT_NEAR(doc.findById(id)->geometryBounds().x1 - doc.findById(id)->geometryBounds().x0, 20.0, 0.01);
     doc.undoStack().undo();
     EXPECT_EQ(doc.findById(id), nullptr);
+    for (auto nid : doc.network().nodeIds()) { std::printf("left: %u %s\n", nid, doc.network().node(nid).typeName().c_str()); }
     EXPECT_TRUE(doc.network().nodeIds().empty());
     doc.undoStack().redo();
     ASSERT_NE(doc.findById(id), nullptr);
-    EXPECT_EQ(doc.network().nodeIds().size(), 1u);
+    EXPECT_EQ(doc.network().nodeIds().size(), 3u) << "the shape, its fill and its stroke";
 }
 
 TEST(LiveShape, SurvivesSvgRoundTrip) {
@@ -6301,7 +6325,7 @@ TEST(PathNode, EveryObjectHasANodeThroughEdits) {
     const jitnodes::NodeId node = doc.findById(a)->graphNode();
     doc.deleteSelection();
     EXPECT_TRUE(pathNodesMatch(doc));
-    EXPECT_EQ(doc.network().nodeIds().size(), 1u);
+    EXPECT_EQ(doc.network().nodeIds().size(), 3u) << "the other object's shape, fill and stroke";
     doc.undoStack().undo();
     ASSERT_NE(doc.findById(a), nullptr);
     EXPECT_EQ(doc.findById(a)->graphNode(), node);
@@ -6464,6 +6488,192 @@ TEST(PathNode, AThousandsObjectDocumentStaysResponsive) {
     std::printf("200 commits on 5000 objects: %.1f ms\n", ms);
     EXPECT_LT(ms, 2000.0);
     EXPECT_TRUE(pathNodesMatch(doc));
+}
+
+namespace {
+// The fill, stroke and effect nodes that follow an object's shape node, bottom to top.
+std::vector<jitnodes::NodeId> lookNodes(const SketchDocument& doc, std::size_t objectId) {
+    const jitnodes::Network& net = doc.network();
+    std::vector<jitnodes::NodeId> chain;
+    jitnodes::NodeId at = doc.findById(objectId)->graphNode();
+    for (bool found = true; found;) {
+        found = false;
+        for (jitnodes::NodeId id : net.nodeIds()) {
+            if (isAppearanceNodeType(net.node(id).typeName()) && net.inputOf(id, 0) == at) {
+                chain.push_back(id);
+                at = id;
+                found = true;
+                break;
+            }
+        }
+    }
+    return chain;
+}
+
+// True when every object has one node per appearance item, each holding exactly that item's look.
+bool looksMatch(const SketchDocument& doc) {
+    std::size_t nodes = 0;
+    for (jitnodes::NodeId id : doc.network().nodeIds()) {
+        nodes += isAppearanceNodeType(doc.network().node(id).typeName()) ? 1 : 0;
+    }
+    std::size_t items = 0;
+    for (std::size_t i = 0; i < doc.objectCount(); ++i) {
+        const SketchObject& object = doc.object(i);
+        const std::vector<jitnodes::NodeId> chain = lookNodes(doc, object.id());
+        if (chain.size() != object.appearance().size()) {
+            return false;
+        }
+        for (std::size_t k = 0; k < chain.size(); ++k) {
+            if (paramsOf(doc.network().node(chain[k])) != paramsOf(object.appearance()[k])) {
+                return false;
+            }
+        }
+        items += chain.size();
+    }
+    return nodes == items;
+}
+}
+
+TEST(AppearanceNode, EveryObjectHasAFillAndStrokeNodeChainedAfterItsShape) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    doc.add(SketchObject::makeEllipse(40, 40, 8, 8));
+    EXPECT_TRUE(looksMatch(doc));
+    const std::vector<jitnodes::NodeId> chain = lookNodes(doc, a);
+    ASSERT_EQ(chain.size(), 2u);
+    EXPECT_EQ(doc.network().node(chain[0]).typeName(), kFillNodeType);
+    EXPECT_EQ(doc.network().node(chain[1]).typeName(), kStrokeNodeType);
+    EXPECT_EQ(doc.network().inputOf(chain[0], 0), doc.findById(a)->graphNode());
+    EXPECT_EQ(doc.network().inputOf(chain[1], 0), chain[0]);
+    EXPECT_EQ(doc.cook(chain[1])->primitiveCount(), 1u) << "the shape passes through the look nodes";
+}
+
+TEST(AppearanceNode, ChangingTheStrokeWidthWritesTheNodeAndUndoes) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    const double original = doc.findById(a)->strokeWidth();
+    doc.setSelection({a});
+    const auto before = doc.snapshotStyle();
+    doc.setSelectionStrokeWidth(7.5);
+    ASSERT_TRUE(doc.commitStyle(before, "Stroke Width"));
+    const jitnodes::NodeId stroke = lookNodes(doc, a)[1];
+    EXPECT_EQ(doc.network().node(stroke).getFloat("width"), 7.5f);
+    EXPECT_TRUE(looksMatch(doc));
+    doc.undoStack().undo();
+    EXPECT_DOUBLE_EQ(doc.findById(a)->strokeWidth(), original);
+    EXPECT_EQ(doc.network().node(stroke).getFloat("width"), float(original));
+    doc.undoStack().redo();
+    EXPECT_EQ(doc.network().node(stroke).getFloat("width"), 7.5f);
+    EXPECT_TRUE(looksMatch(doc));
+}
+
+TEST(AppearanceNode, EditingTheNodeChangesTheLookAndUndoes) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    doc.findById(a)->setStrokeWidth(0.1);
+    doc.touch();
+    const std::vector<jitnodes::NodeId> chain = lookNodes(doc, a);
+    doc.setGraphParam(chain[1], "width", 9.0f);
+    EXPECT_DOUBLE_EQ(doc.findById(a)->strokeWidth(), 9.0);
+    doc.setGraphParam(chain[0], "opacity", 0.25f);
+    EXPECT_DOUBLE_EQ(doc.findById(a)->appearance()[0].opacity, 0.25);
+    EXPECT_TRUE(looksMatch(doc));
+    doc.undoStack().undo();
+    EXPECT_DOUBLE_EQ(doc.findById(a)->appearance()[0].opacity, 1.0);
+    doc.undoStack().undo();
+    EXPECT_NEAR(doc.findById(a)->strokeWidth(), 0.1, 1e-6);
+    EXPECT_EQ(doc.findById(a)->strokeWidth(), double(0.1f)) << "a number that went through the graph is the node's float";
+    EXPECT_TRUE(looksMatch(doc));
+    doc.undoStack().redo();
+    doc.undoStack().redo();
+    EXPECT_DOUBLE_EQ(doc.findById(a)->strokeWidth(), 9.0);
+}
+
+TEST(AppearanceNode, EverythingALookHoldsSurvivesTheNode) {
+    SketchGradient gradient = SketchGradient::fromColor(SketchColor::cmyk(0.1f, 0.2f, 0.3f, 0.4f));
+    gradient.hasAxis = true;
+    gradient.axisAspect = 2.0;
+    gradient.spread = GradientSpread::Reflect;
+    gradient.stops.push_back({0.5, SketchColor::hsb(0.3f, 0.5f, 0.7f, 0.5f)});
+    gradient.sortStops();
+    StrokeOptions options;
+    options.cap = StrokeCap::Round;
+    options.join = StrokeJoin::Bevel;
+    options.dashes = {4.0, 2.0, 1.0};
+    options.widths = {{0.0, 1.0, 1.0}, {0.5, 2.0, 0.5}};
+    options.align = StrokeAlign::Inside;
+    options.arrowEnd = ArrowStyle::Filled;
+    SketchDocument doc;
+    SketchObject& object = doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    std::vector<AppearanceItem> items = {AppearanceItem::makeFill(SketchPaint::linear(gradient)), AppearanceItem::makeStroke(SketchPaint::solid(SketchColor::gray(0.25f, 0.5f)), 3.5, options),
+        AppearanceItem::makeEffect(EffectKind::OuterGlow)};
+    items[0].opacity = 0.4;
+    items[0].blendMode = BlendMode::Screen;
+    items[1].visible = false;
+    object.setAppearance(items);
+    doc.touch();
+    EXPECT_TRUE(looksMatch(doc));
+    const std::vector<jitnodes::NodeId> chain = lookNodes(doc, object.id());
+    ASSERT_EQ(chain.size(), 3u);
+    EXPECT_EQ(doc.network().node(chain[2]).typeName(), kEffectNodeType);
+
+    // Reading a node back gives the item it was written from.
+    const AppearanceLibrary none;
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        AppearanceItem other = items[i];
+        other.opacity = 0.9;
+        other.strokeWidth = 1.0;
+        const AppearanceItem rebuilt = itemFrom(paramsOf(doc.network().node(chain[i])), paramsOf(other), other, none);
+        EXPECT_EQ(paramsOf(rebuilt), paramsOf(items[i])) << "item " << i;
+    }
+    doc.undoStack().clear();
+    doc.setGraphParam(chain[0], "angle", 33.0f);
+    EXPECT_DOUBLE_EQ(doc.findById(object.id())->appearance()[0].paint.gradient().angleDegrees, 33.0);
+    EXPECT_EQ(doc.findById(object.id())->appearance()[0].paint.gradient().stops.size(), 3u);
+    EXPECT_EQ(doc.findById(object.id())->appearance()[1].strokeOptions.dashes.size(), 3u);
+    EXPECT_TRUE(looksMatch(doc));
+}
+
+TEST(AppearanceNode, AddingAndRemovingItemsAddsAndRemovesNodes) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    doc.setSelection({a});
+    ASSERT_TRUE(doc.addEffect(EffectKind::DropShadow));
+    EXPECT_EQ(lookNodes(doc, a).size(), 3u);
+    EXPECT_TRUE(looksMatch(doc));
+    ASSERT_TRUE(doc.addAppearanceItem(AppearanceKind::Stroke));
+    EXPECT_EQ(lookNodes(doc, a).size(), 4u);
+    EXPECT_TRUE(looksMatch(doc));
+    doc.undoStack().undo();
+    doc.undoStack().undo();
+    EXPECT_EQ(lookNodes(doc, a).size(), 2u);
+    EXPECT_TRUE(looksMatch(doc));
+    doc.undoStack().redo();
+    EXPECT_EQ(lookNodes(doc, a).size(), 3u);
+    EXPECT_TRUE(looksMatch(doc));
+    doc.deleteSelection();
+    EXPECT_TRUE(doc.network().nodeIds().empty()) << "an object's look nodes go with it";
+    doc.undoStack().undo();
+    EXPECT_TRUE(looksMatch(doc));
+    EXPECT_EQ(lookNodes(doc, a).size(), 3u);
+}
+
+TEST(AppearanceNode, SurviveSvgSaveAndLoad) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    doc.setSelection({a});
+    const auto before = doc.snapshotStyle();
+    doc.setSelectionStrokeWidth(4.0);
+    doc.setSelectionFill(SketchPaint::solid(SketchColor::fromHex("#336699")));
+    doc.commitStyle(before, "Look");
+    SketchDocument loaded;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), loaded));
+    EXPECT_TRUE(looksMatch(loaded));
+    EXPECT_EQ(loaded.network().nodeIds().size(), doc.network().nodeIds().size());
+    const std::size_t b = loaded.object(0).id();
+    EXPECT_EQ(loaded.network().node(lookNodes(loaded, b)[1]).getFloat("width"), 4.0f);
+    loaded.setGraphParam(lookNodes(loaded, b)[1], "width", 6.0f);
+    EXPECT_DOUBLE_EQ(loaded.findById(b)->strokeWidth(), 6.0);
 }
 
 namespace {

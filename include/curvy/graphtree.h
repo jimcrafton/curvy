@@ -3,6 +3,7 @@
 #include <jitnodes/graph/node.h>
 
 #include <newui/controllers.h>
+#include <newui/controls.h>
 #include <newui/items.h>
 #include <newui/models.h>
 
@@ -23,7 +24,7 @@ namespace curvy {
         Kind kind = Kind::Node;
         std::size_t depth = 0;
         std::string text;               // the name
-        std::string summary;            // shown at the right when there is no chip
+        std::string summary;            // shown at the right, before the chip when there is one
         std::string icon;               // resource name, drawn before the name
         std::string key;                // stable identity, so a rebuilt tree keeps what was open
         jitnodes::NodeId node = 0;      // Node and Link rows
@@ -33,6 +34,7 @@ namespace curvy {
         bool chip = false;              // a colour chip at the right (a solid fill or stroke); chipColor is 0xRRGGBB
         std::uint32_t chipColor = 0;
         double chipAlpha = 1.0;
+        bool look = false;              // a Fill, Stroke or Effect node under an object
         bool dim = false;               // matches only through a row below it (while filtering)
     };
 
@@ -62,6 +64,22 @@ namespace curvy {
         std::vector<std::vector<std::size_t>> children_;     // per row
         std::vector<std::size_t> parent_;                    // per row (rows_.size() for a top row)
         std::vector<std::size_t> position_;                  // per row: its index among its siblings
+    };
+
+    // A colour over a checkerboard, so a partly transparent colour reads as such; `rgb` is 0xRRGGBB.
+    void paintColourChip(BLContext& ctx, double x, double y, double width, double height, std::uint32_t rgb, double alpha);
+
+    // A small view that shows one colour as a chip (the swatch beside a colour's hex in the parameter box).
+    // @reflect ignore=true
+    class ColourChip : public newui::SubView {
+    public:
+        ColourChip();
+        void setColour(std::uint32_t rgb, double alpha);
+        void paint(BLContext& ctx) override;
+
+    private:
+        std::uint32_t rgb_ = 0;
+        double alpha_ = 1.0;
     };
 
     // One row drawn: the TreeItem (triangle, icon, name) and, at the right, a colour chip over a checkerboard or the summary text.

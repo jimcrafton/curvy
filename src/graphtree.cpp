@@ -99,36 +99,70 @@ namespace curvy {
         return std::any();
     }
 
+    void paintColourChip(BLContext& ctx, double x, double y, double width, double height, std::uint32_t color, double alpha) {
+        ctx.save();
+        ctx.clip_to_rect(BLRect(x, y, width, height));
+        ctx.fill_rect(BLRect(x, y, width, height), rgb(0xBBBBBB));
+        const double cell = height * 0.5;
+        for (int i = 0; x + i * cell < x + width; ++i) {
+            for (int j = 0; j < 2; ++j) {
+                if ((i + j) % 2 == 0) {
+                    ctx.fill_rect(BLRect(x + i * cell, y + j * cell, cell, cell), rgb(0x777777));
+                }
+            }
+        }
+        ctx.fill_rect(BLRect(x, y, width, height), rgb(color, std::uint32_t(std::lround(std::clamp(alpha, 0.0, 1.0) * 255.0))));
+        ctx.restore();
+        ctx.save();
+        ctx.set_stroke_style(rgb(Theme::current().border));
+        ctx.stroke_rect(BLRect(x + 0.5, y + 0.5, width - 1.0, height - 1.0));
+        ctx.restore();
+    }
+
+    ColourChip::ColourChip() {
+        setVisible(true);
+    }
+
+    void ColourChip::setColour(std::uint32_t color, double alpha) {
+        rgb_ = color;
+        alpha_ = alpha;
+        style().markDirty();
+    }
+
+    void ColourChip::paint(BLContext& ctx) {
+        const Rect client = getClientBounds();
+        paintColourChip(ctx, client.left(), client.top(), client.width(), client.height(), rgb_, alpha_);
+    }
+
     void GraphTreeItem::paint(BLContext& ctx, const Rect& rect, const std::vector<std::size_t>& path, TreeController& controller) {
+        // The selected row is a dim wash of the accent and a hovered one a faint white, so the icon and the chip stay readable on it.
+        const bool selected = isSelected(), hot = isHighlighted();
+        if (selected || hot) {
+            ctx.save();
+            ctx.set_fill_style(rgb(selected ? Theme::current().accent : 0xFFFFFF));
+            ctx.set_fill_alpha(selected ? 0.28 : 0.07);
+            ctx.fill_rect(BLRect(rect.left(), rect.top(), rect.size().width, rect.size().height));
+            ctx.restore();
+            setSelected(false);
+            setHighlighted(false);
+        }
         TreeItem::paint(ctx, rect, path, controller);
+        setSelected(selected);
+        setHighlighted(hot);
         auto* graph = dynamic_cast<GraphTreeController*>(&controller);
         const GraphRow* row = graph != nullptr && graph->graphModel() != nullptr ? graph->graphModel()->rowAt(path) : nullptr;
         if (row == nullptr) {
             return;
         }
         const Rect client = clientBounds();
-        const double right = client.left() + client.size().width - kRightMargin;
+        double right = client.left() + client.size().width - kRightMargin;
         const double centerY = client.top() + client.size().height * 0.5;
         if (row->chip) {
             const double x = right - kChipWidth, y = centerY - kChipHeight * 0.5;
-            ctx.save();
-            // A checkerboard under the colour, so a partly transparent fill reads as such.
-            ctx.clip_to_rect(BLRect(x, y, kChipWidth, kChipHeight));
-            ctx.fill_rect(BLRect(x, y, kChipWidth, kChipHeight), rgb(0xBBBBBB));
-            for (int i = 0; i < 4; ++i) {
-                for (int j = 0; j < 2; ++j) {
-                    if ((i + j) % 2 == 0) {
-                        ctx.fill_rect(BLRect(x + i * 7.0, y + j * 7.0, 7.0, 7.0), rgb(0x777777));
-                    }
-                }
-            }
-            ctx.fill_rect(BLRect(x, y, kChipWidth, kChipHeight), rgb(row->chipColor, std::uint32_t(std::lround(std::clamp(row->chipAlpha, 0.0, 1.0) * 255.0))));
-            ctx.restore();
-            ctx.save();
-            ctx.set_stroke_style(rgb(Theme::current().border));
-            ctx.stroke_rect(BLRect(x + 0.5, y + 0.5, kChipWidth - 1.0, kChipHeight - 1.0));
-            ctx.restore();
-        } else if (!row->summary.empty()) {
+            paintColourChip(ctx, x, y, kChipWidth, kChipHeight, row->chipColor, row->chipAlpha);
+            right = x - 6.0;
+        }
+        if (!row->summary.empty()) {
             Font font = FontManager::getSystemFont(SystemUIFont::Message);
             BLFont* blFont = font.blFont();
             if (blFont == nullptr || !blFont->is_valid()) {

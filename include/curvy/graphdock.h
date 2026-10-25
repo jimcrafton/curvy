@@ -58,22 +58,47 @@ namespace curvy {
         // The row of a document object in the tree; selects it and shows its node. False when it is not listed (filtered out, or in the
         // other view).
         bool selectObject(std::size_t objectId);
+        // Selects the row with this key (a Fill, Stroke or Effect row as well as an object's) and the object it belongs to.
+        bool selectRow(const std::string& key);
         jitnodes::NodeId detailNode() const { return detailNode_; }
         // The parameter box, for tests: the text of row `index` (caption and value) and whether it is shown.
         std::string detailCaption(std::size_t index) const;
         std::string detailValue(std::size_t index) const;
+        // The names in the Inputs (or Used by) list of the box.
+        std::vector<std::string> detailLinks(bool inputs) const;
+        // Selects the row of this node (and its object); false when it has none.
+        bool selectNode(jitnodes::NodeId node);
         bool detailShown(std::size_t index) const;
         // Types into row `index` as if the user had, and applies it (what Return does).
         void setDetailValue(std::size_t index, const std::string& text);
         std::string title() const;
 
         static constexpr std::size_t kDetailRows = 6;
+        static constexpr std::size_t kLinkRows = 3;
 
     private:
         struct DetailRow {
+            enum class Kind { Text, Colour, Slider };
+            Kind kind = Kind::Text;
             newui::Label* caption = nullptr;
             newui::TextField* field = nullptr;
+            ColourChip* chip = nullptr;         // beside the hex of a colour
+            newui::Slider* slider = nullptr;    // a 0..100 value with its percent
+            newui::Label* percent = nullptr;
             std::function<void(const std::string&)> apply;
+            // Dragging the caption scrubs the number: the node and parameter it changes, within [minimum, maximum]; `scale` is how many
+            // times the box's number is the parameter (a percent slider shows 100 times its parameter).
+            bool scrub = false;
+            jitnodes::NodeId node = 0;
+            std::string param;
+            double minimum = 0.0, maximum = 0.0, scale = 1.0;
+        };
+        // One line of the Inputs and Used by lists: where it goes, and the node it names.
+        struct LinkRow {
+            newui::Label* index = nullptr;
+            newui::Label* name = nullptr;
+            newui::Label* go = nullptr;
+            jitnodes::NodeId node = 0;
         };
         void layout();
         void buildDetail();
@@ -81,11 +106,21 @@ namespace curvy {
         void selectionChangedInTree();
         void showDetail(const GraphRow* row);
         void setRow(std::size_t index, const std::string& caption, const std::string& value, std::function<void(const std::string&)> apply);
+        void setColourRow(std::size_t index, const std::string& caption, const SketchColor& color, std::function<void(const std::string&)> apply);
+        // `value` is 0..1; `apply` gets the percent as text.
+        void setSliderRow(std::size_t index, const std::string& caption, double value, std::function<void(const std::string&)> apply);
+        void showLinks(jitnodes::NodeId id);
+        void scrubRow(std::size_t index, jitnodes::NodeId id, const std::string& param, double minimum, double maximum, double scale = 1.0);
+        void commitSlider(std::size_t index);
         void clearDetail();
         std::vector<GraphRow> buildRows() const;
         std::vector<GraphRow> documentRows() const;
         std::vector<GraphRow> flowRowsFromGraph() const;
         void describe(GraphRow& row, jitnodes::NodeId node) const;
+        void describeLook(GraphRow& row, jitnodes::NodeId node) const;
+        // The appearance item a Fill, Stroke or Effect node stands for, and the object it belongs to; null when the node has no object.
+        const AppearanceItem* itemOfNode(jitnodes::NodeId node, std::size_t* objectId = nullptr) const;
+        void lookRows(const jitnodes::Node& node, jitnodes::NodeId id, std::size_t& at);
         std::size_t signature() const;
         std::size_t objectOfNode(jitnodes::NodeId node) const;
         void expandAll();
@@ -107,12 +142,20 @@ namespace curvy {
         std::shared_ptr<GraphTreeController> controller_;
         std::vector<DetailRow> detailRows_;
         std::vector<newui::Button*> pathButtons_;
+        std::vector<LinkRow> inputRows_, userRows_;
+        std::shared_ptr<jitnodes::GraphSnapshot> scrubBefore_;   // the graph when the drag started
+        newui::Label* inputsHeader_ = nullptr;
+        newui::Label* usersHeader_ = nullptr;
+        newui::Label* noInputs_ = nullptr;
+        newui::Label* noUsers_ = nullptr;
+        std::vector<jitnodes::NodeId> inputNodes_, userNodes_;
         Mode mode_ = Mode::Document;
         std::string filter_;
         std::vector<GraphRow> rows_;              // as shown
         std::set<std::string> collapsed_;         // keys of the rows the user closed (everything starts open)
         jitnodes::NodeId detailNode_ = 0;
         std::size_t detailObject_ = 0;
+        std::string selectedKey_;                  // the row the user clicked, kept while its object stays selected
         std::size_t lastSignature_ = 0;
         bool built_ = false;
         bool updating_ = false;

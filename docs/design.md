@@ -59,7 +59,19 @@ nothing of sketch types (paths, layers, artboards), so it can be unit tested alo
   catches up at commit. Text, symbol and image objects have `curvyText`, `curvySymbol` and `curvyImage` nodes: `d` is the outline, plus the words,
   font, size, placement, style and warp (text), the definition id (symbol) or the picture name (image). A text node's words are adopted back
   into the object; which symbol or picture an object shows is mirrored only, since definitions and pixels live in the document. Still to do: layers
-  and groups as subnets, selection and hit-testing by node, the node view, storing the graph in .skb.
+  and groups as subnets, selection and hit-testing by node, storing the graph in .skb.
+- **Appearance as nodes (2026-10-24).** Each entry of an object's appearance stack is a node chained after its shape node, bottom to top: `curvyFill`
+  (paint, opacity, blend, visible), `curvyStroke` (the same plus weight, cap, join, miter, align, arrows, brush, dashes and width profile) and `curvyEffect`
+  (kind, amount, tint, softness, offsets, radius). They pass the shape through and carry the look as parameters: every number is a float parameter, a
+  colour is its colour space plus four components plus alpha, and the gradient stops, dashes and width points are small geometry tables (one point per row).
+  `AppearanceParams` (include/curvy/appearancenode.h) is the plain-value form of one node; two looks are the same exactly when their params are equal.
+  Authority works as for curves: `SketchDocument` keeps what each node held when it and its object last agreed (`appearanceSynced_`), so an object edited
+  since wins and writes the node, and a node edited since (graph edit, undo, redo) wins and `itemFrom` changes only the fields that differ, leaving the
+  rest at full double precision. A number that went through the graph is the node's float. Which items an object has is read from the graph (the chain
+  of appearance nodes after its shape node), so loading an SVG needs no extra attributes; `appearanceChains_` makes an unchanged object cost nothing
+  per edit. Not yet: patterns and brushes are held by id (looked up in the document's libraries), colour swatches are not nodes, a Fill node cannot be
+  shared by several objects, and the Appearance panel still edits the object (which writes the node). An embedded graph is about 760 bytes per object
+  now (jitnodes' compact save leaves out parameters that still have their default).
 - **Bezier curves in jitnodes (2026-10-24, both steps done).** `jitnodes::Primitive` has a `kind` (`polyline`, `cubic`). A cubic primitive holds
   SVG-order control points (anchor, out handle, in handle, anchor ...; open 3n+1 points, closed 3n ending on the first anchor), so handles are ordinary
   points: transform, wrangle and noise nodes move them with their anchors and a point attribute on an anchor (pressure, tilt, width) is just a point

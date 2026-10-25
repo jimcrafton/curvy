@@ -270,6 +270,15 @@ namespace curvy {
                 };
             }
         }
+        // A button that was clicked keeps the keyboard focus and would take the next Space, which belongs to the canvas.
+        for (const char* name : {"toolbarToggle", "propertiesToggle", "graphToggle"}) {
+            if (auto* button = dynamic_cast<Button*>(frame_.rootView().findView(name))) {
+                button->onClick += [this](Control&) {
+                    focusCanvas();
+                    return SyncReturn::Handled;
+                };
+            }
+        }
         canvas_->onPaintTop = [this](BLContext& ctx) { paintTop(ctx); };
         canvas_->onKeyUp.add(this, &WorkspaceController::handleKeyUp);
         canvas_->onMouseMove.add(this, &WorkspaceController::handleMouseMove);

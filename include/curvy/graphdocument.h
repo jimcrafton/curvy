@@ -6,6 +6,7 @@
 #include <newui/undostack.h>
 
 #include <memory>
+#include <map>
 #include <string>
 
 namespace curvy {
@@ -25,6 +26,8 @@ namespace curvy {
         void removeGraphNode(jitnodes::NodeId id);
         void connectGraphNodes(jitnodes::NodeId from, jitnodes::NodeId to, int inputIndex = 0);
         void setGraphParam(jitnodes::NodeId id, const std::string& name, float value);
+        // Several float parameters of a node as one undo step.
+        void setGraphFloats(jitnodes::NodeId id, const std::map<std::string, float>& values, const std::string& description);
         void setGraphString(jitnodes::NodeId id, const std::string& name, const std::string& value);
         void setGraphGeometry(jitnodes::NodeId id, const std::string& name, jitnodes::GeometryHandle geometry);
         void renameGraphNode(jitnodes::NodeId id, const std::string& name);
@@ -32,6 +35,8 @@ namespace curvy {
         // For a drag: edit the network directly, then record the finished edit from the snapshot taken first.
         jitnodes::GraphSnapshot snapshotGraph() const { return jitnodes::snapshotNetwork(*network_); }
         void commitGraphEdit(const jitnodes::GraphSnapshot& before, const std::string& description);
+        // One step of such a drag: sets the parameter and lets everything that depends on the graph follow, without an undo step.
+        void setGraphFloatLive(jitnodes::NodeId id, const std::string& name, float value);
 
         // Makes the graph match `target` with no undo step, for derived documents that fold graph changes into their own steps.
         void restoreGraph(const jitnodes::GraphSnapshot& target);

@@ -36,6 +36,11 @@ namespace curvy {
             [this, a, b]() { jitnodes::restoreSnapshot(*network_, *b, a.get()); graphChanged(); }});
     }
 
+    void GraphDocument::setGraphFloatLive(jitnodes::NodeId id, const std::string& name, float value) {
+        network_->node(id).setFloat(name, value);
+        graphChanged();
+    }
+
     void GraphDocument::restoreGraph(const jitnodes::GraphSnapshot& target) {
         jitnodes::restoreSnapshot(*network_, target);
         graphChanged();
@@ -65,6 +70,14 @@ namespace curvy {
         network_->node(id).setFloat(name, value);
         network_->markDirty(id);
         commitGraphEdit(before, "Change " + name);
+    }
+
+    void GraphDocument::setGraphFloats(jitnodes::NodeId id, const std::map<std::string, float>& values, const std::string& description) {
+        const jitnodes::GraphSnapshot before = snapshotGraph();
+        for (const auto& [name, value] : values) {
+            network_->node(id).setFloat(name, value);
+        }
+        commitGraphEdit(before, description);
     }
 
     void GraphDocument::setGraphString(jitnodes::NodeId id, const std::string& name, const std::string& value) {

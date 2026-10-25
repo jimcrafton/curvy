@@ -702,17 +702,7 @@ namespace curvy {
                 break;
             case Drag::Marquee: {
                 BLBox box = normalizedBox(dragStartDoc_, dragNowDoc_);
-                std::vector<std::size_t> selection = dragAdditive_ ? document_->selection() : std::vector<std::size_t>();
-                for (std::size_t i = 0; i < document_->objectCount(); ++i) {
-                    SketchObject& object = document_->object(i);
-                    BLBox b = object.geometryBounds();
-                    bool hits = b.x1 >= box.x0 && b.x0 <= box.x1 && b.y1 >= box.y0 && b.y0 <= box.y1;
-                    if (hits && object.isVisible() && !object.isLocked() &&
-                        std::find(selection.begin(), selection.end(), object.id()) == selection.end()) {
-                        selection.push_back(object.id());
-                    }
-                }
-                document_->setSelection(document_->withGroupMembers(selection));
+                document_->selectInRect(box, dragAdditive_);
                 style().markDirty();
                 break;
             }
