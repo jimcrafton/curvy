@@ -26,6 +26,7 @@ namespace curvy {
         BLPath path;
         double angle = 0.0;
         BLMatrix2D textMatrix = BLMatrix2D::make_identity();   // a Text object's placement (see SketchObject::textMatrix)
+        BLMatrix2D paintMatrix = BLMatrix2D::make_identity();  // where its paints sit (see SketchObject::paintToPage)
     };
 
     // Four world-space corners (TL, TR, BR, BL) of a possibly distorted frame, with the projective map
@@ -805,6 +806,7 @@ namespace curvy {
         };
         std::map<std::uint32_t, AppearanceChain> appearanceChains_;
         std::size_t appearanceObjectCount_ = 0;
+        std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> placedCache_;   // a shape node's transform node, rebuilt when the graph's wiring may have changed
         // Puts the objects in the stacking order given by ids (all of them, back to front).
         void reorder(const std::vector<std::size_t>& ids);
         // Records a visible/locked change of some objects (already applied) as one undo step.

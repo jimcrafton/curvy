@@ -1,6 +1,7 @@
 #include "curvy/appearancenode.h"
 
 #include "curvy/brush.h"
+#include "curvy/pathnode.h"
 
 #include <jitnodes/graph/network.h>
 
@@ -26,10 +27,11 @@ namespace curvy {
             std::vector<const char*> columns;
         };
         const Table kStops = {"stops", {"offset", "space", "c0", "c1", "c2", "c3", "alpha"}};
+        const Table kPoints = {"points", {"x", "y", "radius", "space", "c0", "c1", "c2", "c3", "alpha"}};
         const Table kDashes = {"dashes", {"value"}};
         const Table kWidths = {"widths", {"t", "left", "right"}};
 
-        enum PaintCode { PaintNone, PaintSolid, PaintLinear, PaintRadial, PaintPattern };
+        enum PaintCode { PaintNone, PaintSolid, PaintLinear, PaintRadial, PaintPattern, PaintPoints };
 
         float flag(bool value) { return value ? 1.0f : 0.0f; }
 
@@ -64,7 +66,8 @@ namespace curvy {
             if (item.kind != AppearanceKind::Effect) {
                 const SketchPaint& paint = item.paint;
                 n["paint"] = float(paint.kind() == SketchPaint::Kind::None ? PaintNone : paint.kind() == SketchPaint::Kind::Solid ? PaintSolid
-                    : paint.kind() == SketchPaint::Kind::Linear ? PaintLinear : paint.kind() == SketchPaint::Kind::Radial ? PaintRadial : PaintPattern);
+                    : paint.kind() == SketchPaint::Kind::Linear ? PaintLinear : paint.kind() == SketchPaint::Kind::Radial ? PaintRadial
+                    : paint.kind() == SketchPaint::Kind::Points ? PaintPoints : PaintPattern);
                 putColor(n, paint.color(), "space", {"c0", "c1", "c2", "c3"}, "alpha");
                 const SketchGradient& g = paint.gradient();
                 n["angle"] = float(g.angleDegrees);
@@ -80,6 +83,11 @@ namespace curvy {
                 std::vector<std::vector<float>>& stops = p.tables[kStops.name];
                 for (const GradientStop& stop : g.stops) {
                     stops.push_back(colorRow(float(stop.offset), stop.color));
+                }
+                std::vector<std::vector<float>>& points = p.tables[kPoints.name];
+                for (const GradientPoint& point : g.points) {
+                    points.push_back({float(point.x), float(point.y), float(point.radius), float(int(point.color.space())),
+                        point.color.component(0), point.color.component(1), point.color.component(2), point.color.component(3), point.color.alpha()});
                 }
                 n["patternId"] = float(paint.patternId());
                 n["patternScale"] = float(paint.patternScale());
@@ -137,6 +145,9 @@ namespace curvy {
                     drop(p, kGradient);
                     p.tables.erase(kStops.name);
                 }
+                if (code != PaintPoints) {
+                    p.tables.erase(kPoints.name);
+                }
                 if (code != PaintPattern) {
                     drop(p, kPattern);
                 }
@@ -148,7 +159,7 @@ namespace curvy {
             }
         }
 
-        const std::array<const Table*, 3> kTables = {&kStops, &kDashes, &kWidths};
+        const std::array<const Table*, 4> kTables = {&kStops, &kPoints, &kDashes, &kWidths};
 
         std::vector<std::vector<float>> readTable(const jitnodes::Node& node, const Table& table) {
             std::vector<std::vector<float>> rows;
@@ -204,6 +215,7 @@ namespace curvy {
                 }
                 if (kind != AppearanceKind::Effect) {
                     declareGeometry(kStops.name);
+                    declareGeometry(kPoints.name);
                 }
                 if (kind == AppearanceKind::Stroke) {
                     declareGeometry(kDashes.name);
@@ -234,12 +246,31 @@ namespace curvy {
 
     std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> appearanceSuccessors(const jitnodes::Network& network, const std::vector<jitnodes::NodeId>& ids) {
         std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> next;
+        const std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> placed = placementNodes(network, ids);
+        std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> shapeOf;   // a placement node stands for the shape it takes its input from
+        for (const auto& [shape, place] : placed) {
+            shapeOf.emplace(place, shape);
+        }
         for (jitnodes::NodeId id : ids) {
             if (isAppearanceNodeType(network.node(id).typeName())) {
-                next.emplace(network.inputOf(id, 0), id);
+                jitnodes::NodeId input = network.inputOf(id, 0);
+                if (const auto through = shapeOf.find(input); through != shapeOf.end()) {
+                    input = through->second;
+                }
+                next.emplace(input, id);
             }
         }
         return next;
+    }
+
+    std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> placementNodes(const jitnodes::Network& network, const std::vector<jitnodes::NodeId>& ids) {
+        std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> placed;
+        for (jitnodes::NodeId id : ids) {
+            if (network.node(id).typeName() == kTransformNodeType) {
+                placed.emplace(network.inputOf(id, 0), id);
+            }
+        }
+        return placed;
     }
 
     std::vector<jitnodes::NodeId> appearanceChain(const std::unordered_map<jitnodes::NodeId, jitnodes::NodeId>& successors, jitnodes::NodeId shape) {
@@ -342,6 +373,16 @@ namespace curvy {
                         }
                     }
                     item.paint = code == PaintLinear ? SketchPaint::linear(g) : SketchPaint::radial(g);
+                }
+            } else if (code == PaintPoints) {
+                if (!sameKind || tableDiffers(kPoints)) {
+                    SketchGradient g = was.gradient();
+                    g.points.clear();
+                    for (const std::vector<float>& row : params.tables.at(kPoints.name)) {
+                        const float c[4] = {row[4], row[5], row[6], row[7]};
+                        g.points.push_back({double(row[0]), double(row[1]), colorOf(row[3], c, row[8]), double(row[2])});
+                    }
+                    item.paint = SketchPaint::points(g);
                 }
             } else if (code == PaintPattern) {
                 if (!sameKind || groupDiffers(kPattern)) {

@@ -78,6 +78,103 @@ namespace curvy {
         return paint;
     }
 
+    SketchPaint SketchPaint::points(const SketchGradient& gradient) {
+        SketchPaint paint = linear(gradient);
+        paint.kind_ = Kind::Points;
+        paint.color_ = gradient.points.empty() ? SketchColor() : gradient.points.front().color;
+        return paint;
+    }
+
+    SketchGradient SketchGradient::pointsFromColor(const SketchColor& color) {
+        SketchGradient gradient;
+        gradient.points.push_back({0.25, 0.25, color, 0.45});
+        gradient.points.push_back({0.75, 0.75, SketchColor::rgb(1.0f, 1.0f, 1.0f, color.alpha()), 0.45});
+        return gradient;
+    }
+
+    namespace {
+        struct PointBlend {
+            struct Entry {
+                double x, y, scale;   // in box units; scale = 1 / radius in the same units
+                float r, g, b, a;
+            };
+            std::vector<Entry> entries;
+            mutable std::vector<double> exponent;   // scratch for at()
+
+            PointBlend(const std::vector<GradientPoint>& points, double w, double h) {
+                const double longer = std::max(w, h);
+                for (const GradientPoint& point : points) {
+                    const BLRgba32 c = point.color.toRgba32();
+                    entries.push_back({point.x * w, point.y * h, 1.0 / std::max(1e-6, point.radius * longer),
+                        float(c.r()), float(c.g()), float(c.b()), float(c.a())});
+                }
+            }
+
+            // Straight (not premultiplied) 0..255 channels at (x, y) in box units. Weights are taken relative to the nearest point so a place
+            // far from every point still shows the nearest colour instead of underflowing to nothing.
+            void at(double x, double y, float out[4]) const {
+                double nearest = 1e300;
+                exponent.resize(entries.size());
+                for (std::size_t i = 0; i < entries.size(); ++i) {
+                    const double dx = (x - entries[i].x) * entries[i].scale, dy = (y - entries[i].y) * entries[i].scale;
+                    exponent[i] = dx * dx + dy * dy;
+                    nearest = std::min(nearest, exponent[i]);
+                }
+                double total = 0.0, r = 0.0, g = 0.0, b = 0.0, a = 0.0;
+                for (std::size_t i = 0; i < entries.size(); ++i) {
+                    const double weight = std::exp(-2.0 * (exponent[i] - nearest));
+                    total += weight;
+                    r += weight * entries[i].r;
+                    g += weight * entries[i].g;
+                    b += weight * entries[i].b;
+                    a += weight * entries[i].a;
+                }
+                if (total <= 0.0) {
+                    out[0] = out[1] = out[2] = out[3] = 0.0f;
+                    return;
+                }
+                out[0] = float(r / total);
+                out[1] = float(g / total);
+                out[2] = float(b / total);
+                out[3] = float(a / total);
+            }
+        };
+    }
+
+    SketchColor SketchGradient::pointColorAt(double x, double y, double w, double h) const {
+        if (points.empty()) {
+            return SketchColor::rgb(0.0f, 0.0f, 0.0f, 0.0f);
+        }
+        w = w < 1e-9 ? 1.0 : w;
+        h = h < 1e-9 ? 1.0 : h;
+        float c[4];
+        PointBlend(points, w, h).at(x * w, y * h, c);
+        return SketchColor::rgb(c[0] / 255.0f, c[1] / 255.0f, c[2] / 255.0f, c[3] / 255.0f);
+    }
+
+    BLImage SketchGradient::pointsImage(int width, int height, const BLBox& box) const {
+        BLImage image;
+        if (points.empty() || width < 1 || height < 1 || image.create(width, height, BL_FORMAT_PRGB32) != BL_SUCCESS) {
+            return image;
+        }
+        BLImageData data;
+        image.get_data(&data);
+        const double w = box.x1 - box.x0 < 1e-6 ? 1.0 : box.x1 - box.x0;
+        const double h = box.y1 - box.y0 < 1e-6 ? 1.0 : box.y1 - box.y0;
+        const PointBlend blend(points, w, h);
+        for (int row = 0; row < height; ++row) {
+            std::uint32_t* pixels = reinterpret_cast<std::uint32_t*>(static_cast<std::uint8_t*>(data.pixel_data) + std::ptrdiff_t(row) * data.stride);
+            for (int column = 0; column < width; ++column) {
+                float c[4];
+                blend.at((double(column) + 0.5) * w / double(width), (double(row) + 0.5) * h / double(height), c);
+                const float alpha = c[3] / 255.0f;
+                pixels[column] = BLRgba32(std::uint32_t(std::lround(c[0] * alpha)), std::uint32_t(std::lround(c[1] * alpha)),
+                    std::uint32_t(std::lround(c[2] * alpha)), std::uint32_t(std::lround(c[3]))).value;
+            }
+        }
+        return image;
+    }
+
     SketchGradient SketchGradient::fromColor(const SketchColor& color) {
         SketchGradient gradient;
         gradient.stops.push_back({0.0, color});
@@ -193,12 +290,24 @@ namespace curvy {
     }
 
     namespace {
-        // Applies a paint to ctx as the fill or stroke style over `box` (the object's geometry bounds),
+        // The box a paint is laid out on: the outline's bounds before the object's transforms, the matrix that carries it to the page, and its bounds there.
+        struct PaintFrame {
+            BLBox box;
+            BLMatrix2D toPage;
+            BLBox world;
+            PaintFrame(const BLBox& b) : box(b), toPage(BLMatrix2D::make_identity()), world(b) {}
+            PaintFrame(const BLBox& b, const BLMatrix2D& m, const BLBox& w) : box(b), toPage(m), world(w) {}
+        };
+
+        // Applies a paint to ctx as the fill or stroke style over the frame's box (the object's bounds),
         // returning false when there is nothing to paint.
-        bool setPaintStyle(BLContext& ctx, const SketchPaint& paint, const BLBox& box, bool asStroke) {
+        bool setPaintStyle(BLContext& ctx, const SketchPaint& paint, const PaintFrame& frame, bool asStroke) {
             if (paint.isNone()) {
                 return false;
             }
+            const BLBox& box = frame.box;
+            const BLMatrix2D& turn = frame.toPage;
+            const bool placed = !(turn.m00 == 1.0 && turn.m01 == 0.0 && turn.m10 == 0.0 && turn.m11 == 1.0 && turn.m20 == 0.0 && turn.m21 == 0.0);
             double w = box.x1 - box.x0, h = box.y1 - box.y0;
             if (paint.isPattern()) {
                 const SymbolDef* def = paint.patternDef().get();
@@ -215,8 +324,24 @@ namespace curvy {
                 if (paint.patternAngle() != 0.0) {
                     place.post_transform(BLMatrix2D::make_rotation(paint.patternAngle() * 3.14159265358979323846 / 180.0));
                 }
+                place.post_transform(turn);
                 BLPattern pattern(def->tile(pw, ph), BL_EXTEND_MODE_REPEAT, place);
                 if (asStroke) { ctx.set_stroke_style(pattern); } else { ctx.set_fill_style(pattern); }
+                return true;
+            }
+            if (paint.isPoints() && !paint.gradient().points.empty() && (w >= 1e-6 || h >= 1e-6)) {
+                // A low resolution image over the box, smoothed when drawn: the colours are soft, and a drag makes a new one every frame.
+                const BLMatrix2D m = ctx.final_transform();
+                const double device = std::sqrt(std::fabs(m.m00 * m.m11 - m.m01 * m.m10));
+                const double longer = std::max(w, h) * device;
+                const double fit = std::min(1.0, 160.0 / std::max(1.0, longer));
+                const int pw = std::max(2, int(std::lround(std::max(w, 1.0) * device * fit))), ph = std::max(2, int(std::lround(std::max(h, 1.0) * device * fit)));
+                BLMatrix2D place = BLMatrix2D::make_scaling((w >= 1e-6 ? w : 1.0) / double(pw), (h >= 1e-6 ? h : 1.0) / double(ph));
+                place.post_translate(box.x0, box.y0);
+                place.post_transform(turn);
+                BLPattern pattern(paint.gradient().pointsImage(pw, ph, box), BL_EXTEND_MODE_PAD, place);
+                if (asStroke) { ctx.set_stroke_style(pattern); } else { ctx.set_fill_style(pattern); }
+                ctx.set_pattern_quality(BL_PATTERN_QUALITY_BILINEAR);
                 return true;
             }
             if (!paint.isGradient() || paint.gradient().stops.empty() || (w < 1e-6 && h < 1e-6)) {
@@ -236,8 +361,15 @@ namespace curvy {
                 double radius = std::hypot(end.x - start.x, end.y - start.y);
                 gradient = BLGradient(BLRadialGradientValues(start.x, start.y, start.x, start.y, radius > 1e-9 ? radius : 1e-9));
             }
+            BLMatrix2D axis = BLMatrix2D::make_identity();
             if (g.hasAxis && (g.axisSkew != 0.0 || (radial && g.axisAspect != 1.0))) {
-                gradient.set_transform(g.axisMatrix(start, end, radial));
+                axis = g.axisMatrix(start, end, radial);
+            }
+            if (placed) {
+                axis.post_transform(turn);
+            }
+            if (g.hasAxis || placed) {
+                gradient.set_transform(axis);
             }
             for (const GradientStop& stop : g.stops) {
                 gradient.add_stop(std::min(1.0, std::max(0.0, stop.offset)), stop.color.toRgba32());
@@ -1103,6 +1235,7 @@ namespace curvy {
 
     void SketchObject::transform(const BLMatrix2D& matrix) {
         path_.transform(matrix);
+        paintMatrix_.post_transform(matrix);
         ++geometryRevision_;
         if (type_ == SketchObjectType::Text) {
             textMatrix_.post_transform(matrix);   // later edits of the words land where the object now is
@@ -1127,6 +1260,18 @@ namespace curvy {
             BLPoint mapped = map(vertices[i]);
             path_.set_vertex_at(i, BL_PATH_CMD_PRESERVE, mapped.x, mapped.y);
         }
+    }
+
+    BLBox SketchObject::paintFrameBounds() const {
+        BLMatrix2D back = paintMatrix_;
+        if (back.invert() != BL_SUCCESS) {
+            return geometryBounds();
+        }
+        BLPath original = path_;
+        original.transform(back);
+        BLBox box(0, 0, 0, 0);
+        original.get_bounding_box(&box);
+        return box;
     }
 
     BLBox SketchObject::frameBounds() const {
@@ -1156,6 +1301,7 @@ namespace curvy {
         copy->blendMode_ = blendMode_;
         copy->groups_ = groups_;
         copy->frameAngle_ = frameAngle_;
+        copy->paintMatrix_ = paintMatrix_;
         copy->text_ = text_;
         copy->fontName_ = fontName_;
         copy->fontSize_ = fontSize_;
@@ -1334,11 +1480,11 @@ namespace curvy {
         }
 
         // A stroke drawn by a brush: the nib swept along the path in the stroke paint, or the artwork bent or scattered along it.
-        void paintBrushStroke(BLContext& ctx, const BLPath& path, const AppearanceItem& item, double alpha, const BLBox& box) {
+        void paintBrushStroke(BLContext& ctx, const BLPath& path, const AppearanceItem& item, double alpha, const PaintFrame& frame) {
             const BrushDef& brush = *item.strokeOptions.brush;
             const double width = item.strokeWidth;
             if (brush.kind == BrushKind::Calligraphic) {
-                if (setPaintStyle(ctx, item.paint, box, false)) {
+                if (setPaintStyle(ctx, item.paint, frame, false)) {
                     ctx.set_global_alpha(alpha);
                     ctx.fill_path(brush.nibOutline(path, width));
                 }
@@ -1362,12 +1508,13 @@ namespace curvy {
                 draw(ctx);
             } else {
                 const double reach = brush.reach(width);
+                const BLBox& box = frame.world;
                 paintIsolated(ctx, BLBox(box.x0 - reach, box.y0 - reach, box.x1 + reach, box.y1 + reach), alpha, BlendMode::Normal, draw);
             }
         }
 
-        // One stroke item painted over the object's outline (box = the outline's bounds, for gradients).
-        void paintStrokeItem(BLContext& ctx, const BLPath& path, const AppearanceItem& item, double alpha, const BLBox& box) {
+        // One stroke item painted over the object's outline (frame = the outline's bounds, for gradients).
+        void paintStrokeItem(BLContext& ctx, const BLPath& path, const AppearanceItem& item, double alpha, const PaintFrame& frame) {
             const SketchPaint& stroke = item.paint;
             const StrokeOptions& options = item.strokeOptions;
             double width = item.strokeWidth;
@@ -1375,14 +1522,14 @@ namespace curvy {
                 return;
             }
             if (options.brush) {
-                paintBrushStroke(ctx, path, item, alpha, box);
+                paintBrushStroke(ctx, path, item, alpha, frame);
             } else if (options.decorated()) {
                 BLPath outline;
-                if (decoratedStroke(path, width, options, outline) && setPaintStyle(ctx, stroke, box, false)) {
+                if (decoratedStroke(path, width, options, outline) && setPaintStyle(ctx, stroke, frame, false)) {
                     ctx.set_global_alpha(alpha);
                     ctx.fill_path(outline);
                 }
-            } else if (!options.widths.empty() && setPaintStyle(ctx, stroke, box, false)) {
+            } else if (!options.widths.empty() && setPaintStyle(ctx, stroke, frame, false)) {
                 ctx.set_global_alpha(alpha);
                 ctx.fill_path(widthOutline(path, width * 0.5, options.widths, options.cap));
             } else if (stroke.isGradient() && stroke.gradient().alongStroke && !stroke.gradient().stops.empty()) {
@@ -1392,7 +1539,7 @@ namespace curvy {
                 }
                 ctx.set_global_alpha(alpha);
                 strokeAlongPath(ctx, path, width, stroke.gradient(), opaque);
-            } else if (setPaintStyle(ctx, stroke, box, true)) {
+            } else if (setPaintStyle(ctx, stroke, frame, true)) {
                 ctx.set_stroke_width(width);
                 ctx.set_stroke_caps(blCap(options.cap));
                 ctx.set_stroke_join(blJoin(options.join));
@@ -1663,22 +1810,23 @@ namespace curvy {
                 shown = applyGeometryEffect(shown, items_[j]);
             }
         }
+        const PaintFrame frame(box, paintMatrix_, geometryBounds());
         ctx.save();
         ctx.set_comp_op(kBlends[std::size_t(item.blendMode)].op);
         if (item.kind == AppearanceKind::Fill) {
-            if (isClosed() && setPaintStyle(ctx, item.paint, box, false)) {
+            if (isClosed() && setPaintStyle(ctx, item.paint, frame, false)) {
                 ctx.set_global_alpha(item.opacity);
                 ctx.fill_path(shown);
             }
         } else {
-            paintStrokeItem(ctx, shown, item, item.opacity, box);
+            paintStrokeItem(ctx, shown, item, item.opacity, frame);
         }
         ctx.restore();
     }
 
     void SketchObject::paintItems(BLContext& ctx) const {
         ctx.save();
-        BLBox box = geometryBounds();
+        BLBox box = paintFrameBounds();
         for (std::size_t i = 0; i < items_.size(); ++i) {  // bottom to top
             if (items_[i].visible && items_[i].kind != AppearanceKind::Effect) {
                 drawItem(ctx, i, box);
@@ -1692,7 +1840,7 @@ namespace curvy {
         if (!makeLayer(ctx, paintBounds(), layer)) {
             return;
         }
-        BLBox box = geometryBounds();
+        BLBox box = paintFrameBounds();
         BLContext lc(layer.image);
         lc.clear_all();
         lc.set_transform(layer.toLayer);

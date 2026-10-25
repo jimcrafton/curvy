@@ -24,6 +24,18 @@ namespace curvy {
         bool operator==(const GradientStop& other) const { return offset == other.offset && color == other.color; }
     };
 
+    // One colour point of a point gradient: where it sits as fractions of the object's bounding box (0,0 = top-left, 1,1 = bottom-right),
+    // its colour, and how far it reaches as a fraction of the box's longer side.
+    // @reflect ignore=true
+    struct GradientPoint {
+        double x = 0.5;
+        double y = 0.5;
+        SketchColor color;
+        double radius = 0.4;
+
+        bool operator==(const GradientPoint& other) const { return x == other.x && y == other.y && radius == other.radius && color == other.color; }
+    };
+
     struct SymbolDef;
     struct BrushDef;
     class SketchDocument;
@@ -59,6 +71,16 @@ namespace curvy {
         // object's bounding box. The axis, angle and radial/linear kind then do not matter.
         bool alongStroke = false;
 
+        // Point gradients only (SketchPaint::Kind::Points): the colour points inside the object. The colour at any place is the average of
+        // the points' colours, each weighted by how near that place is to the point in units of its radius.
+        std::vector<GradientPoint> points;
+        // `color` at the top left and fading to white at the bottom right, as two points - what a solid fill becomes.
+        static SketchGradient pointsFromColor(const SketchColor& color);
+        // The colour the points give at the box fractions (x, y) of an object whose box is w x h.
+        SketchColor pointColorAt(double x, double y, double w, double h) const;
+        // The points drawn into an image of width x height pixels covering `box` (premultiplied ARGB).
+        BLImage pointsImage(int width, int height, const BLBox& box) const;
+
         // The matrix that turns the plain gradient (a circle of radius |end - start| around `start`, or the
         // linear gradient from `start` to `end`) into the ellipse / leaning gradient described by aspect and
         // skew; identity when there is neither.
@@ -83,7 +105,7 @@ namespace curvy {
         void reverse();
 
         bool operator==(const SketchGradient& other) const {
-            return angleDegrees == other.angleDegrees && spread == other.spread && stops == other.stops && hasAxis == other.hasAxis &&
+            return angleDegrees == other.angleDegrees && spread == other.spread && stops == other.stops && points == other.points && hasAxis == other.hasAxis &&
                 alongStroke == other.alongStroke &&
                 (!hasAxis || (axisX1 == other.axisX1 && axisY1 == other.axisY1 && axisX2 == other.axisX2 && axisY2 == other.axisY2 &&
                     axisAspect == other.axisAspect && axisSkew == other.axisSkew));
@@ -112,13 +134,15 @@ namespace curvy {
     // What fill and stroke hold: nothing, a solid color, a gradient or a repeating pattern.
     class SketchPaint {
     public:
-        enum class Kind { None, Solid, Linear, Radial, Pattern };
+        enum class Kind { None, Solid, Linear, Radial, Pattern, Points };
 
         SketchPaint() = default;
         static SketchPaint none() { return SketchPaint(); }
         static SketchPaint solid(const SketchColor& color);
         static SketchPaint linear(const SketchGradient& gradient);
         static SketchPaint radial(const SketchGradient& gradient);
+        // A point gradient: colour points blending into each other across the object (gradient.points).
+        static SketchPaint points(const SketchGradient& gradient);
         // The pattern's tile (a SymbolDef: its box is the tile, its artwork what is repeated) at `scale` times its size and turned by
         // `angleDegrees`, anchored at the document origin. patternRef is the same before the definition is known (loading a file): it is
         // bound by bindPattern once the library is in.
@@ -128,6 +152,7 @@ namespace curvy {
         Kind kind() const { return kind_; }
         bool isNone() const { return kind_ == Kind::None; }
         bool isGradient() const { return kind_ == Kind::Linear || kind_ == Kind::Radial; }
+        bool isPoints() const { return kind_ == Kind::Points; }
         bool isPattern() const { return kind_ == Kind::Pattern; }
         const std::shared_ptr<const SymbolDef>& patternDef() const { return pattern_; }
         std::size_t patternId() const { return patternId_; }
@@ -148,7 +173,7 @@ namespace curvy {
             if (kind_ == Kind::Pattern) {
                 return patternId_ == other.patternId_ && pattern_ == other.pattern_ && patternScale_ == other.patternScale_ && patternAngle_ == other.patternAngle_;
             }
-            return isGradient() ? gradient_ == other.gradient_ : color_ == other.color_;
+            return isGradient() || isPoints() ? gradient_ == other.gradient_ : color_ == other.color_;
         }
         bool operator!=(const SketchPaint& other) const { return !(*this == other); }
 
@@ -494,6 +519,12 @@ namespace curvy {
         // Bounds of the outline measured in the rotated frame (points un-rotated by -frameAngle()
         // about the origin); equal to geometryBounds() while frameAngle() is 0.
         BLBox frameBounds() const;
+        // Paints (gradients, point gradients, patterns) are laid out on frameBounds() and carried to the page by this matrix.
+        // The sum of every transform applied to the outline (rotate, scale, shear, flip, move): paints are laid out on the outline as it
+        // was before them (paintFrameBounds()) and carried to the page by paintToPage(). A warp is not a matrix, so it is not in it.
+        const BLMatrix2D& paintToPage() const { return paintMatrix_; }
+        void setPaintMatrix(const BLMatrix2D& matrix) { paintMatrix_ = matrix; }
+        BLBox paintFrameBounds() const;
         // Moves every outline vertex (curve control points included) through `map` - how a perspective
         // warp is applied. Control points are mapped, not re-fitted, so strong distortion of a curve is approximate.
         void warp(const std::function<BLPoint(const BLPoint&)>& map);
@@ -569,6 +600,7 @@ namespace curvy {
         std::size_t activeStroke_ = 1;
         std::size_t activeEffect_ = 0;
         double frameAngle_ = 0.0;
+        BLMatrix2D paintMatrix_ = BLMatrix2D::make_identity();
         std::string text_;
         std::string fontName_;
         double fontSize_ = 24.0;

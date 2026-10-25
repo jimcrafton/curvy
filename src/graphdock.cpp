@@ -3,6 +3,7 @@
 #include "curvy/appearancenode.h"
 #include "curvy/numberscrubber.h"
 #include "curvy/pathnode.h"
+#include "curvy/stylepanel.h"
 #include "curvy/theme.h"
 
 #include <newui/bundle.h>
@@ -36,6 +37,7 @@ namespace curvy {
             if (nodeType == kTextNodeType) return "Text";
             if (nodeType == kSymbolNodeType) return "Symbol";
             if (nodeType == kImageNodeType) return "Image";
+            if (nodeType == kTransformNodeType) return "Transform";
             if (nodeType == kFillNodeType) return "Fill";
             if (nodeType == kStrokeNodeType) return "Stroke";
             if (nodeType == kEffectNodeType) return "Effect";
@@ -185,14 +187,21 @@ namespace curvy {
         for (std::size_t i = 0; i < kDetailRows; ++i) {
             DetailRow& row = detailRows_[i];
             row.caption = new Label();
+            row.caption->setName("graphDetailCaption" + std::to_string(i));
             row.caption->setVisible(false);
             detail_->addChild(row.caption);
             row.field = new TextField();
+            row.field->setName("graphDetailField" + std::to_string(i));
             row.field->setVisible(false);
             detail_->addChild(row.field);
             row.chip = new ColourChip();
+            row.chip->setName("graphDetailChip" + std::to_string(i));
             row.chip->setVisible(false);
             detail_->addChild(row.chip);
+            row.chip->onMouseDown += [this, i](View&, const Point&, std::uint32_t, std::uint32_t) {
+                editDetailColour(i);
+                return SyncReturn::Handled;
+            };
             row.slider = new Slider();
             row.slider->setRange(0.0f, 100.0f);
             row.slider->setVisible(false);
@@ -342,7 +351,9 @@ namespace curvy {
                 continue;
             }
             row.caption->setBounds(Rect(8.0f, y, kCaptionWidth, 20.0f));
-            if (row.kind == DetailRow::Kind::Colour) {
+            if (row.kind == DetailRow::Kind::Gradient) {
+                row.chip->setBounds(Rect(fieldLeft, y + 1.0f, fieldWidth, 18.0f));
+            } else if (row.kind == DetailRow::Kind::Colour) {
                 row.chip->setBounds(Rect(fieldLeft, y + 1.0f, 28.0f, 18.0f));
                 row.field->setBounds(Rect(fieldLeft + 34.0f, y, std::max(40.0f, fieldWidth - 34.0f), 20.0f));
             } else if (row.kind == DetailRow::Kind::Slider) {
@@ -504,6 +515,9 @@ namespace curvy {
     }
 
     std::size_t GraphDock::objectOfNode(jitnodes::NodeId node) const {
+        if (document_.network().node(node).typeName() == kTransformNodeType) {
+            node = document_.network().inputOf(node, 0);   // a transform node belongs to the shape it moves
+        }
         for (std::size_t i = 0; i < document_.objectCount(); ++i) {
             if (document_.object(i).graphNode() == node) {
                 return document_.object(i).id();
@@ -556,9 +570,17 @@ namespace curvy {
                 row.chipColor = paint.color().toRgba32().value & 0x00FFFFFFu;
                 row.chipAlpha = paint.color().alpha();
             } else if (paint.kind() == SketchPaint::Kind::Linear || paint.kind() == SketchPaint::Kind::Radial) {
-                row.summary = paint.kind() == SketchPaint::Kind::Linear ? "Linear gradient" : "Radial gradient";
+                row.radial = paint.kind() == SketchPaint::Kind::Radial;
+                for (const GradientStop& stop : paint.gradient().stops) {
+                    row.stops.emplace_back(stop.offset, stop.color.toRgba32().value);
+                }
+                if (row.stops.empty()) {
+                    row.summary = row.radial ? "Radial gradient" : "Linear gradient";
+                }
             } else if (paint.isPattern()) {
                 row.summary = "Pattern";
+            } else if (paint.isPoints()) {
+                row.summary = std::to_string(paint.gradient().points.size()) + " points";
             } else if (type == kFillNodeType) {
                 row.summary = "None";
             }
@@ -583,7 +605,10 @@ namespace curvy {
         const std::size_t objectId = objectOfNode(node);
         const SketchObject* object = objectId != 0 ? document_.findById(objectId) : nullptr;
         row.objectId = objectId;
-        if (object != nullptr) {
+        if (type == kTransformNodeType) {
+            row.text = typeLabel(type);
+            row.summary = "Placement";
+        } else if (object != nullptr) {
             row.text = !object->name().empty() ? object->name()
                 : object->isText() ? "\"" + object->text().substr(0, 24) + "\"" : std::string("<") + objectTypeName(object->type()) + ">";
             const SketchPaint& paint = object->isClosed() && !object->fill().isNone() ? object->fill() : object->stroke();
@@ -591,6 +616,11 @@ namespace curvy {
                 row.chip = true;
                 row.chipColor = paint.color().toRgba32().value & 0x00FFFFFFu;
                 row.chipAlpha = paint.color().alpha();
+            } else if (paint.isGradient() && !paint.gradient().stops.empty()) {
+                row.radial = paint.kind() == SketchPaint::Kind::Radial;
+                for (const GradientStop& stop : paint.gradient().stops) {
+                    row.stops.emplace_back(stop.offset, stop.color.toRgba32().value);
+                }
             } else if (object->isSymbol() && object->symbol()) {
                 row.summary = object->symbol()->name;
             } else if (object->isImage() && object->image()) {
@@ -876,7 +906,7 @@ namespace curvy {
             return std::string();
         }
         const DetailRow& row = detailRows_[index];
-        return row.kind == DetailRow::Kind::Slider ? row.percent->text() : wideToUtf8(row.field->text());
+        return row.kind == DetailRow::Kind::Slider ? row.percent->text() : wideToUtf8(row.field->text());   // a gradient row has no text
     }
 
     std::vector<std::string> GraphDock::detailLinks(bool inputs) const {
@@ -887,6 +917,34 @@ namespace curvy {
             }
         }
         return names;
+    }
+
+    bool GraphDock::editDetailColour(std::size_t index) {
+        if (index >= detailRows_.size() || (detailRows_[index].kind != DetailRow::Kind::Colour && detailRows_[index].kind != DetailRow::Kind::Gradient) ||
+            !detailRows_[index].chip->isVisible() || detailNode_ == 0) {
+            return false;
+        }
+        std::size_t objectId = 0;
+        const AppearanceItem* item = itemOfNode(detailNode_, &objectId);
+        SketchObject* object = document_.findById(objectId);
+        if (item == nullptr || object == nullptr) {
+            return false;
+        }
+        const AppearanceKind kind = item->kind;
+        const std::size_t at = std::size_t(item - object->appearance().data());
+        // Where the swatch is on the canvas; the card goes beside the dock rather than over it.
+        Point corner(0.0f, 0.0f);
+        for (const View* view = detailRows_[index].chip; view != nullptr && view != &canvas_; view = view->parent()) {
+            corner = Point(corner.x + view->bounds().left(), corner.y + view->bounds().top());
+        }
+        const Rect avoid = dock_->bounds();
+        document_.setSelection({objectId});
+        document_.setActiveItem(kind, at);
+        docks_.showCard(DockController::Card::Fill, corner, &avoid);
+        if (docks_.stylePanel() != nullptr) {
+            docks_.stylePanel()->setTarget(kind == AppearanceKind::Stroke ? StylePanel::Target::Stroke : StylePanel::Target::Fill);
+        }
+        return true;
     }
 
     bool GraphDock::selectNode(jitnodes::NodeId node) {
@@ -1020,8 +1078,26 @@ namespace curvy {
                 } catch (const std::exception&) {
                 }
             });
-        } else {
-            choice("Paint", "paint", {"None", "Solid", "Linear", "Radial", "Pattern"});
+        } else if ((paint == 2 || paint == 3) && item != nullptr) {
+            setGradientRow(at++, "Colours", item->paint, nullptr);
+        }
+        // The kinds of paint, by name: switching one keeps the look (see setPaintKind) rather than writing the number.
+        const std::vector<std::string> kinds = {"None", "Solid", "Linear", "Radial", "Pattern", "Points"};
+        setRow(at++, "Paint", kinds[std::size_t(std::clamp(paint, 0, 5))], [this, id, kinds](const std::string& value) {
+            for (std::size_t k = 0; k < kinds.size(); ++k) {
+                if (kinds[k] == value) {
+                    setPaintKind(id, int(k));
+                }
+            }
+        });
+        if (paint == 2) {
+            number("Angle", "angle", -10000.0);
+        }
+        if (paint == 2 || paint == 3) {
+            choice("Spread", "spread", {"pad", "repeat", "reflect"});
+        }
+        if (paint == 5 && item != nullptr) {
+            setRow(at++, "Points", std::to_string(item->paint.gradient().points.size()) + " (edit on the shape)", nullptr);
         }
         if (type == kStrokeNodeType) {
             number("Width", "width");
@@ -1070,6 +1146,52 @@ namespace curvy {
             row.maximum = maximum;
             row.scale = scale;
         }
+    }
+
+    void GraphDock::setGradientRow(std::size_t index, const std::string& caption, const SketchPaint& paint, std::function<void(const std::string&)> apply) {
+        if (index >= detailRows_.size()) {
+            return;
+        }
+        setRow(index, caption, "", std::move(apply));
+        DetailRow& row = detailRows_[index];
+        row.kind = DetailRow::Kind::Gradient;
+        row.field->setVisible(false);
+        std::vector<std::pair<double, std::uint32_t>> stops;
+        for (const GradientStop& stop : paint.gradient().stops) {
+            stops.emplace_back(stop.offset, stop.color.toRgba32().value);
+        }
+        row.chip->setGradient(std::move(stops), paint.kind() == SketchPaint::Kind::Radial);
+        row.chip->setVisible(true);
+    }
+
+    void GraphDock::setPaintKind(jitnodes::NodeId id, int kind) {
+        std::size_t objectId = 0;
+        const AppearanceItem* item = itemOfNode(id, &objectId);
+        if (item == nullptr || kind < 0 || kind > 5) {
+            return;
+        }
+        AppearanceItem next = *item;
+        const SketchPaint& was = item->paint;
+        const SketchColor colour = was.isNone() ? SketchColor::gray(item->kind == AppearanceKind::Stroke ? 0.0f : 1.0f) : was.color();
+        if (kind == 0) {
+            next.paint = SketchPaint::none();
+        } else if (kind == 1) {
+            next.paint = SketchPaint::solid(colour);
+        } else if (kind == 2 || kind == 3) {
+            const SketchGradient gradient = was.isGradient() && !was.gradient().stops.empty() ? was.gradient() : SketchGradient::fromColor(colour);
+            next.paint = kind == 2 ? SketchPaint::linear(gradient) : SketchPaint::radial(gradient);
+        } else if (kind == 5) {
+            next.paint = was.isPoints() ? was : SketchPaint::points(SketchGradient::pointsFromColor(colour));
+        } else if (!document_.patterns().empty()) {
+            next.paint = SketchPaint::pattern(document_.patterns().front());
+        } else {
+            return;   // nothing to repeat: the document has no pattern in its library
+        }
+        const AppearanceParams params = paramsOf(next);
+        const jitnodes::GraphSnapshot before = document_.snapshotGraph();
+        store(document_.network().node(id), params);
+        document_.network().markDirty(id);
+        document_.commitGraphEdit(before, "Change Paint");
     }
 
     void GraphDock::showLinks(jitnodes::NodeId id) {

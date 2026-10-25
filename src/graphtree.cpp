@@ -99,24 +99,54 @@ namespace curvy {
         return std::any();
     }
 
-    void paintColourChip(BLContext& ctx, double x, double y, double width, double height, std::uint32_t color, double alpha) {
-        ctx.save();
-        ctx.clip_to_rect(BLRect(x, y, width, height));
-        ctx.fill_rect(BLRect(x, y, width, height), rgb(0xBBBBBB));
-        const double cell = height * 0.5;
-        for (int i = 0; x + i * cell < x + width; ++i) {
-            for (int j = 0; j < 2; ++j) {
-                if ((i + j) % 2 == 0) {
-                    ctx.fill_rect(BLRect(x + i * cell, y + j * cell, cell, cell), rgb(0x777777));
+    namespace {
+        // A checkerboard, so a partly transparent paint reads as such.
+        void paintChipBase(BLContext& ctx, double x, double y, double width, double height) {
+            ctx.save();
+            ctx.clip_to_rect(BLRect(x, y, width, height));
+            ctx.fill_rect(BLRect(x, y, width, height), rgb(0xBBBBBB));
+            const double cell = height * 0.5;
+            for (int i = 0; x + i * cell < x + width; ++i) {
+                for (int j = 0; j < 2; ++j) {
+                    if ((i + j) % 2 == 0) {
+                        ctx.fill_rect(BLRect(x + i * cell, y + j * cell, cell, cell), rgb(0x777777));
+                    }
                 }
             }
+            ctx.restore();
         }
+
+        void paintChipBorder(BLContext& ctx, double x, double y, double width, double height) {
+            ctx.save();
+            ctx.set_stroke_style(rgb(Theme::current().border));
+            ctx.stroke_rect(BLRect(x + 0.5, y + 0.5, width - 1.0, height - 1.0));
+            ctx.restore();
+        }
+    }
+
+    void paintColourChip(BLContext& ctx, double x, double y, double width, double height, std::uint32_t color, double alpha) {
+        paintChipBase(ctx, x, y, width, height);
+        ctx.save();
+        ctx.clip_to_rect(BLRect(x, y, width, height));
         ctx.fill_rect(BLRect(x, y, width, height), rgb(color, std::uint32_t(std::lround(std::clamp(alpha, 0.0, 1.0) * 255.0))));
         ctx.restore();
-        ctx.save();
-        ctx.set_stroke_style(rgb(Theme::current().border));
-        ctx.stroke_rect(BLRect(x + 0.5, y + 0.5, width - 1.0, height - 1.0));
-        ctx.restore();
+        paintChipBorder(ctx, x, y, width, height);
+    }
+
+    void paintGradientChip(BLContext& ctx, double x, double y, double width, double height, const std::vector<std::pair<double, std::uint32_t>>& stops, bool radial) {
+        paintChipBase(ctx, x, y, width, height);
+        if (!stops.empty()) {
+            BLGradient gradient = radial ? BLGradient(BLRadialGradientValues(x + width * 0.5, y + height * 0.5, x + width * 0.5, y + height * 0.5, std::max(width, height) * 0.5))
+                                         : BLGradient(BLLinearGradientValues(x, y, x + width, y));
+            for (const auto& [offset, argb] : stops) {
+                gradient.add_stop(std::clamp(offset, 0.0, 1.0), BLRgba32(argb));
+            }
+            ctx.save();
+            ctx.clip_to_rect(BLRect(x, y, width, height));
+            ctx.fill_rect(BLRect(x, y, width, height), gradient);
+            ctx.restore();
+        }
+        paintChipBorder(ctx, x, y, width, height);
     }
 
     ColourChip::ColourChip() {
@@ -126,12 +156,23 @@ namespace curvy {
     void ColourChip::setColour(std::uint32_t color, double alpha) {
         rgb_ = color;
         alpha_ = alpha;
+        stops_.clear();
+        style().markDirty();
+    }
+
+    void ColourChip::setGradient(std::vector<std::pair<double, std::uint32_t>> stops, bool radial) {
+        stops_ = std::move(stops);
+        radial_ = radial;
         style().markDirty();
     }
 
     void ColourChip::paint(BLContext& ctx) {
         const Rect client = getClientBounds();
-        paintColourChip(ctx, client.left(), client.top(), client.width(), client.height(), rgb_, alpha_);
+        if (!stops_.empty()) {
+            paintGradientChip(ctx, client.left(), client.top(), client.width(), client.height(), stops_, radial_);
+        } else {
+            paintColourChip(ctx, client.left(), client.top(), client.width(), client.height(), rgb_, alpha_);
+        }
     }
 
     void GraphTreeItem::paint(BLContext& ctx, const Rect& rect, const std::vector<std::size_t>& path, TreeController& controller) {
@@ -157,9 +198,13 @@ namespace curvy {
         const Rect client = clientBounds();
         double right = client.left() + client.size().width - kRightMargin;
         const double centerY = client.top() + client.size().height * 0.5;
-        if (row->chip) {
+        if (row->chip || !row->stops.empty()) {
             const double x = right - kChipWidth, y = centerY - kChipHeight * 0.5;
-            paintColourChip(ctx, x, y, kChipWidth, kChipHeight, row->chipColor, row->chipAlpha);
+            if (row->stops.empty()) {
+                paintColourChip(ctx, x, y, kChipWidth, kChipHeight, row->chipColor, row->chipAlpha);
+            } else {
+                paintGradientChip(ctx, x, y, kChipWidth, kChipHeight, row->stops, row->radial);
+            }
             right = x - 6.0;
         }
         if (!row->summary.empty()) {

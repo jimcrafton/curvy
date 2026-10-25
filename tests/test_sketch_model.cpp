@@ -843,6 +843,46 @@ TEST(SketchGradient, GradientEditsUndoLikeAnyStyle) {
     EXPECT_FALSE(doc.findById(a)->fill().isGradient());
 }
 
+namespace {
+    SketchGradient redAndBluePoints() {
+        SketchGradient gradient;
+        gradient.points.push_back({0.1, 0.5, SketchColor::fromHex("#ff0000"), 0.3});
+        gradient.points.push_back({0.9, 0.5, SketchColor::fromHex("#0000ff"), 0.3});
+        return gradient;
+    }
+}
+
+TEST(SketchGradient, PointsBlendTowardTheNearestColour) {
+    std::unique_ptr<SketchObject> rect(SketchObject::makeRect(0, 0, 100, 40));
+    rect->setStroke(SketchPaint::none());
+    rect->setFill(SketchPaint::points(redAndBluePoints()));
+    ASSERT_TRUE(rect->fill().isPoints());
+    EXPECT_FALSE(rect->fill().isGradient());
+    std::vector<std::uint32_t> px = render(*rect, 100, 40);
+    const std::uint32_t red = px[20 * 100 + 10], middle = px[20 * 100 + 50], blue = px[20 * 100 + 90];
+    EXPECT_GT((red >> 16) & 0xFF, 220u);
+    EXPECT_LT(red & 0xFF, 40u);
+    EXPECT_GT(blue & 0xFF, 220u);
+    EXPECT_LT((blue >> 16) & 0xFF, 40u);
+    EXPECT_GT((middle >> 16) & 0xFF, 80u) << "halfway both colours show";
+    EXPECT_GT(middle & 0xFF, 80u);
+}
+
+TEST(SketchGradient, PointsFollowTheObjectAndHaveEquality) {
+    std::unique_ptr<SketchObject> rect(SketchObject::makeRect(0, 0, 100, 40));
+    rect->setStroke(SketchPaint::none());
+    rect->setFill(SketchPaint::points(redAndBluePoints()));
+    rect->transform(BLMatrix2D::make_translation(100, 0));
+    std::vector<std::uint32_t> px = render(*rect, 200, 40);
+    EXPECT_GT((px[20 * 200 + 110] >> 16) & 0xFF, 220u);
+    EXPECT_GT(px[20 * 200 + 190] & 0xFF, 220u);
+    SketchGradient moved = redAndBluePoints();
+    EXPECT_EQ(SketchPaint::points(redAndBluePoints()), SketchPaint::points(moved));
+    moved.points[0].x = 0.2;
+    EXPECT_NE(SketchPaint::points(redAndBluePoints()), SketchPaint::points(moved));
+    EXPECT_NE(SketchPaint::points(redAndBluePoints()), SketchPaint::linear(redAndBluePoints()));
+}
+
 TEST(SketchGradient, ExplicitAxisIsKeptRelativeToTheBox) {
     SketchGradient gradient = redToBlue();
     BLBox box(10, 20, 110, 70);  // 100 x 50
@@ -1721,6 +1761,63 @@ TEST(SketchSvg, GradientsRoundTrip) {
     EXPECT_EQ(fill.gradient().stops[1].color.space(), ColorSpace::CMYK);
     EXPECT_NEAR(fill.gradient().stops[2].color.alpha(), 0.5f, 0.01f);
     EXPECT_EQ(copy.object(0).stroke().kind(), SketchPaint::Kind::Radial);
+}
+
+TEST(SketchSvg, PointGradientsSurviveSvgAndBinary) {
+    SketchDocument doc;
+    SketchObject& o = doc.add(SketchObject::makeRect(10, 10, 100, 50));
+    SketchGradient g = redAndBluePoints();
+    g.points.push_back({0.5, 0.25, SketchColor::cmyk(0.1f, 0.2f, 0.3f, 0.4f, 0.5f), 0.2});
+    o.setFill(SketchPaint::points(g));
+    o.setStroke(SketchPaint::points(redAndBluePoints()));
+
+    SketchDocument copy = roundTrip(doc);
+    ASSERT_EQ(copy.objectCount(), 1u);
+    ASSERT_TRUE(copy.object(0).fill().isPoints());
+    ASSERT_EQ(copy.object(0).fill().gradient().points.size(), 3u);
+    EXPECT_NEAR(copy.object(0).fill().gradient().points[2].x, 0.5, 1e-5);
+    EXPECT_NEAR(copy.object(0).fill().gradient().points[2].radius, 0.2, 1e-5);
+    EXPECT_EQ(copy.object(0).fill().gradient().points[2].color.space(), ColorSpace::CMYK);
+    EXPECT_NEAR(copy.object(0).fill().gradient().points[2].color.alpha(), 0.5f, 0.01f);
+    EXPECT_TRUE(copy.object(0).stroke().isPoints());
+
+    SketchDocument fromBinary;
+    fromBinary.add(SketchObject::makeRect(0, 0, 1, 1));
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc, true), fromBinary));
+    ASSERT_EQ(fromBinary.objectCount(), 1u);
+    EXPECT_EQ(fromBinary.object(0).fill(), doc.object(0).fill());
+    EXPECT_EQ(fromBinary.object(0).stroke(), doc.object(0).stroke());
+}
+
+TEST(SketchObject, PaintsFollowEveryTransformAndSurviveFiles) {
+    SketchDocument doc;
+    SketchObject& o = doc.add(SketchObject::makeRect(10, 10, 100, 50));
+    o.setFill(SketchPaint::points(redAndBluePoints()));
+    o.transform(BLMatrix2D(1.0, 0.0, 0.5, 1.0, 0.0, 0.0));   // a shear
+    o.transform(BLMatrix2D::make_translation(30.0, 5.0));
+
+    const BLBox frame = o.paintFrameBounds();
+    EXPECT_NEAR(frame.x0, 10.0, 1e-9);
+    EXPECT_NEAR(frame.x1, 110.0, 1e-9);
+    EXPECT_NEAR(frame.y0, 10.0, 1e-9);
+    EXPECT_NEAR(frame.y1, 60.0, 1e-9);
+    EXPECT_NEAR(o.paintToPage().m10, 0.5, 1e-12);
+
+    SketchObject* copy = o.clone();
+    EXPECT_NEAR(copy->paintToPage().m20, 30.0, 1e-12);
+    delete copy;
+
+    SketchDocument viaSvg = roundTrip(doc);
+    ASSERT_EQ(viaSvg.objectCount(), 1u);
+    EXPECT_NEAR(viaSvg.object(0).paintToPage().m10, 0.5, 1e-5);
+    EXPECT_NEAR(viaSvg.object(0).paintToPage().m21, 5.0, 1e-5);
+
+    SketchDocument viaBinary;
+    viaBinary.add(SketchObject::makeRect(0, 0, 1, 1));
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc, true), viaBinary));
+    ASSERT_EQ(viaBinary.objectCount(), 1u);
+    EXPECT_NEAR(viaBinary.object(0).paintToPage().m10, 0.5, 1e-12);
+    EXPECT_NEAR(viaBinary.object(0).paintToPage().m20, 30.0, 1e-12);
 }
 
 TEST(SketchSvg, GradientAxisRoundTripsAndFollowsTheObject) {
@@ -6225,6 +6322,14 @@ TEST(LiveShape, SurvivesSvgRoundTrip) {
 
 namespace {
 // True when every object has exactly one curvyPath node, holding its outline, and no other curvyPath node exists.
+BLPath drawn(const SketchObject& object) {
+    BLMatrix2D back = object.paintToPage();
+    back.invert();
+    BLPath path = object.geometry();
+    path.transform(back);
+    return path;
+}
+
 bool pathNodesMatch(const SketchDocument& doc) {
     std::size_t nodes = 0;
     for (jitnodes::NodeId id : doc.network().nodeIds()) {
@@ -6235,7 +6340,7 @@ bool pathNodesMatch(const SketchDocument& doc) {
     for (std::size_t i = 0; i < doc.objectCount(); ++i) {
         const SketchObject& object = doc.object(i);
         if (object.graphNode() == 0 || doc.network().node(object.graphNode()).typeName() != shapeNodeType(object) ||
-            !sameCurveShape(*doc.network().node(object.graphNode()).geometryParam("curve"), *geometryFromPath(object.geometry()), 1e-4)) {
+            !sameCurveShape(*doc.network().node(object.graphNode()).geometryParam("curve"), *geometryFromPath(drawn(object)), 1e-4)) {
             return false;
         }
     }
@@ -6325,7 +6430,7 @@ TEST(PathNode, EveryObjectHasANodeThroughEdits) {
     const jitnodes::NodeId node = doc.findById(a)->graphNode();
     doc.deleteSelection();
     EXPECT_TRUE(pathNodesMatch(doc));
-    EXPECT_EQ(doc.network().nodeIds().size(), 3u) << "the other object's shape, fill and stroke";
+    EXPECT_EQ(doc.network().nodeIds().size(), 4u) << "the other object's shape, transform, fill and stroke";
     doc.undoStack().undo();
     ASSERT_NE(doc.findById(a), nullptr);
     EXPECT_EQ(doc.findById(a)->graphNode(), node);
@@ -6437,7 +6542,8 @@ TEST(PathNode, AttributesOnAnchorsSurviveMovesAndUndo) {
     doc.commitGeometry(before, "Move");
     ASSERT_NE(doc.network().node(node).geometryParam("curve")->findAttrib(jitnodes::AttribClass::point, "pressure"), nullptr);
     EXPECT_NEAR(pressure(0), 0.25f, 1e-6f);
-    EXPECT_NEAR(doc.network().node(node).geometryParam("curve")->x()[0], 100.0f, 1e-4f);
+    EXPECT_NEAR(doc.network().node(node).geometryParam("curve")->x()[0], 0.0f, 1e-4f);   // the curve stays as drawn; the transform node holds the move
+    EXPECT_NEAR(doc.findById(id)->paintToPage().m20, 100.0, 1e-9);
     doc.undoStack().undo();
     EXPECT_NEAR(doc.network().node(node).geometryParam("curve")->x()[0], 0.0f, 1e-4f);
     EXPECT_NEAR(pressure(3), 0.75f, 1e-6f);
@@ -6465,6 +6571,50 @@ TEST(PathNode, AFileWithoutAGraphGetsNodesOnLoad) {
     SketchDocument loaded;
     ASSERT_TRUE(documentFromSvg(svg, loaded));
     EXPECT_TRUE(pathNodesMatch(loaded));
+}
+
+TEST(TransformNode, HoldsWhereTheObjectSitsAndEditsBothWays) {
+    SketchDocument doc;
+    const std::size_t id = doc.add(SketchObject::makeRect(10, 10, 100, 50)).id();
+    const jitnodes::NodeId shape = doc.findById(id)->graphNode();
+    auto placeOf = [&]() {
+        for (jitnodes::NodeId n : doc.network().nodeIds()) {
+            if (doc.network().node(n).typeName() == kTransformNodeType && doc.network().inputOf(n, 0) == shape) {
+                return n;
+            }
+        }
+        return jitnodes::invalidNodeId;
+    };
+    const jitnodes::NodeId place = placeOf();
+    ASSERT_NE(place, jitnodes::invalidNodeId);
+
+    doc.setSelection({id});
+    doc.transformObjects({id}, BLMatrix2D(1.0, 0.0, 0.5, 1.0, 40.0, 7.0), "Shear");
+    const BLMatrix2D held = transformOf(doc.network().node(place));
+    EXPECT_NEAR(held.m10, 0.5, 1e-6);
+    EXPECT_NEAR(held.m20, 40.0, 1e-4);
+    EXPECT_NEAR(doc.network().node(shape).geometryParam("curve")->x()[0], 10.0f, 1e-4f) << "the shape node keeps the outline as drawn";
+    const jitnodes::GeometryHandle out = doc.cook(place);
+    BLBox box = doc.findById(id)->geometryBounds();
+    float minX = out->x()[0], maxX = out->x()[0];
+    for (std::size_t i = 0; i < out->pointCount(); ++i) {
+        minX = std::min(minX, out->x()[i]);
+        maxX = std::max(maxX, out->x()[i]);
+    }
+    EXPECT_NEAR(minX, box.x0, 1e-3);
+    EXPECT_NEAR(maxX, box.x1, 1e-3);
+
+    doc.setGraphParam(place, "e", 100.0f);
+    EXPECT_NEAR(doc.findById(id)->paintToPage().m20, 100.0, 1e-4);
+    EXPECT_NEAR(doc.findById(id)->geometryBounds().x0, box.x0 + 60.0, 1e-3) << "editing the matrix in the graph moves the object";
+    doc.undoStack().undo();
+    EXPECT_NEAR(doc.findById(id)->geometryBounds().x0, box.x0, 1e-3);
+    EXPECT_NEAR(doc.findById(id)->paintToPage().m20, 40.0, 1e-4);
+
+    SketchDocument copy = roundTrip(doc);
+    ASSERT_EQ(copy.objectCount(), 1u);
+    EXPECT_NEAR(copy.object(0).paintToPage().m10, 0.5, 1e-5);
+    EXPECT_NEAR(copy.object(0).geometryBounds().x0, box.x0, 1e-3);
 }
 
 TEST(PathNode, AThousandsObjectDocumentStaysResponsive) {
@@ -6496,6 +6646,12 @@ std::vector<jitnodes::NodeId> lookNodes(const SketchDocument& doc, std::size_t o
     const jitnodes::Network& net = doc.network();
     std::vector<jitnodes::NodeId> chain;
     jitnodes::NodeId at = doc.findById(objectId)->graphNode();
+    for (jitnodes::NodeId id : net.nodeIds()) {
+        if (net.node(id).typeName() == kTransformNodeType && net.inputOf(id, 0) == at) {
+            at = id;   // the transform node sits between the shape and its looks
+            break;
+        }
+    }
     for (bool found = true; found;) {
         found = false;
         for (jitnodes::NodeId id : net.nodeIds()) {
@@ -6543,7 +6699,8 @@ TEST(AppearanceNode, EveryObjectHasAFillAndStrokeNodeChainedAfterItsShape) {
     ASSERT_EQ(chain.size(), 2u);
     EXPECT_EQ(doc.network().node(chain[0]).typeName(), kFillNodeType);
     EXPECT_EQ(doc.network().node(chain[1]).typeName(), kStrokeNodeType);
-    EXPECT_EQ(doc.network().inputOf(chain[0], 0), doc.findById(a)->graphNode());
+    EXPECT_EQ(doc.network().node(doc.network().inputOf(chain[0], 0)).typeName(), kTransformNodeType);
+    EXPECT_EQ(doc.network().inputOf(doc.network().inputOf(chain[0], 0), 0), doc.findById(a)->graphNode());
     EXPECT_EQ(doc.network().inputOf(chain[1], 0), chain[0]);
     EXPECT_EQ(doc.cook(chain[1])->primitiveCount(), 1u) << "the shape passes through the look nodes";
 }
@@ -6632,6 +6789,38 @@ TEST(AppearanceNode, EverythingALookHoldsSurvivesTheNode) {
     EXPECT_EQ(doc.findById(object.id())->appearance()[0].paint.gradient().stops.size(), 3u);
     EXPECT_EQ(doc.findById(object.id())->appearance()[1].strokeOptions.dashes.size(), 3u);
     EXPECT_TRUE(looksMatch(doc));
+}
+
+TEST(AppearanceNode, PointGradientsAreATableOnTheNodeAndEditBothWays) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 100, 50)).id();
+    doc.setSelection({a});
+    const auto before = doc.snapshotStyle();
+    SketchGradient gradient = redAndBluePoints();
+    doc.setSelectionFill(SketchPaint::points(gradient));
+    doc.commitStyle(before, "Points");
+    EXPECT_TRUE(looksMatch(doc));
+    const std::vector<jitnodes::NodeId> chain = lookNodes(doc, a);
+    ASSERT_FALSE(chain.empty());
+    jitnodes::Node& fill = doc.network().node(chain[0]);
+    EXPECT_EQ(int(fill.baseFloat("paint")), 5);
+    ASSERT_TRUE(fill.hasGeometryParam("points"));
+    EXPECT_EQ(fill.geometryParam("points")->pointCount(), 2u);
+
+    // Moving a point on the shape writes the node; the node's table reads back as the same points.
+    gradient.points[0].x = 0.25;
+    const auto move = doc.snapshotStyle();
+    doc.setSelectionFill(SketchPaint::points(gradient));
+    doc.commitStyle(move, "Move point");
+    EXPECT_TRUE(looksMatch(doc));
+    EXPECT_DOUBLE_EQ(doc.findById(a)->fill().gradient().points[0].x, 0.25);
+
+    // Editing the node's table moves the point on the shape.
+    auto table = std::make_shared<jitnodes::Geometry>(*doc.network().node(chain[0]).geometryParam("points"));
+    table->pointAttrib("x")[1] = 0.75f;
+    doc.setGraphGeometry(chain[0], "points", table);
+    EXPECT_NEAR(doc.findById(a)->fill().gradient().points[1].x, 0.75, 1e-6);
+    EXPECT_EQ(doc.findById(a)->fill().gradient().points.size(), 2u);
 }
 
 TEST(AppearanceNode, AddingAndRemovingItemsAddsAndRemovesNodes) {

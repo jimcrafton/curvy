@@ -156,6 +156,42 @@ class GraphDock(CurvyCase):
         self.app.click_segment("graphModeControl", 0)
         self.app.wait_until(lambda: "Layers and groups" in self.app.prop("graphStatus", "text"), "the Document view")
 
+    def test_dragging_a_caption_in_the_box_scrubs_the_number(self):
+        self.new_a4()
+        self.app.click("toolbarToggle")
+        canvas = self.app.find("canvas")
+        self.app.click("rectangleTool")
+        self.app.drag((canvas.x + 300, canvas.y + 200), (canvas.x + 420, canvas.y + 280))
+        self.app.click("selectTool")
+        self.app.click("graphToggle")
+        self.app.wait_until(lambda: self.app.prop("graphToggle", "checked"), "the toggle to check")
+        tree = self.app.find("graphTree")
+        self.app.click_at((tree.x + 120, tree.y + 2 * 22 + 11))         # the rectangle's Stroke row (layer, rectangle, stroke, fill)
+        self.app.wait_until(lambda: self.app.prop("graphDetailCaption2", "text") == "Width", "the stroke's box")
+        before = float(self.app.prop("graphDetailField2", "text"))
+        caption = self.app.find("graphDetailCaption2")
+        self.app.drag((caption.x + caption.w // 2, caption.y + caption.h // 2), (caption.x + caption.w // 2 + 12, caption.y + caption.h // 2))
+        self.app.wait_until(lambda: float(self.app.prop("graphDetailField2", "text")) > before + 5, "the width to follow the drag")
+        self.app.key("ctrl+z")
+        self.app.wait_until(lambda: float(self.app.prop("graphDetailField2", "text")) == before, "one undo to bring the width back")
+
+    def test_clicking_the_colour_swatch_of_a_fill_opens_the_colour_card(self):
+        self.new_a4()
+        self.app.click("toolbarToggle")
+        canvas = self.app.find("canvas")
+        self.app.click("rectangleTool")
+        self.app.drag((canvas.x + 300, canvas.y + 200), (canvas.x + 420, canvas.y + 280))
+        self.app.click("selectTool")
+        self.app.click("graphToggle")
+        self.app.wait_until(lambda: self.app.prop("graphToggle", "checked"), "the toggle to check")
+        tree = self.app.find("graphTree")
+        self.app.click_at((tree.x + 120, tree.y + 3 * 22 + 11))         # the rectangle's Fill row (layer, rectangle, stroke, fill)
+        self.app.wait_until(lambda: self.app.prop("graphDetailCaption0", "text") == "Colour", "the fill's box")
+        self.app.click("graphDetailChip0")
+        self.app.wait_until(lambda: self.app.find("cardClose").visible, "the Colour card to open")
+        card = self.app.find("cardClose")
+        self.assertLess(card.x, tree.x)                                  # beside the graph dock, not over it
+
     def test_the_view_ring_has_a_graph_slot(self):
         self.new_a4()
         canvas = self.app.find("canvas")

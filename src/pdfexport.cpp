@@ -72,7 +72,7 @@ namespace curvy {
             std::string graphicsState(double fillAlpha, double strokeAlpha, BlendMode blend);
             std::string imageObject(const BLImage& image);   // the XObject's name; the picture is premultiplied RGB32
             std::string addForm(const std::string& content, const BLBox& box);
-            std::string shadingPattern(const SketchGradient& gradient, bool radial, const BLBox& box);
+            std::string shadingPattern(const SketchGradient& gradient, bool radial, const BLBox& box, const BLMatrix2D& toPage);
             std::string tilingPattern(const SketchPaint& paint);
             int gradientFunction(const SketchGradient& gradient);
 
@@ -83,6 +83,8 @@ namespace curvy {
             void pathOps(std::string& out, const BLPath& path);
             std::string fillPath(const BLPath& path, const SketchPaint& paint, double opacity, BlendMode blend);
             std::string drawItem(const SketchObject& object, std::size_t index);
+            std::string drawItemBody(const SketchObject& object, std::size_t index);
+            const SketchObject* painting_ = nullptr;   // the object whose item is being drawn: its gradients follow its turned frame
             std::string drawBrush(const SketchObject& object, const AppearanceItem& item, std::size_t index);
             std::string drawParts(const std::vector<BrushPart>& parts, double opacity);
             std::string drawObject(const SketchObject& object);
@@ -197,7 +199,7 @@ namespace curvy {
             return add("<< /FunctionType 3 /Domain [0 1] /Functions [" + functions + "] /Bounds [" + bounds + "] /Encode [" + encode + "] >>");
         }
 
-        std::string Writer::shadingPattern(const SketchGradient& gradient, bool radial, const BLBox& box) {
+        std::string Writer::shadingPattern(const SketchGradient& gradient, bool radial, const BLBox& box, const BLMatrix2D& toPage) {
             BLPoint start, end;
             gradient.axisPoints(box, radial, start, end);
             const int function = gradientFunction(gradient);
@@ -212,6 +214,7 @@ namespace curvy {
             if (gradient.hasAxis && (gradient.axisSkew != 0.0 || (radial && gradient.axisAspect != 1.0))) {
                 matrix = gradient.axisMatrix(start, end, radial);
             }
+            matrix.post_transform(toPage);
             matrix.post_transform(patternBase_);
             const int pattern = add("<< /Type /Pattern /PatternType 2 /Shading " + std::to_string(shading) + " 0 R /Matrix [" + matrixText(matrix) + "] >>");
             const std::string name = "P" + std::to_string(patterns_.size() + 1);
@@ -281,7 +284,9 @@ namespace curvy {
                 return true;
             }
             if (paint.isGradient() && !paint.gradient().stops.empty()) {
-                const std::string name = shadingPattern(paint.gradient(), paint.kind() == SketchPaint::Kind::Radial, box);
+                const std::string name = painting_ != nullptr
+                    ? shadingPattern(paint.gradient(), paint.kind() == SketchPaint::Kind::Radial, painting_->paintFrameBounds(), painting_->paintToPage())
+                    : shadingPattern(paint.gradient(), paint.kind() == SketchPaint::Kind::Radial, box, BLMatrix2D::make_identity());
                 out += std::string("/Pattern ") + (stroke ? "CS" : "cs") + " /" + name + (stroke ? " SCN\n" : " scn\n");
                 return true;
             }
@@ -393,6 +398,13 @@ namespace curvy {
         }
 
         std::string Writer::drawItem(const SketchObject& object, std::size_t index) {
+            painting_ = &object;
+            std::string out = drawItemBody(object, index);
+            painting_ = nullptr;
+            return out;
+        }
+
+        std::string Writer::drawItemBody(const SketchObject& object, std::size_t index) {
             const AppearanceItem& item = object.appearance()[index];
             if (item.kind == AppearanceKind::Fill) {
                 return object.isClosed() ? fillPath(object.itemOutline(index), item.paint, item.opacity, item.blendMode) : std::string();

@@ -51,6 +51,7 @@ namespace curvy {
         for (const GeometryState& entry : dragBefore_) {
             if (SketchObject* object = document_->findById(entry.id)) {
                 object->setGeometry(entry.path);
+                object->setPaintMatrix(entry.paintMatrix);
                 object->setTextMatrix(entry.textMatrix);
                 object->transform(matrix);
                 object->setFrameAngle(angleScale * entry.angle + angleOffset);

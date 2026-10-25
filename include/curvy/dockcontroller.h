@@ -61,6 +61,7 @@ namespace curvy {
         // The card's x was pressed: the host puts focus back on the canvas so Space still opens the ring.
         std::function<void()> onCardDismissed;
         Card card() const { return card_; }
+        newui::Rect cardBounds() const { return cardHost_ != nullptr ? cardHost_->bounds() : newui::Rect(); }
         bool cardContains(const newui::Point& pt) const;
 
         // A double-click on a tool button asks for that tool's options, with the point (canvas coordinates) just right of the button; the

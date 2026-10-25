@@ -109,8 +109,17 @@ namespace curvy {
             out << "/>\n";
         }
 
+        // Where an object's paints sit (SketchObject::paintToPage), written only when it is not the identity.
+        std::string paintMatrixAttr(const SketchObject& object) {
+            const BLMatrix2D& m = object.paintToPage();
+            if (m.m00 == 1.0 && m.m01 == 0.0 && m.m10 == 0.0 && m.m11 == 1.0 && m.m20 == 0.0 && m.m21 == 0.0) {
+                return std::string();
+            }
+            return " data-paint-matrix=\"" + num(m.m00) + " " + num(m.m01) + " " + num(m.m10) + " " + num(m.m11) + " " + num(m.m20) + " " + num(m.m21) + "\"";
+        }
+
         // The attribute(s) for one paint ("fill" or "stroke"); a gradient adds its element to `defs`.
-        std::string paintAttrs(const char* name, const SketchPaint& paint, const BLBox& box, std::ostringstream& defs, int& gradientCount) {
+        std::string paintAttrs(const char* name, const SketchPaint& paint, const BLBox& box, std::ostringstream& defs, int& gradientCount, const BLMatrix2D& toPage = BLMatrix2D::make_identity()) {
             std::string prefix = name;
             std::ostringstream out;
             if (paint.isNone()) {
@@ -133,11 +142,18 @@ namespace curvy {
                 }
                 // The squash (radial aspect) and lean (skew) go out as a standard gradientTransform so other viewers
                 // draw them too, plus our own numbers to read back exactly.
+                // The axis lies in the object's turned frame, so a turned object also carries its rotation here.
                 std::string shape;
-                if (g.hasAxis && (g.axisSkew != 0.0 || (!linear && g.axisAspect != 1.0))) {
-                    BLMatrix2D m = g.axisMatrix(start, end, !linear);
+                const bool shaped = g.hasAxis && (g.axisSkew != 0.0 || (!linear && g.axisAspect != 1.0));
+                const bool placed = !(toPage.m00 == 1.0 && toPage.m01 == 0.0 && toPage.m10 == 0.0 && toPage.m11 == 1.0 && toPage.m20 == 0.0 && toPage.m21 == 0.0);
+                if (shaped || placed) {
+                    BLMatrix2D m = shaped ? g.axisMatrix(start, end, !linear) : BLMatrix2D::make_identity();
+                    m.post_transform(toPage);
                     shape = " gradientTransform=\"matrix(" + num(m.m00) + " " + num(m.m01) + " " + num(m.m10) + " " + num(m.m11) + " " +
-                        num(m.m20) + " " + num(m.m21) + ")\" data-aspect=\"" + num(g.axisAspect) + "\" data-skew=\"" + num(g.axisSkew) + "\"";
+                        num(m.m20) + " " + num(m.m21) + ")\"";
+                    if (shaped) {
+                        shape += " data-aspect=\"" + num(g.axisAspect) + "\" data-skew=\"" + num(g.axisSkew) + "\"";
+                    }
                 }
                 if (g.alongStroke) {
                     shape += " data-along-stroke=\"1\"";
@@ -149,7 +165,7 @@ namespace curvy {
                 } else {
                     defs << "<radialGradient id=\"" << id << "\" gradientUnits=\"userSpaceOnUse\" cx=\"" << num(start.x) << "\" cy=\"" << num(start.y)
                          << "\" fx=\"" << num(start.x) << "\" fy=\"" << num(start.y) << "\" r=\"" << num(std::hypot(end.x - start.x, end.y - start.y))
-                         << "\" spreadMethod=\"" << spread << "\"" << axis << shape << ">\n";
+                         << "\" spreadMethod=\"" << spread << "\" data-angle=\"" << num(g.angleDegrees) << "\"" << axis << shape << ">\n";
                 }
                 for (const GradientStop& stop : g.stops) {
                     defs << "  ";
@@ -157,6 +173,17 @@ namespace curvy {
                 }
                 defs << (paint.kind() == SketchPaint::Kind::Linear ? "</linearGradient>\n" : "</radialGradient>\n");
                 out << " " << prefix << "=\"url(#" << id << ")\"";
+                return out.str();
+            }
+            if (paint.isPoints() && !paint.gradient().points.empty()) {
+                // The first point's colour for other viewers; the points themselves as "x,y,radius,#rrggbb,alpha,native;...".
+                out << " " << prefix << "=\"" << paint.color().toHex() << "\" data-" << prefix << "-points=\"";
+                const std::vector<GradientPoint>& points = paint.gradient().points;
+                for (std::size_t i = 0; i < points.size(); ++i) {
+                    out << (i ? ";" : "") << num(points[i].x) << "," << num(points[i].y) << "," << num(points[i].radius) << ","
+                        << points[i].color.toHex() << "," << num(points[i].color.alpha()) << "," << nativeColor(points[i].color);
+                }
+                out << "\"";
                 return out.str();
             }
             if (paint.isPattern()) {
@@ -978,6 +1005,7 @@ namespace curvy {
                 "fill", "fill-opacity", "stroke", "stroke-width", "stroke-opacity", "opacity", "display",
                 "stroke-linecap", "stroke-linejoin", "stroke-miterlimit", "stroke-dasharray", "data-width-profile", "data-brush", "data-stroke-align", "data-arrows",
                 "data-fill-color", "data-stroke-color", "data-fill-pattern", "data-stroke-pattern",
+                "data-fill-points", "data-stroke-points",
             };
             for (const char* key : kKeys) {
                 if (const std::string* v = node.attr(key)) {
@@ -1074,8 +1102,54 @@ namespace curvy {
         }
 
         // A paint value ("none", color, "url(#id)") for an object whose outline bounds are `box`.
+        // Files from before the matrix kept only the frame angle: that turn about the origin is what the paints followed.
+        void readPaintMatrix(const XmlNode& node, SketchObject& object) {
+            if (const std::string* own = node.attr("data-paint-matrix")) {
+                const std::vector<double> v = numberList(*own);
+                if (v.size() == 6) {
+                    object.setPaintMatrix(BLMatrix2D(v[0], v[1], v[2], v[3], v[4], v[5]));
+                    return;
+                }
+            }
+            if (object.frameAngle() != 0.0) {
+                object.setPaintMatrix(BLMatrix2D::make_rotation(object.frameAngle()));
+            }
+        }
+
         SketchPaint readPaint(const ReadContext& ctx, const Style& style, const char* name, const BLBox& box) {
             std::string prefix = name;
+            if (const std::string* own = style.get("data-" + prefix + "-points")) {
+                SketchGradient gradient;
+                std::istringstream all(*own);
+                std::string entry;
+                while (std::getline(all, entry, ';')) {
+                    std::istringstream in(entry);
+                    std::string field[6];
+                    for (std::string& f : field) {
+                        std::getline(in, f, ',');
+                    }
+                    GradientPoint point;
+                    point.x = std::strtod(field[0].c_str(), nullptr);
+                    point.y = std::strtod(field[1].c_str(), nullptr);
+                    point.radius = std::strtod(field[2].c_str(), nullptr);
+                    SketchColor color = SketchColor::gray(0.0f);
+                    parseColor(field[3], color);
+                    const float alpha = float(std::strtod(field[4].c_str(), nullptr));
+                    SketchColor native;
+                    if (parseNativeColor(&field[5], alpha, native)) {
+                        color = native;
+                    } else {
+                        color = SketchColor::rgb(color.component(0), color.component(1), color.component(2), alpha);
+                    }
+                    point.color = color;
+                    if (std::isfinite(point.x) && std::isfinite(point.y) && point.radius > 0.0 && std::isfinite(point.radius)) {
+                        gradient.points.push_back(point);
+                    }
+                }
+                if (!gradient.points.empty()) {
+                    return SketchPaint::points(gradient);
+                }
+            }
             if (const std::string* own = style.get("data-" + prefix + "-pattern")) {
                 std::istringstream in(*own);
                 std::string idText, scaleText, angleText;
@@ -1589,6 +1663,7 @@ namespace curvy {
             if (const std::string* angle = node.attr("data-frame-angle")) {
                 object->setFrameAngle(number(angle, 0.0));
             }
+            readPaintMatrix(node, *object);
             object->setGroups(ctx.groupStack);
             ctx.document->add(object.release());
         }
@@ -2030,6 +2105,7 @@ namespace curvy {
             if (const std::string* angle = node.attr("data-frame-angle")) {
                 object->setFrameAngle(number(angle, 0.0));
             }
+            readPaintMatrix(node, *object);
             object->setGroups(ctx.groupStack);
             ctx.document->add(object.release());
         }
@@ -2112,7 +2188,7 @@ namespace curvy {
             body << " href=\"" << imageDataUri(*object.image()) << "\"/>\n";
             return;
         }
-        BLBox box = object.geometryBounds();
+        BLBox box = object.paintFrameBounds();
             {
                 const std::vector<AppearanceItem>& items = object.appearance();
                 bool plain = items.size() == 2 && items[0].kind == AppearanceKind::Fill && items[1].kind == AppearanceKind::Stroke;
@@ -2131,6 +2207,7 @@ namespace curvy {
                     if (object.frameAngle() != 0.0) {
                         body << " data-frame-angle=\"" << num(object.frameAngle()) << "\"";
                     }
+                    body << paintMatrixAttr(object);
                     if (object.opacity() < 1.0) {
                         body << " opacity=\"" << num(object.opacity()) << "\"";
                     }
@@ -2155,7 +2232,7 @@ namespace curvy {
                             body << "<path d=\"M0 0\" data-item=\"effect\" data-effect=\"" << kCodes[std::size_t(item.effect)] << "\" data-softness=\""
                                  << num(item.softness) << "\" data-dx=\"" << num(item.offsetX) << "\" data-dy=\"" << num(item.offsetY)
                                  << "\" data-radius=\"" << num(item.radius) << "\" stroke=\"none\""
-                                 << paintAttrs("fill", SketchPaint::solid(item.color), box, defs, gradientCount);
+                                 << paintAttrs("fill", SketchPaint::solid(item.color), box, defs, gradientCount, object.paintToPage());
                             if (item.opacity < 1.0) {
                                 body << " opacity=\"" << num(item.opacity) << "\"";
                             }
@@ -2170,10 +2247,10 @@ namespace curvy {
                         }
                         body << "<path d=\"" << pathData(object.geometry()) << "\" data-item=\"" << (stroke ? "stroke" : "fill") << "\"";
                         if (stroke) {
-                            body << " fill=\"none\"" << paintAttrs("stroke", item.paint, box, defs, gradientCount)
+                            body << " fill=\"none\"" << paintAttrs("stroke", item.paint, box, defs, gradientCount, object.paintToPage())
                                  << strokeAttrs(item.paint, item.strokeWidth, item.strokeOptions);
                         } else {
-                            body << paintAttrs("fill", object.isClosed() ? item.paint : SketchPaint::none(), box, defs, gradientCount) << " stroke=\"none\"";
+                            body << paintAttrs("fill", object.isClosed() ? item.paint : SketchPaint::none(), box, defs, gradientCount, object.paintToPage()) << " stroke=\"none\"";
                         }
                         if (item.opacity < 1.0) {
                             body << " opacity=\"" << num(item.opacity) << "\"";
@@ -2200,9 +2277,10 @@ namespace curvy {
             if (object.frameAngle() != 0.0) {
                 body << " data-frame-angle=\"" << num(object.frameAngle()) << "\"";
             }
+            body << paintMatrixAttr(object);
             SketchPaint fill = object.isClosed() ? object.fill() : SketchPaint::none();
-            body << paintAttrs("fill", fill, box, defs, gradientCount);
-            body << paintAttrs("stroke", object.stroke(), box, defs, gradientCount);
+            body << paintAttrs("fill", fill, box, defs, gradientCount, object.paintToPage());
+            body << paintAttrs("stroke", object.stroke(), box, defs, gradientCount, object.paintToPage());
             body << strokeAttrs(object.stroke(), object.strokeWidth(), object.strokeOptions());
             if (object.opacity() < 1.0) {
                 body << " opacity=\"" << num(object.opacity()) << "\"";

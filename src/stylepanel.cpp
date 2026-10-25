@@ -473,6 +473,14 @@ namespace curvy {
                             applyPaint(SketchPaint::none(), "No Paint");
                         } else if (kind == 1) {
                             applyPaint(SketchPaint::solid(current.isNone() ? lastSolid_ : displayedColor()), "Solid Paint");
+                        } else if (kind == 4) {
+                            if (!current.isPoints()) {
+                                applyPaint(SketchPaint::points(SketchGradient::pointsFromColor(current.isNone() ? lastSolid_ : displayedColor())), "Point Gradient");
+                            }
+                            selectedStop_ = 0;
+                            refresh();
+                            onGradientChosen(*this);
+                            return SyncReturn::Handled;
                         } else {
                             SketchGradient gradient = current.isGradient() ? current.gradient()
                                 : SketchGradient::fromColor(current.isNone() ? lastSolid_ : current.color());
@@ -492,6 +500,7 @@ namespace curvy {
         wireType("fillSolidButton", 1);
         wireType("fillLinearButton", 2);
         wireType("fillRadialButton", 3);
+        wireType("fillPointsButton", 4);
 
         // The gradient bar: click/drag stops. Dragging is live and one undo step on release, like a slider.
         if (auto* bar = find<GradientBar>("gradientBar")) {
@@ -770,6 +779,8 @@ namespace curvy {
                 case SketchPaint::Kind::Solid: text += "Solid " + item.paint.color().toHex(); break;
                 case SketchPaint::Kind::Linear: text += "Linear gradient"; break;
                 case SketchPaint::Kind::Radial: text += "Radial gradient"; break;
+                case SketchPaint::Kind::Pattern: text += "Pattern"; break;
+                case SketchPaint::Kind::Points: text += "Point gradient"; break;
             }
             if (item.opacity < 1.0) {
                 text += "   " + std::to_string(int(item.opacity * 100.0 + 0.5)) + "%";
@@ -955,6 +966,9 @@ namespace curvy {
 
     SketchColor StylePanel::displayedColor() const {
         SketchPaint paint = targetPaint();
+        if (paint.isPoints() && !paint.gradient().points.empty()) {
+            return paint.gradient().points[std::min(selectedStop_, paint.gradient().points.size() - 1)].color;
+        }
         if (paint.isGradient() && !paint.gradient().stops.empty()) {
             return paint.gradient().stops[std::min(selectedStop_, paint.gradient().stops.size() - 1)].color;
         }
@@ -964,6 +978,12 @@ namespace curvy {
 
     void StylePanel::applyColor(const SketchColor& color, const char* description) {
         SketchPaint paint = targetPaint();
+        if (paint.isPoints() && !paint.gradient().points.empty()) {
+            SketchGradient gradient = paint.gradient();
+            gradient.points[std::min(selectedStop_, gradient.points.size() - 1)].color = color;
+            applyPaint(SketchPaint::points(gradient), description);
+            return;
+        }
         if (paint.isGradient() && !paint.gradient().stops.empty()) {
             SketchGradient gradient = paint.gradient();
             gradient.stops[std::min(selectedStop_, gradient.stops.size() - 1)].color = color;
@@ -1006,7 +1026,7 @@ namespace curvy {
                     // the angle-derived axis.
                     if (gradient.hasAxis && document_.selection().size() == 1) {
                         const SketchObject* object = document_.findById(document_.selection().front());
-                        gradient.setAngle(object != nullptr ? object->geometryBounds() : BLBox(0, 0, 1, 1), number);
+                        gradient.setAngle(object != nullptr ? object->paintFrameBounds() : BLBox(0, 0, 1, 1), number);
                     } else {
                         gradient.hasAxis = false;
                         gradient.angleDegrees = number;
@@ -1213,6 +1233,8 @@ namespace curvy {
         SketchPaint paint = targetPaint();
         if (paint.isGradient() && !paint.gradient().stops.empty()) {
             selectedStop_ = std::min(selectedStop_, paint.gradient().stops.size() - 1);
+        } else if (paint.isPoints() && !paint.gradient().points.empty()) {
+            selectedStop_ = std::min(selectedStop_, paint.gradient().points.size() - 1);
         } else {
             selectedStop_ = 0;
         }
@@ -1307,6 +1329,7 @@ namespace curvy {
         setChecked("fillSolidButton", paint.kind() == SketchPaint::Kind::Solid);
         setChecked("fillLinearButton", paint.kind() == SketchPaint::Kind::Linear);
         setChecked("fillRadialButton", paint.kind() == SketchPaint::Kind::Radial);
+        setChecked("fillPointsButton", paint.isPoints());
 
         if (auto* mode = find<SegmentedControl>("colorModeControl")) {
             std::size_t index = modeIndex(shown.space());

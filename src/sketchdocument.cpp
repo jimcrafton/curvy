@@ -710,7 +710,7 @@ namespace curvy {
         std::vector<GeometryState> result;
         for (std::size_t id : selection_) {
             if (const SketchObject* object = findById(id)) {
-                result.push_back({id, object->geometry(), object->frameAngle(), object->textMatrix()});
+                result.push_back({id, object->geometry(), object->frameAngle(), object->textMatrix(), object->paintToPage()});
             }
         }
         return result;
@@ -722,13 +722,14 @@ namespace curvy {
         std::vector<GeometryState> after;
         for (const GeometryState& entry : before) {
             if (const SketchObject* object = findById(entry.id)) {
-                after.push_back({entry.id, object->geometry(), object->frameAngle(), object->textMatrix()});
+                after.push_back({entry.id, object->geometry(), object->frameAngle(), object->textMatrix(), object->paintToPage()});
             }
         }
         auto apply = [this](const std::vector<GeometryState>& state, const FrameState& frame) {
             for (const GeometryState& entry : state) {
                 if (SketchObject* object = findById(entry.id)) {
                     object->setGeometry(entry.path);
+                    object->setPaintMatrix(entry.paintMatrix);
                     object->setTextMatrix(entry.textMatrix);
                     object->setFrameAngle(entry.angle);
                 }
@@ -748,7 +749,7 @@ namespace curvy {
         FrameState frameBefore = frameState();
         for (std::size_t id : ids) {
             if (SketchObject* object = findById(id)) {
-                before.push_back({id, object->geometry(), object->frameAngle(), object->textMatrix()});
+                before.push_back({id, object->geometry(), object->frameAngle(), object->textMatrix(), object->paintToPage()});
                 object->transform(matrix);
             }
         }
@@ -1644,6 +1645,13 @@ namespace curvy {
         SketchPaint paintInSpace(const SketchPaint& paint, ColorSpace space) {
             if (paint.isNone()) {
                 return paint;
+            }
+            if (paint.isPoints()) {
+                SketchGradient gradient = paint.gradient();
+                for (GradientPoint& point : gradient.points) {
+                    point.color = point.color.convertedTo(space);
+                }
+                return SketchPaint::points(gradient);
             }
             if (!paint.isGradient()) {
                 return SketchPaint::solid(paint.color().convertedTo(space));

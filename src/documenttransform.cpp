@@ -54,6 +54,7 @@ namespace curvy {
         for (const GeometryState& entry : before) {
             if (SketchObject* object = findById(entry.id)) {
                 object->setGeometry(entry.path);
+                object->setPaintMatrix(entry.paintMatrix);
                 object->setTextMatrix(entry.textMatrix);
                 object->transform(matrix);
                 object->setFrameAngle(entry.angle + angleDelta);

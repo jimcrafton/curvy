@@ -66,6 +66,9 @@ namespace curvy {
         std::string detailValue(std::size_t index) const;
         // The names in the Inputs (or Used by) list of the box.
         std::vector<std::string> detailLinks(bool inputs) const;
+        // Opens the Colour card on the colour in row `index` of the box (what clicking its swatch does): the object is selected, the
+        // fill or stroke the row stands for is made the active one, and the card is put beside the dock. False when that row has no colour.
+        bool editDetailColour(std::size_t index);
         // Selects the row of this node (and its object); false when it has none.
         bool selectNode(jitnodes::NodeId node);
         bool detailShown(std::size_t index) const;
@@ -78,7 +81,7 @@ namespace curvy {
 
     private:
         struct DetailRow {
-            enum class Kind { Text, Colour, Slider };
+            enum class Kind { Text, Colour, Gradient, Slider };
             Kind kind = Kind::Text;
             newui::Label* caption = nullptr;
             newui::TextField* field = nullptr;
@@ -110,6 +113,10 @@ namespace curvy {
         // `value` is 0..1; `apply` gets the percent as text.
         void setSliderRow(std::size_t index, const std::string& caption, double value, std::function<void(const std::string&)> apply);
         void showLinks(jitnodes::NodeId id);
+        // Gives a Fill or Stroke node another kind of paint (none, solid, linear, radial, pattern), carrying what the current paint has
+        // so the look does not vanish: a colour becomes a gradient from that colour, and back. One undo step.
+        void setPaintKind(jitnodes::NodeId id, int kind);
+        void setGradientRow(std::size_t index, const std::string& caption, const SketchPaint& paint, std::function<void(const std::string&)> apply);
         void scrubRow(std::size_t index, jitnodes::NodeId id, const std::string& param, double minimum, double maximum, double scale = 1.0);
         void commitSlider(std::size_t index);
         void clearDetail();

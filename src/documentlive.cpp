@@ -1,8 +1,10 @@
 #include "curvy/sketchdocument.h"
 
+#include "curvy/appearancenode.h"
 #include "curvy/pathnode.h"
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -17,12 +19,33 @@ namespace curvy {
 
         // Brings a shape node up to its object: the outline when the object was edited since the node was written, and the settings that
         // shape it (setString leaves a node alone whose text is already right).
+        BLMatrix2D inverseOf(const BLMatrix2D& matrix) {
+            BLMatrix2D back = matrix;
+            return back.invert() == BL_SUCCESS ? back : BLMatrix2D::make_identity();
+        }
+
+        // The shape node holds the outline as it was before the object's transforms; the transform node after it holds those.
+        BLPath drawnPath(const SketchObject& object) {
+            BLPath path = object.geometry();
+            path.transform(inverseOf(object.paintToPage()));
+            return path;
+        }
+
+        bool sameMatrix(const BLMatrix2D& a, const BLMatrix2D& b, double tolerance) {
+            for (int i = 0; i < 6; ++i) {
+                if (std::fabs(a.m[i] - b.m[i]) > tolerance * (1.0 + std::fabs(a.m[i]))) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
         void writeNode(jitnodes::Node& node, SketchObject& object) {
             if (object.nodeRevision() != object.geometryRevision()) {
                 // A node keeps what it holds beyond positions (per-anchor attributes) while the layout stays the same.
                 const jitnodes::GeometryHandle& held = node.geometryParam("curve");
-                const jitnodes::GeometryHandle fresh = geometryFromPath(object.geometry(), held.get());
-                if (!sameCurveShape(*held, *fresh)) {
+                const jitnodes::GeometryHandle fresh = geometryFromPath(drawnPath(object), held.get());
+                if (!sameCurveShape(*held, *fresh, 1e-6)) {
                     node.setGeometryParam("curve", fresh);
                 }
                 object.setNodeRevision(object.geometryRevision());
@@ -38,9 +61,10 @@ namespace curvy {
 
         // A node bound to an object that has not been written to it yet (a loaded file) stays as the file had it when it agrees with the
         // object to within what a file holds; otherwise the object wins and the node follows.
-        bool bindLoadedNode(jitnodes::Node& node, SketchObject& object) {
+        bool bindLoadedNode(jitnodes::Node& node, const jitnodes::Node* place, SketchObject& object) {
             const jitnodes::Geometry& held = *node.geometryParam("curve");
-            if (held.primitiveCount() == 0 || !sameCurveShape(held, *geometryFromPath(object.geometry()), kFileTolerance)) {
+            if (place == nullptr || !sameMatrix(transformOf(*place), object.paintToPage(), kFileTolerance) || held.primitiveCount() == 0 ||
+                !sameCurveShape(held, *geometryFromPath(drawnPath(object)), kFileTolerance)) {
                 return false;
             }
             object.setNodeRevision(object.geometryRevision());
@@ -71,6 +95,7 @@ namespace curvy {
     }
 
     void SketchDocument::graphChanged() {
+        placedCache_.clear();
         appearanceChains_.clear();
         pullPathNodes();
         refreshLiveShapes();
@@ -100,6 +125,7 @@ namespace curvy {
         jitnodes::Network& net = network();
         const std::vector<jitnodes::NodeId> ids = net.nodeIds();
         const std::unordered_set<jitnodes::NodeId> existing(ids.begin(), ids.end());
+        const auto placed = placementNodes(net, ids);
         for (const std::unique_ptr<SketchObject>& object : objects_) {
             const jitnodes::NodeId node = object->graphNode();
             // An object edited since its last sync (or never synced, as after a load) is newer than its node and wins.
@@ -116,10 +142,17 @@ namespace curvy {
                 }
                 continue;
             }
-            const jitnodes::Geometry& held = *target.geometryParam("curve");
+            // What the graph says the object is: the drawn curve carried by the transform node.
+            const jitnodes::Geometry& drawn = *target.geometryParam("curve");
+            const auto place = placed.find(node);
+            const BLMatrix2D matrix = place != placed.end() ? transformOf(net.node(place->second)) : object->paintToPage();
             BLPath path;
-            if (held.primitiveCount() > 0 && !sameCurveShape(held, *geometryFromPath(object->geometry()), kFileTolerance / 10) && pathFromGeometry(held, path)) {
+            BLPath back = object->geometry();
+            back.transform(inverseOf(matrix));
+            if (drawn.primitiveCount() > 0 && !sameCurveShape(drawn, *geometryFromPath(back), kFileTolerance / 10) &&
+                pathFromGeometry(*placeGeometry(drawn, matrix), path)) {
                 object->setGeometry(path);
+                object->setPaintMatrix(matrix);
                 object->setNodeRevision(object->geometryRevision());   // the node already holds it
             }
         }
@@ -168,7 +201,7 @@ namespace curvy {
         jitnodes::Network& net = network();
         std::vector<jitnodes::NodeId> ids;
         std::unordered_set<jitnodes::NodeId> existing;
-        std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> next;
+        std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> next, placed;
         bool loaded = false;
         auto load = [&] {
             if (!loaded) {
@@ -176,6 +209,7 @@ namespace curvy {
                 ids = net.nodeIds();
                 existing.insert(ids.begin(), ids.end());
                 next = appearanceSuccessors(net, ids);
+                placed = placementNodes(net, ids);
             }
         };
         scan = scan || appearanceObjectCount_ != objects_.size();
@@ -202,10 +236,11 @@ namespace curvy {
                 appearanceSynced_.erase(chain.back());
                 chain.pop_back();
             }
+            const auto place = placed.find(shape);
             while (chain.size() < items.size()) {
                 const AppearanceKind kind = items[chain.size()].kind;
                 const jitnodes::NodeId node = net.addNode(appearanceNodeType(kind), net.uniqueName(kind == AppearanceKind::Stroke ? "stroke" : kind == AppearanceKind::Effect ? "effect" : "fill"));
-                net.connect(chain.empty() ? shape : chain.back(), node, 0);
+                net.connect(!chain.empty() ? chain.back() : place != placed.end() ? place->second : shape, node, 0);
                 chain.push_back(node);
             }
             for (std::size_t i = 0; i < items.size(); ++i) {
@@ -249,10 +284,18 @@ namespace curvy {
         jitnodes::Network& net = network();
         const std::vector<jitnodes::NodeId> ids = net.nodeIds();
         const std::unordered_set<jitnodes::NodeId> existing(ids.begin(), ids.end());
+        if (placedCache_.empty()) {
+            placedCache_ = placementNodes(net, ids);
+        }
         for (const std::unique_ptr<SketchObject>& object : objects_) {
             const jitnodes::NodeId node = object->graphNode();
             if (node != jitnodes::invalidNodeId && existing.count(node) != 0 && net.node(node).typeName() == shapeNodeType(*object)) {
+                const bool stale = object->nodeRevision() != object->geometryRevision();
                 writeNode(net.node(node), *object);
+                const auto place = stale ? placedCache_.find(node) : placedCache_.end();
+                if (place != placedCache_.end() && existing.count(place->second) != 0 && net.node(place->second).typeName() == kTransformNodeType) {
+                    storeTransform(net.node(place->second), object->paintToPage());
+                }
             }
         }
     }
@@ -263,6 +306,12 @@ namespace curvy {
         const std::vector<jitnodes::NodeId> ids = net.nodeIds();
         const std::unordered_set<jitnodes::NodeId> existing(ids.begin(), ids.end());
         std::unordered_set<jitnodes::NodeId> used;
+        struct Bound {
+            SketchObject* object;
+            jitnodes::NodeId node;
+            bool known;
+        };
+        std::vector<Bound> bound;
         for (const std::unique_ptr<SketchObject>& object : objects_) {
             const char* type = shapeNodeType(*object);
             jitnodes::NodeId node = object->graphNode();
@@ -278,14 +327,62 @@ namespace curvy {
                 object->setNodeRevision(0);
             }
             used.insert(node);
-            if (!(known && object->nodeRevision() == 0 && bindLoadedNode(net.node(node), *object))) {
-                writeNode(net.node(node), *object);
-            }
+            bound.push_back({object.get(), node, known});
         }
         for (jitnodes::NodeId id : ids) {
             if (used.count(id) == 0 && isShapeNodeType(net.node(id).typeName())) {
                 net.removeNode(id);
                 removedShape = true;
+            }
+        }
+
+        // Every shape node is followed by a transform node, which takes over the appearance nodes that were wired to the shape (a graph made
+        // before there were transform nodes). The wiring is only searched for when a shape has none or one was left without its shape.
+        auto cached = [&](jitnodes::NodeId shape) {
+            const auto it = placedCache_.find(shape);
+            return it != placedCache_.end() && existing.count(it->second) != 0 && net.node(it->second).typeName() == kTransformNodeType &&
+                net.inputOf(it->second, 0) == shape;
+        };
+        bool rewire = placedCache_.empty() || removedShape;
+        for (const Bound& entry : bound) {
+            rewire = rewire || !cached(entry.node);
+        }
+        std::unordered_set<jitnodes::NodeId> created;
+        if (rewire) {
+            const std::vector<jitnodes::NodeId> live = net.nodeIds();
+            const auto following = appearanceSuccessors(net, live);
+            placedCache_ = placementNodes(net, live);
+            for (const Bound& entry : bound) {
+                if (placedCache_.count(entry.node) != 0) {
+                    continue;
+                }
+                const jitnodes::NodeId place = net.addNode(kTransformNodeType, net.uniqueName("transform"));
+                net.connect(entry.node, place, 0);
+                if (const auto first = following.find(entry.node); first != following.end()) {
+                    net.connect(place, first->second, 0);
+                }
+                placedCache_.emplace(entry.node, place);
+                created.insert(entry.node);
+            }
+            for (auto it = placedCache_.begin(); it != placedCache_.end();) {
+                if (used.count(it->first) == 0) {
+                    net.removeNode(it->second);
+                    it = placedCache_.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
+
+        for (const Bound& entry : bound) {
+            const bool stale = entry.object->nodeRevision() != entry.object->geometryRevision();
+            const bool fresh = created.count(entry.node) != 0;
+            jitnodes::Node* place = (stale || fresh) ? &net.node(placedCache_.at(entry.node)) : nullptr;
+            if (!(entry.known && entry.object->nodeRevision() == 0 && place != nullptr && bindLoadedNode(net.node(entry.node), place, *entry.object))) {
+                writeNode(net.node(entry.node), *entry.object);
+            }
+            if (place != nullptr) {
+                storeTransform(*place, entry.object->paintToPage());
             }
         }
         syncAppearanceNodes(removedShape);

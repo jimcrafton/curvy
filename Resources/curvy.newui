@@ -1222,6 +1222,15 @@
                                     icon: "icons/fill-radial.svg",
                                     toggleButton: true,
                                     iconSize: 17
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "fillPointsButton",
+                                    desiredSize: { type: "Size", width: 28, height: 28 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/fill-points.svg",
+                                    toggleButton: true,
+                                    iconSize: 17
                                   }
                                 ]
                               },

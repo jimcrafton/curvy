@@ -48,7 +48,7 @@ namespace curvy {
             if (a.isNone()) {
                 return true;
             }
-            if (a.isGradient()) {
+            if (a.isGradient() || a.isPoints()) {
                 return a == b;
             }
             float ar, ag, ab, br, bg, bb;

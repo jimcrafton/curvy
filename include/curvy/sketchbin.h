@@ -26,7 +26,7 @@ namespace curvy {
     // The document as a .skb file image. `compress` gzips the body (the files are several times smaller and the extra time is small).
     // `version` is the layout written: 2 (the current one, outlines as 32-bit float steps) or 1 (outlines as doubles; the older files, kept
     // so that reading them can be tested). Both are read.
-    std::string binaryFromDocument(const SketchDocument& document, bool compress = true, unsigned version = 2);
+    std::string binaryFromDocument(const SketchDocument& document, bool compress = true, unsigned version = 3);
 
     // Replaces the document's contents with the file image in `data` (undo history and selection are cleared). Returns false - and
     // leaves the document untouched - when the data is not a well-formed .skb file (wrong magic, cut short, a count or index that does

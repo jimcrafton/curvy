@@ -12,6 +12,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace curvy {
@@ -34,6 +35,9 @@ namespace curvy {
         bool chip = false;              // a colour chip at the right (a solid fill or stroke); chipColor is 0xRRGGBB
         std::uint32_t chipColor = 0;
         double chipAlpha = 1.0;
+        // A gradient paint instead of a colour: a chip of its stops (offset, 0xAARRGGBB), round for a radial one.
+        std::vector<std::pair<double, std::uint32_t>> stops;
+        bool radial = false;
         bool look = false;              // a Fill, Stroke or Effect node under an object
         bool dim = false;               // matches only through a row below it (while filtering)
     };
@@ -69,17 +73,23 @@ namespace curvy {
     // A colour over a checkerboard, so a partly transparent colour reads as such; `rgb` is 0xRRGGBB.
     void paintColourChip(BLContext& ctx, double x, double y, double width, double height, std::uint32_t rgb, double alpha);
 
+    // The same for a gradient: `stops` are (offset, 0xAARRGGBB) sorted by offset.
+    void paintGradientChip(BLContext& ctx, double x, double y, double width, double height, const std::vector<std::pair<double, std::uint32_t>>& stops, bool radial);
+
     // A small view that shows one colour as a chip (the swatch beside a colour's hex in the parameter box).
     // @reflect ignore=true
     class ColourChip : public newui::SubView {
     public:
         ColourChip();
         void setColour(std::uint32_t rgb, double alpha);
+        void setGradient(std::vector<std::pair<double, std::uint32_t>> stops, bool radial);
         void paint(BLContext& ctx) override;
 
     private:
         std::uint32_t rgb_ = 0;
         double alpha_ = 1.0;
+        std::vector<std::pair<double, std::uint32_t>> stops_;
+        bool radial_ = false;
     };
 
     // One row drawn: the TreeItem (triangle, icon, name) and, at the right, a colour chip over a checkerboard or the summary text.

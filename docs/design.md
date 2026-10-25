@@ -63,7 +63,7 @@ nothing of sketch types (paths, layers, artboards), so it can be unit tested alo
 - **Appearance as nodes (2026-10-24).** Each entry of an object's appearance stack is a node chained after its shape node, bottom to top: `curvyFill`
   (paint, opacity, blend, visible), `curvyStroke` (the same plus weight, cap, join, miter, align, arrows, brush, dashes and width profile) and `curvyEffect`
   (kind, amount, tint, softness, offsets, radius). They pass the shape through and carry the look as parameters: every number is a float parameter, a
-  colour is its colour space plus four components plus alpha, and the gradient stops, dashes and width points are small geometry tables (one point per row).
+  colour is its colour space plus four components plus alpha, and the gradient stops, point-gradient points, dashes and width points are small geometry tables (one point per row).
   `AppearanceParams` (include/curvy/appearancenode.h) is the plain-value form of one node; two looks are the same exactly when their params are equal.
   Authority works as for curves: `SketchDocument` keeps what each node held when it and its object last agreed (`appearanceSynced_`), so an object edited
   since wins and writes the node, and a node edited since (graph edit, undo, redo) wins and `itemFrom` changes only the fields that differ, leaving the
@@ -90,4 +90,12 @@ nothing of sketch types (paths, layers, artboards), so it can be unit tested alo
   second copy of their curves. Files saved with the earlier `d` text nodes fail to load their graph and get nodes made from their objects. The
   jitnodes edit is in the 3rdparty/jitnodes working tree: **commit and push it, then bump the submodule.** Next: layers and groups as subnets,
   selection and hit-testing by node, the node view (the graph tree mockup), objects as pure views of their nodes.
+- **Transform node (2026-10-24).** Each shape node is followed by a `curvyTransform` node (six float parameters a b c d e f, an SVG matrix), wired between the shape and the
+  object's appearance nodes; its cook is the shape's geometry moved by the matrix. The shape node now holds the outline **as drawn**, and the matrix is the sum of every
+  `SketchObject::transform()` since (move, rotate, scale, shear, flip; a warp is not a matrix and is not in it). Paints are laid out on the outline before the matrix
+  (`paintFrameBounds()`) and carried by it (`paintToPage()`), so gradients, point gradients and patterns follow all of those; the SVG writer adds the matrix to
+  `gradientTransform` and PDF to the shading pattern's matrix. Authority is as for the other nodes: an object edit writes curve and matrix, a graph edit or undo that
+  changes either rebuilds the outline as matrix x curve (`pullPathNodes`). Files: `data-paint-matrix` in SVG, version 3 of `.skb` (a version 2 file, or one with only a
+  frame angle, gets a rotation). A graph saved before this has no transform nodes; they are added on load and the shape nodes are rewritten as drawn. Not yet: a warp
+  (perspective) moving paints, moving the matrix out of the object so selection and handles read it from the node.
 - **Risks.** Node ids must stay stable across undo (restoreSnapshot preserves them); the Network must not be edited while cooking.

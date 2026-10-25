@@ -368,22 +368,55 @@ namespace curvy {
                 expect(fillRow != nullptr && fillRow->chip && fillRow->chipColor == 0xFF0000 && fillRow->depth == 2 && fillRow->icon == "icons/node-fill.svg",
                     "an object's fill is a row under it, with its colour chip and icon");
                 expect(strokeRow != nullptr && strokeRow->depth == 2 && strokeRow->icon == "icons/node-stroke.svg", "and so is its stroke");
+                const std::string fillKey = fillRow != nullptr ? fillRow->key : std::string(), strokeKey = strokeRow != nullptr ? strokeRow->key : std::string();
 
+                if (!fillKey.empty()) {
+                    expect(graph.selectRow(fillKey) && graph.title() == "Fill", "selecting the fill row shows the fill node");
+                    expect(graph.editDetailColour(0) && w_.dock().card() == DockController::Card::Fill, "clicking the colour swatch opens the Colour card");
+                    expect(doc_->selection().size() == 1 && doc_->selection().front() == rectId, "on the object the fill belongs to");
+                    const newui::Rect card = w_.dock().cardBounds();
+                    expect(card.left() + card.width() <= graph.dock()->bounds().left() + 1.0f, "beside the graph dock, not over it");
+                    w_.dock().closeCard();
+                    const SketchPaint original = doc_->findById(rectId)->fill();
+                    expect(graph.detailCaption(1) == "Paint" && graph.detailValue(1) == "Solid", "a solid fill names its kind of paint");
+                    graph.setDetailValue(1, "Linear");
+                    const SketchPaint& linear = doc_->findById(rectId)->fill();
+                    expect(linear.kind() == SketchPaint::Kind::Linear && linear.gradient().stops.size() >= 2 && linear.gradient().stops.front().color == original.color(),
+                        "switching to Linear makes a gradient from the colour, not an empty one");
+                    expect(graph.detailCaption(0) == "Colours" && graph.detailCaption(1) == "Paint" && graph.detailCaption(2) == "Angle", "and the box shows the gradient with its angle");
+                    expect(lookRow(rectId, "Fill") != nullptr && !lookRow(rectId, "Fill")->stops.empty() && !lookRow(rectId, "Fill")->chip, "the tree row shows the gradient as a chip");
+                    graph.setDetailValue(1, "Solid");
+                    expect(doc_->findById(rectId)->fill() == original, "switching back to Solid gives the colour back");
+                    graph.setDetailValue(1, "None");
+                    expect(doc_->findById(rectId)->fill().isNone(), "None clears the fill");
+                    doc_->undoStack().undo();
+                    doc_->undoStack().undo();
+                    doc_->undoStack().undo();
+                    expect(doc_->findById(rectId)->fill() == original, "each switch is one undo step");
+                    graph.setDetailValue(1, "Points");
+                    const SketchPaint& points = doc_->findById(rectId)->fill();
+                    expect(points.isPoints() && points.gradient().points.size() == 2 && points.gradient().points.front().color == original.color(),
+                        "switching to Points makes two colour points from the colour");
+                    expect(lookRow(rectId, "Fill") != nullptr && lookRow(rectId, "Fill")->summary == "2 points", "the tree row counts the points");
+                    doc_->undoStack().undo();
+                    expect(doc_->findById(rectId)->fill() == original, "and it is one undo step");
+                }
+                doc_->setSelection({textId});
                 doc_->setSelection({rectId});
                 expect(graph.detailNode() == rect.graphNode() && graph.title() == "Box", "selecting an object on the canvas shows its node");
-                if (strokeRow != nullptr) {
+                if (!strokeKey.empty()) {
                     const double width = rect.strokeWidth();
-                    expect(graph.selectRow(strokeRow->key) && graph.title() == "Stroke" && graph.detailCaption(1) == "Width", "selecting the stroke row shows the stroke node");
-                    graph.setDetailValue(1, "6");
+                    expect(graph.selectRow(strokeKey) && graph.title() == "Stroke" && graph.detailCaption(2) == "Width", "selecting the stroke row shows the stroke node");
+                    graph.setDetailValue(2, "6");
                     expect(doc_->findById(rectId)->strokeWidth() == 6.0, "editing the width in the box changes the stroke");
-                    expect(graph.title() == "Stroke" && graph.detailValue(1) == "6", "the box stays on the stroke row");
+                    expect(graph.title() == "Stroke" && graph.detailValue(2) == "6", "the box stays on the stroke row");
                     doc_->undoStack().undo();
                     expect(doc_->findById(rectId)->strokeWidth() == width, "which is one undo step");
                 }
                 doc_->setSelection({textId});
                 doc_->setSelection({rectId});
                 expect(graph.detailCaption(0) == "Curves" && graph.detailValue(0) == "4 anchors, closed, 50 x 30", "a path node shows its curves as a summary, not as text");
-                expect(graph.detailLinks(true).empty() && graph.detailLinks(false).size() == 1 && graph.detailLinks(false)[0] == "Fill", "and what feeds it and what uses it, as lists under the values");
+                expect(graph.detailLinks(true).empty() && graph.detailLinks(false).size() == 1 && graph.detailLinks(false)[0] == "Transform", "and what feeds it and what uses it, as lists under the values");
 
                 doc_->setSelection({textId});
                 expect(graph.detailCaption(0) == "Words" && graph.detailValue(0) == "Hello" && graph.detailShown(2), "a text node shows words, font and size");

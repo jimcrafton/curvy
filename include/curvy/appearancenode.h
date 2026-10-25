@@ -46,6 +46,8 @@ namespace curvy {
     };
 
     // The appearance nodes of a network by the node they take their input from, and the chain that follows a shape node through them.
+    // The transform node of each shape node (by the shape's id) sits between the shape and its appearance nodes; the successors below see through it.
+    std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> placementNodes(const jitnodes::Network& network, const std::vector<jitnodes::NodeId>& ids);
     std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> appearanceSuccessors(const jitnodes::Network& network, const std::vector<jitnodes::NodeId>& ids);
     std::vector<jitnodes::NodeId> appearanceChain(const std::unordered_map<jitnodes::NodeId, jitnodes::NodeId>& successors, jitnodes::NodeId shape);
 

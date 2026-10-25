@@ -1449,6 +1449,33 @@ namespace curvy {
         }
         while (document.undoStack().canUndo()) { document.undoStack().undo(); }
 
+        // A point gradient is edited on the shape: its points are the handles.
+        if (auto* pointsButton = dynamic_cast<newui::ToolbarButton*>(frame.rootView().findView("fillPointsButton"))) {
+            pointsButton->setChecked(true);
+            expect(document.object(0).fill().isPoints() && document.object(0).fill().gradient().points.size() == 2, "the points button makes a two point gradient");
+            const auto points = [&document]() -> const std::vector<curvy::GradientPoint>& { return document.object(0).fill().gradient().points; };
+            mouse(0, view(150, 125));  // the first point
+            mouse(1, view(170, 140));
+            mouse(2, view(170, 140));
+            expect(std::fabs(points()[0].x - 0.35) < 0.01 && std::fabs(points()[0].y - 0.4) < 0.01, "dragging a point moves it within the box");
+            expect(canvas->selectedGradientStop() == 0, "the point just moved is the selected one");
+            mouse(0, view(260, 140));  // the reach handle on the selected point's ring
+            mouse(1, view(230, 140));
+            mouse(2, view(230, 140));
+            expect(std::fabs(points()[0].radius - 0.3) < 0.01, "dragging the ring's handle sets the point's reach");
+            mouse(0, view(200, 190));  // empty shape: adds a point there
+            mouse(2, view(200, 190));
+            expect(points().size() == 3 && std::fabs(points()[2].x - 0.5) < 0.01 && canvas->selectedGradientStop() == 2, "clicking the shape adds a point and selects it");
+            mouse(0, view(200, 190), newui::kmAlt);
+            mouse(2, view(200, 190), newui::kmAlt);
+            expect(points().size() == 2, "Alt-click removes a point");
+            mouse(0, view(50, 50));  // off the shape: no point is added
+            mouse(2, view(50, 50));
+            expect(points().size() == 2 || !document.object(0).fill().isPoints(), "clicking away from the shape adds no point");
+            while (document.undoStack().canUndo()) { document.undoStack().undo(); }
+            expect(document.object(0).fill().kind() == curvy::SketchPaint::Kind::Solid, "undoing the point edits restores the solid fill");
+        }
+
         canvas->setTool(curvy::SketchTool::Hand);
         expect(canvas->cursorName() == "hand", "the hand tool shows the hand cursor");
         canvas->setTool(curvy::SketchTool::Gradient);

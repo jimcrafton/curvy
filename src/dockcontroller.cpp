@@ -176,7 +176,7 @@ namespace curvy {
             {"capButtButton", "icons/cap-butt.svg"}, {"capRoundButton", "icons/cap-round.svg"}, {"capSquareButton", "icons/cap-square.svg"},
             {"joinMiterButton", "icons/join-miter.svg"}, {"joinRoundButton", "icons/join-round.svg"}, {"joinBevelButton", "icons/join-bevel.svg"},
             {"fillNoneButton", "icons/fill-none.svg"}, {"fillSolidButton", "icons/fill-solid.svg"}, {"fillLinearButton", "icons/fill-linear.svg"},
-            {"fillRadialButton", "icons/fill-radial.svg"}};
+            {"fillRadialButton", "icons/fill-radial.svg"}, {"fillPointsButton", "icons/fill-points.svg"}};
         for (const auto& row : kStrokeIcons) {
             if (auto* button = find<ToolbarButton>(frame_.rootView(), row.name)) {
                 button->setIcon(row.icon);

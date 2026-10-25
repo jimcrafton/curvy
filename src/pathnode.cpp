@@ -144,6 +144,57 @@ namespace curvy {
         };
     }
 
+    namespace {
+        constexpr const char* kMatrixNames[6] = {"a", "b", "c", "d", "e", "f"};
+
+        class TransformNode : public jitnodes::Node {
+        public:
+            TransformNode() : Node(kTransformNodeType, 1) {
+                const BLMatrix2D identity = BLMatrix2D::make_identity();
+                for (int i = 0; i < 6; ++i) {
+                    declareFloat(kMatrixNames[i], float(identity.m[i]));
+                }
+            }
+
+            jitnodes::GeometryHandle cook(jitnodes::CookContext&, const std::vector<jitnodes::GeometryHandle>& inputs) override {
+                if (inputs.empty() || !inputs.front()) {
+                    return std::make_shared<jitnodes::Geometry>();
+                }
+                return placeGeometry(*inputs.front(), transformOf(*this));
+            }
+        };
+    }
+
+    BLMatrix2D transformOf(const jitnodes::Node& node) {
+        BLMatrix2D matrix;
+        for (int i = 0; i < 6; ++i) {
+            matrix.m[i] = double(node.baseFloat(kMatrixNames[i]));
+        }
+        return matrix;
+    }
+
+    void storeTransform(jitnodes::Node& node, const BLMatrix2D& matrix) {
+        for (int i = 0; i < 6; ++i) {
+            if (node.baseFloat(kMatrixNames[i]) != float(matrix.m[i])) {
+                node.setFloat(kMatrixNames[i], float(matrix.m[i]));
+            }
+        }
+    }
+
+    jitnodes::GeometryHandle placeGeometry(const jitnodes::Geometry& geometry, const BLMatrix2D& matrix) {
+        auto placed = std::make_shared<jitnodes::Geometry>(geometry);
+        if (placed->pointCount() > 0) {
+            float* x = placed->x();
+            float* y = placed->y();
+            for (std::size_t i = 0; i < placed->pointCount(); ++i) {
+                const BLPoint p = matrix.map_point(double(x[i]), double(y[i]));
+                x[i] = float(p.x);
+                y[i] = float(p.y);
+            }
+        }
+        return placed;
+    }
+
     void registerCurvyNodes() {
         static std::once_flag once;
         std::call_once(once, [] {
@@ -153,6 +204,7 @@ namespace curvy {
             registry.registerType(kTextNodeType, [] { return std::make_unique<PathNode>(kTextNodeType, Extras{"text", "font", "size", "matrix", "style", "warp"}); });
             registry.registerType(kSymbolNodeType, [] { return std::make_unique<PathNode>(kSymbolNodeType, Extras{"symbol"}); });
             registry.registerType(kImageNodeType, [] { return std::make_unique<PathNode>(kImageNodeType, Extras{"image"}); });
+            registry.registerType(kTransformNodeType, [] { return std::make_unique<TransformNode>(); });
             registerAppearanceNodes();
         });
     }

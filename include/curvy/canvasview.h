@@ -478,6 +478,11 @@ namespace curvy {
         void finishGradientDrag();
         void cancelGradientDrag();
         void paintGradientOverlay(BLContext& ctx) const;
+        // The Gradient tool on a point gradient: the points are handles on the shape (drag to move, drag the square on the selected point's ring
+        // to change its reach, click the shape to add one, Alt-click a point to remove it).
+        bool beginPointsDrag(SketchObject& target, const newui::Point& pt, std::uint32_t keys);
+        void updatePointsDrag(SketchObject& object);
+        void paintPointsOverlay(BLContext& ctx, const SketchObject& target) const;
 
         bool gradientOnStroke_ = false;
         std::size_t gradientSelectedStop_ = 0;

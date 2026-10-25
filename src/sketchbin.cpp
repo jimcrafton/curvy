@@ -21,7 +21,7 @@ namespace curvy {
         constexpr char kMagic[4] = {'S', 'K', 'B', '1'};
         // Version 2 stores the vertices of a path as 32-bit floats, each as the step from the one before (see writePath); version 1 stored
         // them as pairs of doubles. Both are read.
-        constexpr std::uint16_t kVersion = 2;
+        constexpr std::uint16_t kVersion = 3;
         constexpr std::uint16_t kFlagCompressed = 1;
         constexpr std::size_t kHeaderSize = 8;
 
@@ -87,6 +87,14 @@ namespace curvy {
                 writeColor(out, paint.color());
             } else if (paint.isGradient()) {
                 writeGradient(out, paint.gradient());
+            } else if (paint.isPoints()) {
+                out.varint(paint.gradient().points.size());
+                for (const GradientPoint& point : paint.gradient().points) {
+                    out.f64(point.x);
+                    out.f64(point.y);
+                    out.f64(point.radius);
+                    writeColor(out, point.color);
+                }
             } else if (paint.isPattern()) {
                 out.varint(paint.patternId());
                 out.f64(paint.patternScale());
@@ -411,8 +419,21 @@ namespace curvy {
         }
 
         SketchPaint readPaint(ByteReader& in) {
-            unsigned kind = in.enumeration(5);
+            unsigned kind = in.enumeration(6);
             switch (SketchPaint::Kind(kind)) {
+                case SketchPaint::Kind::Points: {
+                    SketchGradient g;
+                    std::size_t n = in.count(24 + 21);
+                    for (std::size_t i = 0; i < n && in.ok(); ++i) {
+                        GradientPoint point;
+                        point.x = in.f64();
+                        point.y = in.f64();
+                        point.radius = in.f64();
+                        point.color = readColor(in);
+                        g.points.push_back(point);
+                    }
+                    return SketchPaint::points(g);
+                }
                 case SketchPaint::Kind::Pattern: {
                     std::size_t id = std::size_t(in.varint());
                     double scale = in.f64(), angle = in.f64();
@@ -495,7 +516,7 @@ namespace curvy {
     }
 
     std::string binaryFromDocument(const SketchDocument& document, bool compress, unsigned version) {
-        version = version < 2 ? 1u : 2u;
+        version = version < 2 ? 1u : (version == 2 ? 2u : 3u);
         StringTable strings;
 
         // The appearances, each distinct one once.
@@ -529,7 +550,9 @@ namespace curvy {
                 lookAt = found->second;
             }
 
-            unsigned flags = (object.ownVisible() ? 1u : 0u) | (object.ownLocked() ? 2u : 0u) | (object.frameAngle() != 0.0 ? 4u : 0u) |
+            const BLMatrix2D& placed = object.paintToPage();
+            const bool hasPlaced = version >= 3 && !(placed.m00 == 1.0 && placed.m01 == 0.0 && placed.m10 == 0.0 && placed.m11 == 1.0 && placed.m20 == 0.0 && placed.m21 == 0.0);
+            unsigned flags = (object.ownVisible() ? 1u : 0u) | (object.ownLocked() ? 2u : 0u) | (object.frameAngle() != 0.0 || hasPlaced ? 4u : 0u) |
                 (object.groups().empty() ? 0u : 8u) | (object.isText() ? 16u : 0u) |
                 (object.isText() && !object.textStyle().isDefault() ? 32u : 0u) | (object.isSymbol() && object.symbol() ? 64u : 0u) |
                 (object.isText() && object.textWarp().active() ? 128u : 0u);
@@ -539,6 +562,14 @@ namespace curvy {
             objects.varint(lookAt);
             if (flags & 4u) {
                 objects.f64(object.frameAngle());
+                if (version >= 3) {
+                    objects.u8(hasPlaced ? 1u : 0u);
+                    if (hasPlaced) {
+                        for (double v : {placed.m00, placed.m01, placed.m10, placed.m11, placed.m20, placed.m21}) {
+                            objects.f64(v);
+                        }
+                    }
+                }
             }
             if (flags & 8u) {
                 objects.varint(object.groups().size());
@@ -1063,6 +1094,11 @@ namespace curvy {
                         return false;
                     }
                     double frameAngle = (objectFlags & 4u) ? in.f64() : 0.0;
+                    BLMatrix2D paintMatrix = BLMatrix2D::make_rotation(frameAngle);
+                    if ((objectFlags & 4u) && version >= 3 && in.u8() == 1u) {
+                        const double a = in.f64(), b = in.f64(), c = in.f64(), d = in.f64(), e = in.f64(), f = in.f64();
+                        paintMatrix = BLMatrix2D(a, b, c, d, e, f);
+                    }
                     std::vector<std::size_t> objectGroups;
                     if (objectFlags & 8u) {
                         std::size_t g = in.count(1);
@@ -1146,6 +1182,7 @@ namespace curvy {
                     object->setVisible((objectFlags & 1u) != 0);
                     object->setLocked((objectFlags & 2u) != 0);
                     object->setFrameAngle(frameAngle);
+                    object->setPaintMatrix(paintMatrix);
                     object->setGroups(objectGroups);
                     objects.push_back(std::move(object));
                     symbolRefs.push_back(symbolRef);
