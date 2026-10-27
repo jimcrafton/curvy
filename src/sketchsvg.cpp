@@ -1122,18 +1122,18 @@ namespace curvy {
                 if (v.size() == 9) {
                     PaintWarp read;
                     std::copy(v.begin(), v.end(), read.m);
-                    object.setPaintWarp(read);
+                    SketchObject::Prototype::setPaintWarp(object, read);
                 }
             }
             if (const std::string* own = node.attr("data-paint-matrix")) {
                 const std::vector<double> v = numberList(*own);
                 if (v.size() == 6) {
-                    object.setPaintMatrix(BLMatrix2D(v[0], v[1], v[2], v[3], v[4], v[5]));
+                    SketchObject::Prototype::setPaintMatrix(object, BLMatrix2D(v[0], v[1], v[2], v[3], v[4], v[5]));
                     return;
                 }
             }
             if (object.frameAngle() != 0.0) {
-                object.setPaintMatrix(BLMatrix2D::make_rotation(object.frameAngle()));
+                SketchObject::Prototype::setPaintMatrix(object, BLMatrix2D::make_rotation(object.frameAngle()));
             }
         }
 
@@ -1353,7 +1353,7 @@ namespace curvy {
             const std::string* id = node.attr("data-symbol");
             std::shared_ptr<const SymbolDef> def = id != nullptr && ctx.document != nullptr ? ctx.document->findSymbol(std::size_t(std::strtoull(id->c_str(), nullptr, 10))) : nullptr;
             if (def) {
-                object->setSymbol(def);
+                SketchObject::Prototype::setSymbol(*object, def);
                 return object;
             }
             SketchObject* plain = SketchObject::make(SketchObjectType::Path, object->geometry());
@@ -1390,8 +1390,8 @@ namespace curvy {
             placed.post_transform(matrix);   // the file's own transform applies after the stored placement
             const std::string* font = node.attr("data-font-name");
             double fontSize = number(size, 24.0);
-            object->setTextState(*words, font != nullptr ? *font : std::string(), fontSize > 0.0 ? fontSize : 24.0, placed);
-            object->setTextStyle(textStyle);
+            SketchObject::Prototype::setTextState(*object, *words, font != nullptr ? *font : std::string(), fontSize > 0.0 ? fontSize : 24.0, placed);
+            SketchObject::Prototype::setTextStyle(*object, textStyle);
             if (const std::string* mode = node.attr("data-text-warp")) {
                 TextWarp warp;
                 std::istringstream in(*mode);
@@ -1409,7 +1409,7 @@ namespace curvy {
                     ok = ok && b != nullptr && parsePathData(*b, warp.second);
                 }
                 if (ok && warp.active() && std::isfinite(warp.start)) {
-                    object->setTextWarp(warp);
+                    SketchObject::Prototype::setTextWarp(*object, warp);
                 }
             }
             return object;
@@ -1601,7 +1601,7 @@ namespace curvy {
             }
             BLPath path = object->geometry();
             path.transform(matrix);
-            object->setGeometry(path);
+            SketchObject::Prototype::setOutline(*object, path);
             if (const std::string* dt = node.attr("data-type"); dt != nullptr && *dt == "Text") {
                 object.reset(restoreText(node, object.release(), matrix));
             }
@@ -2087,7 +2087,7 @@ namespace curvy {
             }
             BLPath path = object->geometry();
             path.transform(matrix);
-            object->setGeometry(path);
+            SketchObject::Prototype::setOutline(*object, path);
             if (const std::string* dt = node.attr("data-type"); dt != nullptr && *dt == "Text") {
                 object.reset(restoreText(node, object.release(), matrix));
             }

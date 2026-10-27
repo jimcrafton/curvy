@@ -205,6 +205,7 @@ namespace curvy {
         timeline_ = std::make_unique<TimelineBar>(frame_, *canvas_, *model_, document_);
         options_ = std::make_unique<ToolOptionsCard>(*canvas_, *canvas_);
         dock_->onToolOptions = [this](SketchTool tool, const Point& at) { showToolOptions(tool, at); };
+        dock_->onToolPicked = [this](SketchTool tool) { armTool(tool, tool != SketchTool::Select, std::string()); };
         dock_->onCardDismissed = [this] { focusCanvas(); };
         if (StylePanel* style = dock_->stylePanel()) {
             // A gradient fill is edited on the shape: the type buttons put the canvas on the Gradient tool, and the stop the panel and the canvas have
@@ -522,7 +523,9 @@ namespace curvy {
         if (!model_->documentOpen()) {
             ring = newRing();
         } else if (SketchObject* hit = document_.hitTest(world, 4.0 / double(canvas_->zoom()))) {
-            document_.setSelection({hit->id()});
+            if (!document_.isSelected(hit->id())) {
+                document_.setSelection({hit->id()});   // a shape already in the selection leaves it whole, so Group and Arrange act on all of it
+            }
             ring = objectRing();
         } else if (std::any_of(document_.artboards().begin(), document_.artboards().end(), [&](const Artboard& board) { return board.contains(world); })) {
             ring = createRing();

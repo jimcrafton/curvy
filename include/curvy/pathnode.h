@@ -15,6 +15,7 @@ namespace jitnodes {
 namespace curvy {
 
     class SketchObject;
+    struct PaintWarp;
 
     // The graph node type that holds one path object's curves in its geometry parameter "curve": one primitive per sub path, a polyline for a
     // figure of straight lines and a cubic (jitnodes PrimKind) for any other. The node cooks that geometry as it is.
@@ -56,9 +57,20 @@ namespace curvy {
     BLMatrix2D resolvedTransformOf(const jitnodes::Node& node);
     BLMatrix2D worldTransformOf(const jitnodes::Network& network, jitnodes::NodeId place);
     void storeTransform(jitnodes::Node& node, const BLMatrix2D& matrix);
+    // The perspective map of the object's paints (identity when never warped), kept on the transform node beside its placement as text at the
+    // precision of a saved file (six digits); a node that already holds the text is left alone. paintWarpDiffers: the node's text is not what
+    // this map would be written as, i.e. the node is the newer.
+    void storePaintWarp(jitnodes::Node& node, const PaintWarp& warp);
+    bool paintWarpDiffers(const jitnodes::Node& node, const PaintWarp& warp);
+    PaintWarp paintWarpOf(const jitnodes::Node& node);
     // Puts the pivot at the middle of `shape`'s bounds, so rotating or scaling in the graph turns the shape about its centre.
     // Moves the pivot (a point in the shape's own space) without moving the shape: translate takes up the difference.
     void setTransformPivot(jitnodes::Node& node, double x, double y);
+    // The pivot as the dock shows and edits it: where it lands in the node's output space (the parent's, or the page), pivot + translate.
+    // Editing one axis moves it along that axis of the parent space, whatever the node's rotation; the node still stores the local pivot.
+    bool pivotShownInParent(const jitnodes::Node& node, const std::string& name);
+    double shownParam(const jitnodes::Node& node, const std::string& name);
+    void setPivotInParent(jitnodes::Node& node, const std::string& name, double value);
     void centerTransformPivot(jitnodes::Node& node, const jitnodes::Geometry& shape);
     // A copy of `geometry` with every point (handles included) moved by `matrix`.
     jitnodes::GeometryHandle placeGeometry(const jitnodes::Geometry& geometry, const BLMatrix2D& matrix);

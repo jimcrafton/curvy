@@ -81,14 +81,14 @@ namespace curvy {
         }
 
         void writeNode(jitnodes::Node& node, SketchObject& object, bool outline = true) {
-            if (outline && object.nodeRevision() != object.geometryRevision()) {
+            if (outline && !object.boundToNodes()) {
                 // A node keeps what it holds beyond positions (per-anchor attributes) while the layout stays the same.
                 const jitnodes::GeometryHandle& held = node.geometryParam("curve");
                 const jitnodes::GeometryHandle fresh = geometryFromPath(drawnPath(object), held.get());
                 if (!sameCurveShape(*held, *fresh, 1e-6)) {
                     node.setGeometryParam("curve", fresh);
                 }
-                object.setNodeRevision(object.geometryRevision());
+                object.setBoundToNodes(true);
             }
             for (const auto& [name, value] : shapeNodeParams(object)) {
                 node.setString(name, value);
@@ -107,7 +107,7 @@ namespace curvy {
                 !sameCurveShape(held, *geometryFromPath(drawnPath(object)), kFileTolerance)) {
                 return false;
             }
-            object.setNodeRevision(object.geometryRevision());
+            object.setBoundToNodes(true);
             return true;
         }
 
@@ -212,11 +212,31 @@ namespace curvy {
                 continue;
             }
             // An object edited since its last sync (or never synced, as after a load) is newer than its node and wins.
-            if (object->nodeRevision() != object->geometryRevision()) {
+            if (!object->boundToNodes()) {
                 continue;
+            }
+            if (const auto home = placed.find(node); home != placed.end() && existing.count(home->second) != 0) {
+                const jitnodes::Node& placement = net.node(home->second);
+                if (placement.typeName() == kTransformNodeType && paintWarpDiffers(placement, object->paintWarp())) {
+                    object->setPaintWarp(paintWarpOf(placement));
+                }
             }
             jitnodes::Node& target = net.node(node);
             if (object->isText()) {
+                // A text follows its placement node like any shape: the move is carried by the object and by the text's own matrix string.
+                if (const auto home = placed.find(node); home != placed.end() && existing.count(home->second) != 0) {
+                    const BLMatrix2D want = worldTransformOf(net, home->second);
+                    if (!sameMatrix(want, object->paintToPage(), 1e-6)) {
+                        BLMatrix2D delta = inverseOf(object->paintToPage());
+                        delta.post_transform(want);
+                        SketchObject::Prototype::transform(*object, delta);
+                        object->setFrameAngle(std::atan2(want.m01, want.m00));
+                        for (const auto& [name, value] : shapeNodeParams(*object)) {
+                            target.setString(name, value);
+                        }
+                        object->setBoundToNodes(true);
+                    }
+                }
                 // The outline of a text is made from its words, so those are what is adopted; which symbol or picture an object shows is
                 // not, as that lives in the document and only the outline (the placement) can come back from the node.
                 if (applyTextNodeParams(*object, target)) {
@@ -235,7 +255,8 @@ namespace curvy {
                 pathFromGeometry(*placeGeometry(drawn, matrix), path)) {
                 object->setGeometry(path);
                 object->setPaintMatrix(matrix);
-                object->setNodeRevision(object->geometryRevision());   // the node already holds it
+                object->setFrameAngle(std::atan2(matrix.m01, matrix.m00));
+                object->setBoundToNodes(true);   // the node already holds it
             }
         }
         pullAppearanceNodes();
@@ -362,26 +383,91 @@ namespace curvy {
         }
     }
 
-    void SketchDocument::writePathNodes() {
-        jitnodes::Network& net = network();
-        const std::vector<jitnodes::NodeId> ids = net.nodeIds();
-        const std::unordered_set<jitnodes::NodeId> existing(ids.begin(), ids.end());
-        if (placedCache_.empty()) {
-            placedCache_ = placementNodes(net, ids);
+    void SketchDocument::placeObjects(const std::vector<GeometryState>& baseline, const BLMatrix2D& matrix, double angleScale, double angleOffset) {
+        std::vector<ObjectPlacement> placements;
+        placements.reserve(baseline.size());
+        for (const GeometryState& entry : baseline) {
+            placements.push_back({&entry, matrix, angleScale, angleOffset});
         }
-        for (const std::unique_ptr<SketchObject>& object : objects_) {
-            const jitnodes::NodeId node = object->graphNode();
-            if (node != jitnodes::invalidNodeId && existing.count(node) != 0 && net.node(node).typeName() == shapeNodeType(*object)) {
-                const bool stale = object->nodeRevision() != object->geometryRevision();
-                const auto driver = placedCache_.find(node);
-                const bool driven = driver != placedCache_.end() && existing.count(driver->second) != 0 && drivenPlace(driver->second);
-                writeNode(net.node(node), *object, !driven);
-                const auto place = stale ? placedCache_.find(node) : placedCache_.end();
-                if (place != placedCache_.end() && existing.count(place->second) != 0 && net.node(place->second).typeName() == kTransformNodeType) {
-                    storeTransform(net.node(place->second), localPlacement(*object, parentOf(*this, *object)));
-                }
+        placeObjects(placements);
+    }
+
+    void SketchDocument::placeObjects(const std::vector<ObjectPlacement>& placements) {
+        struct Placed {
+            SketchObject* object;
+            bool synced;
+        };
+        std::vector<Placed> placed;
+        placed.reserve(placements.size());
+        for (const ObjectPlacement& step : placements) {
+            if (step.from == nullptr) {
+                continue;
+            }
+            const GeometryState& entry = *step.from;
+            if (SketchObject* object = findById(entry.id)) {
+                // An object whose node is behind it (never synced, or driven) stays that way; the next changed() writes it.
+                placed.push_back({object, object->boundToNodes()});
+                object->setGeometry(entry.path);
+                object->setPaintMatrix(entry.paintMatrix);
+                object->setPaintWarp(entry.paintWarp);
+                object->setTextMatrix(entry.textMatrix);
+                object->transform(step.matrix);
+                object->setFrameAngle(step.angleScale * entry.angle + step.angleOffset);
             }
         }
+        // Parents and children move together, so every world matrix is final before any local one is worked out.
+        for (const Placed& entry : placed) {
+            if (entry.synced) {
+                writeObjectNodes(*entry.object, false);   // the drawn curve is the same under any placement
+            }
+        }
+    }
+
+    void SketchDocument::warpObjects(const std::vector<GeometryState>& baseline, const std::function<BLPoint(const BLPoint&)>& map, const PaintWarp& page) {
+        for (const GeometryState& entry : baseline) {
+            if (SketchObject* object = findById(entry.id)) {
+                object->setGeometry(entry.path);
+                object->setPaintMatrix(entry.paintMatrix);
+                object->setPaintWarp(entry.paintWarp);
+                object->setTextMatrix(entry.textMatrix);
+                object->warp(map, page);
+                object->setFrameAngle(entry.angle);
+                syncObject(*object);
+            }
+        }
+    }
+
+    void SketchDocument::setObjectOutline(SketchObject& object, const BLPath& placed) {
+        object.setGeometry(placed);
+        writeObjectNodes(object, true);
+    }
+
+    void SketchDocument::syncObject(SketchObject& object) {
+        writeObjectNodes(object, true);
+    }
+
+    bool SketchDocument::writeObjectNodes(SketchObject& object, bool curve) {
+        const jitnodes::NodeId place = transformNodeOf(object.id());
+        if (place == jitnodes::invalidNodeId || drivenPlace(place)) {
+            return false;   // not in the graph yet, or shown from what its chain cooks: the next changed() writes it
+        }
+        jitnodes::Network& net = network();
+        jitnodes::Node& shape = net.node(object.graphNode());
+        if (shape.typeName() != shapeNodeType(object)) {
+            return false;
+        }
+        if (curve) {
+            writeNode(shape, object);
+        } else {
+            for (const auto& [name, value] : shapeNodeParams(object)) {
+                shape.setString(name, value);
+            }
+        }
+        storeTransform(net.node(place), localPlacement(object, parentOf(*this, object)));
+        storePaintWarp(net.node(place), object.paintWarp());
+        object.setBoundToNodes(true);
+        outlineCache_[object.id()] = PlacedOutline{object.geometryRevision(), object.geometry()};   // what the node would cook
+        return true;
     }
 
     void SketchDocument::syncPathNodes() {
@@ -408,7 +494,7 @@ namespace curvy {
                 const bool reuse = node != jitnodes::invalidNodeId && used.count(node) == 0 && existing.count(node) == 0;
                 node = reuse ? net.addNodeWithId(node, type, net.uniqueName("path" + std::to_string(node))) : net.addNode(type, net.uniqueName("path"));
                 object->setGraphNode(node);
-                object->setNodeRevision(0);
+                object->forgetNodes();
             }
             used.insert(node);
             bound.push_back({object.get(), node, known});
@@ -473,7 +559,7 @@ namespace curvy {
                 const auto it = placedCache_.find(parent->graphNode());
                 want = it != placedCache_.end() ? it->second : jitnodes::invalidNodeId;
             }
-            if (linked != jitnodes::invalidNodeId && entry.known && entry.object->nodeRevision() == 0 && entry.object->parent() == 0) {
+            if (linked != jitnodes::invalidNodeId && entry.known && !entry.object->everBound() && entry.object->parent() == 0) {
                 if (byPlace.empty()) {
                     for (const Bound& other : bound) {
                         byPlace.emplace(placedCache_.at(other.node), other.object);
@@ -497,13 +583,13 @@ namespace curvy {
 
         for (const Bound& entry : bound) {
             const SketchObject* parent = parentOf(*this, *entry.object);
-            const bool stale = entry.object->nodeRevision() != entry.object->geometryRevision();
+            const bool stale = !entry.object->boundToNodes();
             const bool fresh = created.count(entry.node) != 0;
-            const bool follows = relinked.count(entry.node) != 0 || (parent != nullptr && parent->nodeRevision() != parent->geometryRevision());
+            const bool follows = relinked.count(entry.node) != 0 || (parent != nullptr && !parent->boundToNodes());
             jitnodes::Node* place = (stale || fresh || follows) ? &net.node(placedCache_.at(entry.node)) : nullptr;
             const BLMatrix2D world = place != nullptr ? worldTransformOf(net, placedCache_.at(entry.node)) : BLMatrix2D::make_identity();
             const bool driven = drivenPlace(placedCache_.at(entry.node));
-            if (driven || !(entry.known && entry.object->nodeRevision() == 0 && place != nullptr && bindLoadedNode(net.node(entry.node), &world, *entry.object))) {
+            if (driven || !(entry.known && !entry.object->everBound() && place != nullptr && bindLoadedNode(net.node(entry.node), &world, *entry.object))) {
                 writeNode(net.node(entry.node), *entry.object, !driven);
             }
             if (place != nullptr) {
@@ -511,6 +597,7 @@ namespace curvy {
                     centerTransformPivot(*place, *net.node(entry.node).geometryParam("curve"));
                 }
                 storeTransform(*place, localPlacement(*entry.object, parent));
+                storePaintWarp(*place, entry.object->paintWarp());
             }
             if (driven) {
                 adoptChain(*entry.object, placedCache_.at(entry.node));
@@ -597,6 +684,22 @@ namespace curvy {
         } catch (const std::exception&) {
         }
         return jitnodes::invalidNodeId;
+    }
+
+    bool SketchDocument::pathHeldByNode(const SketchObject& object) const {
+        if (object.isText() || object.graphNode() == jitnodes::invalidNodeId || !object.boundToNodes()) {
+            return false;
+        }
+        const jitnodes::NodeId place = transformNodeOf(object.id());
+        if (place == jitnodes::invalidNodeId || drivenPlace(place)) {
+            return false;
+        }
+        try {
+            const jitnodes::Node& shape = network().node(object.graphNode());
+            return shape.typeName() == shapeNodeType(object) && shape.hasGeometryParam("curve") && shape.geometryParam("curve")->primitiveCount() > 0;
+        } catch (const std::exception&) {
+            return false;
+        }
     }
 
     namespace {
@@ -716,7 +819,7 @@ namespace curvy {
                 object.setGeometry(path);
             }
             object.setPaintMatrix(world);
-            object.setNodeRevision(object.geometryRevision());
+            object.setBoundToNodes(true);
             return true;
         } catch (const std::exception&) {
             return false;
@@ -828,7 +931,7 @@ namespace curvy {
 
     BLPath SketchDocument::placedOutline(const SketchObject& object) const {
         // One edited since its node was written (a drag in progress) is newer than the node.
-        if (object.nodeRevision() != object.geometryRevision()) {
+        if (!object.boundToNodes()) {
             return object.geometry();
         }
         const auto cached = outlineCache_.find(object.id());

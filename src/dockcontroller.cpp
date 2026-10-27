@@ -76,6 +76,7 @@ namespace curvy {
         }
         if (propertyDock_ != nullptr) {
             transformPanel_ = std::make_unique<TransformPanel>(frame_.rootView(), document_);
+            textPanel_ = std::make_unique<TextPanel>(frame_.rootView(), document_);
             stylePanel_ = std::make_unique<StylePanel>(frame_.rootView(), document_);   // binds the views it finds by name; the rest of its panel is not in the dock
             stylePanel_->onContentChanged += guarded(alive_, [this](StylePanel&) { fitCard(); return SyncReturn::Handled; });
         }
@@ -108,6 +109,13 @@ namespace curvy {
         });
         document_.onSelectionChanged += guarded(alive_, [this](SketchDocument&) {
             refreshContext();
+            return SyncReturn::Handled;
+        });
+        // Grouping or retyping what is selected changes the boxes without changing the selection.
+        document_.onChanged += guarded(alive_, [this](SketchDocument&) {
+            if (!(DockContext::boxesFor(document_, canvas_.tool()) == boxes_)) {
+                refreshContext();
+            }
             return SyncReturn::Handled;
         });
         restyle();
@@ -143,7 +151,11 @@ namespace curvy {
             tools_.push_back({button, row.tool});
             const SketchTool tool = row.tool;
             button->onClick += guarded(alive_, [this, tool](Control&) {
-                canvas_.setTool(tool);
+                if (onToolPicked) {
+                    onToolPicked(tool);
+                } else {
+                    canvas_.setTool(tool);
+                }
                 syncTool();
                 return SyncReturn::Handled;
             });
@@ -214,6 +226,7 @@ namespace curvy {
         };
         show("transformPanel", boxes_.transform);
         show("colorPanel", boxes_.colour);
+        show("textPanel", boxes_.text);
         show("strokePanel", boxes_.stroke);
         show("opacityPanel", boxes_.opacity);
         show("dockCaption", !boxes_.caption.empty());

@@ -90,6 +90,7 @@ namespace curvy {
                 if (SketchObject* object = findById(state.id)) {
                     object->setTextMatrix(state.matrix);
                     object->setTextWarp(state.warp);
+                    syncObject(*object);
                 }
             }
             changed();

@@ -20,6 +20,16 @@
 
 namespace curvy {
 
+    // What shapes a text object's words. With no matrix the object keeps the placement it has.
+    // @reflect ignore=true
+    struct TextState {
+        std::string text, font;
+        double size = 0.0;
+        TextStyle style;
+        std::optional<BLMatrix2D> matrix;
+        bool sameWords(const TextState& o) const { return text == o.text && font == o.font && size == o.size && style == o.style; }
+    };
+
     // An object's outline and frame angle at one moment - what undo of a move/resize/rotate restores.
     // @reflect ignore=true
     struct GeometryState {
@@ -29,6 +39,16 @@ namespace curvy {
         BLMatrix2D textMatrix = BLMatrix2D::make_identity();   // a Text object's placement (see SketchObject::textMatrix)
         BLMatrix2D paintMatrix = BLMatrix2D::make_identity();  // where its paints sit (see SketchObject::paintToPage)
         PaintWarp paintWarp;                                   // and how a perspective warp bent them (see SketchObject::paintWarp)
+    };
+
+    // One object's part in a placement edit: `from` is where it started, `matrix` carries that to where it ends up, and its frame angle
+    // becomes angleScale * from.angle + angleOffset.
+    // @reflect ignore=true
+    struct ObjectPlacement {
+        const GeometryState* from = nullptr;
+        BLMatrix2D matrix = BLMatrix2D::make_identity();
+        double angleScale = 1.0;
+        double angleOffset = 0.0;
     };
 
     // Four world-space corners (TL, TR, BR, BL) of a possibly distorted frame, with the projective map
@@ -443,6 +463,8 @@ namespace curvy {
         void setQuadFrame(const std::optional<QuadFrame>& quad) { quadFrame_ = quad; }
         FrameState frameState() const { return FrameState{groupAngle_, quadFrame_}; }
         bool selectionFrame(SelectionFrame& out) const;
+        // The oriented frame of one object on its own: its placed outline measured along its frame angle.
+        SelectionFrame objectFrame(const SketchObject& object) const;
         // The transform origin (rotate/shear pivot): kept as a fraction of the frame's box so it rides along
         // with moves, resizes and rotations; back to the center whenever the selection changes. View state - not undoable.
         BLPoint selectionOrigin(const SelectionFrame& frame) const;
@@ -473,6 +495,9 @@ namespace curvy {
         // object's pre-edit outline, the objects' current outlines are the "after".
         void commitGeometry(const std::vector<GeometryState>& before, const std::string& description,
             const FrameState& frameBefore = FrameState());
+        // The same for an edit that only moved, turned, scaled or flipped the objects (placeObjects): undo and redo write the transform nodes
+        // again instead of the outlines, which the nodes keep as they were drawn.
+        void commitPlacement(const std::vector<GeometryState>& before, const std::string& description, const FrameState& frameBefore = FrameState());
         // Applies `matrix` to the given objects as one undo step.
         void transformObjects(const std::vector<std::size_t>& ids, const BLMatrix2D& matrix, const std::string& description);
         // Selected objects' ids and current outlines - the `before` for a drag.
@@ -481,6 +506,9 @@ namespace curvy {
         // The transform node that places an object's shape (invalidNodeId when it has none). With one object selected the transform origin
         // is that node's pivot, so the canvas and the node show and edit the same point.
         jitnodes::NodeId transformNodeOf(std::size_t objectId) const;
+        // True when the object's outline is nothing but its shape node's curve under its placement, so a file can leave the outline out and
+        // build it from the graph (not text, whose words make the outline; not a chain-driven or out-of-step object).
+        bool pathHeldByNode(const SketchObject& object) const;
         // Makes `child` hang from `parent` (0 releases it), keeping where it sits; refused for itself, a missing object or a loop. Undoable.
         bool setParent(std::size_t child, std::size_t parent);
         // The last object selected becomes the parent of the others (loops refused), as one undo step.
@@ -583,9 +611,13 @@ namespace curvy {
         // the shapes that result become the selection. False when no cell was chosen.
         bool shapeBuild(const std::vector<std::size_t>& cellIndices, bool erase);
 
-        // Text objects of the selection: `change` edits each one (its font, size or style), recorded as one undo step. False when the
-        // selection holds no text or nothing changed.
-        bool changeSelectionText(const std::function<void(SketchObject&)>& change, const std::string& description);
+        // Text objects of the selection: `change` edits the state of each one (its words, font, size or style), recorded as one undo step.
+        // False when the selection holds no text or nothing changed.
+        bool changeSelectionText(const std::function<void(TextState&)>& change, const std::string& description);
+        // The words, font, size and style a text object has now (no matrix).
+        static TextState textStateOf(const SketchObject& object);
+        // Puts `state` on the text object: its outline is rebuilt and its nodes written at once. No undo step, no changed().
+        void setObjectText(std::size_t id, const TextState& state);
 
         // Image Trace (documenttrace.cpp): the layers of a traced picture become filled shapes in one group, fitted onto the page and
         // centred, as one undo step; they become the selection. Returns their ids (none when there was nothing to add).
@@ -714,6 +746,19 @@ namespace curvy {
         // (the frame angles turn by `angleDelta`), with NO undo step. When the editing is over, finish with
         // commitGeometry(before, name, frameBefore) - and noteTransform() - to make it one step.
         void previewTransform(const std::vector<GeometryState>& before, const BLMatrix2D& matrix, double angleDelta);
+        // Every placement edit goes through here: each object goes where its starting state carried by its matrix puts it, by writing its
+        // transform node (the graph is the truth) and refreshing the object from the same numbers. No undo step.
+        void placeObjects(const std::vector<ObjectPlacement>& placements);
+        // Curve edits: the object's outline becomes `placed` (page coordinates) and its shape node's curve is rewritten at once, keeping the
+        // point ids and groups of points that stayed. syncObject() is the same after the object was changed some other way (a warp).
+        // A driven object, or one not in the graph yet, is written by the next changed() instead.
+        void setObjectOutline(SketchObject& object, const BLPath& placed);
+        void syncObject(SketchObject& object);
+        // The same matrix for every object in `baseline`; the frame angles become angleScale * angle + angleOffset.
+        void placeObjects(const std::vector<GeometryState>& baseline, const BLMatrix2D& matrix, double angleScale = 1.0, double angleOffset = 0.0);
+        // Puts the objects in `baseline` back as they were and bends them through `map` (`page` is the projective map it stands for, which
+        // the paints follow); the shape nodes are rewritten at once. No undo step: finish with commitGeometry().
+        void warpObjects(const std::vector<GeometryState>& baseline, const std::function<BLPoint(const BLPoint&)>& map, const PaintWarp& page);
         // Turns the selection about the center of its bounds by `radians` (the frame angles follow). One undo step.
         bool rotateSelectionBy(double radians);
         // Transform Again: the last move, resize or rotate (as the matrix it applied, about the same point) is applied once more to the
@@ -846,9 +891,9 @@ namespace curvy {
         bool drivenPlace(jitnodes::NodeId place) const;
         mutable std::unordered_set<jitnodes::NodeId> drivenPlaces_;
         mutable bool drivenDirty_ = true;
-        // Writes the curves of every path object edited since its node was written into that node, so a geometry commit (and its undo and
-        // redo) lands in the graph in the same step instead of waiting for changed().
-        void writePathNodes();
+        // One object's nodes made to match it now: the placement, the paint warp and the shape node's strings, and the curve when `curve`.
+        // False (nothing written) for an object with no placement node yet or one that is driven.
+        bool writeObjectNodes(SketchObject& object, bool curve);
         // Mirrors every path object into a curvyPath node holding its curves: creates the missing nodes, rewrites the ones whose outline
         // changed since they were written and removes those whose object is gone. A deleted-then-restored object gets its node id back.
         void syncPathNodes();

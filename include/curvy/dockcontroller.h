@@ -7,6 +7,7 @@
 #include "curvy/dockcontext.h"
 #include "curvy/stylepanel.h"
 #include "curvy/sketchdocument.h"
+#include "curvy/textpanel.h"
 #include "curvy/transformpanel.h"
 #include "curvy/workspacemodel.h"
 
@@ -68,6 +69,8 @@ namespace curvy {
         // A double-click on a tool button asks for that tool's options, with the point (canvas coordinates) just right of the button; the
         // workspace owns the card. Set by whoever hosts the dock.
         std::function<void(SketchTool, const newui::Point&)> onToolOptions;
+        // A toolbar button was pressed: the workspace arms the tool and keeps it until another is chosen.
+        std::function<void(SketchTool)> onToolPicked;
 
         StylePanel* stylePanel() const { return stylePanel_.get(); }
         newui::SubView* toolDock() const { return toolDock_; }
@@ -107,6 +110,7 @@ namespace curvy {
         Card card_ = Card::None;
         std::unique_ptr<TransformPanel> transformPanel_;
         std::unique_ptr<StylePanel> stylePanel_;
+        std::unique_ptr<TextPanel> textPanel_;
         DockBoxes boxes_;
         std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);   // the views and models outlive this object and still call its handlers while closing
     };

@@ -227,6 +227,7 @@ namespace curvy {
                 declareFloat("shear", none.shear);
                 declareFloat("pivotX", none.pivotX);
                 declareFloat("pivotY", none.pivotY);
+                declareString("paintWarp", "");
             }
 
             // Input 0 is the shape; input 1, when connected, is the parent's transform node.
@@ -518,6 +519,33 @@ namespace curvy {
         node.setFloat("translateY", float(held.m21 - py + held.m01 * px + held.m11 * py));
     }
 
+    bool pivotShownInParent(const jitnodes::Node& node, const std::string& name) {
+        return node.typeName() == kTransformNodeType && (name == "pivotX" || name == "pivotY") && node.keyframes(name).empty() &&
+               !node.isAnimated("translateX") && !node.isAnimated("translateY");
+    }
+
+    double shownParam(const jitnodes::Node& node, const std::string& name) {
+        if (!pivotShownInParent(node, name)) {
+            return node.baseFloat(name);
+        }
+        const bool x = name == "pivotX";
+        return double(node.baseFloat(name)) + node.baseFloat(x ? "translateX" : "translateY");
+    }
+
+    void setPivotInParent(jitnodes::Node& node, const std::string& name, double value) {
+        const BLMatrix2D held = transformOf(node);
+        const double det = held.m00 * held.m11 - held.m01 * held.m10;
+        const double px = node.baseFloat("pivotX"), py = node.baseFloat("pivotY");
+        double dx = name == "pivotX" ? value - shownParam(node, "pivotX") : 0.0;
+        double dy = name == "pivotY" ? value - shownParam(node, "pivotY") : 0.0;
+        if (std::fabs(det) < 1e-12) {
+            setTransformPivot(node, px + dx, py + dy);
+            return;
+        }
+        // The local step that lands dx, dy in the parent space is the inverse of the matrix's linear part.
+        setTransformPivot(node, px + (held.m11 * dx - held.m10 * dy) / det, py + (-held.m01 * dx + held.m00 * dy) / det);
+    }
+
     void centerTransformPivot(jitnodes::Node& node, const jitnodes::Geometry& shape) {
         if (shape.pointCount() == 0) {
             return;
@@ -551,6 +579,40 @@ namespace curvy {
                 node.setFloat(name, value);
             }
         }
+    }
+
+    namespace {
+        std::string paintWarpText(const PaintWarp& warp) {
+            std::string text;
+            if (!warp.isIdentity()) {
+                for (int i = 0; i < 9; ++i) {
+                    text += i == 0 ? "" : " ";
+                    appendNumber(text, warp.m[i]);
+                }
+            }
+            return text;
+        }
+    }
+
+    void storePaintWarp(jitnodes::Node& node, const PaintWarp& warp) {
+        if (paintWarpDiffers(node, warp)) {
+            node.setString("paintWarp", paintWarpText(warp));
+        }
+    }
+
+    bool paintWarpDiffers(const jitnodes::Node& node, const PaintWarp& warp) {
+        return node.getString("paintWarp") != paintWarpText(warp);
+    }
+
+    PaintWarp paintWarpOf(const jitnodes::Node& node) {
+        PaintWarp warp;
+        std::istringstream in(node.getString("paintWarp"));
+        for (int i = 0; i < 9; ++i) {
+            if (!(in >> warp.m[i])) {
+                return PaintWarp();
+            }
+        }
+        return warp;
     }
 
     jitnodes::GeometryHandle placeGeometry(const jitnodes::Geometry& geometry, const BLMatrix2D& matrix) {
@@ -695,9 +757,9 @@ namespace curvy {
             warp.flip = flip != 0;
         }
         // The last call rebuilds the outline with everything set before it, the placement included.
-        object.setTextWarp(warp);
-        object.setTextStyle(style);
-        object.setTextState(node.getString("text"), node.getString("font"), size, matrix);
+        SketchObject::Prototype::setTextWarp(object, warp);
+        SketchObject::Prototype::setTextStyle(object, style);
+        SketchObject::Prototype::setTextState(object, node.getString("text"), node.getString("font"), size, matrix);
         return true;
     }
 

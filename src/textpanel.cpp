@@ -198,15 +198,14 @@ namespace curvy {
             return;
         }
         // The value `which` of a text as the number the field shows, and a text with that number set.
-        auto set = [which](const Snap& snap, double value, SketchObject& object) {
-            TextStyle style = snap.style;
-            double size = snap.size;
+        auto set = [which](SketchDocument& document, const Snap& snap, double value) {
+            TextState state = snap.state;
             switch (which) {
-                case Scrubbed::Size: size = value; break;
-                case Scrubbed::Tracking: style.tracking = value; break;
-                case Scrubbed::Leading: style.leading = value / 100.0; break;
+                case Scrubbed::Size: state.size = value; break;
+                case Scrubbed::Tracking: state.style.tracking = value; break;
+                case Scrubbed::Leading: state.style.leading = value / 100.0; break;
             }
-            object.setTextAll(snap.text, snap.font, size, style);
+            document.setObjectText(snap.id, state);
         };
         auto scrubber = NumberScrubber::attach(*label, unit, minimum, maximum);
         scrubber->onBegin += [this, which](NumberScrubber&, double& value) {
@@ -220,7 +219,7 @@ namespace curvy {
             for (std::size_t id : document_.selection()) {
                 const SketchObject* object = document_.findById(id);
                 if (object != nullptr && object->isText()) {
-                    scrubBefore_.push_back({id, object->text(), object->fontName(), object->fontSize(), object->textStyle()});
+                    scrubBefore_.push_back({id, SketchDocument::textStateOf(*object)});
                 }
             }
             scrubValue_ = value;
@@ -233,9 +232,7 @@ namespace curvy {
             }
             scrubValue_ = value;
             for (const Snap& snap : scrubBefore_) {
-                if (SketchObject* object = document_.findById(snap.id)) {
-                    set(snap, value, *object);
-                }
+                set(document_, snap, value);
             }
             document_.touch();
             return newui::SyncReturn::Handled;
@@ -248,19 +245,15 @@ namespace curvy {
             if (changed) {
                 // Back to what the drag found, then the final number as one undo step.
                 for (const Snap& snap : scrubBefore_) {
-                    if (SketchObject* object = document_.findById(snap.id)) {
-                        object->setTextAll(snap.text, snap.font, snap.size, snap.style);
-                    }
+                    document_.setObjectText(snap.id, snap.state);
                 }
                 const double value = scrubValue_;
-                document_.changeSelectionText([value, which](SketchObject& object) {
-                    TextStyle style = object.textStyle();
+                document_.changeSelectionText([value, which](TextState& state) {
                     switch (which) {
-                        case Scrubbed::Size: object.setFontSize(value); return;
-                        case Scrubbed::Tracking: style.tracking = value; break;
-                        case Scrubbed::Leading: style.leading = value / 100.0; break;
+                        case Scrubbed::Size: state.size = value; break;
+                        case Scrubbed::Tracking: state.style.tracking = value; break;
+                        case Scrubbed::Leading: state.style.leading = value / 100.0; break;
                     }
-                    object.setTextStyle(style);
                 }, which == Scrubbed::Size ? "Text Size" : (which == Scrubbed::Tracking ? "Tracking" : "Leading"));
             }
             scrubBefore_.clear();
@@ -283,24 +276,20 @@ namespace curvy {
             return;
         }
         const std::string name = fonts_[*font_->selectedIndex()];
-        document_.changeSelectionText([name](SketchObject& object) { object.setFontName(name); }, "Text Font");
+        document_.changeSelectionText([name](TextState& state) { state.font = name; }, "Text Font");
     }
 
     void TextPanel::applySize() {
         double value;
         if (!updating_ && size_ != nullptr && parseNumber(size_->text(), value) && value > 0.0) {
             value = std::max(1.0, std::min(1000.0, value));
-            document_.changeSelectionText([value](SketchObject& object) { object.setFontSize(value); }, "Text Size");
+            document_.changeSelectionText([value](TextState& state) { state.size = value; }, "Text Size");
         }
         refresh();
     }
 
     void TextPanel::applyStyle(const char* what, const std::function<void(TextStyle&)>& change) {
-        document_.changeSelectionText([&change](SketchObject& object) {
-            TextStyle style = object.textStyle();
-            change(style);
-            object.setTextStyle(style);
-        }, what);
+        document_.changeSelectionText([&change](TextState& state) { change(state.style); }, what);
     }
 
 }

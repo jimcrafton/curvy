@@ -534,7 +534,7 @@ namespace curvy {
                 break;
             }
         }
-        object->setGeometry(subPathsToPath(directPaths_));
+        document_->setObjectOutline(*object, subPathsToPath(directPaths_));
         document_->touch();
         style().markDirty();
     }
@@ -596,7 +596,7 @@ namespace curvy {
         }
         std::vector<GeometryState> before = document_->snapshotSelection();
         FrameState frameBefore = document_->frameState();
-        object->setGeometry(subPathsToPath(subs));
+        document_->setObjectOutline(*object, subPathsToPath(subs));
         document_->touch();
         document_->commitGeometry(before, "Delete Anchor Point", frameBefore);
         style().markDirty();
@@ -827,7 +827,7 @@ namespace curvy {
             }
         }
         liveLabel_ = text;
-        object->setGeometry(path);
+        document_->setObjectOutline(*object, path);
         dragMoved_ = true;
         document_->touch();
         style().markDirty();

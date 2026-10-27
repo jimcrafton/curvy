@@ -39,14 +39,18 @@ namespace curvy {
             return boxes;
         }
         bool allText = true;
+        bool anyText = false;
         for (std::size_t id : selection) {
             const SketchObject* object = document.findById(id);
             if (object != nullptr && object->type() != SketchObjectType::Text) {
                 allText = false;
+            } else if (object != nullptr) {
+                anyText = true;
             }
         }
         boxes.transform = boxes.colour = boxes.opacity = true;
         boxes.stroke = !allText;
+        boxes.text = anyText;
         return boxes;
     }
 

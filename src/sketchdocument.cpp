@@ -479,6 +479,17 @@ namespace curvy {
         return true;
     }
 
+    SelectionFrame SketchDocument::objectFrame(const SketchObject& object) const {
+        SelectionFrame frame;
+        frame.angle = object.frameAngle();
+        BLPath path = placedOutline(object);
+        if (frame.angle != 0.0) {
+            path.transform(BLMatrix2D::make_rotation(-frame.angle));
+        }
+        path.get_bounding_box(&frame.local);
+        return frame;
+    }
+
     BLPoint SketchDocument::selectionOrigin(const SelectionFrame& frame) const {
         if (selection_.size() == 1) {
             const jitnodes::NodeId place = transformNodeOf(selection_.front());
@@ -761,7 +772,7 @@ namespace curvy {
         groupAngle_.reset();
         quadFrame_.reset();
         originU_ = originV_ = 0.5;
-        commitGeometry(before, "Reset Bounding Box", frameBefore);
+        commitPlacement(before, "Reset Bounding Box", frameBefore);
         return true;
     }
 
@@ -792,11 +803,31 @@ namespace curvy {
                     object->setPaintWarp(entry.paintWarp);
                     object->setTextMatrix(entry.textMatrix);
                     object->setFrameAngle(entry.angle);
+                    syncObject(*object);
                 }
             }
             groupAngle_ = frame.groupAngle;
             quadFrame_ = frame.quad;
-            writePathNodes();
+            changed();
+        };
+        undoStack_.push({description,
+            [apply, after, frameAfter]() { apply(after, frameAfter); },
+            [apply, before, frameBefore]() { apply(before, frameBefore); }});
+    }
+
+    void SketchDocument::commitPlacement(const std::vector<GeometryState>& before, const std::string& description, const FrameState& frameBefore) {
+        FrameState frameAfter = frameState();
+        std::vector<GeometryState> after;
+        for (const GeometryState& entry : before) {
+            if (const SketchObject* object = findById(entry.id)) {
+                after.push_back({entry.id, object->geometry(), object->frameAngle(), object->textMatrix(), object->paintToPage(), object->paintWarp()});
+            }
+        }
+        // Undo and redo are placement edits too: the transform nodes get the old (or new) numbers and the objects follow.
+        auto apply = [this](const std::vector<GeometryState>& state, const FrameState& frame) {
+            placeObjects(state, BLMatrix2D::make_identity());
+            groupAngle_ = frame.groupAngle;
+            quadFrame_ = frame.quad;
             changed();
         };
         undoStack_.push({description,
@@ -808,17 +839,17 @@ namespace curvy {
         std::vector<GeometryState> before;
         FrameState frameBefore = frameState();
         for (std::size_t id : withDescendants(ids)) {
-            if (SketchObject* object = findById(id)) {
+            if (const SketchObject* object = findById(id)) {
                 before.push_back({id, object->geometry(), object->frameAngle(), object->textMatrix(), object->paintToPage(), object->paintWarp()});
-                object->transform(matrix);
             }
         }
         if (!before.empty()) {
+            placeObjects(before, matrix);
             if (quadFrame_.has_value()) {
                 quadFrame_ = quadFrame_->transformed(matrix);
             }
             noteTransform(matrix, 0.0);
-            commitGeometry(before, description, frameBefore);
+            commitPlacement(before, description, frameBefore);
         }
     }
 
@@ -1070,9 +1101,9 @@ namespace curvy {
         if (unitBounds.size() > 1) {
             selectionBounds(target);
         }
-        bool moved = false;
+        std::vector<ObjectPlacement> placements;
         for (const GeometryState& entry : before) {
-            SketchObject* object = findById(entry.id);
+            const SketchObject* object = findById(entry.id);
             if (object == nullptr) {
                 continue;
             }
@@ -1087,16 +1118,16 @@ namespace curvy {
                 case AlignMode::Bottom: dy = target.y1 - b.y1; break;
             }
             if (std::fabs(dx) > 1e-9 || std::fabs(dy) > 1e-9) {
-                object->transform(BLMatrix2D::make_translation(dx, dy));
-                moved = true;
+                placements.push_back({&entry, BLMatrix2D::make_translation(dx, dy)});
             }
         }
-        if (!moved) {
+        if (placements.empty()) {
             return false;
         }
+        placeObjects(placements);
         quadFrame_.reset();
         static const char* kNames[] = {"Align Left", "Align Center", "Align Right", "Align Top", "Align Middle", "Align Bottom"};
-        commitGeometry(before, kNames[int(mode)], frameBefore);
+        commitPlacement(before, kNames[int(mode)], frameBefore);
         return true;
     }
 
@@ -1112,15 +1143,10 @@ namespace curvy {
         BLMatrix2D m = BLMatrix2D::make_translation(-cx, -cy);
         m.post_rotate(angle);
         m.post_translate(cx, cy);
-        for (const GeometryState& entry : before) {
-            if (SketchObject* object = findById(entry.id)) {
-                object->transform(m);
-                object->setFrameAngle(entry.angle + angle);
-            }
-        }
+        placeObjects(before, m, 1.0, angle);
         quadFrame_.reset();
         groupAngle_.reset();
-        commitGeometry(before, clockwise ? "Rotate 90 CW" : "Rotate 90 CCW", frameBefore);
+        commitPlacement(before, clockwise ? "Rotate 90 CW" : "Rotate 90 CCW", frameBefore);
         return true;
     }
 
@@ -1135,15 +1161,10 @@ namespace curvy {
         BLMatrix2D m = BLMatrix2D::make_translation(-cx, -cy);
         m.post_scale(horizontal ? -1.0 : 1.0, horizontal ? 1.0 : -1.0);
         m.post_translate(cx, cy);
-        for (const GeometryState& entry : before) {
-            if (SketchObject* object = findById(entry.id)) {
-                object->transform(m);
-                object->setFrameAngle(-entry.angle);  // a mirrored turned box is the box turned the other way
-            }
-        }
+        placeObjects(before, m, -1.0, 0.0);   // a mirrored turned box is the box turned the other way
         quadFrame_.reset();
         groupAngle_.reset();
-        commitGeometry(before, horizontal ? "Flip Horizontal" : "Flip Vertical", frameBefore);
+        commitPlacement(before, horizontal ? "Flip Horizontal" : "Flip Vertical", frameBefore);
         return true;
     }
 
@@ -1176,35 +1197,57 @@ namespace curvy {
         return true;
     }
 
-    bool SketchDocument::changeSelectionText(const std::function<void(SketchObject&)>& change, const std::string& description) {
+    TextState SketchDocument::textStateOf(const SketchObject& object) {
+        TextState state;
+        state.text = object.text();
+        state.font = object.fontName();
+        state.size = object.fontSize();
+        state.style = object.textStyle();
+        return state;
+    }
+
+    void SketchDocument::setObjectText(std::size_t id, const TextState& state) {
+        SketchObject* object = findById(id);
+        if (object == nullptr || !object->isText()) {
+            return;
+        }
+        if (state.matrix) {
+            object->setTextMatrix(*state.matrix);
+        }
+        object->setTextAll(state.text, state.font, state.size, state.style);
+        syncObject(*object);
+    }
+
+    bool SketchDocument::changeSelectionText(const std::function<void(TextState&)>& change, const std::string& description) {
         struct Snap {
             std::size_t id;
-            std::string text, font;
-            double size;
-            TextStyle style;
-            bool operator==(const Snap& o) const { return text == o.text && font == o.font && size == o.size && style == o.style; }
+            TextState state;
         };
         std::vector<Snap> before, after;
         for (std::size_t id : selection_) {
-            SketchObject* object = findById(id);
+            const SketchObject* object = findById(id);
             if (object == nullptr || !object->isText()) {
                 continue;
             }
-            before.push_back({id, object->text(), object->fontName(), object->fontSize(), object->textStyle()});
-            change(*object);
-            after.push_back({id, object->text(), object->fontName(), object->fontSize(), object->textStyle()});
+            before.push_back({id, textStateOf(*object)});
+            TextState edited = before.back().state;
+            change(edited);
+            after.push_back({id, edited});
         }
-        if (before.empty() || before == after) {
+        bool differs = false;
+        for (std::size_t i = 0; i < before.size(); ++i) {
+            differs = differs || !before[i].state.sameWords(after[i].state);
+        }
+        if (!differs) {
             return false;
         }
         auto apply = [this](const std::vector<Snap>& snaps) {
             for (const Snap& snap : snaps) {
-                if (SketchObject* object = findById(snap.id)) {
-                    object->setTextAll(snap.text, snap.font, snap.size, snap.style);
-                }
+                setObjectText(snap.id, snap.state);
             }
             changed();
         };
+        apply(after);
         undoStack_.push({description, [apply, after]() { apply(after); }, [apply, before]() { apply(before); }});
         return true;
     }

@@ -28,15 +28,10 @@ namespace curvy {
             return false;
         }
         FrameState frameBefore = frameState();
-        for (const GeometryState& entry : before) {
-            if (SketchObject* object = findById(entry.id)) {
-                object->transform(lastTransform_);
-                object->setFrameAngle(entry.angle + lastTransformAngle_);
-            }
-        }
+        placeObjects(before, lastTransform_, 1.0, lastTransformAngle_);
         quadFrame_.reset();
         groupAngle_.reset();
-        commitGeometry(before, "Transform Again", frameBefore);
+        commitPlacement(before, "Transform Again", frameBefore);
         return true;
     }
 
@@ -51,16 +46,7 @@ namespace curvy {
     }
 
     void SketchDocument::previewTransform(const std::vector<GeometryState>& before, const BLMatrix2D& matrix, double angleDelta) {
-        for (const GeometryState& entry : before) {
-            if (SketchObject* object = findById(entry.id)) {
-                object->setGeometry(entry.path);
-                object->setPaintMatrix(entry.paintMatrix);
-                object->setPaintWarp(entry.paintWarp);
-                object->setTextMatrix(entry.textMatrix);
-                object->transform(matrix);
-                object->setFrameAngle(entry.angle + angleDelta);
-            }
-        }
+        placeObjects(before, matrix, 1.0, angleDelta);
         quadFrame_.reset();
         groupAngle_.reset();
         touch();
@@ -155,6 +141,15 @@ namespace curvy {
             return pieces;
         }
 
+        const GeometryState* stateOf(const std::vector<GeometryState>& states, std::size_t id) {
+            for (const GeometryState& state : states) {
+                if (state.id == id) {
+                    return &state;
+                }
+            }
+            return nullptr;
+        }
+
         double lowOf(const BLBox& b, bool horizontal) { return horizontal ? b.x0 : b.y0; }
         double highOf(const BLBox& b, bool horizontal) { return horizontal ? b.x1 : b.y1; }
     }
@@ -173,25 +168,23 @@ namespace curvy {
         std::stable_sort(pieces.begin(), pieces.end(), [&](const Piece& a, const Piece& b) { return key(a.box) < key(b.box); });
         const double first = key(pieces.front().box), last = key(pieces.back().box);
         FrameState frameBefore = frameState();
-        bool moved = false;
+        std::vector<ObjectPlacement> placements;
         for (std::size_t i = 1; i + 1 < pieces.size(); ++i) {
             const double delta = first + (last - first) * double(i) / double(pieces.size() - 1) - key(pieces[i].box);
             if (std::fabs(delta) < 1e-9) {
                 continue;
             }
             for (std::size_t id : pieces[i].members) {
-                if (SketchObject* object = findById(id)) {
-                    object->transform(horizontal ? BLMatrix2D::make_translation(delta, 0.0) : BLMatrix2D::make_translation(0.0, delta));
-                }
+                placements.push_back({stateOf(before, id), horizontal ? BLMatrix2D::make_translation(delta, 0.0) : BLMatrix2D::make_translation(0.0, delta)});
             }
-            moved = true;
         }
-        if (!moved) {
+        if (placements.empty()) {
             return false;
         }
+        placeObjects(placements);
         quadFrame_.reset();
         static const char* kNames[] = {"Distribute Left", "Distribute Horizontal Centers", "Distribute Right", "Distribute Top", "Distribute Vertical Centers", "Distribute Bottom"};
-        commitGeometry(before, kNames[int(mode)], frameBefore);
+        commitPlacement(before, kNames[int(mode)], frameBefore);
         return true;
     }
 
@@ -214,7 +207,7 @@ namespace curvy {
             between = (span - sizes) / double(pieces.size() - 1);
         }
         FrameState frameBefore = frameState();
-        bool moved = false;
+        std::vector<ObjectPlacement> placements;
         double at = lowOf(pieces.front().box, horizontal);   // where the next piece starts
         for (const Piece& piece : pieces) {
             const double delta = at - lowOf(piece.box, horizontal);
@@ -223,17 +216,15 @@ namespace curvy {
                 continue;
             }
             for (std::size_t id : piece.members) {
-                if (SketchObject* object = findById(id)) {
-                    object->transform(horizontal ? BLMatrix2D::make_translation(delta, 0.0) : BLMatrix2D::make_translation(0.0, delta));
-                }
+                placements.push_back({stateOf(before, id), horizontal ? BLMatrix2D::make_translation(delta, 0.0) : BLMatrix2D::make_translation(0.0, delta)});
             }
-            moved = true;
         }
-        if (!moved) {
+        if (placements.empty()) {
             return false;
         }
+        placeObjects(placements);
         quadFrame_.reset();
-        commitGeometry(before, horizontal ? "Distribute Horizontal Spacing" : "Distribute Vertical Spacing", frameBefore);
+        commitPlacement(before, horizontal ? "Distribute Horizontal Spacing" : "Distribute Vertical Spacing", frameBefore);
         return true;
     }
 
@@ -248,16 +239,11 @@ namespace curvy {
         BLMatrix2D m = BLMatrix2D::make_translation(-cx, -cy);
         m.post_rotate(radians);
         m.post_translate(cx, cy);
-        for (const GeometryState& entry : before) {
-            if (SketchObject* object = findById(entry.id)) {
-                object->transform(m);
-                object->setFrameAngle(entry.angle + radians);
-            }
-        }
+        placeObjects(before, m, 1.0, radians);
         quadFrame_.reset();
         groupAngle_.reset();
         noteTransform(m, radians);
-        commitGeometry(before, "Rotate", frameBefore);
+        commitPlacement(before, "Rotate", frameBefore);
         return true;
     }
 

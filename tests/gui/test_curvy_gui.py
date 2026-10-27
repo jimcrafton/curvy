@@ -211,6 +211,82 @@ class GraphDock(CurvyCase):
         self.assertEqual("1", fields["scaleX"])
         self.assertEqual("1", fields["scaleY"])
 
+    TRANSFORM_ROWS = {"translateX": 0, "translateY": 1, "rotation": 2, "scaleX": 3, "scaleY": 4, "shear": 5, "pivotX": 6, "pivotY": 7}
+
+    def open_transform_of_new_rectangle(self):
+        # A 120x80 rectangle (so width and height differ), with the property dock beside the graph dock to read its bounds back.
+        self.new_a4()
+        self.app.click("toolbarToggle")
+        self.app.click("propertiesToggle")
+        canvas = self.app.find("canvas")
+        self.app.click("rectangleTool")
+        self.app.drag((canvas.x + 300, canvas.y + 200), (canvas.x + 420, canvas.y + 280))
+        self.app.click("selectTool")
+        self.app.click("graphToggle")
+        self.app.wait_until(lambda: self.app.prop("graphToggle", "checked"), "the toggle to check")
+        self.app.click_segment("graphModeControl", 1)
+        self.app.wait_until(lambda: "nobody uses" in self.app.prop("graphStatus", "text"), "the Flow view")
+        self.app.click_row("graphTree", "Transform")
+        self.app.wait_until(lambda: self.app.prop("graphDetailKind", "text") == "Transform", "the transform node's box")
+
+    def bounds(self):
+        return {k: float(self.app.prop("transform%sField" % k, "text")) for k in ("X", "Y", "W", "H")}
+
+    def type_param(self, name, value):
+        self.app.click_at(self.param_point(self.TRANSFORM_ROWS[name]))
+        self.app.wait_until(lambda: self.app.find("graphDetailEditor").visible, "the row's editor")
+        self.app.key("ctrl+a")
+        self.app.type(str(value))
+        self.app.key("enter")
+
+    def test_typing_translate_x_moves_the_shape_and_one_undo_puts_it_back(self):
+        self.open_transform_of_new_rectangle()
+        before = self.bounds()
+        self.type_param("translateX", 50)
+        self.app.wait_until(lambda: abs(self.bounds()["X"] - (before["X"] + 50)) < 0.6, "the shape to move 50 right")
+        after = self.bounds()
+        self.assertAlmostEqual(before["Y"], after["Y"], delta=0.6)
+        self.assertAlmostEqual(before["W"], after["W"], delta=0.6)
+        self.app.key("ctrl+z")
+        self.app.wait_until(lambda: abs(self.bounds()["X"] - before["X"]) < 0.6, "one undo to bring the shape back")
+
+    def test_typing_scale_x_widens_the_shape_about_its_pivot(self):
+        self.open_transform_of_new_rectangle()
+        before = self.bounds()
+        self.type_param("scaleX", 2)
+        self.app.wait_until(lambda: abs(self.bounds()["W"] - before["W"] * 2) < 0.6, "the shape to double in width")
+        after = self.bounds()
+        self.assertAlmostEqual(before["H"], after["H"], delta=0.6)
+        self.assertAlmostEqual(before["X"] + before["W"] / 2, after["X"] + after["W"] / 2, delta=0.6)   # the default pivot is the centre
+        self.app.key("ctrl+z")
+        self.app.wait_until(lambda: abs(self.bounds()["W"] - before["W"]) < 0.6, "one undo to restore the width")
+
+    def test_typing_a_rotation_of_90_swaps_width_and_height(self):
+        self.open_transform_of_new_rectangle()
+        before = self.bounds()
+        self.type_param("rotation", 90)
+        self.app.wait_until(lambda: abs(self.bounds()["W"] - before["H"]) < 0.6, "the shape to turn a quarter")
+        after = self.bounds()
+        self.assertAlmostEqual(before["W"], after["H"], delta=0.6)
+        self.assertAlmostEqual(before["X"] + before["W"] / 2, after["X"] + after["W"] / 2, delta=0.6)   # turned about its centre
+        self.assertAlmostEqual(before["Y"] + before["H"] / 2, after["Y"] + after["H"] / 2, delta=0.6)
+        self.app.key("ctrl+z")
+        self.app.wait_until(lambda: abs(self.bounds()["W"] - before["W"]) < 0.6, "one undo to turn it back")
+
+    def test_a_pivot_off_centre_keeps_that_point_fixed_while_scaling(self):
+        self.open_transform_of_new_rectangle()
+        before = self.bounds()
+        pivot = self.transform_fields()
+        self.type_param("pivotX", float(pivot["pivotX"]) - before["W"] / 2)       # the left edge, assuming the pivot starts at the centre
+        self.type_param("scaleX", 2)
+        self.app.wait_until(lambda: abs(self.bounds()["W"] - before["W"] * 2) < 0.6, "the shape to double in width")
+        after = self.bounds()
+        self.assertAlmostEqual(before["X"], after["X"], delta=0.6)                # growing rightwards from the pivot
+        self.app.key("ctrl+z")
+        self.app.key("ctrl+z")
+        self.app.wait_until(lambda: abs(self.bounds()["W"] - before["W"]) < 0.6 and abs(self.bounds()["X"] - before["X"]) < 0.6,
+                            "two undos to restore the shape")
+
     def test_clicking_the_colour_swatch_of_a_fill_opens_the_colour_card(self):
         self.new_a4()
         self.app.click("toolbarToggle")
@@ -498,6 +574,174 @@ class NewDocumentDialog(CurvyCase):
         self.app.key_raw("enter")
         self.app.wait_until(lambda: not self.dialog_open(), "the dialog to close")
         self.app.wait_until(lambda: self.hint_tool() == "Select", "a document to open")
+
+
+class TextObject(CurvyCase):
+    """A text object in the property dock: the Text box with its Size / Track / Lead fields, and its fill colour."""
+
+    def make_text(self, words="Hi"):
+        self.new_a4()
+        self.app.click("toolbarToggle")
+        self.app.click("textTool")
+        self.app.wait_until(lambda: self.hint_tool() == "Text", "the Text tool")
+        canvas = self.app.find("canvas")
+        self.at = (canvas.x + canvas.w // 2, canvas.y + canvas.h // 2)
+        self.app.click_at(self.at)
+        self.app.type(words)
+        self.app.click("selectTool")                               # choosing a tool finishes the typing
+        self.app.wait_until(lambda: self.hint_tool() == "Select", "the Select tool")
+        self.app.key("ctrl+a")                                     # the text is the only object
+        self.app.click("propertiesToggle")
+        self.app.wait_until(lambda: self.app.prop("propertiesToggle", "checked"), "the property dock")
+
+    def shown(self, name):
+        try:
+            box, canvas = self.app.find(name), self.app.find("canvas")
+        except newui_guitest.GuiTestError:
+            return False
+        return box.visible and box.w > 0 and box.x + box.w <= canvas.x + canvas.w + 1
+
+    def test_a_selected_text_shows_the_text_box_with_size_track_and_lead(self):
+        self.make_text()
+        self.app.wait_until(lambda: self.shown("textPanel"), "the Text box")
+        for name in ("textFontCombo", "textSizeField", "textTrackingField", "textLeadingField",
+                     "textSizeLabel", "textTrackingLabel", "textLeadingLabel", "textBoldButton", "textItalicButton"):
+            self.assertTrue(self.shown(name), name)
+        self.assertEqual("Size", self.app.prop("textSizeLabel", "text"))
+        self.assertEqual("Track", self.app.prop("textTrackingLabel", "text"))
+        self.assertEqual("Lead", self.app.prop("textLeadingLabel", "text"))
+
+    def test_the_text_box_is_hidden_for_a_shape(self):
+        self.new_a4()
+        self.app.click("toolbarToggle")
+        self.app.click("rectangleTool")
+        canvas = self.app.find("canvas")
+        cx, cy = canvas.x + canvas.w // 2, canvas.y + canvas.h // 2
+        self.app.drag((cx - 60, cy - 40), (cx + 60, cy + 40))
+        self.app.click("selectTool")
+        self.app.click_at((cx, cy))
+        self.app.click("propertiesToggle")
+        self.app.wait_until(lambda: self.shown("transformPanel"), "the dock")
+        self.assertFalse(self.shown("textPanel"))
+
+    def test_the_fields_show_the_selected_texts_values(self):
+        self.make_text()
+        self.app.wait_until(lambda: self.shown("textPanel"), "the Text box")
+        self.assertEqual("24", self.app.prop("textSizeField", "text"))
+        self.assertEqual("0", self.app.prop("textTrackingField", "text"))
+        self.assertEqual("100", self.app.prop("textLeadingField", "text"))
+
+    def test_typing_a_size_resizes_the_text(self):
+        self.make_text()
+        self.app.wait_until(lambda: self.shown("textPanel"), "the Text box")
+        before = float(self.app.prop("transformWField", "text"))
+        self.app.double_click("textSizeField")
+        self.app.key("ctrl+a")
+        self.app.type("48")
+        self.app.key("enter")
+        self.app.wait_until(lambda: float(self.app.prop("transformWField", "text")) > before * 1.8, "the text to grow with its size")
+
+    def test_dragging_the_size_caption_scrubs_the_size(self):
+        self.make_text()
+        self.app.wait_until(lambda: self.shown("textPanel"), "the Text box")
+        before = float(self.app.prop("transformWField", "text"))
+        self.app.drag_by("textSizeLabel", 30, 0)
+        self.app.wait_until(lambda: self.app.prop("textSizeField", "text") != "24", "the size to scrub")
+        self.assertGreater(float(self.app.prop("transformWField", "text")), before)
+
+    def test_typing_a_tracking_widens_the_text(self):
+        self.make_text()
+        self.app.wait_until(lambda: self.shown("textPanel"), "the Text box")
+        before = float(self.app.prop("transformWField", "text"))
+        self.app.double_click("textTrackingField")
+        self.app.key("ctrl+a")
+        self.app.type("200")
+        self.app.key("enter")
+        self.app.wait_until(lambda: float(self.app.prop("transformWField", "text")) > before, "the text to widen")
+
+    def test_the_wheel_gives_text_a_colour_not_just_grey(self):
+        self.make_text()
+        self.app.wait_until(lambda: self.shown("colorPanel"), "the Colour box")
+        wheel = self.app.find("colorWheelHost")
+        cx, cy = wheel.x + wheel.w // 2, wheel.y + wheel.h // 2
+        radius = min(wheel.w, wheel.h) // 2 - 2 - 8
+        self.app.drag((cx + radius, cy), (cx, cy + radius))           # a hue on the ring: black stays black
+        self.app.drag((cx - 20, cy + 20), (cx + 25, cy - 25))         # the square: bright and saturated
+        self.app.wait_until(lambda: self.app.prop("hexField", "text").lstrip("#").upper() != "000000", "the fill to change")
+        hexa = self.app.prop("hexField", "text").lstrip("#")
+        red, green, blue = int(hexa[0:2], 16), int(hexa[2:4], 16), int(hexa[4:6], 16)
+        self.assertFalse(red == green == blue, "the fill kept a hue: " + hexa)
+
+
+class Grouping(CurvyCase):
+    """Group / Ungroup from the Object ring. A group shows only Transform and Opacity in the dock, so that is what tells grouped from not."""
+
+    def shown(self, name):
+        try:
+            box, canvas = self.app.find(name), self.app.find("canvas")
+        except newui_guitest.GuiTestError:
+            return False
+        return box.visible and box.w > 0 and box.x + box.w <= canvas.x + canvas.w + 1
+
+    def draw_two(self):
+        self.new_a4()
+        canvas = self.app.find("canvas")
+        cx, cy = canvas.x + canvas.w // 2, canvas.y + canvas.h // 2
+        for dx in (-120, 60):
+            self.app.click_at((cx + dx, cy))
+            self.tap_space()
+            self.app.key("r")
+            self.app.wait_until(lambda: self.hint_tool() == "Rectangle", "the rectangle tool")
+            self.app.drag((cx + dx - 30, cy - 40), (cx + dx + 30, cy + 40))
+            self.app.key("escape")
+            self.app.wait_until(lambda: self.hint_tool() == "Select", "the Select tool")
+        self.app.click("propertiesToggle")
+        self.app.wait_until(lambda: self.app.prop("propertiesToggle", "checked"), "the dock")
+        self.app.click_at((cx - 120, cy))
+        self.app.key("ctrl+a")
+        self.app.wait_until(lambda: self.shown("colorPanel"), "both selected")
+
+    def object_ring(self):
+        self.tap_space()
+        self.app.wait_until(lambda: self.app.prop("hintKeys", "text") == "Ring: Object", "the Object ring")
+
+    def picked(self):
+        """How many objects a click on the left rectangle selects: 2 when it is grouped with the other."""
+        canvas = self.app.find("canvas")
+        cx, cy = canvas.x + canvas.w // 2, canvas.y + canvas.h // 2
+        self.app.click_at((cx, cy + 250))                          # empty page: nothing selected
+        self.app.click_at((cx - 120, cy))
+        self.app.wait_until(lambda: self.app.prop("transformPanelHeaderInfo", "text") != "no selection", "a selection")
+        return self.app.prop("transformPanelHeaderInfo", "text")
+
+    def test_the_ring_group_slot_groups_the_selection(self):
+        self.draw_two()
+        self.assertEqual("1 object", self.picked())
+        self.app.key("ctrl+a")
+        self.object_ring()
+        self.app.key("2")
+        self.assertEqual("2 objects", self.picked())
+
+    def test_the_dock_follows_a_group(self):
+        self.draw_two()
+        self.object_ring()
+        self.app.key("2")
+        self.app.wait_until(lambda: not self.shown("colorPanel"), "the dock to show a group's boxes")
+
+    def test_the_group_shortcut_and_ungroup(self):
+        self.draw_two()
+        self.app.key("ctrl+g")
+        self.assertEqual("2 objects", self.picked())
+        self.app.key("ctrl+shift+g")
+        self.assertEqual("1 object", self.picked())
+
+    def test_undo_takes_the_group_apart(self):
+        self.draw_two()
+        self.object_ring()
+        self.app.key("2")
+        self.assertEqual("2 objects", self.picked())
+        self.app.key("ctrl+z")
+        self.assertEqual("1 object", self.picked())
 
 
 class Welcome(CurvyCase):

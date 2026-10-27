@@ -38,9 +38,7 @@ namespace curvy {
         void bindScrub(const char* labelName, Scrubbed which, double unit, double minimum, double maximum);
         struct Snap {
             std::size_t id = 0;
-            std::string text, font;
-            double size = 0.0;
-            TextStyle style;
+            TextState state;
         };
         std::vector<Snap> scrubBefore_;   // the selected text as the drag found it
         double scrubValue_ = 0.0;

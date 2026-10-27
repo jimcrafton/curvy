@@ -13,20 +13,21 @@ namespace curvy {
     //   nothing selected, a drawing tool armed   Colour, Stroke, Opacity - they edit the defaults of the next shape ("New shapes")
     //   nothing selected, any other tool         nothing, with the note "Nothing selected"
     //   a group (exactly)                        Transform, Opacity
-    //   text only                                Transform, Colour, Opacity
-    //   any other selection                      Transform, Colour, Stroke, Opacity
+    //   text only                                Transform, Colour, Text, Opacity
+    //   any other selection                      Transform, Colour, Stroke, Opacity (and Text when it includes text)
     // @reflect ignore=true
     struct DockBoxes {
         bool transform = false;
         bool colour = false;
         bool stroke = false;
         bool opacity = false;
+        bool text = false;
         std::string caption;   // shown above the boxes; empty hides it
 
         bool operator==(const DockBoxes& o) const {
-            return transform == o.transform && colour == o.colour && stroke == o.stroke && opacity == o.opacity && caption == o.caption;
+            return transform == o.transform && colour == o.colour && stroke == o.stroke && opacity == o.opacity && text == o.text && caption == o.caption;
         }
-        bool any() const { return transform || colour || stroke || opacity; }
+        bool any() const { return transform || colour || stroke || opacity || text; }
     };
 
     // @reflect ignore=true

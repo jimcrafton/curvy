@@ -2096,12 +2096,7 @@ namespace curvy {
         expect(hover(view(300, 150)) == "resize-we", "its right-middle handle shows the horizontal arrow");
         expect(hover(view(200, 250)) == "select", "away from the handles the arrow returns");
         double turn = 3.14159265358979323846 / 4.0;  // turn the object 45 degrees about its center
-        BLMatrix2D rotation = BLMatrix2D::make_translation(-200, -150);
-        rotation.post_rotate(turn);
-        rotation.post_translate(200, 150);
-        document.object(0).transform(rotation);
-        document.object(0).setFrameAngle(turn);
-        document.touch();
+        document.rotateSelectionBy(turn);
         // The top-middle handle is now up and to the right of the center: the NE-SW arrow.
         expect(hover(view(200 + 50 * std::sin(turn), 150 - 50 * std::cos(turn))) == "resize-nesw",
             "a frame turned 45 degrees shows the arrow matching its turned handle");

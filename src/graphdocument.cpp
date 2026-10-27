@@ -57,7 +57,10 @@ namespace curvy {
         // A keyed parameter takes an edit as a key at the current time, any other as its stored value.
         void writeFloat(jitnodes::Network& network, jitnodes::NodeId id, const std::string& name, float value) {
             jitnodes::Node& node = network.node(id);
-            if (node.keyframes(name).empty()) {
+            if (pivotShownInParent(node, name)) {
+                // The pivot is where the node turns and scales about, not where the shape sits: moving it leaves the shape where it is.
+                setPivotInParent(node, name, value);
+            } else if (node.keyframes(name).empty()) {
                 node.setFloat(name, value);
             } else {
                 putKey(node, name, network.time(), value);

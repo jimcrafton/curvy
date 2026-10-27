@@ -195,7 +195,7 @@ namespace curvy {
             for (const Follow& f : follow) {
                 if (SketchObject* object = findById(f.id)) {
                     object->setSymbol(to);
-                    object->setGeometry(forward ? f.after : f.before);
+                    setObjectOutline(*object, forward ? f.after : f.before);
                 }
             }
             changed();

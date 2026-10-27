@@ -44,6 +44,30 @@
 
 using namespace curvy;
 
+namespace {
+    // Carries an object that is already in `document` by `matrix`, the way a drag does: through the document, which writes its nodes.
+    void placeInDocument(SketchDocument& document, SketchObject& object, const BLMatrix2D& matrix) {
+        GeometryState state;
+        state.id = object.id();
+        state.path = object.geometry();
+        state.angle = object.frameAngle();
+        state.textMatrix = object.textMatrix();
+        state.paintMatrix = object.paintToPage();
+        state.paintWarp = object.paintWarp();
+        document.placeObjects({state}, matrix);
+    }
+
+    void setWords(SketchDocument& document, std::size_t id, const std::string& words) {
+        TextState state = SketchDocument::textStateOf(*document.findById(id));
+        state.text = words;
+        document.setObjectText(id, state);
+    }
+
+    void transformPrototype(SketchObject& object, const BLMatrix2D& matrix) {
+        SketchObject::Prototype::transform(object, matrix);
+    }
+}
+
 TEST(SketchColor, RgbRoundTripsThroughHex) {
     SketchColor color = SketchColor::fromHex("#336699");
     EXPECT_EQ(color.space(), ColorSpace::RGB);
@@ -248,7 +272,7 @@ TEST(SketchDocument, SvgIoIsNotYetAvailable) {
 
 TEST(SketchObject, TransformBakesIntoGeometry) {
     std::unique_ptr<SketchObject> rect(SketchObject::makeRect(0, 0, 10, 10));
-    rect->transform(BLMatrix2D::make_translation(5, 7));
+    transformPrototype(*rect, BLMatrix2D::make_translation(5, 7));
     BLBox box = rect->geometryBounds();
     EXPECT_NEAR(box.x0, 5.0, 1e-9);
     EXPECT_NEAR(box.y1, 17.0, 1e-9);
@@ -371,8 +395,8 @@ TEST(SketchUndo, CommitGeometryRecordsALiveDrag) {
     std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
     doc.setSelection({a});
     auto before = doc.snapshotSelection();
-    doc.findById(a)->transform(BLMatrix2D::make_scaling(2.0));  // the live drag edit
-    doc.commitGeometry(before, "Resize");
+    doc.placeObjects(before, BLMatrix2D::make_scaling(2.0));  // the live drag edit
+    doc.commitPlacement(before, "Resize");
     EXPECT_NEAR(doc.findById(a)->geometryBounds().x1, 20.0, 1e-9);
     doc.undoStack().undo();
     EXPECT_NEAR(doc.findById(a)->geometryBounds().x1, 10.0, 1e-9);
@@ -385,7 +409,7 @@ TEST(SketchObject, RotateAboutCenterStaysPut) {
     BLMatrix2D m = BLMatrix2D::make_translation(-50, -25);  // 90 degrees about the center (50, 25)
     m.post_rotate(1.5707963267948966);
     m.post_translate(50, 25);
-    rect->transform(m);
+    transformPrototype(*rect, m);
     BLBox box = rect->geometryBounds();
     EXPECT_NEAR(box.x0, 25.0, 1e-6);
     EXPECT_NEAR(box.x1, 75.0, 1e-6);
@@ -413,7 +437,7 @@ TEST(SketchFrame, FollowsTheObjectsRotation) {
     BLMatrix2D m = BLMatrix2D::make_translation(-50, -25);
     m.post_rotate(angle);
     m.post_translate(50, 25);
-    object->transform(m);
+    transformPrototype(*object, m);
     object->setFrameAngle(angle);
 
     SelectionFrame frame;
@@ -447,9 +471,8 @@ TEST(SketchFrame, UndoRestoresTheFrameAngle) {
     std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
     doc.setSelection({a});
     auto before = doc.snapshotSelection();
-    doc.findById(a)->transform(BLMatrix2D::make_rotation(0.3));
-    doc.findById(a)->setFrameAngle(0.3);
-    doc.commitGeometry(before, "Rotate");
+    doc.placeObjects(before, BLMatrix2D::make_rotation(0.3), 1.0, 0.3);
+    doc.commitPlacement(before, "Rotate");
     doc.undoStack().undo();
     EXPECT_DOUBLE_EQ(doc.findById(a)->frameAngle(), 0.0);
     doc.undoStack().redo();
@@ -465,7 +488,7 @@ TEST(SketchFrame, CloneKeepsTheFrameAngle) {
 
 TEST(SketchObject, WarpMapsEveryVertex) {
     std::unique_ptr<SketchObject> rect(SketchObject::makeRect(0, 0, 10, 10));
-    rect->warp([](const BLPoint& p) { return BLPoint(p.x * 2.0 + 1.0, p.y + 5.0); });
+    SketchObject::Prototype::warp(*rect, [](const BLPoint& p) { return BLPoint(p.x * 2.0 + 1.0, p.y + 5.0); });
     BLBox box = rect->geometryBounds();
     EXPECT_NEAR(box.x0, 1.0, 1e-9);
     EXPECT_NEAR(box.x1, 21.0, 1e-9);
@@ -477,7 +500,7 @@ TEST(SketchObject, WarpMapsEveryVertex) {
 TEST(SketchObject, WarpKeepsCurvesAndClosure) {
     std::unique_ptr<SketchObject> ellipse(SketchObject::makeEllipse(0, 0, 10, 10));
     std::size_t before = ellipse->geometry().size();
-    ellipse->warp([](const BLPoint& p) { return BLPoint(p.x + 100.0, p.y); });
+    SketchObject::Prototype::warp(*ellipse, [](const BLPoint& p) { return BLPoint(p.x + 100.0, p.y); });
     EXPECT_EQ(ellipse->geometry().size(), before);
     EXPECT_NEAR(ellipse->geometryBounds().x0, 90.0, 1e-6);
 }
@@ -498,11 +521,11 @@ TEST(SketchOrigin, DefaultsToTheCenterAndRidesWithTheFrame) {
     EXPECT_NEAR(origin.y, 0.0, 1e-9);
 
     // Scale the object 2x about the corner: the origin fraction keeps pointing at the same corner.
-    doc.findById(a)->transform(BLMatrix2D::make_scaling(2.0));
+    doc.placeObjects(doc.snapshotSelection(), BLMatrix2D::make_scaling(2.0));
     doc.selectionFrame(frame);
     origin = doc.selectionOrigin(frame);
     EXPECT_NEAR(origin.x, 0.0, 1e-9);
-    doc.findById(a)->transform(BLMatrix2D::make_translation(30, 0));
+    doc.placeObjects(doc.snapshotSelection(), BLMatrix2D::make_translation(30, 0));
     doc.selectionFrame(frame);
     EXPECT_NEAR(doc.selectionOrigin(frame).x, 30.0, 1e-9);
 }
@@ -826,7 +849,7 @@ TEST(SketchGradient, GradientFollowsTheObjectWhenItMoves) {
     std::unique_ptr<SketchObject> rect(SketchObject::makeRect(0, 0, 100, 40));
     rect->setStroke(SketchPaint::none());
     rect->setFill(SketchPaint::linear(redToBlue()));
-    rect->transform(BLMatrix2D::make_translation(100, 0));
+    transformPrototype(*rect, BLMatrix2D::make_translation(100, 0));
     std::vector<std::uint32_t> px = render(*rect, 200, 40);
     EXPECT_GT((px[20 * 200 + 103] >> 16) & 0xFF, 200u);  // still red at its (new) left edge
     EXPECT_GT(px[20 * 200 + 196] & 0xFF, 200u);
@@ -873,7 +896,7 @@ TEST(SketchGradient, PointsFollowTheObjectAndHaveEquality) {
     std::unique_ptr<SketchObject> rect(SketchObject::makeRect(0, 0, 100, 40));
     rect->setStroke(SketchPaint::none());
     rect->setFill(SketchPaint::points(redAndBluePoints()));
-    rect->transform(BLMatrix2D::make_translation(100, 0));
+    transformPrototype(*rect, BLMatrix2D::make_translation(100, 0));
     std::vector<std::uint32_t> px = render(*rect, 200, 40);
     EXPECT_GT((px[20 * 200 + 110] >> 16) & 0xFF, 220u);
     EXPECT_GT(px[20 * 200 + 190] & 0xFF, 220u);
@@ -1794,8 +1817,8 @@ TEST(SketchObject, PaintsFollowEveryTransformAndSurviveFiles) {
     SketchDocument doc;
     SketchObject& o = doc.add(SketchObject::makeRect(10, 10, 100, 50));
     o.setFill(SketchPaint::points(redAndBluePoints()));
-    o.transform(BLMatrix2D(1.0, 0.0, 0.5, 1.0, 0.0, 0.0));   // a shear
-    o.transform(BLMatrix2D::make_translation(30.0, 5.0));
+    placeInDocument(doc, o, BLMatrix2D(1.0, 0.0, 0.5, 1.0, 0.0, 0.0));   // a shear
+    placeInDocument(doc, o, BLMatrix2D::make_translation(30.0, 5.0));
 
     const BLBox frame = o.paintFrameBounds();
     EXPECT_NEAR(frame.x0, 10.0, 1e-9);
@@ -1849,7 +1872,7 @@ TEST(SketchSvg, GradientAxisRoundTripsAndFollowsTheObject) {
         EXPECT_NEAR(e0.y, e1.y, 1e-3);
     }
     // The axis is relative to the box, so moving the object moves it along.
-    copy.object(0).transform(BLMatrix2D::make_translation(50, 0));
+    placeInDocument(copy, copy.object(0), BLMatrix2D::make_translation(50, 0));
     BLPoint moved, ignored;
     copy.object(0).fill().gradient().axisPoints(copy.object(0).geometryBounds(), false, moved, ignored);
     EXPECT_NEAR(moved.x, 80.0, 1e-3);
@@ -1953,7 +1976,7 @@ TEST(SketchSvg, ForeignSkewIsKept) {
 TEST(SketchSvg, RotatedObjectsKeepTheirFrameAngle) {
     SketchDocument doc;
     SketchObject& o = doc.add(SketchObject::makeRect(0, 0, 40, 20));
-    o.transform(BLMatrix2D::make_rotation(0.5, 0.0, 0.0));
+    placeInDocument(doc, o, BLMatrix2D::make_rotation(0.5, 0.0, 0.0));
     o.setFrameAngle(0.5);
     SketchDocument copy = roundTrip(doc);
     ASSERT_EQ(copy.objectCount(), 1u);
@@ -2803,11 +2826,11 @@ TEST(SketchText, OutlineSitsOnTheBaselineAndGrowsWithTheWordsAndSize) {
     EXPECT_LE(box.y1, 50.5) << "H and i stand on the baseline";
     EXPECT_LT(box.y0, 50.0 - 10.0) << "the capitals rise well above it";
     double width = box.x1 - box.x0;
-    text->setText("Hi there");
+    SketchObject::Prototype::setText(*text, "Hi there");
     EXPECT_GT(text->geometryBounds().x1 - text->geometryBounds().x0, width * 2.0);
-    text->setText("Hi\nthere");
+    SketchObject::Prototype::setText(*text, "Hi\nthere");
     EXPECT_GT(text->geometryBounds().y1, 50.0 + 10.0) << "a second line sits below the first";
-    text->setFontSize(48.0);
+    SketchObject::Prototype::setFontSize(*text, 48.0);
     EXPECT_GT(text->geometryBounds().y1 - text->geometryBounds().y0, 40.0);
 }
 
@@ -2817,13 +2840,13 @@ TEST(SketchText, MovingKeepsLaterEditsWhereTheTextWas) {
     std::size_t id = text.id();
     doc.transformObjects({id}, BLMatrix2D::make_translation(30.0, 20.0), "Move");
     EXPECT_NEAR(doc.findById(id)->geometryBounds().x0, 130.0, 3.0);
-    doc.findById(id)->setText("Hi!");
+    setWords(doc, id, "Hi!");
     EXPECT_NEAR(doc.findById(id)->geometryBounds().x0, 130.0, 3.0) << "editing the words does not send the text back";
     EXPECT_LE(doc.findById(id)->geometryBounds().y1, 70.5);
-    doc.findById(id)->setText("Hi");
+    setWords(doc, id, "Hi");
     doc.undoStack().undo();
     EXPECT_NEAR(doc.findById(id)->geometryBounds().x0, 100.0, 3.0);
-    doc.findById(id)->setText("Hi!");
+    setWords(doc, id, "Hi!");
     EXPECT_NEAR(doc.findById(id)->geometryBounds().x0, 100.0, 3.0) << "after undoing the move the placement is the old one too";
     EXPECT_LE(doc.findById(id)->geometryBounds().y1, 50.5);
 }
@@ -2832,7 +2855,7 @@ TEST(SketchSvg, TextKeepsItsWordsFontAndPlacement) {
     SketchDocument doc;
     SketchObject& plain = doc.add(SketchObject::makeText("Line one\nLine \"two\" & <more>", "", 30.0, BLPoint(40.0, 80.0)));
     plain.setFill(SketchPaint::solid(SketchColor::fromHex("#336699")));
-    plain.transform(BLMatrix2D::make_scaling(1.5, 1.5));
+    placeInDocument(doc, plain, BLMatrix2D::make_scaling(1.5, 1.5));
     SketchObject& styled = doc.add(SketchObject::makeText("Fancy", "", 20.0, BLPoint(10.0, 200.0)));
     AppearanceItem extra = AppearanceItem::makeStroke(SketchPaint::solid(SketchColor::gray(0.0f)), 2.0);
     std::vector<AppearanceItem> items = styled.appearance();
@@ -2853,7 +2876,7 @@ TEST(SketchSvg, TextKeepsItsWordsFontAndPlacement) {
         EXPECT_NEAR(b.geometryBounds().x0, a.geometryBounds().x0, 1e-2);
         EXPECT_NEAR(b.geometryBounds().y1, a.geometryBounds().y1, 1e-2);
         std::string words = b.text();
-        b.setText(words + "!");   // the restored placement puts an edit in the same spot
+        setWords(copy, b.id(), words + "!");   // the restored placement puts an edit in the same spot
         EXPECT_NEAR(b.geometryBounds().x0, a.geometryBounds().x0, 1e-2);
     }
 }
@@ -3037,7 +3060,33 @@ namespace {
         return "differ at byte " + std::to_string(i) + ":\n  first : " + around(a) + "\n  second: " + around(b);
     }
 
-    // The SVG without its embedded graph: .skb files do not store it (the nodes are made from the objects on load), so only the drawing is compared.
+    // Like firstDifference, but a number may differ by `tolerance`: an outline rebuilt from a node's float curve is the saved one to within a float step.
+    std::string firstDifferenceNear(const std::string& a, const std::string& b, double tolerance) {
+        auto numeric = [](char c) { return (c >= '0' && c <= '9') || c == '.' || c == '-' || c == 'e' || c == '+'; };
+        std::size_t i = 0, j = 0;
+        while (i < a.size() && j < b.size()) {
+            if (a[i] == b[j]) {
+                ++i;
+                ++j;
+                continue;
+            }
+            std::size_t ei = i, ej = j;
+            while (ei < a.size() && numeric(a[ei])) { ++ei; }
+            while (ej < b.size() && numeric(b[ej])) { ++ej; }
+            std::size_t si = i, sj = j;
+            while (si > 0 && numeric(a[si - 1])) { --si; }
+            while (sj > 0 && numeric(b[sj - 1])) { --sj; }
+            const double x = std::atof(a.substr(si, ei - si).c_str()), y = std::atof(b.substr(sj, ej - sj).c_str());
+            if ((ei == i && ej == j) || std::fabs(x - y) > tolerance * (1.0 + std::fabs(x))) {
+                return "differ at byte " + std::to_string(i) + ":\n  first : " + a.substr(i > 60 ? i - 60 : 0, 140) + "\n  second: " + b.substr(j > 60 ? j - 60 : 0, 140);
+            }
+            i = ei;
+            j = ej;
+        }
+        return i == a.size() && j == b.size() ? std::string() : "one ends early, at byte " + std::to_string(i);
+    }
+
+    // The SVG without its embedded graph, so only the drawing is compared (the graph text carries the node ids and the order they were made in).
     std::string withoutGraph(std::string svg) {
         const std::size_t start = svg.find("<metadata>");
         const std::size_t end = svg.find("</metadata>");
@@ -3079,7 +3128,7 @@ namespace {
         items.push_back(AppearanceItem::makeFill(SketchPaint::radial(SketchGradient::fromColor(SketchColor::rgb(1, 0, 0)))));
         card.setAppearance(items);
         card.setActiveIndices(0, 1, 2);
-        card.transform(BLMatrix2D::make_rotation(0.3));
+        placeInDocument(doc, card, BLMatrix2D::make_rotation(0.3));
         card.setFrameAngle(0.3);
 
         SketchObject& a = doc.add(SketchObject::makeEllipse(200, 100, 40, 30));
@@ -3093,8 +3142,9 @@ namespace {
         doc.setGroupProps(outer, props);
         BLPath curve;
         curve.move_to(5, 5);
-        curve.quad_to(20, 40, 50, 5);
+        curve.cubic_to(15, 85.0 / 3.0, 30, 85.0 / 3.0, 50, 5);   // a node's curve holds cubics only, so a quadratic would come back as this
         curve.cubic_to(60, 0, 70, 30, 90, 20);
+        curve.line_to(5, 5);   // a node's closed curve holds its closing edge as a segment
         curve.close();
         doc.add(SketchObject::makePath(curve)).setVisible(false);
         doc.add(SketchObject::makeText("Fine\nand \"dandy\" \xC3\xA9", "", 22.0, BLPoint(40, 300)));
@@ -3114,7 +3164,7 @@ TEST(SketchBinary, ADocumentRoundTripsWithNothingLost) {
         ASSERT_TRUE(documentFromBinary(file, copy)) << "compress " << compress;
         ASSERT_EQ(copy.objectCount(), doc.objectCount());
         // The SVG writer reads every part of the model, so equal SVG means equal documents.
-        EXPECT_EQ(firstDifference(withoutGraph(svgFromDocument(copy)), withoutGraph(svgFromDocument(doc))), "");
+        EXPECT_EQ(firstDifferenceNear(withoutGraph(svgFromDocument(copy)), withoutGraph(svgFromDocument(doc)), 1e-4), "");
         EXPECT_TRUE(copy.object(4).isText());
         EXPECT_EQ(copy.object(4).text(), doc.object(4).text());
         EXPECT_EQ(copy.object(0).activeEffectIndex(), 2u);
@@ -3139,7 +3189,56 @@ TEST(SketchBinary, SharedAppearancesAreWrittenOnce) {
     }
     std::size_t base = binaryFromDocument(one, false).size();
     std::size_t big = binaryFromDocument(many, false).size();
-    EXPECT_LT(big, base + 1000 * 150) << "each extra rectangle costs its outline and a few bytes, not another appearance";
+    EXPECT_LT(big, base + 1000 * 700) << "each extra rectangle costs its nodes (the outline lives there) and a few bytes, not another appearance";
+}
+
+// DG-03 S5: the file stores the graph and each object's shape node; an outline the node holds is not saved but built from the node on load.
+TEST(SketchBinary, TheFileStoresTheGraphAndObjectsAreBuiltFromItsNodes) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(20, 20, 100, 60)).id();
+    const std::size_t b = doc.add(SketchObject::makeEllipse(200, 100, 40, 30)).id();
+    doc.transformObjects({a}, SketchDocument::rotationAbout(BLPoint(70, 50), 0.7), "Rotate");
+    ASSERT_TRUE(doc.setParent(b, a));
+    ASSERT_TRUE(doc.pathHeldByNode(*doc.findById(a)));
+
+    SketchDocument loaded;
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc), loaded));
+    ASSERT_EQ(loaded.objectCount(), 2u);
+    EXPECT_EQ(loaded.graphToText(), doc.graphToText()) << "the graph comes back as it was saved";
+    EXPECT_EQ(loaded.object(0).graphNode(), doc.object(0).graphNode());
+    EXPECT_EQ(loaded.object(1).graphNode(), doc.object(1).graphNode());
+    EXPECT_EQ(loaded.object(1).parent(), loaded.object(0).id()) << "the parent link is in the graph";
+    EXPECT_TRUE(loaded.pathHeldByNode(loaded.object(0))) << "the object is in step with its node, nothing was rewritten";
+    const BLBox x = doc.object(0).geometryBounds(), y = loaded.object(0).geometryBounds();
+    EXPECT_NEAR(x.x0, y.x0, 1e-3);
+    EXPECT_NEAR(x.y0, y.y0, 1e-3);
+    EXPECT_NEAR(x.x1, y.x1, 1e-3);
+    EXPECT_NEAR(x.y1, y.y1, 1e-3);
+}
+
+TEST(SketchBinary, AnOlderFileWithoutAGraphStillLoads) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(20, 20, 100, 60));
+    doc.add(SketchObject::makeText("Hi", "", 24.0, BLPoint(10, 90)));
+    SketchDocument loaded;
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc, true, 3), loaded));
+    ASSERT_EQ(loaded.objectCount(), 2u);
+    EXPECT_NEAR(loaded.object(0).geometryBounds().x1, 120.0, 1e-3);
+    EXPECT_TRUE(loaded.object(1).isText());
+    EXPECT_NE(loaded.object(0).graphNode(), 0u) << "the nodes are made from the objects, as before";
+}
+
+TEST(SketchBinary, AGraphThatCannotBeReadRefusesTheFileAndLeavesTheDocument) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(20, 20, 100, 60));
+    std::string file = binaryFromDocument(doc, false);
+    const std::size_t at = file.find("jitnodes");
+    ASSERT_NE(at, std::string::npos) << "the graph text is in the file";
+    file[at] = '#';
+    SketchDocument keep;
+    keep.add(SketchObject::makeRect(1, 2, 3, 4));
+    EXPECT_FALSE(documentFromBinary(file, keep));
+    EXPECT_EQ(keep.objectCount(), 1u);
 }
 
 TEST(SketchBinary, DamagedFilesAreRefusedWithoutHarm) {
@@ -3192,7 +3291,7 @@ TEST(SketchBinary, FilesSaveAndLoadByExtensionAndByContent) {
     in.close();
     SketchDocument loaded;
     ASSERT_TRUE(loaded.load(path));
-    EXPECT_EQ(firstDifference(withoutGraph(svgFromDocument(loaded)), withoutGraph(svgFromDocument(doc))), "");
+    EXPECT_EQ(firstDifferenceNear(withoutGraph(svgFromDocument(loaded)), withoutGraph(svgFromDocument(doc)), 1e-4), "");
     std::string renamed = (folder / "sketch_test_e.svg").string();
     std::filesystem::copy_file(path, renamed, std::filesystem::copy_options::overwrite_existing);
     SketchDocument fromRenamed;
@@ -3309,7 +3408,7 @@ TEST(SketchEffects, RoughenIsRepeatableAndStaysNearTheOutline) {
     EXPECT_TRUE(differs);
     // Moving the object moves the wobble with it, unchanged.
     std::unique_ptr<SketchObject> moved(rough->clone());
-    moved->transform(BLMatrix2D::make_translation(20, 0));
+    transformPrototype(*moved, BLMatrix2D::make_translation(20, 0));
     EXPECT_EQ(pixelAt(*rough, 200, 90, 38), pixelAt(*moved, 200, 110, 38));
     // Size 0 does nothing.
     std::vector<AppearanceItem> zero = rough->appearance();
@@ -4316,7 +4415,7 @@ TEST(SketchText, StyleChangesTheOutlineAndSurvivesUndoAndFiles) {
     EXPECT_TRUE(text.textStyle().isDefault());
 
     // Tracking widens it; undo brings the old outline back.
-    ASSERT_TRUE(doc.changeSelectionText([](SketchObject& o) { TextStyle s = o.textStyle(); s.tracking = 5.0; o.setTextStyle(s); }, "Tracking"));
+    ASSERT_TRUE(doc.changeSelectionText([](TextState& s) { s.style.tracking = 5.0; }, "Tracking"));
     EXPECT_GT(text.geometryBounds().x1 - text.geometryBounds().x0, plain.x1 - plain.x0 + 10.0);
     doc.undoStack().undo();
     EXPECT_NEAR(text.geometryBounds().x1, plain.x1, 1e-6);
@@ -4325,7 +4424,7 @@ TEST(SketchText, StyleChangesTheOutlineAndSurvivesUndoAndFiles) {
     // Leading spreads the lines; alignment moves the shorter line.
     TextStyle style;
     style.leading = 2.0;
-    ASSERT_TRUE(doc.changeSelectionText([&style](SketchObject& o) { o.setTextStyle(style); }, "Leading"));
+    ASSERT_TRUE(doc.changeSelectionText([&style](TextState& s) { s.style = style; }, "Leading"));
     EXPECT_GT(text.geometryBounds().y1 - text.geometryBounds().y0, (plain.y1 - plain.y0) * 1.3);
     EXPECT_NEAR(textLineHeight("", 24.0, style), textLineHeight("", 24.0, TextStyle()) * 2.0, 1e-9);
     TextStyle right;
@@ -4333,14 +4432,14 @@ TEST(SketchText, StyleChangesTheOutlineAndSurvivesUndoAndFiles) {
     EXPECT_GT(textLineOffset("Hi\nA much longer line", 0, "", 24.0, right), 10.0);
     EXPECT_NEAR(textLineOffset("Hi\nA much longer line", 1, "", 24.0, right), 0.0, 1e-9);
     EXPECT_NEAR(textLineOffset("Hi\nA much longer line", 0, "", 24.0, TextStyle()), 0.0, 1e-9);
-    EXPECT_FALSE(doc.changeSelectionText([&style](SketchObject& o) { o.setTextStyle(style); }, "Again")) << "no change, no step";
+    EXPECT_FALSE(doc.changeSelectionText([&style](TextState& s) { s.style = style; }, "Again")) << "no change, no step";
 
     // Both file formats keep the style.
     style.bold = true;
     style.italic = true;
     style.align = TextStyle::Center;
     style.tracking = 1.5;
-    doc.changeSelectionText([&style](SketchObject& o) { o.setTextStyle(style); }, "All");
+    doc.changeSelectionText([&style](TextState& s) { s.style = style; }, "All");
     SketchDocument svg, bin;
     ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), svg));
     ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc), bin));
@@ -4351,7 +4450,7 @@ TEST(SketchText, StyleChangesTheOutlineAndSurvivesUndoAndFiles) {
     // Not text: nothing to change.
     SketchDocument other;
     other.setSelection({other.add(SketchObject::makeRect(0, 0, 10, 10)).id()});
-    EXPECT_FALSE(other.changeSelectionText([](SketchObject& o) { o.setFontSize(10.0); }, "x"));
+    EXPECT_FALSE(other.changeSelectionText([](TextState& s) { s.size = 10.0; }, "x"));
 }
 
 // ---- Image Trace ----
@@ -5035,7 +5134,7 @@ TEST(SketchBrushes, AnArtBrushBendsWithACurve) {
     BLPath path;
     path.move_to(10, 90);
     path.quad_to(50, 10, 90, 90);   // up and over: it peaks at y = 50
-    arc->setGeometry(path);
+    SketchObject::Prototype::setOutline(*arc, path);
     arc->setStroke(SketchPaint::solid(SketchColor::gray(0.0f)));
     arc->setStrokeWidth(1.0);
     StrokeOptions options;
@@ -5646,7 +5745,7 @@ TEST(SketchTextPath, TextIsStretchedBetweenTwoPaths) {
     EXPECT_GT(box.y1, 120.0);               // ... to the baseline, just above the bottom one
     EXPECT_LT(box.y1, 151.0);
     // Typing keeps the shape between the paths.
-    doc.findById(text)->setText("Banner day");
+    setWords(doc, text, "Banner day");
     BLBox again = doc.findById(text)->geometryBounds();
     EXPECT_NEAR(again.x1, 300.0, 1.0);
     // Release: plain text again, starting about where the warped text started.
@@ -5695,7 +5794,7 @@ TEST(SketchTextPath, TheWarpSurvivesSavingMovingAndCopying) {
     doc.setSelection({text});
     doc.transformObjects({text}, BLMatrix2D::make_translation(50, 20), "Move");
     EXPECT_NEAR(doc.findById(text)->geometryBounds().x0, box.x0 + 50.0, 1e-6);
-    doc.findById(text)->setText("Hi");   // typing afterwards: still on the (moved) path
+    setWords(doc, text, "Hi");   // typing afterwards: still on the (moved) path
     EXPECT_NEAR(doc.findById(text)->geometryBounds().x0, box.x0 + 50.0, 3.0);
     // A copy keeps it.
     doc.duplicateSelection(0, 0);
@@ -5798,7 +5897,7 @@ TEST(SketchImages, PicturesSurviveSvgBinaryAndClipboardRoundTrips) {
     EXPECT_NE(svg.find("<image"), std::string::npos);   // a real <image> that other viewers show
     EXPECT_NE(svg.find("data:image/png;base64,"), std::string::npos);
     const std::string bin = binaryFromDocument(doc, false);
-    EXPECT_LT(bin.size(), image->bytes.size() * 3 / 2 + 2000) << "the picture is stored once however often it is used";
+    EXPECT_LT(bin.size(), image->bytes.size() * 3 / 2 + 4000) << "the picture is stored once however often it is used";
     SketchDocument fromSvg, fromBin;
     ASSERT_TRUE(documentFromSvg(svg, fromSvg));
     ASSERT_TRUE(documentFromBinary(bin, fromBin));
@@ -6418,9 +6517,8 @@ TEST(PathNode, EveryObjectHasANodeThroughEdits) {
 
     doc.setSelection({a});
     const auto before = doc.snapshotSelection();
-    doc.findById(a)->transform(BLMatrix2D::make_scaling(2.0));
-    doc.touch();
-    doc.commitGeometry(before, "Resize");
+    doc.placeObjects(before, BLMatrix2D::make_scaling(2.0));
+    doc.commitPlacement(before, "Resize");
     EXPECT_TRUE(pathNodesMatch(doc));
     doc.undoStack().undo();
     EXPECT_TRUE(pathNodesMatch(doc));
@@ -6469,8 +6567,8 @@ TEST(PathNode, UndoAndRedoKeepTheExactCoordinates) {
     doc.setSelection({a});
     const BLPath start = doc.findById(a)->geometry();
     const auto before = doc.snapshotSelection();
-    doc.findById(a)->transform(BLMatrix2D::make_rotation(0.7, 100.1, 200.2));
-    doc.commitGeometry(before, "Rotate");
+    doc.placeObjects(before, BLMatrix2D::make_rotation(0.7, 100.1, 200.2));
+    doc.commitPlacement(before, "Rotate");
     const BLPath moved = doc.findById(a)->geometry();
     for (int i = 0; i < 3; ++i) {
         doc.undoStack().undo();
@@ -6501,7 +6599,7 @@ TEST(PathNode, TextSymbolAndImageObjectsHaveNodesToo) {
 
     SketchObject* object = doc.findById(text);
     doc.setSelection({text});
-    object->setText("Changed");
+    setWords(doc, text, "Changed");
     doc.touch();
     EXPECT_EQ(net.node(object->graphNode()).getString("text"), "Changed");
     EXPECT_TRUE(pathNodesMatch(doc));
@@ -6538,8 +6636,8 @@ TEST(PathNode, AttributesOnAnchorsSurviveMovesAndUndo) {
 
     doc.setSelection({id});
     const auto before = doc.snapshotSelection();
-    doc.findById(id)->transform(BLMatrix2D::make_translation(100, 5));
-    doc.commitGeometry(before, "Move");
+    doc.placeObjects(before, BLMatrix2D::make_translation(100, 5));
+    doc.commitPlacement(before, "Move");
     ASSERT_NE(doc.network().node(node).geometryParam("curve")->findAttrib(jitnodes::AttribClass::point, "pressure"), nullptr);
     EXPECT_NEAR(pressure(0), 0.25f, 1e-6f);
     EXPECT_NEAR(doc.network().node(node).geometryParam("curve")->x()[0], 0.0f, 1e-4f);   // the curve stays as drawn; the transform node holds the move
@@ -6841,7 +6939,7 @@ TEST(PointIds, PointsKeepTheirIdsWhileTheShapeIsEdited) {
     moved.line_to(40, 20);
     moved.line_to(0, 20);
     moved.close();
-    object->setGeometry(moved);
+    doc.setObjectOutline(*object, moved);
     doc.touch();
     EXPECT_EQ(pointIds(doc, id), (std::vector<int>{0, 1, 2, 3})) << "moving a point keeps the ids";
 
@@ -6850,7 +6948,7 @@ TEST(PointIds, PointsKeepTheirIdsWhileTheShapeIsEdited) {
     fewer.line_to(50, 0);
     fewer.line_to(0, 20);
     fewer.close();
-    object->setGeometry(fewer);
+    doc.setObjectOutline(*object, fewer);
     doc.touch();
     EXPECT_EQ(pointIds(doc, id), (std::vector<int>{0, 1, 3})) << "deleting the third point leaves the others their ids";
 
@@ -6860,7 +6958,7 @@ TEST(PointIds, PointsKeepTheirIdsWhileTheShapeIsEdited) {
     more.line_to(50, 0);
     more.line_to(0, 20);
     more.close();
-    object->setGeometry(more);
+    doc.setObjectOutline(*object, more);
     doc.touch();
     const std::vector<int> ids = pointIds(doc, id);
     ASSERT_EQ(ids.size(), 4u);
@@ -7197,21 +7295,29 @@ TEST(Selection, TheFrameOfALargeGraphIsCheapToMeasureWhileScrubbing) {
 
     // Dragging: each mouse move puts the objects back and moves them again (CanvasView::applyToSelection), then the handles are measured.
     const std::vector<GeometryState> before = doc.snapshotSelection(true);
-    double dragging = 0.0;
+    double dragging = 0.0, placing = 0.0;
     for (int step = 1; step <= 20; ++step) {
-        for (const GeometryState& entry : before) {
-            SketchObject* object = doc.findById(entry.id);
-            object->setGeometry(entry.path);
-            object->transform(BLMatrix2D::make_translation(step * 3.0, step * 2.0));
-        }
+        start = std::chrono::steady_clock::now();
+        doc.placeObjects(before, BLMatrix2D::make_translation(step * 3.0, step * 2.0));
+        placing += millisSince(start);
         start = std::chrono::steady_clock::now();
         ASSERT_TRUE(doc.selectionBounds(box));
         ASSERT_TRUE(doc.selectionFrame(frame));
         dragging += millisSince(start);
     }
     dragging /= 20;
+    placing /= 20;
     EXPECT_NEAR(box.x0, 60.0, 1e-3) << "the handles follow the drag";
-    doc.commitGeometry(before, "Move");
+    start = std::chrono::steady_clock::now();
+    doc.commitPlacement(before, "Move");
+    const double committing = millisSince(start);
+    start = std::chrono::steady_clock::now();
+    doc.undoStack().undo();
+    const double undoing = millisSince(start);
+    EXPECT_NEAR(doc.findById(before.front().id)->geometryBounds().x0, 0.0, 1e-3);
+    doc.undoStack().redo();
+    EXPECT_NEAR(doc.findById(before.front().id)->geometryBounds().x0, 60.0, 1e-3);
+    std::printf("drag step: placing %.2f ms; commit %.1f ms, undo %.1f ms\n", placing, committing, undoing);
 
     // Scrubbing the timeline: every frame re-cooks the graph, then the handles are measured.
     double cook = 0.0, measure = 0.0;
@@ -7230,7 +7336,259 @@ TEST(Selection, TheFrameOfALargeGraphIsCheapToMeasureWhileScrubbing) {
         kCount, resting, dragging, scrubbing, cook / 20, measure / 20);
     EXPECT_LT(resting, kBudgetMs);
     EXPECT_LT(dragging, kBudgetMs);
+    EXPECT_LT(placing, 2 * kBudgetMs) << "writing 2000 transform nodes per mouse move";
     EXPECT_LT(scrubbing, 4 * kBudgetMs) << "includes re-cooking the graph";
+}
+
+// DG-03 S2: a placement edit writes the transform node and the object follows; nothing is left for the next sync to write.
+TEST(Placement, AMoveWritesTheTransformNodeAndLeavesTheObjectInStep) {
+    SketchDocument doc;
+    SketchObject& parent = doc.add(SketchObject::makeRect(10, 10, 40, 20));
+    SketchObject& child = doc.add(SketchObject::makeRect(100, 100, 10, 10));
+    const std::size_t parentId = parent.id(), childId = child.id();
+    ASSERT_TRUE(doc.setParent(childId, parentId));
+    doc.setSelection({parentId});
+    const std::vector<GeometryState> before = doc.snapshotSelection(true);
+    ASSERT_EQ(before.size(), std::size_t(2)) << "the child comes along";
+    const BLMatrix2D localBefore = transformOf(doc.network().node(doc.transformNodeOf(childId)));
+
+    doc.placeObjects(before, BLMatrix2D::make_translation(5, 7), 1.0, 0.25);
+
+    for (const std::size_t id : {parentId, childId}) {
+        const SketchObject* object = doc.findById(id);
+        EXPECT_TRUE(object->boundToNodes()) << "the node already holds the placement";
+        const jitnodes::NodeId place = doc.transformNodeOf(id);
+        ASSERT_NE(place, jitnodes::invalidNodeId);
+        const BLMatrix2D world = worldTransformOf(doc.network(), place);
+        for (int i = 0; i < 6; ++i) {
+            EXPECT_NEAR(world.m[i], object->paintToPage().m[i], 1e-4) << "object " << id << " m" << i;
+        }
+        const BLBox placed = [&] { BLBox b; doc.placedOutline(*object).get_bounding_box(&b); return b; }();
+        EXPECT_NEAR(placed.x0, object->geometryBounds().x0, 1e-3);
+        EXPECT_NEAR(placed.y0, object->geometryBounds().y0, 1e-3);
+    }
+    EXPECT_NEAR(doc.findById(parentId)->geometryBounds().x0, 15.0, 1e-9);
+    EXPECT_NEAR(doc.findById(childId)->geometryBounds().x0, 105.0, 1e-9);
+    EXPECT_NEAR(doc.findById(parentId)->frameAngle(), 0.25, 1e-12);
+    const BLMatrix2D childLocal = transformOf(doc.network().node(doc.transformNodeOf(childId)));
+    EXPECT_NEAR(childLocal.m20, localBefore.m20, 1e-3) << "a child follows its parent, so its own placement is unchanged";
+    EXPECT_NEAR(childLocal.m21, localBefore.m21, 1e-3);
+
+    // Undo and redo write the nodes, and the objects follow.
+    doc.commitPlacement(before, "Move");
+    const jitnodes::NodeId parentPlace = doc.transformNodeOf(parentId);
+    doc.undoStack().undo();
+    EXPECT_NEAR(doc.findById(parentId)->geometryBounds().x0, 10.0, 1e-9);
+    EXPECT_NEAR(doc.findById(parentId)->frameAngle(), 0.0, 1e-12);
+    EXPECT_NEAR(worldTransformOf(doc.network(), parentPlace).m20, 0.0, 1e-4) << "the node is back where it was";
+    EXPECT_NEAR(worldTransformOf(doc.network(), doc.transformNodeOf(childId)).m20, 0.0, 1e-4);
+    doc.undoStack().redo();
+    EXPECT_NEAR(doc.findById(childId)->geometryBounds().x0, 105.0, 1e-9);
+    EXPECT_NEAR(worldTransformOf(doc.network(), parentPlace).m20, 5.0, 1e-4);
+    EXPECT_TRUE(doc.findById(parentId)->boundToNodes());
+}
+
+// DG-03 S3: a curve edit rewrites the shape node's curve at once, keeping what the node holds for the points that stayed; undo and redo too.
+TEST(Placement, ACurveEditWritesTheShapeNodeAndKeepsTheTags) {
+    SketchDocument doc;
+    const std::size_t id = doc.add(SketchObject::makeRect(20, 20, 100, 60)).id();
+    doc.setSelection({id});
+    ASSERT_TRUE(doc.tagPoints(id, "a", {1}, true));
+    const std::vector<int> tagged = doc.taggedIds(id, "a");
+    ASSERT_EQ(tagged.size(), std::size_t(1));
+    auto width = [&] {
+        BLBox box;
+        doc.placedOutline(*doc.findById(id)).get_bounding_box(&box);
+        return box.x1 - box.x0;
+    };
+    const std::vector<GeometryState> before = doc.snapshotSelection();
+    SketchObject* object = doc.findById(id);
+
+    const std::unique_ptr<SketchObject> wider(SketchObject::makeRect(20, 20, 160, 60));
+    doc.setObjectOutline(*object, wider->geometry());
+    EXPECT_TRUE(object->boundToNodes()) << "the node was written by the edit, not by the next sync";
+    EXPECT_NEAR(width(), 160.0, 1e-3);
+    const jitnodes::GeometryHandle& curve = doc.network().node(object->graphNode()).geometryParam("curve");
+    ASSERT_TRUE(curve);
+    BLPath drawn;
+    ASSERT_TRUE(pathFromGeometry(*curve, drawn));
+    BLBox drawnBox;
+    drawn.get_bounding_box(&drawnBox);
+    EXPECT_NEAR(drawnBox.x1 - drawnBox.x0, 160.0, 1e-3);
+    EXPECT_EQ(doc.taggedIds(id, "a"), tagged) << "the point kept its id and its tag";
+
+    doc.commitGeometry(before, "Edit Curve");
+    doc.undoStack().undo();
+    EXPECT_NEAR(width(), 100.0, 1e-3);
+    EXPECT_TRUE(object->boundToNodes());
+    doc.undoStack().redo();
+    EXPECT_NEAR(width(), 160.0, 1e-3);
+    EXPECT_EQ(doc.taggedIds(id, "a"), tagged);
+}
+
+// The pivot is where a transform node turns and scales about; changing it must not move the shape (reported from hand testing).
+TEST(Placement, ChangingThePivotInTheTransformNodeLeavesTheShapeWhereItIs) {
+    SketchDocument doc;
+    const std::size_t id = doc.add(SketchObject::makeRect(20, 20, 100, 60)).id();
+    doc.setSelection({id});
+    // Scaled and turned, so the pivot takes part in the matrix.
+    doc.transformObjects({id}, SketchDocument::scalingAbout(BLPoint(70, 50), 1.5, 0.5), "Resize");
+    doc.transformObjects({id}, SketchDocument::rotationAbout(BLPoint(70, 50), 0.4), "Rotate");
+    const jitnodes::NodeId place = doc.transformNodeOf(id);
+    ASSERT_NE(place, jitnodes::invalidNodeId);
+    const BLMatrix2D held = worldTransformOf(doc.network(), place);
+    BLBox bounds;
+    doc.selectionBounds(bounds);
+
+    for (const char* name : {"pivotX", "pivotY"}) {
+        for (const float value : {12.0f, -40.0f, 75.0f}) {
+            const jitnodes::Node& placeNode = doc.network().node(place);
+            const char* other = std::string(name) == "pivotX" ? "pivotY" : "pivotX";
+            const double otherShown = shownParam(placeNode, other);
+            doc.setGraphParam(place, name, value);
+            EXPECT_NEAR(shownParam(placeNode, name), value, 1e-3);
+            EXPECT_NEAR(shownParam(placeNode, other), otherShown, 1e-3) << "the other axis of the parent space stays put";
+            const BLMatrix2D now = worldTransformOf(doc.network(), place);
+            for (int i = 0; i < 6; ++i) {
+                EXPECT_NEAR(now.m[i], held.m[i], 1e-3) << name << " = " << value << " moved m" << i;
+            }
+            BLBox after;
+            doc.selectionBounds(after);
+            EXPECT_NEAR(after.x0, bounds.x0, 1e-2) << name << " = " << value;
+            EXPECT_NEAR(after.y0, bounds.y0, 1e-2);
+            EXPECT_NEAR(after.x1, bounds.x1, 1e-2);
+            EXPECT_NEAR(after.y1, bounds.y1, 1e-2);
+        }
+    }
+    doc.undoStack().undo();
+    EXPECT_NEAR(shownParam(doc.network().node(place), "pivotY"), -40.0, 1e-3) << "undo steps back one pivot edit";
+    const BLMatrix2D undone = worldTransformOf(doc.network(), place);
+    for (int i = 0; i < 6; ++i) {
+        EXPECT_NEAR(undone.m[i], held.m[i], 1e-3);
+    }
+}
+
+TEST(Placement, ThePivotIsEditedInTheParentSpaceAndStoredInTheShapesOwn) {
+    SketchDocument doc;
+    const std::size_t id = doc.add(SketchObject::makeRect(20, 20, 100, 60)).id();
+    doc.setSelection({id});
+    doc.transformObjects({id}, SketchDocument::rotationAbout(BLPoint(70, 50), 0.8), "Rotate");
+    const jitnodes::NodeId place = doc.transformNodeOf(id);
+    ASSERT_NE(place, jitnodes::invalidNodeId);
+    const jitnodes::Node& node = doc.network().node(place);
+    const BLMatrix2D held = worldTransformOf(doc.network(), place);
+    const BLPoint before(shownParam(node, "pivotX"), shownParam(node, "pivotY"));
+    const BLPoint landed = held.map_point(node.baseFloat("pivotX"), node.baseFloat("pivotY"));
+    EXPECT_NEAR(before.x, landed.x, 1e-3) << "the shown pivot is where the pivot lands";
+    EXPECT_NEAR(before.y, landed.y, 1e-3);
+
+    doc.setGraphParam(place, "pivotX", float(before.x + 30.0));
+    const BLPoint after = held.map_point(node.baseFloat("pivotX"), node.baseFloat("pivotY"));
+    EXPECT_NEAR(after.x, before.x + 30.0, 1e-2) << "pivotX moves along the parent's x axis";
+    EXPECT_NEAR(after.y, before.y, 1e-2) << "and not along the turned axis";
+    EXPECT_GT(std::fabs(node.baseFloat("pivotY") - 50.0f) + std::fabs(node.baseFloat("pivotX") - 70.0f), 1.0) << "the stored pivot is in the shape's space";
+}
+
+TEST(Grouping, GroupingTurnedAndParentedObjectsMakesOneGroupAndUndoes) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(20, 20, 30, 120)).id();
+    const std::size_t b = doc.add(SketchObject::makeRect(60, 20, 30, 120)).id();
+    const std::size_t c = doc.add(SketchObject::makeRect(100, 20, 30, 120)).id();
+    doc.transformObjects({b}, SketchDocument::rotationAbout(BLPoint(75, 80), 0.9), "Rotate");
+    ASSERT_TRUE(doc.setParent(c, a));
+    doc.setSelection({a, b, c});
+    ASSERT_TRUE(doc.groupSelection());
+    EXPECT_EQ(doc.findById(a)->groups().size(), 1u);
+    EXPECT_EQ(doc.findById(a)->groups(), doc.findById(b)->groups());
+    EXPECT_EQ(doc.findById(a)->groups(), doc.findById(c)->groups());
+    EXPECT_NE(doc.selectedGroup(), 0u) << "the whole selection is one group";
+    const BLBox before = doc.findById(b)->geometryBounds();
+    EXPECT_NEAR(doc.findById(b)->geometryBounds().x0, before.x0, 1e-9);
+    doc.undoStack().undo();
+    EXPECT_TRUE(doc.findById(a)->groups().empty());
+    doc.undoStack().redo();
+    EXPECT_EQ(doc.findById(a)->groups().size(), 1u);
+}
+
+TEST(Grouping, EachObjectsOwnFrameStaysOnTheObjectAfterItWasMoved) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(20, 20, 30, 120)).id();
+    const std::size_t b = doc.add(SketchObject::makeRect(60, 20, 30, 120)).id();
+    doc.transformObjects({a}, BLMatrix2D::make_translation(300, 200), "Move");
+    doc.transformObjects({b}, SketchDocument::rotationAbout(BLPoint(75, 80), 0.9), "Rotate");
+    for (std::size_t id : {a, b}) {
+        const SketchObject& object = *doc.findById(id);
+        const QuadFrame quad = doc.objectFrame(object).asQuad();
+        const BLBox box = object.geometryBounds();
+        for (const BLPoint& corner : quad.p) {
+            EXPECT_GE(corner.x, box.x0 - 1e-6) << id;
+            EXPECT_LE(corner.x, box.x1 + 1e-6) << id;
+            EXPECT_GE(corner.y, box.y0 - 1e-6) << id;
+            EXPECT_LE(corner.y, box.y1 + 1e-6) << id;
+        }
+    }
+}
+
+TEST(Placement, ResettingTheTransformNodeOfATurnedTextBringsTheTextBack) {
+    SketchDocument doc;
+    const std::size_t id = doc.add(SketchObject::makeText("hello there", "", 40.0, BLPoint(100.0, 200.0))).id();
+    const BLBox start = doc.findById(id)->bounds();
+    doc.setSelection({id});
+    doc.transformObjects({id}, SketchDocument::rotationAbout(BLPoint(150, 190), 0.6), "Rotate");
+    ASSERT_GT(std::fabs(doc.findById(id)->bounds().y1 - start.y1), 5.0);
+    const jitnodes::NodeId place = doc.transformNodeOf(id);
+    ASSERT_NE(place, jitnodes::invalidNodeId);
+    for (const char* name : {"translateX", "translateY", "rotation", "shear", "pivotX", "pivotY"}) {
+        doc.setGraphParam(place, name, 0.0f);
+    }
+    doc.setGraphParam(place, "scaleX", 1.0f);
+    doc.setGraphParam(place, "scaleY", 1.0f);
+    const BLBox reset = doc.findById(id)->bounds();
+    EXPECT_NEAR(reset.x0, start.x0, 0.5);
+    EXPECT_NEAR(reset.y0, start.y0, 0.5);
+    EXPECT_NEAR(reset.x1, start.x1, 0.5);
+    EXPECT_NEAR(reset.y1, start.y1, 0.5);
+    EXPECT_NEAR(doc.findById(id)->frameAngle(), 0.0, 1e-6) << "the selection frame turns back with the node";
+}
+
+TEST(Placement, ResettingTheTransformNodeOfATurnedShapeTurnsItsFrameBack) {
+    SketchDocument doc;
+    const std::size_t id = doc.add(SketchObject::makeRect(20, 20, 100, 60)).id();
+    doc.setSelection({id});
+    const jitnodes::NodeId place = doc.transformNodeOf(id);
+    ASSERT_NE(place, jitnodes::invalidNodeId);
+    doc.setGraphParam(place, "rotation", 40.0f);
+    ASSERT_GT(std::fabs(doc.findById(id)->frameAngle()), 0.5) << "typed into the node";
+    for (const char* name : {"translateX", "translateY", "rotation", "shear", "pivotX", "pivotY"}) {
+        doc.setGraphParam(place, name, 0.0f);
+    }
+    doc.setGraphParam(place, "scaleX", 1.0f);
+    doc.setGraphParam(place, "scaleY", 1.0f);
+    EXPECT_NEAR(doc.findById(id)->frameAngle(), 0.0, 1e-6);
+}
+
+// DG-03 S1: the perspective map of an object's paints lives on its transform node too, and follows graph edits and their undo.
+TEST(PaintWarp, TheTransformNodeHoldsTheWarpAndFollowsGraphEdits) {
+    SketchDocument doc;
+    SketchObject& rect = doc.add(SketchObject::makeRect(20, 20, 100, 60));
+    const std::size_t id = rect.id();
+    const jitnodes::NodeId place = doc.transformNodeOf(id);
+    ASSERT_NE(place, jitnodes::invalidNodeId);
+    EXPECT_EQ(doc.network().node(place).getString("paintWarp"), "") << "never warped";
+
+    const BLPoint from[4] = {{20, 20}, {120, 20}, {120, 80}, {20, 80}};
+    const BLPoint to[4] = {{20, 20}, {120, 35}, {120, 65}, {20, 80}};
+    const PaintWarp warp = PaintWarp::between(from, to);
+    doc.setSelection({id});
+    doc.warpObjects(doc.snapshotSelection(), [](const BLPoint& p) { return p; }, warp);
+    EXPECT_NE(doc.network().node(place).getString("paintWarp"), "");
+    EXPECT_FALSE(paintWarpDiffers(doc.network().node(place), doc.findById(id)->paintWarp()));
+
+    doc.setGraphString(place, "paintWarp", "");   // typed into the node
+    EXPECT_TRUE(doc.findById(id)->paintWarp().isIdentity()) << "the object follows the node";
+    doc.undoStack().undo();
+    EXPECT_FALSE(doc.findById(id)->paintWarp().isIdentity()) << "and its undo";
+    EXPECT_NEAR(doc.findById(id)->paintWarp().m[1], warp.m[1], 1e-5);
 }
 
 TEST(PaintWarp, AGradientFollowsAPerspectiveWarpOfItsShape) {
@@ -7251,7 +7609,7 @@ TEST(PaintWarp, AGradientFollowsAPerspectiveWarpOfItsShape) {
 
     doc.setSelection({id});
     const std::vector<GeometryState> start = doc.snapshotSelection();
-    doc.findById(id)->warp([&](const BLPoint& p) { return page.map(p); }, page);
+    doc.warpObjects(start, [&](const BLPoint& p) { return page.map(p); }, page);
     ASSERT_FALSE(doc.findById(id)->paintWarp().isIdentity());
     const BLBox frame = doc.findById(id)->paintFrameBounds();
     EXPECT_NEAR(frame.x1 - frame.x0, 100.0, 1e-3) << "the paint frame is the shape before the warp";
@@ -7278,7 +7636,7 @@ TEST(PaintWarp, AGradientFollowsAPerspectiveWarpOfItsShape) {
     ASSERT_EQ(viaBinary.objectCount(), 1u);
     EXPECT_TRUE(viaBinary.object(0).paintWarp() == page) << "so does the binary format";
 
-    doc.findById(id)->transform(BLMatrix2D::make_translation(10.0, 0.0));
+    doc.placeObjects(doc.snapshotSelection(), BLMatrix2D::make_translation(10.0, 0.0));
     EXPECT_NEAR(double(pixelAt(*doc.findById(id), 160, 80, 50) & 0xFFu), 255.0 * ((unwarp.map(BLPoint(70, 50)).x - 20.0) / 100.0), 10.0)
         << "a move after the warp carries the colours with the shape";
 
@@ -7303,8 +7661,8 @@ TEST(PathNode, AThousandsObjectDocumentStaysResponsive) {
     doc.setSelection({id});
     for (int i = 0; i < 200; ++i) {
         const auto before = doc.snapshotSelection();
-        doc.findById(id)->transform(BLMatrix2D::make_translation(1.0, 0.0));
-        doc.commitGeometry(before, "Move");
+        doc.placeObjects(before, BLMatrix2D::make_translation(1.0, 0.0));
+        doc.commitPlacement(before, "Move");
     }
     const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     std::printf("200 commits on 5000 objects: %.1f ms\n", ms);

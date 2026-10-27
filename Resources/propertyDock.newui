@@ -1086,6 +1086,214 @@
         },
         {
           type: "SubView",
+          visible: true,
+          name: "textPanel",
+          layout: { type: "FlexLayout", orientation: "Vertical" },
+          desiredSize: { type: "Size", width: 268, height: 158 },
+          desiredSizeOverride: true,
+          childViews: [
+            {
+              type: "SubView",
+              visible: true,
+              name: "textPanelHeaderBar",
+              layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6, padding: 4 },
+              style: {
+                type: "ViewStyle",
+                backgroundFill: { type: "Fill", kind: "Color", color: "#2e2e2e99" }
+              },
+              desiredSize: { type: "Size", width: 268, height: 24 },
+              desiredSizeOverride: true,
+              childViews: [
+                {
+                  type: "Label",
+                  text: "Text",
+                  textAlignment: "Left",
+                  name: "textPanelHeader",
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                  style: {
+                    type: "LabelStyle",
+                    text: "Text",
+                    wordWrap: true,
+                    font: { type: "Font", name: "Segoe UI", size: 12, bold: true, italic: false, strikeThrough: false, underlined: false },
+                    textColor: "#f0f0f0",
+                    textAlignment: "Left"
+                  }
+                }
+              ]
+            },
+            {
+              type: "SubView",
+              visible: true,
+              name: "textPanelBody",
+              layout: { type: "FlexLayout", orientation: "Vertical", spacing: 6, padding: 8 },
+              desiredSize: { type: "Size", width: 268, height: 134 },
+              desiredSizeOverride: true,
+              childViews: [
+                {
+                  type: "SubView",
+                  visible: true,
+                  name: "textFontRow",
+                  layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                  desiredSize: { type: "Size", width: 252, height: 24 },
+                  desiredSizeOverride: true,
+                  childViews: [
+                    {
+                      type: "Label",
+                      text: "Font",
+                      textAlignment: "Left",
+                      style: { type: "LabelStyle", text: "Font", font: { type: "Font", name: "Segoe UI", size: 12 }, textColor: "#a0a0a0", textAlignment: "Left" },
+                      desiredSize: { type: "Size", width: 44, height: 20 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "DropDownList",
+                      name: "textFontCombo",
+                      desiredSize: { type: "Size", width: 0, height: 20 },
+                      desiredSizeOverride: true,
+                      layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                      model: { type: "StringListModel", items: ["Segoe UI"] },
+                      selectedIndex: 0
+                    }
+                  ]
+                },
+                {
+                  type: "SubView",
+                  visible: true,
+                  name: "textSizeRow",
+                  layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                  desiredSize: { type: "Size", width: 252, height: 26 },
+                  desiredSizeOverride: true,
+                  childViews: [
+                    {
+                      type: "Label",
+                      name: "textSizeLabel",
+                      text: "Size",
+                      textAlignment: "Left",
+                      style: { type: "LabelStyle", text: "Size", font: { type: "Font", name: "Segoe UI", size: 12 }, textColor: "#a0a0a0", textAlignment: "Left" },
+                      desiredSize: { type: "Size", width: 44, height: 20 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "TextField",
+                      name: "textSizeField",
+                      text: "24",
+                      font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                      textColor: "#f0f0f0",
+                      desiredSize: { type: "Size", width: 56, height: 20 },
+                      desiredSizeOverride: true
+                    },
+                    { type: "ToolbarButton", name: "textBoldButton", desiredSize: { type: "Size", width: 24, height: 24 }, desiredSizeOverride: true, icon: "icons/text-bold.svg", toggleButton: true, iconSize: 15 },
+                    { type: "ToolbarButton", name: "textItalicButton", desiredSize: { type: "Size", width: 24, height: 24 }, desiredSizeOverride: true, icon: "icons/text-italic.svg", toggleButton: true, iconSize: 15 },
+                    { type: "ToolbarButton", name: "textAlignLeftButton", desiredSize: { type: "Size", width: 24, height: 24 }, desiredSizeOverride: true, icon: "icons/text-align-left.svg", toggleButton: true, checked: true, iconSize: 15 },
+                    { type: "ToolbarButton", name: "textAlignCenterButton", desiredSize: { type: "Size", width: 24, height: 24 }, desiredSizeOverride: true, icon: "icons/text-align-center.svg", toggleButton: true, iconSize: 15 },
+                    { type: "ToolbarButton", name: "textAlignRightButton", desiredSize: { type: "Size", width: 24, height: 24 }, desiredSizeOverride: true, icon: "icons/text-align-right.svg", toggleButton: true, iconSize: 15 }
+                  ]
+                },
+                {
+                  type: "SubView",
+                  visible: true,
+                  name: "textPathRow",
+                  layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                  desiredSize: { type: "Size", width: 252, height: 26 },
+                  desiredSizeOverride: true,
+                  childViews: [
+                    {
+                      type: "Label",
+                      name: "textPathLabel",
+                      text: "On path",
+                      textAlignment: "Left",
+                      style: { type: "LabelStyle", text: "On path", font: { type: "Font", name: "Segoe UI", size: 12 }, textColor: "#a0a0a0", textAlignment: "Left" },
+                      desiredSize: { type: "Size", width: 44, height: 20 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "Label",
+                      text: "Start",
+                      textAlignment: "Left",
+                      style: { type: "LabelStyle", text: "Start", font: { type: "Font", name: "Segoe UI", size: 12 }, textColor: "#a0a0a0", textAlignment: "Left" },
+                      desiredSize: { type: "Size", width: 34, height: 20 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "TextField",
+                      name: "textPathStartField",
+                      text: "0",
+                      font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                      textColor: "#f0f0f0",
+                      desiredSize: { type: "Size", width: 50, height: 20 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "Label",
+                      text: "%",
+                      textAlignment: "Left",
+                      style: { type: "LabelStyle", text: "%", font: { type: "Font", name: "Segoe UI", size: 12 }, textColor: "#a0a0a0", textAlignment: "Left" },
+                      desiredSize: { type: "Size", width: 14, height: 20 },
+                      desiredSizeOverride: true
+                    },
+                    { type: "ToolbarButton", name: "textPathFlipButton", desiredSize: { type: "Size", width: 24, height: 24 }, desiredSizeOverride: true, icon: "icons/text-flip.svg", toggleButton: true, iconSize: 15 }
+                  ]
+                },
+                {
+                  type: "SubView",
+                  visible: true,
+                  name: "textSpacingRow",
+                  layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                  desiredSize: { type: "Size", width: 252, height: 24 },
+                  desiredSizeOverride: true,
+                  childViews: [
+                    {
+                      type: "Label",
+                      name: "textTrackingLabel",
+                      text: "Track",
+                      textAlignment: "Left",
+                      style: { type: "LabelStyle", text: "Track", font: { type: "Font", name: "Segoe UI", size: 12 }, textColor: "#a0a0a0", textAlignment: "Left" },
+                      desiredSize: { type: "Size", width: 44, height: 20 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "TextField",
+                      name: "textTrackingField",
+                      text: "0",
+                      font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                      textColor: "#f0f0f0",
+                      desiredSize: { type: "Size", width: 50, height: 20 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "Label",
+                      name: "textLeadingLabel",
+                      text: "Lead",
+                      textAlignment: "Left",
+                      style: { type: "LabelStyle", text: "Lead", font: { type: "Font", name: "Segoe UI", size: 12 }, textColor: "#a0a0a0", textAlignment: "Left" },
+                      desiredSize: { type: "Size", width: 34, height: 20 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "TextField",
+                      name: "textLeadingField",
+                      text: "100",
+                      font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                      textColor: "#f0f0f0",
+                      desiredSize: { type: "Size", width: 50, height: 20 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "Label",
+                      text: "%",
+                      textAlignment: "Left",
+                      style: { type: "LabelStyle", text: "%", font: { type: "Font", name: "Segoe UI", size: 12 }, textColor: "#a0a0a0", textAlignment: "Left" },
+                      desiredSize: { type: "Size", width: 14, height: 20 },
+                      desiredSizeOverride: true
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          type: "SubView",
           bounds: {
             type: "Rect",
             pos: { type: "Point", x: 0, y: 516 },

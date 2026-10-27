@@ -17,6 +17,19 @@ namespace curvy {
         constexpr double kMinTextSize = 4.0;
         constexpr double kMaxTextSize = 600.0;
 
+        void putText(SketchDocument& document, std::size_t id, const std::string& text, const std::string& font, double size, const BLMatrix2D& matrix) {
+            const SketchObject* object = document.findById(id);
+            if (object == nullptr) {
+                return;
+            }
+            TextState state = SketchDocument::textStateOf(*object);
+            state.text = text;
+            state.font = font;
+            state.size = size;
+            state.matrix = matrix;
+            document.setObjectText(id, state);
+        }
+
         // UTF-8 of one Unicode code point.
         std::string utf8Of(unsigned long code) {
             std::string out;
@@ -188,9 +201,15 @@ namespace curvy {
         if (object == nullptr) {
             return;
         }
-        object->setTextState(textBuffer_, object->fontName(), textSize_, object->textMatrix());
         if (textId_ != 0 && document_ != nullptr) {
+            TextState state = SketchDocument::textStateOf(*object);
+            state.text = textBuffer_;
+            state.size = textSize_;
+            state.matrix = object->textMatrix();
+            document_->setObjectText(textId_, state);
             document_->touch();
+        } else {
+            SketchObject::Prototype::setTextState(*object, textBuffer_, object->fontName(), textSize_, object->textMatrix());
         }
         style().markDirty();
     }
@@ -332,7 +351,7 @@ namespace curvy {
         if (textId_ == 0) {
             if (draft && !blank(textBuffer_)) {
                 draft->setName("Text");
-                draft->setFill(SketchPaint::solid(SketchColor::gray(0.0f)));
+                draft->setFill(SketchPaint::solid(SketchColor::rgb(0.0f, 0.0f, 0.0f).convertedTo(document_->colorMode())));
                 draft->setStroke(SketchPaint::none());
                 document_->addUndoable(draft.release(), "Add Text");
             }
@@ -348,16 +367,14 @@ namespace curvy {
         TextSnapshot after{object->text(), object->fontName(), object->fontSize(), object->textMatrix()};
         if (blank(after.text)) {
             // Emptied: the text goes away (undo brings it back as it was).
-            object->setTextState(before.text, before.font, before.size, before.matrix);
+            putText(*document_, id, before.text, before.font, before.size, before.matrix);
             document_->setSelection({id});
             document_->deleteSelection();
         } else if (after.text != before.text || after.size != before.size) {
             SketchDocument* document = document_;
             auto apply = [document, id](const TextSnapshot& state) {
-                if (SketchObject* target = document->findById(id)) {
-                    target->setTextState(state.text, state.font, state.size, state.matrix);
-                    document->touch();
-                }
+                putText(*document, id, state.text, state.font, state.size, state.matrix);
+                document->touch();
             };
             document_->undoStack().push({"Edit Text", [apply, after]() { apply(after); }, [apply, before]() { apply(before); }});
         }

@@ -3,6 +3,7 @@
 #include "curvy/imagedata.h"
 
 #include "curvy/gzip.h"
+#include "curvy/pathnode.h"
 #include "curvy/sketchdocument.h"
 
 #include <cmath>
@@ -21,7 +22,9 @@ namespace curvy {
         constexpr char kMagic[4] = {'S', 'K', 'B', '1'};
         // Version 2 stores the vertices of a path as 32-bit floats, each as the step from the one before (see writePath); version 1 stored
         // them as pairs of doubles. Both are read.
-        constexpr std::uint16_t kVersion = 3;
+        // Version 4 adds the GRPH chunk (the node graph, and the shape node of each object) and leaves out the outline of an object that
+        // its node holds.
+        constexpr std::uint16_t kVersion = 4;
         constexpr std::uint16_t kFlagCompressed = 1;
         constexpr std::size_t kHeaderSize = 8;
 
@@ -516,7 +519,7 @@ namespace curvy {
     }
 
     std::string binaryFromDocument(const SketchDocument& document, bool compress, unsigned version) {
-        version = version < 2 ? 1u : (version == 2 ? 2u : 3u);
+        version = version < 2 ? 1u : (version == 2 ? 2u : (version == 3 ? 3u : 4u));
         StringTable strings;
 
         // The appearances, each distinct one once.
@@ -529,6 +532,7 @@ namespace curvy {
         std::map<const ImageData*, std::size_t> imageIndex;   // the pictures in use, each saved once
         std::vector<std::shared_ptr<const ImageData>> images;
         ByteWriter objects;
+        std::vector<std::uint32_t> graphNodes;
         objects.varint(document.objectCount());
         for (std::size_t i = 0; i < document.objectCount(); ++i) {
             const SketchObject& object = document.object(i);
@@ -620,7 +624,16 @@ namespace curvy {
                 writePath(objects, warp.first, version);
                 writePath(objects, warp.second, version);
             }
-            writePath(objects, object.geometry(), version);
+            if (version >= 4) {
+                const bool held = document.pathHeldByNode(object);
+                objects.u8(held ? 1u : 0u);
+                if (!held) {
+                    writePath(objects, object.geometry(), version);
+                }
+                graphNodes.push_back(object.graphNode());
+            } else {
+                writePath(objects, object.geometry(), version);
+            }
         }
 
         ByteWriter page;
@@ -779,6 +792,15 @@ namespace curvy {
             lookChunk.bytes(look.data(), look.size());
         }
 
+        ByteWriter graphChunk;
+        if (version >= 4) {
+            graphChunk.text(document.graphToText());
+            graphChunk.varint(graphNodes.size());
+            for (std::uint32_t node : graphNodes) {
+                graphChunk.varint(node);
+            }
+        }
+
         std::string body;
         chunk(body, "PAGE", page.data());
         chunk(body, "GUID", guideChunk.data());
@@ -794,6 +816,9 @@ namespace curvy {
         chunk(body, "IMGS", imageChunk.data());
         chunk(body, "ABRD", boards.data());
         chunk(body, "GSTY", styles.data());
+        if (version >= 4) {
+            chunk(body, "GRPH", graphChunk.data());
+        }
         chunk(body, "OBJS", objects.data());
 
         ByteWriter file;
@@ -851,7 +876,10 @@ namespace curvy {
         std::vector<std::shared_ptr<const BrushDef>> brushLibrary;
         std::vector<std::shared_ptr<const ImageData>> pictures;   // the IMGS chunk (a picture that cannot be decoded is null)
         std::vector<std::size_t> imageRefs;                       // the picture of each object (an index into `pictures`)
-        bool havePage = false, haveObjects = false;
+        bool havePage = false, haveObjects = false, haveGraph = false;
+        std::string graphText;
+        std::vector<std::uint32_t> graphNodes;   // the shape node of each object (GRPH), in stacking order
+        std::vector<bool> fromGraph;             // the outline of each object is built from its node
 
         ByteReader file(body, bodySize);
         while (file.left() > 0) {
@@ -1085,6 +1113,16 @@ namespace curvy {
                 if (!in.ok()) {
                     return false;
                 }
+            } else if (tag == "GRPH") {
+                graphText = in.text();
+                const std::size_t n = in.count(1);
+                for (std::size_t i = 0; i < n && in.ok(); ++i) {
+                    graphNodes.push_back(std::uint32_t(in.varint()));
+                }
+                if (!in.ok()) {
+                    return false;
+                }
+                haveGraph = true;
             } else if (tag == "OBJS") {
                 if (strings.empty()) {
                     return false;   // the strings and appearances come first
@@ -1173,20 +1211,22 @@ namespace curvy {
                         }
                     }
                     BLPath path;
-                    if (!readPath(in, version, path)) {
+                    const bool held = version >= 4 && in.u8() == 1u;
+                    if (!held && !readPath(in, version, path)) {
                         return false;
                     }
+                    fromGraph.push_back(held);
                     if (!in.ok()) {
                         return false;
                     }
                     std::unique_ptr<SketchObject> object(SketchObject::make(SketchObjectType(type), path));
                     if (SketchObjectType(type) == SketchObjectType::Text) {
-                        object->setTextState(words, font, fontSize, matrix);
-                        object->setTextStyle(textStyle);
+                        SketchObject::Prototype::setTextState(*object, words, font, fontSize, matrix);
+                        SketchObject::Prototype::setTextStyle(*object, textStyle);
                         if (textWarp.active()) {
-                            object->setTextWarp(textWarp);
+                            SketchObject::Prototype::setTextWarp(*object, textWarp);
                         }
-                        object->setGeometry(path);   // the outline as saved, whatever the fonts here would make of the words
+                        SketchObject::Prototype::setOutline(*object, path);   // the outline as saved, whatever the fonts here would make of the words
                     }
                     const Look& look = looks[lookAt];
                     object->setAppearance(look.items);
@@ -1197,8 +1237,8 @@ namespace curvy {
                     object->setVisible((objectFlags & 1u) != 0);
                     object->setLocked((objectFlags & 2u) != 0);
                     object->setFrameAngle(frameAngle);
-                    object->setPaintMatrix(paintMatrix);
-                    object->setPaintWarp(paintWarp);
+                    SketchObject::Prototype::setPaintMatrix(*object, paintMatrix);
+                    SketchObject::Prototype::setPaintWarp(*object, paintWarp);
                     object->setGroups(objectGroups);
                     objects.push_back(std::move(object));
                     symbolRefs.push_back(symbolRef);
@@ -1214,9 +1254,37 @@ namespace curvy {
         if (!havePage || !haveObjects) {
             return false;
         }
+        // An outline that the file leaves to the graph needs its node; the graph is read once here, so a bad one refuses the file before
+        // the document is touched.
+        bool anyHeld = false;
+        for (bool held : fromGraph) {
+            anyHeld = anyHeld || held;
+        }
+        if ((haveGraph && graphNodes.size() != objects.size()) || (anyHeld && !haveGraph)) {
+            return false;
+        }
+        if (haveGraph) {
+            jitnodes::Network scratch;
+            try {
+                jitnodes::loadNetwork(scratch, graphText);
+            } catch (const std::exception&) {
+                return false;
+            }
+            const std::vector<jitnodes::NodeId> nodeIds = scratch.nodeIds();
+            const std::set<jitnodes::NodeId> existing(nodeIds.begin(), nodeIds.end());
+            for (std::size_t i = 0; i < objects.size(); ++i) {
+                if (fromGraph[i] && (existing.count(graphNodes[i]) == 0 || !scratch.node(graphNodes[i]).hasGeometryParam("curve") ||
+                                     scratch.node(graphNodes[i]).geometryParam("curve")->primitiveCount() == 0)) {
+                    return false;
+                }
+            }
+        }
 
         // Accepted: install it. Group ids in the file are only labels; each gets a fresh id from the document.
         document.clearObjects();
+        if (haveGraph) {
+            document.graphFromText(graphText);
+        }
         document.setPageSize(pageWidth, pageHeight);
         if (!artboards.empty()) {
             document.setArtboards(artboards, artboardActive);
@@ -1245,9 +1313,17 @@ namespace curvy {
         std::map<std::size_t, std::size_t> groupIds;
         std::size_t objectAt = 0;
         for (std::unique_ptr<SketchObject>& object : objects) {
+            const std::size_t at = objectAt;
+            if (haveGraph && fromGraph[at]) {
+                BLPath held;
+                const jitnodes::Geometry& curve = *document.network().node(graphNodes[at]).geometryParam("curve");
+                if (pathFromGeometry(*placeGeometry(curve, object->paintToPage()), held)) {
+                    SketchObject::Prototype::setOutline(*object, held);
+                }
+            }
             if (object->type() == SketchObjectType::Image) {
                 if (imageRefs[objectAt] < pictures.size() && pictures[imageRefs[objectAt]]) {
-                    object->setImage(pictures[imageRefs[objectAt]]);
+                    SketchObject::Prototype::setImage(*object, pictures[imageRefs[objectAt]]);
                 } else {
                     object.reset(SketchObject::make(SketchObjectType::Path, object->geometry()));   // its picture is missing: keep the outline
                 }
@@ -1255,12 +1331,15 @@ namespace curvy {
             if (object && object->type() == SketchObjectType::Symbol) {
                 std::shared_ptr<const SymbolDef> def = document.findSymbol(symbolRefs[objectAt]);
                 if (def) {
-                    object->setSymbol(def);
+                    SketchObject::Prototype::setSymbol(*object, def);
                 } else {
                     object.reset(SketchObject::make(SketchObjectType::Path, object->geometry()));   // its artwork is missing: keep the outline
                 }
             }
             ++objectAt;
+            if (haveGraph) {
+                object->setGraphNode(graphNodes[at]);
+            }
             while (runAt < layerRuns.size() && runUsed >= layerRuns[runAt].second) {
                 ++runAt;
                 runUsed = 0;

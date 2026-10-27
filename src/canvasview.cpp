@@ -395,16 +395,7 @@ namespace curvy {
     }
 
     void CanvasView::applyMapToSelection(const std::function<BLPoint(const BLPoint&)>& map, const PaintWarp& page, const QuadFrame& newQuad) {
-        for (const GeometryState& entry : dragBefore_) {
-            if (SketchObject* object = document_->findById(entry.id)) {
-                object->setGeometry(entry.path);
-                object->setPaintMatrix(entry.paintMatrix);
-                object->setPaintWarp(entry.paintWarp);
-                object->setTextMatrix(entry.textMatrix);
-                object->warp(map, page);
-                object->setFrameAngle(entry.angle);
-            }
-        }
+        document_->warpObjects(dragBefore_, map, page);
         document_->setQuadFrame(newQuad);
         document_->touch();
     }
@@ -412,16 +403,7 @@ namespace curvy {
     void CanvasView::applyToSelection(const BLMatrix2D& matrix, double angleDelta) {
         dragMatrix_ = matrix;
         dragAngle_ = angleDelta;
-        for (const GeometryState& entry : dragBefore_) {
-            if (SketchObject* object = document_->findById(entry.id)) {
-                object->setGeometry(entry.path);
-                object->setPaintMatrix(entry.paintMatrix);
-                object->setPaintWarp(entry.paintWarp);
-                object->setTextMatrix(entry.textMatrix);
-                object->transform(matrix);
-                object->setFrameAngle(entry.angle + angleDelta);
-            }
-        }
+        document_->placeObjects(dragBefore_, matrix, 1.0, angleDelta);
         if (document_->selection().size() > 1) {
             // A rotated group keeps its own frame angle even when its members differ.
             document_->setGroupAngle(angleDelta == 0.0 ? dragFrameBefore_.groupAngle : std::optional<double>(dragFrame_.angle + angleDelta));
@@ -696,7 +678,11 @@ namespace curvy {
                         case Drag::Warp: what = "Warp"; break;
                         default: break;
                     }
-                    document_->commitGeometry(dragBefore_, what, dragFrameBefore_);
+                    if (finished == Drag::Warp) {
+                        document_->commitGeometry(dragBefore_, what, dragFrameBefore_);   // a warp bends the outlines themselves
+                    } else {
+                        document_->commitPlacement(dragBefore_, what, dragFrameBefore_);
+                    }
                     if (finished == Drag::Move || finished == Drag::Resize || finished == Drag::Rotate) {
                         document_->noteTransform(dragMatrix_, dragAngle_);
                     }
@@ -1215,9 +1201,7 @@ namespace curvy {
                 if (object == nullptr) {
                     continue;
                 }
-                SelectionFrame own;
-                own.angle = object->frameAngle();
-                own.local = object->paintFrameBounds();
+                const SelectionFrame own = document_->objectFrame(*object);
                 if (const Layer* ownLayer = document_->findLayer(object->layer())) {
                     ctx.set_stroke_style(BLRgba32(layerColor(*ownLayer) | 0xFF000000u));
                 }

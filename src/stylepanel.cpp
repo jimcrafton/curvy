@@ -682,7 +682,9 @@ namespace curvy {
                 }
                 const SketchColor shown = displayedColor();
                 SketchColor color = SketchColor::hsb(float(changed.hue()), float(changed.saturation()), float(changed.brightness()), shown.alpha());
-                applyColor(color.convertedTo(shown.space()), target_ == Target::Fill ? "Change Fill" : "Change Stroke");
+                // A hue cannot live in Gray, so a grey paint takes the wheel's color in the document's mode.
+                const ColorSpace space = shown.space() == ColorSpace::Gray ? document_.colorMode() : shown.space();
+                applyColor(color.convertedTo(space), target_ == Target::Fill ? "Change Fill" : "Change Stroke");
                 return SyncReturn::Handled;
             };
         }

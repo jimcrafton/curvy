@@ -158,7 +158,7 @@ namespace curvy {
             scrub_.active = false;
             if (changed) {
                 const char* name = which == Field::Angle ? "Rotate" : (which == Field::X || which == Field::Y ? "Move" : "Resize");
-                document_.commitGeometry(scrub_.before, name, scrub_.frameBefore);
+                document_.commitPlacement(scrub_.before, name, scrub_.frameBefore);
                 document_.noteTransform(scrub_.matrix, scrub_.angleDelta);
             }
             refresh();

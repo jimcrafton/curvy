@@ -235,7 +235,7 @@ namespace curvy {
             }
             const jitnodes::Node& scrubbed = document_.network().node(r.node);
             const std::vector<jitnodes::Keyframe>& keys = scrubbed.keyframes(r.param);
-            value = r.scale * (keys.empty() ? scrubbed.baseFloat(r.param) : jitnodes::evaluateKeyframes(keys, document_.time()));
+            value = r.scale * (keys.empty() ? shownParam(scrubbed, r.param) : jitnodes::evaluateKeyframes(keys, document_.time()));
             scrubBefore_ = std::make_shared<jitnodes::GraphSnapshot>(document_.snapshotGraph());
             return SyncReturn::Handled;
         });
@@ -835,7 +835,7 @@ namespace curvy {
         }
         const std::string& expression = node.expression(row.param);
         const std::vector<jitnodes::Keyframe>& keys = node.keyframes(row.param);
-        const float shown = keys.empty() ? node.baseFloat(row.param) : jitnodes::evaluateKeyframes(keys, document_.time());
+        const float shown = keys.empty() ? float(shownParam(node, row.param)) : jitnodes::evaluateKeyframes(keys, document_.time());
         const std::size_t index = std::size_t(&row - detailRows_.data());
         ParamGrid::Row& cell = grid_->edit(index);
         cell.text = expression.empty() ? numberText(shown) : "=" + expression;
@@ -1445,7 +1445,7 @@ namespace curvy {
                     setRow(at++, caption, node.getString(name), [this, id, name](const std::string& value) { document_.setGraphString(id, name, value); });
                 };
                 auto numberRow = [&](const std::string& name, double lowest = -100000.0) {
-                    setRow(at++, name, numberText(node.baseFloat(name)), [this, id, name](const std::string& value) {
+                    setRow(at++, name, numberText(shownParam(node, name)), [this, id, name](const std::string& value) {
                         double number = 0.0;
                         if (parseNumber(value, number)) {
                             document_.setGraphParam(id, name, float(number));
@@ -1478,7 +1478,7 @@ namespace curvy {
                     if (at >= (type == kTransformNodeType ? kDetailRows : 4)) {
                         break;
                     }
-                    setRow(at++, name, numberText(node.baseFloat(name)), [this, id, name](const std::string& value) {
+                    setRow(at++, name, numberText(shownParam(node, name)), [this, id, name](const std::string& value) {
                         double number = 0.0;
                         if (parseNumber(value, number)) {
                             document_.setGraphParam(id, name, float(number));

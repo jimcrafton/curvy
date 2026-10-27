@@ -56,7 +56,7 @@ namespace curvy {
             for (SubPath& sub : subs) {
                 reverseSubPath(sub);
             }
-            object->setGeometry(subPathsToPath(subs));
+            setObjectOutline(*object, subPathsToPath(subs));
             any = true;
         }
         if (!any) {
@@ -102,7 +102,7 @@ namespace curvy {
             if (subs.empty()) {
                 continue;
             }
-            object->setGeometry(subPathsToPath(subs));
+            setObjectOutline(*object, subPathsToPath(subs));
             any = true;
         }
         if (!any) {
@@ -144,7 +144,7 @@ namespace curvy {
                 sub.anchors.pop_back();
             }
             sub.closed = true;
-            pieces[0].object->setGeometry(subPathsToPath({sub}));
+            setObjectOutline(*pieces[0].object, subPathsToPath({sub}));
             commitGeometry(before, "Join", frameBefore);
             return true;
         }

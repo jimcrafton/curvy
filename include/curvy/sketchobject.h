@@ -413,6 +413,26 @@ namespace curvy {
         // An object of the given type around an existing outline (what the SVG reader uses).
         static SketchObject* make(SketchObjectType type, const BLPath& path);
 
+        // Builds up an object that is not in a document yet (import, a clone before it is added): the document makes its nodes
+        // from the finished object on add(). Once an object is in a document its outline changes only through the document, which
+        // also uses these to refresh the object from its nodes.
+        struct Prototype {
+            static void setOutline(SketchObject& object, const BLPath& path) { object.setGeometry(path); }
+            static void transform(SketchObject& object, const BLMatrix2D& matrix) { object.transform(matrix); }
+            static void warp(SketchObject& object, const std::function<BLPoint(const BLPoint&)>& map, const PaintWarp& page = PaintWarp()) { object.warp(map, page); }
+            static void setPaintMatrix(SketchObject& object, const BLMatrix2D& matrix) { object.setPaintMatrix(matrix); }
+            static void setPaintWarp(SketchObject& object, const PaintWarp& warp) { object.setPaintWarp(warp); }
+            static void setSymbol(SketchObject& object, const std::shared_ptr<const SymbolDef>& def) { object.setSymbol(def); }
+            static void setImage(SketchObject& object, const std::shared_ptr<const ImageData>& image) { object.setImage(image); }
+            static void setTextMatrix(SketchObject& object, const BLMatrix2D& matrix) { object.setTextMatrix(matrix); }
+            static void setText(SketchObject& object, const std::string& text) { object.setText(text); }
+            static void setFontSize(SketchObject& object, double size) { object.setFontSize(size); }
+            static void setTextState(SketchObject& object, const std::string& text, const std::string& fontName, double fontSize, const BLMatrix2D& matrix) { object.setTextState(text, fontName, fontSize, matrix); }
+            static void setTextAll(SketchObject& object, const std::string& text, const std::string& fontName, double fontSize, const TextStyle& style) { object.setTextAll(text, fontName, fontSize, style); }
+            static void setTextStyle(SketchObject& object, const TextStyle& style) { object.setTextStyle(style); }
+            static void setTextWarp(SketchObject& object, const TextWarp& warp) { object.setTextWarp(warp); }
+        };
+
         SketchObjectType type() const { return type_; }
         std::size_t id() const { return id_; }
         // Assigned by SketchDocument::add(); 0 means "not in a document".
@@ -481,14 +501,12 @@ namespace curvy {
         // Symbol instances only: the definition, and the matrix that carries its artwork (definition space) onto the instance's outline.
         bool isSymbol() const { return type_ == SketchObjectType::Symbol; }
         const std::shared_ptr<const SymbolDef>& symbol() const { return symbol_; }
-        void setSymbol(const std::shared_ptr<const SymbolDef>& def) { symbol_ = def; }
         BLMatrix2D symbolMatrix() const;
 
         // Image objects only: the picture, and the matrix that carries its pixels (0,0 .. width,height) onto the object's outline.
         static SketchObject* makeImageObject(const std::shared_ptr<const ImageData>& image, const BLMatrix2D& placement);
         bool isImage() const { return type_ == SketchObjectType::Image; }
         const std::shared_ptr<const ImageData>& image() const { return image_; }
-        void setImage(const std::shared_ptr<const ImageData>& image) { image_ = image; }
         BLMatrix2D imageMatrix() const;
 
         // Text objects only (type() == SketchObjectType::Text). The words ('\n' separates lines), the font name ("" = the default
@@ -498,41 +516,31 @@ namespace curvy {
         const std::string& fontName() const { return fontName_; }
         double fontSize() const { return fontSize_; }
         const BLMatrix2D& textMatrix() const { return textMatrix_; }
-        // Puts the placement back (undo of a move / resize restores the outline and, through this, where edits of the words land).
-        void setTextMatrix(const BLMatrix2D& matrix) { textMatrix_ = matrix; }
-        // Each of these rebuilds the outline from the text state; setTextState also replaces the placement matrix.
-        void setText(const std::string& text);
-        void setFontName(const std::string& fontName);
-        void setFontSize(double size);
-        void setTextState(const std::string& text, const std::string& fontName, double fontSize, const BLMatrix2D& matrix);
-        // Weight, slant, alignment, tracking and leading (see TextStyle); the outline is rebuilt.
+        // Weight, slant, alignment, tracking and leading (see TextStyle).
         const TextStyle& textStyle() const { return textStyle_; }
-        void setTextStyle(const TextStyle& style);
-        // Text on a path / between two paths; the outline is rebuilt. None (the default) is plain text.
+        // Text on a path / between two paths. None (the default) is plain text.
         const TextWarp& textWarp() const { return textWarp_; }
-        void setTextWarp(const TextWarp& warp);
         // A point of the text's flat space (x along the first baseline, y down from it) as it is on the page now: through the warp, if any,
         // and the placement. What the editing caret uses.
         BLPoint mapTextPoint(double x, double y) const;
         // The left edge of the text as last set (the warp stretches from there).
         double warpFrameLeft() const { return warpFrame_.x0; }
-        // Everything that shapes the words at once (one rebuild) - what undo of a text change restores.
-        void setTextAll(const std::string& text, const std::string& fontName, double fontSize, const TextStyle& style);
 
         const BLPath& geometry() const { return path_; }
-        // Replaces the outline (undo restores the pre-edit one through this).
-        void setGeometry(const BLPath& path) { path_ = path; ++geometryRevision_; }
-        // Counts the edits of the outline; the document compares it with the revision its path node was last written at.
+        // Counts the edits of the outline; the document's cache of what the nodes cook is valid for one value of it.
         std::uint64_t geometryRevision() const { return geometryRevision_; }
-        std::uint64_t nodeRevision() const { return nodeRevision_; }
-        void setNodeRevision(std::uint64_t revision) { nodeRevision_ = revision; }
+        // True while the object's nodes hold what it is: every edit of the outline clears it, and the document sets it once the nodes were
+        // written (or the object was read back from them). A document sets it for a new object when it makes the nodes.
+        bool boundToNodes() const { return bound_; }
+        // False until the object has been bound once: a loaded or new object whose nodes, if it has any, are the file's.
+        bool everBound() const { return everBound_; }
+        void setBoundToNodes(bool bound) { bound_ = bound; everBound_ = everBound_ || bound; }
+        // A new node chain is about to be made for the object.
+        void forgetNodes() { bound_ = everBound_ = false; }
         // The object this one hangs from (0: none). Transforming the parent carries the child along; the child's own transform node holds
         // its placement relative to the parent's.
         std::size_t parent() const { return parent_; }
         void setParent(std::size_t id) { parent_ = id; }
-        // Bakes a transform into the outline - move/resize/rotate all go through here, so stroke width
-        // stays put and handles are always axis-aligned on geometryBounds().
-        void transform(const BLMatrix2D& matrix);
         // The angle (radians) the object's selection frame is turned by - the sum of the rotations
         // applied to it. The outline itself is baked, so this only orients the handles.
         double frameAngle() const { return frameAngle_; }
@@ -544,17 +552,11 @@ namespace curvy {
         // The sum of every transform applied to the outline (rotate, scale, shear, flip, move): paints are laid out on the outline as it
         // was before them (paintFrameBounds()) and carried to the page by paintToPage(). A warp is not a matrix, so it is not in it.
         const BLMatrix2D& paintToPage() const { return paintMatrix_; }
-        void setPaintMatrix(const BLMatrix2D& matrix) { paintMatrix_ = matrix; }
         // A perspective warp bends the outline but not the paints, which are not a point list: the paint sits at paintToPage() after this
         // map of the plane it was laid out on, so a gradient or pattern is drawn flat and resampled through it. Identity when never warped.
         const PaintWarp& paintWarp() const { return paintWarp_; }
-        void setPaintWarp(const PaintWarp& warp) { paintWarp_ = warp; }
         // The box the paints are laid out on: the outline as it was before every transform and warp.
         BLBox paintFrameBounds() const;
-        // Moves every outline vertex (curve control points included) through `map` - how a perspective
-        // warp is applied. Control points are mapped, not re-fitted, so strong distortion of a curve is approximate.
-        // `page` is the projective map `map` stands for (page to page), which the paints follow.
-        void warp(const std::function<BLPoint(const BLPoint&)>& map, const PaintWarp& page = PaintWarp());
         // Axis-aligned bounds of the outline alone (no stroke) - what the selection frame wraps.
         BLBox geometryBounds() const;
         // A copy with id 0 (the document assigns one on add) and the same appearance.
@@ -586,6 +588,33 @@ namespace curvy {
         void paint(BLContext& ctx) const;
 
     private:
+        // The outline and its paint frame change only through the document, which writes the same edit to the object's nodes.
+        friend class SketchDocument;
+        // Replaces the outline (undo restores the pre-edit one through this).
+        void setGeometry(const BLPath& path) { path_ = path; touchGeometry(); }
+        void touchGeometry() { ++geometryRevision_; bound_ = false; }
+        // Bakes a transform into the outline - move/resize/rotate all go through here, so stroke width
+        // stays put and handles are always axis-aligned on geometryBounds().
+        void transform(const BLMatrix2D& matrix);
+        void setPaintMatrix(const BLMatrix2D& matrix) { paintMatrix_ = matrix; }
+        void setPaintWarp(const PaintWarp& warp) { paintWarp_ = warp; }
+        void setSymbol(const std::shared_ptr<const SymbolDef>& def) { symbol_ = def; }
+        void setImage(const std::shared_ptr<const ImageData>& image) { image_ = image; }
+        // Puts the placement back (undo of a move / resize restores the outline and, through this, where edits of the words land).
+        void setTextMatrix(const BLMatrix2D& matrix) { textMatrix_ = matrix; }
+        // Each of these rebuilds the outline from the text state; setTextState also replaces the placement matrix.
+        void setText(const std::string& text);
+        void setFontName(const std::string& fontName);
+        void setFontSize(double size);
+        void setTextState(const std::string& text, const std::string& fontName, double fontSize, const BLMatrix2D& matrix);
+        void setTextStyle(const TextStyle& style);
+        void setTextWarp(const TextWarp& warp);
+        // Everything that shapes the words at once (one rebuild) - what undo of a text change restores.
+        void setTextAll(const std::string& text, const std::string& fontName, double fontSize, const TextStyle& style);
+        // Moves every outline vertex (curve control points included) through `map` - how a perspective
+        // warp is applied. Control points are mapped, not re-fitted, so strong distortion of a curve is approximate.
+        // `page` is the projective map `map` stands for (page to page), which the paints follow.
+        void warp(const std::function<BLPoint(const BLPoint&)>& map, const PaintWarp& page = PaintWarp());
         SketchObject(SketchObjectType type, const BLPath& path);
         // The appearance items only (their own opacity and blend mode, no object-level ones).
         void paintItems(BLContext& ctx) const;
@@ -614,7 +643,8 @@ namespace curvy {
         std::size_t id_ = 0;
         std::uint32_t graphNode_ = 0;
         std::uint64_t geometryRevision_ = 1;
-        std::uint64_t nodeRevision_ = 0;
+        bool bound_ = false;
+        bool everBound_ = false;
         std::size_t parent_ = 0;
         std::string name_;
         bool visible_ = true;

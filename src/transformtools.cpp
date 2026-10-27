@@ -48,16 +48,7 @@ namespace curvy {
         dragMatrix_ = matrix;
         toolAngleScale_ = angleScale;
         toolAngleOffset_ = angleOffset;
-        for (const GeometryState& entry : dragBefore_) {
-            if (SketchObject* object = document_->findById(entry.id)) {
-                object->setGeometry(entry.path);
-                object->setPaintMatrix(entry.paintMatrix);
-                object->setPaintWarp(entry.paintWarp);
-                object->setTextMatrix(entry.textMatrix);
-                object->transform(matrix);
-                object->setFrameAngle(angleScale * entry.angle + angleOffset);
-            }
-        }
+        document_->placeObjects(dragBefore_, matrix, angleScale, angleOffset);
         if (document_->selection().size() > 1) {
             const bool plain = angleScale == 1.0 && angleOffset == 0.0;
             document_->setGroupAngle(plain ? dragFrameBefore_.groupAngle : std::optional<double>(angleScale * dragFrame_.angle + angleOffset));
@@ -137,7 +128,7 @@ namespace curvy {
             document_->duplicateTransformed(matrix, scale, offset, std::string(what) + " Copy");
             return;
         }
-        document_->commitGeometry(dragBefore_, what, dragFrameBefore_);
+        document_->commitPlacement(dragBefore_, what, dragFrameBefore_);
         document_->noteTransform(dragMatrix_, dragAngle_);
     }
 
