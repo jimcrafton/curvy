@@ -65,9 +65,9 @@ namespace curvy {
         newui::Label* rate_ = nullptr;
         int lastFrame_ = 48;
         bool updating_ = false;
-        std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);   // the views and the model outlive this object and still call its handlers while closing
         newui::RunLoop::TimerHandle timer_ = newui::RunLoop::kInvalidTimerHandle;
         std::chrono::steady_clock::time_point lastTick_;
+        newui::Connections connections_;
     };
 
 }

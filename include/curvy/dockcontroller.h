@@ -2,7 +2,6 @@
 
 #include <map>
 
-#include "curvy/aliveguard.h"
 #include "curvy/canvasview.h"
 #include "curvy/dockcontext.h"
 #include "curvy/stylepanel.h"
@@ -112,7 +111,7 @@ namespace curvy {
         std::unique_ptr<StylePanel> stylePanel_;
         std::unique_ptr<TextPanel> textPanel_;
         DockBoxes boxes_;
-        std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);   // the views and models outlive this object and still call its handlers while closing
+        newui::Connections connections_;
     };
 
 }

@@ -48,12 +48,10 @@ namespace curvy {
 
         auto bind = [this](const char* name, std::function<void()> action) {
             if (auto* button = find<Button>(*bar_, name)) {
-                button->onClick += [action, alive = alive_](Control&) {
-                    if (*alive) {
-                        action();
-                    }
+                connections_.add(button->onClick, [action](Control&) {
+                    action();
                     return SyncReturn::Handled;
-                };
+                });
             }
         };
         bind("timelineFirst", [this] { setFrame(0); });
@@ -63,47 +61,37 @@ namespace curvy {
         bind("timelineLast", [this] { setFrame(lastFrame_); });
         if (scrub_ != nullptr) {
             scrub_->setInteger(true);
-            scrub_->onValueChanged += [this, alive = alive_](Slider&) {
-                if (*alive && !updating_) {
+            connections_.add(scrub_->onValueChanged, [this](Slider&) {
+                if (!updating_) {
                     setFrame(int(std::lround(scrub_->value())));
                 }
                 return SyncReturn::Handled;
-            };
+            });
         }
         if (field_ != nullptr) {
-            field_->onReturnPressed += [this, alive = alive_](TextField&) {
-                if (*alive) {
-                    readControls();
-                }
+            connections_.add(field_->onReturnPressed, [this](TextField&) {
+                readControls();
                 return SyncReturn::Handled;
-            };
-            field_->onLostFocus += [this, alive = alive_](View&) {
-                if (*alive) {
-                    readControls();
-                }
+            });
+            connections_.add(field_->onLostFocus, [this](View&) {
+                readControls();
                 return SyncReturn::Handled;
-            };
+            });
         }
-        model_.onChanged += [this, alive = alive_](Model&) {
-            if (*alive) {
-                sync();
-            }
+        connections_.add(model_.onChanged, [this](Model&) {
+            sync();
             return SyncReturn::Handled;
-        };
-        canvas_.onSizeChanged += [this, alive = alive_](View&, const Size&) {
-            if (*alive) {
-                layout();
-            }
+        });
+        connections_.add(canvas_.onSizeChanged, [this](View&, const Size&) {
+            layout();
             return SyncReturn::Handled;
-        };
+        });
         setLastFrame(lastFrame_);
         restyle();
         sync();
     }
 
-    TimelineBar::~TimelineBar() {
-        *alive_ = false;
-    }
+    TimelineBar::~TimelineBar() = default;
 
     int TimelineBar::frame() const {
         return int(std::lround(document_.time() * fps()));

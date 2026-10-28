@@ -78,7 +78,7 @@ namespace curvy {
             transformPanel_ = std::make_unique<TransformPanel>(frame_.rootView(), document_);
             textPanel_ = std::make_unique<TextPanel>(frame_.rootView(), document_);
             stylePanel_ = std::make_unique<StylePanel>(frame_.rootView(), document_);   // binds the views it finds by name; the rest of its panel is not in the dock
-            stylePanel_->onContentChanged += guarded(alive_, [this](StylePanel&) { fitCard(); return SyncReturn::Handled; });
+            connections_.add(stylePanel_->onContentChanged, [this](StylePanel&) { fitCard(); return SyncReturn::Handled; });
         }
         if (propertyDock_ != nullptr) {
             cardHost_ = new SubView();
@@ -88,7 +88,7 @@ namespace curvy {
             cardClose_->setName("cardClose");
             cardClose_->setIcon("icons/close.svg");   // drawn, so the cross sits exactly in the middle (a glyph sits on the text baseline)
             cardClose_->setIconSize(14.0f);
-            cardClose_->onClick += guarded(alive_, [this](Control&) {
+            connections_.add(cardClose_->onClick, [this](Control&) {
                 closeCard();
                 if (onCardDismissed) {
                     onCardDismissed();
@@ -99,20 +99,20 @@ namespace curvy {
         }
         bindTools();
         bindToggles();
-        model_.onChanged += guarded(alive_, [this](Model&) {
+        connections_.add(model_.onChanged, [this](Model&) {
             sync();
             return SyncReturn::Handled;
         });
-        canvas_.onSizeChanged += guarded(alive_, [this](View&, const Size&) {
+        connections_.add(canvas_.onSizeChanged, [this](View&, const Size&) {
             layout();
             return SyncReturn::Handled;
         });
-        document_.onSelectionChanged += guarded(alive_, [this](SketchDocument&) {
+        connections_.add(document_.onSelectionChanged, [this](SketchDocument&) {
             refreshContext();
             return SyncReturn::Handled;
         });
         // Grouping or retyping what is selected changes the boxes without changing the selection.
-        document_.onChanged += guarded(alive_, [this](SketchDocument&) {
+        connections_.add(document_.onChanged, [this](SketchDocument&) {
             if (!(DockContext::boxesFor(document_, canvas_.tool()) == boxes_)) {
                 refreshContext();
             }
@@ -123,9 +123,7 @@ namespace curvy {
         sync();
     }
 
-    DockController::~DockController() {
-        *alive_ = false;
-    }
+    DockController::~DockController() = default;
 
     ToolbarButton* DockController::toolButton(SketchTool tool) const {
         for (const ToolButton& entry : tools_) {
@@ -150,7 +148,7 @@ namespace curvy {
             button->setToggleButton(true);
             tools_.push_back({button, row.tool});
             const SketchTool tool = row.tool;
-            button->onClick += guarded(alive_, [this, tool](Control&) {
+            connections_.add(button->onClick, [this, tool](Control&) {
                 if (onToolPicked) {
                     onToolPicked(tool);
                 } else {
@@ -159,7 +157,7 @@ namespace curvy {
                 syncTool();
                 return SyncReturn::Handled;
             });
-            button->onMouseDblClick += guarded(alive_, [this, tool, button](View&, const Point&, std::uint32_t, std::uint32_t) {
+            connections_.add(button->onMouseDblClick, [this, tool, button](View&, const Point&, std::uint32_t, std::uint32_t) {
                 if (onToolOptions) {
                     const Point corner = frame_.rootView().accumulatedOffset(button);
                     const Point origin = frame_.rootView().accumulatedOffset(&canvas_);
@@ -176,14 +174,14 @@ namespace curvy {
         propertiesToggle_ = find<Button>(frame_.rootView(), "propertiesToggle");
         if (toolbarToggle_ != nullptr) {
             toolbarToggle_->setToggleButton(true);
-            toolbarToggle_->onClick += guarded(alive_, [this](Control&) {
+            connections_.add(toolbarToggle_->onClick, [this](Control&) {
                 model_.setToolbarVisible(!model_.toolbarVisible());
                 return SyncReturn::Handled;
             });
         }
         if (propertiesToggle_ != nullptr) {
             propertiesToggle_->setToggleButton(true);
-            propertiesToggle_->onClick += guarded(alive_, [this](Control&) {
+            connections_.add(propertiesToggle_->onClick, [this](Control&) {
                 model_.setPropertiesVisible(!model_.propertiesVisible());
                 return SyncReturn::Handled;
             });

@@ -1,6 +1,5 @@
 #pragma once
 
-#include "curvy/aliveguard.h"
 #include "curvy/canvasview.h"
 #include "curvy/dockcontroller.h"
 #include "curvy/expressionfield.h"
@@ -182,7 +181,7 @@ namespace curvy {
         bool shown_ = false;
         float shownRight_ = -1.0f;
         bool havePropertyDock_ = false;
-        std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);   // the views and models outlive this object and still call its handlers while closing
+        newui::Connections connections_;
     };
 
 }

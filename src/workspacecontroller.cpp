@@ -203,7 +203,14 @@ namespace curvy {
         dock_ = std::make_unique<DockController>(frame_, *canvas_, *model_, document_);
         graph_ = std::make_unique<GraphDock>(frame_, *canvas_, *model_, document_, *dock_);
         timeline_ = std::make_unique<TimelineBar>(frame_, *canvas_, *model_, document_);
-        options_ = std::make_unique<ToolOptionsCard>(*canvas_, *canvas_);
+        // The frame frees every view before the application returns from run(); the docks observe those views, so they go first.
+        connections_.add(frame_.onDestroyed, [this](Frame&) {
+            timeline_.reset();
+            graph_.reset();
+            dock_.reset();
+            return SyncReturn::Handled;
+        });
+        options_= std::make_unique<ToolOptionsCard>(*canvas_, *canvas_);
         dock_->onToolOptions = [this](SketchTool tool, const Point& at) { showToolOptions(tool, at); };
         dock_->onToolPicked = [this](SketchTool tool) { armTool(tool, tool != SketchTool::Select, std::string()); };
         dock_->onCardDismissed = [this] { focusCanvas(); };
@@ -220,7 +227,9 @@ namespace curvy {
                 return SyncReturn::Handled;
             };
             canvas_->onGradientStopSelected += [this](CanvasView& view) {
-                dock_->stylePanel()->setSelectedStop(view.selectedGradientStop());
+                if (dock_ != nullptr) {
+                    dock_->stylePanel()->setSelectedStop(view.selectedGradientStop());
+                }
                 return SyncReturn::Handled;
             };
         }

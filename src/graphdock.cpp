@@ -137,7 +137,7 @@ namespace curvy {
         controller_->setModel(std::make_unique<GraphTreeModel>());
         if (tree_ != nullptr) {
             tree_->setController(controller_);
-            tree_->onSelectionChanged += guarded(alive_, [this](TreeView&) {
+            connections_.add(tree_->onSelectionChanged, [this](TreeView&) {
                 selectionChangedInTree();
                 return SyncReturn::Handled;
             });
@@ -145,13 +145,13 @@ namespace curvy {
         if (modeControl_ != nullptr) {
             modeControl_->setSegments({"Document", "Flow"});
             modeControl_->setSelectedIndex(0);
-            modeControl_->onSelectionChanged += guarded(alive_, [this](SegmentedControl& changed) {
+            connections_.add(modeControl_->onSelectionChanged, [this](SegmentedControl& changed) {
                 setMode(changed.selectedIndex() == 1 ? Mode::Flow : Mode::Document);
                 return SyncReturn::Handled;
             });
         }
         if (filterField_ != nullptr) {
-            filterField_->onKeyUp += guarded(alive_, [this](View&, std::uint32_t, int, int, std::uint32_t) {
+            connections_.add(filterField_->onKeyUp, [this](View&, std::uint32_t, int, int, std::uint32_t) {
                 setFilter(wideToUtf8(filterField_->text()));
                 return SyncReturn::Handled;
             });
@@ -159,26 +159,26 @@ namespace curvy {
         buildDetail();
         if (auto* toggle = find<Button>(frame_.rootView(), "graphToggle")) {
             toggle->setToggleButton(true);
-            toggle->onClick += guarded(alive_, [this](Control&) {
+            connections_.add(toggle->onClick, [this](Control&) {
                 model_.setGraphVisible(!model_.graphVisible());
                 return SyncReturn::Handled;
             });
         }
-        model_.onChanged += guarded(alive_, [this](Model&) {
+        connections_.add(model_.onChanged, [this](Model&) {
             sync();
             return SyncReturn::Handled;
         });
-        canvas_.onSizeChanged += guarded(alive_, [this](View&, const Size&) {
+        connections_.add(canvas_.onSizeChanged, [this](View&, const Size&) {
             layout();
             return SyncReturn::Handled;
         });
-        document_.onChanged += guarded(alive_, [this](SketchDocument&) {
+        connections_.add(document_.onChanged, [this](SketchDocument&) {
             if (shown_) {
                 refresh();
             }
             return SyncReturn::Handled;
         });
-        document_.onSelectionChanged += guarded(alive_, [this](SketchDocument&) {
+        connections_.add(document_.onSelectionChanged, [this](SketchDocument&) {
             if (shown_) {
                 refresh();
             }
@@ -188,9 +188,7 @@ namespace curvy {
         sync();
     }
 
-    GraphDock::~GraphDock() {
-        *alive_ = false;
-    }
+    GraphDock::~GraphDock() = default;
 
     void GraphDock::buildDetail() {
         if (detail_ == nullptr) {
@@ -201,18 +199,18 @@ namespace curvy {
         grid_->setName("graphParams");
         detail_->addChild(grid_);
         grid_->resize(kDetailRows);
-        grid_->onCommit += guarded(alive_, [this](ParamGrid&, std::size_t i, const std::string& text) {
+        connections_.add(grid_->onCommit, [this](ParamGrid&, std::size_t i, const std::string& text) {
             commitDetail(i, text);
             return SyncReturn::Handled;
         });
-        grid_->onSliderReleased += guarded(alive_, [this](ParamGrid&, std::size_t i, double percent) {
+        connections_.add(grid_->onSliderReleased, [this](ParamGrid&, std::size_t i, double percent) {
             if (detailRows_[i].apply) {
                 const auto apply = detailRows_[i].apply;   // a copy: the edit rebuilds the rows, and with them this function
                 apply(numberText(std::round(percent)));
             }
             return SyncReturn::Handled;
         });
-        grid_->onEditEnded += guarded(alive_, [this](ParamGrid&) {
+        connections_.add(grid_->onEditEnded, [this](ParamGrid&) {
             if (RootView* root = canvas_.rootView()) {
                 if (SubView* target = UIInputManager::instance().resolveClickFocusTarget(&canvas_)) {
                     root->setFocusedSubView(target);
@@ -220,15 +218,15 @@ namespace curvy {
             }
             return SyncReturn::Handled;
         });
-        grid_->onChipClicked += guarded(alive_, [this](ParamGrid&, std::size_t i) {
+        connections_.add(grid_->onChipClicked, [this](ParamGrid&, std::size_t i) {
             editDetailColour(i);
             return SyncReturn::Handled;
         });
-        grid_->onKeyToggled += guarded(alive_, [this](ParamGrid&, std::size_t i) {
+        connections_.add(grid_->onKeyToggled, [this](ParamGrid&, std::size_t i) {
             toggleKey(i);
             return SyncReturn::Handled;
         });
-        grid_->onScrubBegin += guarded(alive_, [this](ParamGrid&, std::size_t i, double& value) {
+        connections_.add(grid_->onScrubBegin, [this](ParamGrid&, std::size_t i, double& value) {
             const DetailRow& r = detailRows_[i];
             if (!r.scrub || r.node == 0) {
                 return SyncReturn::Ignored;
@@ -239,7 +237,7 @@ namespace curvy {
             scrubBefore_ = std::make_shared<jitnodes::GraphSnapshot>(document_.snapshotGraph());
             return SyncReturn::Handled;
         });
-        grid_->onScrubChange += guarded(alive_, [this](ParamGrid&, std::size_t i, double value) {
+        connections_.add(grid_->onScrubChange, [this](ParamGrid&, std::size_t i, double value) {
             DetailRow& r = detailRows_[i];
             value = std::clamp(value, r.minimum, r.maximum);
             document_.setGraphFloatLive(r.node, r.param, float(value / r.scale));
@@ -252,14 +250,14 @@ namespace curvy {
             grid_->changed();
             return SyncReturn::Handled;
         });
-        grid_->onScrubEnd += guarded(alive_, [this](ParamGrid&, std::size_t i, bool changed) {
+        connections_.add(grid_->onScrubEnd, [this](ParamGrid&, std::size_t i, bool changed) {
             if (changed && scrubBefore_) {
                 document_.commitGraphEdit(*scrubBefore_, "Change " + detailRows_[i].param);
             }
             scrubBefore_.reset();
             return SyncReturn::Handled;
         });
-        grid_->onScrubUnit += guarded(alive_, [this](ParamGrid&, std::size_t i, double& unit) {
+        connections_.add(grid_->onScrubUnit, [this](ParamGrid&, std::size_t i, double& unit) {
             unit = detailRows_[i].unit;
             return SyncReturn::Handled;
         });
@@ -291,7 +289,7 @@ namespace curvy {
                 link.name = makeLabel(false);
                 link.go = makeLabel(true);
                 link.go->setText("Go to");
-                link.go->onLinkClicked += guarded(alive_, [this, list, k](Label&) {
+                connections_.add(link.go->onLinkClicked, [this, list, k](Label&) {
                     selectNode((*list)[k].node);
                     return SyncReturn::Handled;
                 });
@@ -309,20 +307,20 @@ namespace curvy {
         resetButton_->setText("Reset");
         resetButton_->setVisible(false);
         detail_->addChild(resetButton_);
-        resetButton_->onClick += guarded(alive_, [this](Control&) {
+        connections_.add(resetButton_->onClick, [this](Control&) {
             if (detailNode_ != 0) {
                 resetTransform(detailNode_);
             }
             return SyncReturn::Handled;
         });
-        pathButtons_[0]->onClick += guarded(alive_, [this](Control&) {
+        connections_.add(pathButtons_[0]->onClick, [this](Control&) {
             if (detailObject_ != 0) {
                 document_.setSelection({detailObject_});
                 canvas_.setTool(SketchTool::DirectSelect);
             }
             return SyncReturn::Handled;
         });
-        pathButtons_[1]->onClick += guarded(alive_, [this](Control&) {
+        connections_.add(pathButtons_[1]->onClick, [this](Control&) {
             if (detailNode_ != 0 && document_.network().node(detailNode_).hasGeometryParam("curve")) {
                 BLPath path;
                 if (pathFromGeometry(*document_.network().node(detailNode_).geometryParam("curve"), path)) {
@@ -332,7 +330,7 @@ namespace curvy {
             }
             return SyncReturn::Handled;
         });
-        pathButtons_[2]->onClick += guarded(alive_, [this](Control&) {
+        connections_.add(pathButtons_[2]->onClick, [this](Control&) {
             std::wstring text;
             BLPath path;
             if (detailNode_ != 0 && ClipboardManager::getText(text) && pathFromText(wideToUtf8(text), path) && path.size() > 1) {

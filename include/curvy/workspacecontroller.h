@@ -126,6 +126,7 @@ namespace curvy {
         std::unique_ptr<GraphDock> graph_;
         std::unique_ptr<TimelineBar> timeline_;
         std::unique_ptr<ToolOptionsCard> options_;
+        newui::Connections connections_;
         HoldScrub scrub_;
         void autosaveTick();
         void showToolOptions(SketchTool tool, const newui::Point& at);
