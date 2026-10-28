@@ -305,6 +305,7 @@ namespace curvy {
         }
         resetButton_ = new Button();
         resetButton_->setText("Reset");
+        resetButton_->setName("graphResetButton");
         resetButton_->setVisible(false);
         detail_->addChild(resetButton_);
         connections_.add(resetButton_->onClick, [this](Control&) {

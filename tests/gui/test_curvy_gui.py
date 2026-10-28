@@ -7,6 +7,7 @@ The app starts with nothing open, so every test sees the same empty workspace. H
 `curvy.exe --check-workspace`; these add what only the real message pump shows: focus, hit-testing of the docks over the canvas, the top bar
 buttons and the ring's key handling.
 """
+import ctypes
 import os
 import sys
 import tempfile
@@ -67,6 +68,43 @@ class StartUp(CurvyCase):
         self.assertFalse(self.app.prop("propertiesToggle", "checked"))
         canvas = self.app.find("canvas")
         self.assertGreater(canvas.w, 600)
+
+
+class Closing(CurvyCase):
+    """Closing the window tears down the docks and their delegate connections; a crash there shows as a non-zero exit code."""
+
+    def exit_code(self):
+        code = ctypes.c_ulong(0)
+        ctypes.windll.kernel32.GetExitCodeProcess(ctypes.c_void_p(self.app._process), ctypes.byref(code))
+        return code.value
+
+    def open_docks(self, draw):
+        self.new_a4()
+        self.app.click("toolbarToggle")
+        self.app.click("propertiesToggle")
+        self.app.click("graphToggle")
+        self.app.wait_until(lambda: self.app.prop("graphToggle", "checked"), "the graph dock")
+        if draw:
+            canvas = self.app.find("canvas")
+            self.app.click("rectangleTool")
+            self.app.drag((canvas.x + 300, canvas.y + 200), (canvas.x + 420, canvas.y + 280))
+            self.app.click("selectTool")
+
+    def wait_exit(self):
+        self.app.wait_until(lambda: not self.app.running, "the app to exit", timeout=10)
+        self.assertEqual(0, self.exit_code())
+
+    def test_closing_an_unmodified_document_with_every_dock_open_exits_cleanly(self):
+        self.open_docks(draw=False)
+        self.app.key_raw("alt+f4")
+        self.wait_exit()
+
+    def test_closing_a_modified_document_and_discarding_exits_cleanly(self):
+        self.open_docks(draw=True)
+        self.app.key_raw("alt+f4")
+        self.app.wait_for_dialog()                                    # the save-changes question
+        self.app.key_raw("n")
+        self.wait_exit()
 
 
 class Rings(CurvyCase):
@@ -286,6 +324,37 @@ class GraphDock(CurvyCase):
         self.app.key("ctrl+z")
         self.app.wait_until(lambda: abs(self.bounds()["W"] - before["W"]) < 0.6 and abs(self.bounds()["X"] - before["X"]) < 0.6,
                             "two undos to restore the shape")
+
+    def test_reset_puts_a_turned_text_with_an_off_centre_pivot_back(self):
+        self.new_a4()
+        self.app.click("toolbarToggle")
+        self.app.click("textTool")
+        self.app.wait_until(lambda: self.hint_tool() == "Text", "the Text tool")
+        canvas = self.app.find("canvas")
+        self.app.click_at((canvas.x + canvas.w // 2, canvas.y + canvas.h // 2))
+        self.app.type("Hello")
+        self.app.click("selectTool")
+        self.app.wait_until(lambda: self.hint_tool() == "Select", "the Select tool")
+        self.app.key("ctrl+a")
+        self.app.click("propertiesToggle")
+        self.app.click("graphToggle")
+        self.app.wait_until(lambda: self.app.prop("graphToggle", "checked"), "the toggle to check")
+        self.app.click_segment("graphModeControl", 1)
+        self.app.wait_until(lambda: "nobody uses" in self.app.prop("graphStatus", "text"), "the Flow view")
+        self.app.click_row("graphTree", "Transform")
+        self.app.wait_until(lambda: self.app.prop("graphDetailKind", "text") == "Transform", "the transform node's box")
+        before = self.bounds()
+        pivot = self.transform_fields()
+        self.type_param("pivotX", float(pivot["pivotX"]) - before["W"] / 2)
+        self.type_param("rotation", 30)
+        self.app.wait_until(lambda: abs(self.bounds()["W"] - before["W"]) > 1, "the text to turn")
+        self.app.wait_until(lambda: abs(float(self.app.prop("transformAngleField", "text")) - 30) < 0.6, "the frame to turn 30 degrees")
+        self.app.click("graphResetButton")
+        self.app.wait_until(lambda: all(abs(self.bounds()[k] - before[k]) < 0.6 for k in before), "Reset to put the text back")
+        self.app.wait_until(lambda: abs(float(self.app.prop("transformAngleField", "text"))) < 0.6, "the frame to turn back")   # the frame angle is not in the bounds
+        fields = self.transform_fields()
+        self.assertEqual("0", fields["rotation"])
+        self.assertEqual("0", fields["shear"])
 
     def test_clicking_the_colour_swatch_of_a_fill_opens_the_colour_card(self):
         self.new_a4()
