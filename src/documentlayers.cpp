@@ -78,7 +78,7 @@ namespace curvy {
     std::size_t SketchDocument::layerObjectCount(std::size_t id, bool withSublayers) const {
         std::size_t count = 0;
         for (const std::unique_ptr<SketchObject>& object : objects_) {
-            if (withSublayers ? layerContains(id, object->layer()) : object->layer() == id) {
+            if (withSublayers ? layerContains(id, layerOf(*object)) : layerOf(*object) == id) {
                 ++count;
             }
         }
@@ -88,7 +88,7 @@ namespace curvy {
     std::vector<std::size_t> SketchDocument::objectsInLayer(std::size_t id) const {
         std::vector<std::size_t> out;
         for (const std::unique_ptr<SketchObject>& object : objects_) {
-            if (layerContains(id, object->layer())) {
+            if (layerContains(id, layerOf(*object))) {
                 out.push_back(object->id());
             }
         }
@@ -107,7 +107,7 @@ namespace curvy {
             return 0;
         }
         const SketchObject* object = findById(selection_.front());
-        return object != nullptr ? object->layer() : 0;
+        return object != nullptr ? layerOf(*object) : 0;
     }
 
     void SketchDocument::setLayerExpanded(std::size_t id, bool expanded) {
@@ -172,10 +172,10 @@ namespace curvy {
         bool sorted = true;
         int last = -1;
         for (const std::unique_ptr<SketchObject>& object : objects_) {
-            std::size_t layer = object->layer();
+            std::size_t layer = layerOf(*object);
             if (layer >= rank.size() || rank[layer] < 0) {
                 layer = activeLayer_;
-                object->setLayer(layer);
+                setLayerOf(*object, layer);
             }
             object->setLayerState(hidden[layer] != 0, locked[layer] != 0);
             if (rank[layer] < last) {
@@ -184,8 +184,8 @@ namespace curvy {
             last = rank[layer];
         }
         if (!sorted) {
-            std::stable_sort(objects_.begin(), objects_.end(), [&rank](const std::unique_ptr<SketchObject>& a, const std::unique_ptr<SketchObject>& b) {
-                return rank[a->layer()] < rank[b->layer()];
+            std::stable_sort(objects_.begin(), objects_.end(), [this, &rank](const std::unique_ptr<SketchObject>& a, const std::unique_ptr<SketchObject>& b) {
+                return rank[layerOf(*a)] < rank[layerOf(*b)];
             });
         }
     }
@@ -194,7 +194,7 @@ namespace curvy {
         std::vector<int> rank = layerRanks();
         std::unordered_map<std::size_t, int> of;
         for (const std::unique_ptr<SketchObject>& object : objects_) {
-            std::size_t layer = object->layer();
+            std::size_t layer = layerOf(*object);
             of[object->id()] = layer < rank.size() && rank[layer] >= 0 ? rank[layer] : 0;
         }
         std::vector<std::size_t> out = ids;
@@ -242,7 +242,7 @@ namespace curvy {
         state.activeLayer = activeLayer_;
         if (withObjects) {
             for (const std::unique_ptr<SketchObject>& object : objects_) {
-                state.objectLayers.push_back({object->id(), object->layer()});
+                state.objectLayers.push_back({object->id(), layerOf(*object)});
                 state.order.push_back(object->id());
             }
         }
@@ -260,7 +260,7 @@ namespace curvy {
             for (const auto& [id, layer] : state.objectLayers) {
                 auto it = byId.find(id);
                 if (it != byId.end()) {
-                    it->second->setLayer(layer);
+                    setLayerOf(*it->second, layer);
                 }
             }
         }
@@ -462,7 +462,7 @@ namespace curvy {
         bool any = false;
         for (std::size_t objectId : selection_) {
             const SketchObject* object = findById(objectId);
-            any = any || (object != nullptr && object->layer() != id);
+            any = any || (object != nullptr && layerOf(*object) != id);
         }
         if (!any) {
             return false;
@@ -473,7 +473,7 @@ namespace curvy {
             (isSelected(object->id()) ? moved : others).push_back(object->id());
         }
         for (std::size_t objectId : moved) {
-            findById(objectId)->setLayer(id);
+            setLayerOf(*findById(objectId), id);
         }
         others.insert(others.end(), moved.begin(), moved.end());   // the moved ones land on top of their new layer
         std::vector<std::size_t> selected = selection_;
@@ -547,15 +547,15 @@ namespace curvy {
         std::map<std::size_t, std::size_t> groupOf;   // the copies get groups of their own
         std::vector<std::shared_ptr<DeletedObject>> slots;
         for (const std::unique_ptr<SketchObject>& object : objects_) {
-            auto found = fresh.find(object->layer());
+            auto found = fresh.find(layerOf(*object));
             if (found == fresh.end()) {
                 continue;
             }
             auto slot = std::make_shared<DeletedObject>();
             slot->object.reset(object->clone());
             slot->object->setId(nextId_++);
-            slot->object->setLayer(found->second);
-            std::vector<std::size_t> groups = slot->object->groups();
+            setLayerOf(*slot->object, found->second);
+            std::vector<std::size_t> groups = groupsOf(*slot->object);
             for (std::size_t& g : groups) {
                 auto it = groupOf.find(g);
                 if (it == groupOf.end()) {
@@ -567,7 +567,7 @@ namespace curvy {
                 }
                 g = it->second;
             }
-            slot->object->setGroups(groups);
+            setGroupsOf(*slot->object, groups);
             slot->id = slot->object->id();
             slots.push_back(slot);
         }
@@ -762,7 +762,7 @@ namespace curvy {
     std::vector<std::size_t> SketchDocument::groupMembers(std::size_t group) const {
         std::vector<std::size_t> out;
         for (const std::unique_ptr<SketchObject>& object : objects_) {
-            if (std::find(object->groups().begin(), object->groups().end(), group) != object->groups().end()) {
+            if (inGroup(*object, group)) {
                 out.push_back(object->id());
             }
         }
@@ -783,7 +783,7 @@ namespace curvy {
             if (anchor == nullptr) {
                 return false;
             }
-            destination = anchor->layer();
+            destination = layerOf(*anchor);
         }
         if (findLayer(destination) == nullptr) {
             return false;
@@ -795,8 +795,8 @@ namespace curvy {
             order.push_back(object->id());
             (moving.count(object->id()) != 0 ? moved : others).push_back(object->id());
             if (moving.count(object->id()) != 0) {
-                groupsBefore.push_back({object->id(), object->groups()});
-                std::vector<std::size_t> chain = object->groups();
+                groupsBefore.push_back({object->id(), groupsOf(*object)});
+                std::vector<std::size_t> chain = groupsOf(*object);
                 if (groups) {
                     chain.erase(chain.begin(), chain.begin() + std::ptrdiff_t(std::min(keepFrom, chain.size())));
                     chain.insert(chain.begin(), groups->begin(), groups->end());
@@ -827,7 +827,7 @@ namespace curvy {
         LayerState before = snapshotLayers(true);
         bool layersChange = false;
         for (std::size_t id : moved) {
-            layersChange = layersChange || findById(id)->layer() != destination;
+            layersChange = layersChange || layerOf(*findById(id)) != destination;
         }
         if (placed == order && !layersChange && groupsBefore == groupsAfter) {
             return false;
@@ -842,7 +842,7 @@ namespace curvy {
         auto applyGroups = [this](const Chains& chains) {
             for (const auto& [id, chain] : chains) {
                 if (SketchObject* object = findById(id)) {
-                    object->setGroups(chain);
+                    setGroupsOf(*object, chain);
                 }
             }
         };

@@ -143,9 +143,9 @@ namespace curvy {
                     groupProps_[group] = props;
                 }
                 for (std::unique_ptr<SketchObject>& part : parts) {
-                    std::vector<std::size_t> groups = part->groups();
+                    std::vector<std::size_t> groups = groupsOf(*part);
                     groups.push_back(group);
-                    part->setGroups(groups);
+                    setGroupsOf(*part, groups);
                 }
             }
             for (std::unique_ptr<SketchObject>& part : parts) {

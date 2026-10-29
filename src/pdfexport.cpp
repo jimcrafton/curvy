@@ -533,16 +533,16 @@ namespace curvy {
             std::size_t i = begin;
             while (i < end) {
                 const SketchObject& object = document.object(i);
-                if (object.groups().size() <= depth) {
+                if (document.groupsOf(object).size() <= depth) {
                     if (intersects(object.paintBounds(), pageBox_) || true) {
                         out += drawObject(object);
                     }
                     ++i;
                     continue;
                 }
-                const std::size_t group = object.groups()[depth];
+                const std::size_t group = document.groupsOf(object)[depth];
                 std::size_t j = i + 1;
-                while (j < end && document.object(j).groups().size() > depth && document.object(j).groups()[depth] == group) {
+                while (j < end && document.groupsOf(document.object(j)).size() > depth && document.groupsOf(document.object(j))[depth] == group) {
                     ++j;
                 }
                 const GroupProps props = document.groupProps(group);

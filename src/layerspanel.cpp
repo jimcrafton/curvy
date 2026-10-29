@@ -166,10 +166,10 @@ namespace curvy {
         std::vector<std::size_t> open;   // the groups whose rows have been written, outermost first
         for (std::size_t i = document_.objectCount(); i > 0; --i) {
             const SketchObject& object = document_.object(i - 1);
-            if (object.layer() != layer.id) {
+            if (document_.layerOf(object) != layer.id) {
                 continue;
             }
-            const std::vector<std::size_t>& chain = object.groups();
+            const std::vector<std::size_t>& chain = document_.groupsOf(object);
             std::size_t levels = chain.size();   // the group rows to show: down to the first one that is closed
             bool objectShown = true;
             for (std::size_t k = 0; k < chain.size(); ++k) {
@@ -252,7 +252,7 @@ namespace curvy {
             row.color = layerColor(layer);
             for (std::size_t id : document_.selection()) {
                 const SketchObject* object = document_.findById(id);
-                if (object != nullptr && object->layer() == layer.id) {
+                if (object != nullptr && document_.layerOf(*object) == layer.id) {
                     row.holdsSelection = true;
                 }
             }
@@ -282,11 +282,11 @@ namespace curvy {
         for (std::size_t i = 0; i < document_.objectCount(); ++i) {
             const SketchObject& object = document_.object(i);
             mix(object.id());
-            mix(object.layer());
+            mix(document_.layerOf(object));
             mix((object.ownVisible() ? 1u : 0u) | (object.ownLocked() ? 2u : 0u) | (object.isVisible() ? 4u : 0u) | (object.isLocked() ? 8u : 0u));
             mix(hashName(object.name()));
             mix(std::size_t(object.type()));
-            for (std::size_t g : object.groups()) { mix(g + 3); }
+            for (std::size_t g : document_.groupsOf(object)) { mix(g + 3); }
             const SketchPaint& fill = object.fill();
             mix(std::size_t(fill.kind()));
             if (fill.kind() == SketchPaint::Kind::Solid) { mix(fill.color().toRgba32().value); }
@@ -307,7 +307,7 @@ namespace curvy {
         groupStates_.clear();
         for (std::size_t i = 0; i < document_.objectCount(); ++i) {
             const SketchObject& object = document_.object(i);
-            for (std::size_t g : object.groups()) {
+            for (std::size_t g : document_.groupsOf(object)) {
                 GroupState& state = groupStates_[g];
                 state.visible = state.visible && object.ownVisible();
                 state.locked = state.locked && object.ownLocked();
@@ -378,7 +378,7 @@ namespace curvy {
             const SketchObject* first = document_.findById(ids.front());
             keepFrom = 0;
             if (first != nullptr) {
-                const std::vector<std::size_t>& chain = first->groups();
+                const std::vector<std::size_t>& chain = document_.groupsOf(*first);
                 keepFrom = std::size_t(std::find(chain.begin(), chain.end(), source.id) - chain.begin());
             }
         }
@@ -391,7 +391,7 @@ namespace curvy {
         if (anchor == nullptr) {
             return;
         }
-        std::vector<std::size_t> chain = anchor->groups();
+        std::vector<std::size_t> chain = document_.groupsOf(*anchor);
         if (target.kind == Kind::Group) {   // beside a group: in the groups that hold it
             chain.resize(std::size_t(std::find(chain.begin(), chain.end(), target.id) - chain.begin()));
         }

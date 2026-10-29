@@ -228,10 +228,10 @@ namespace curvy {
         });
         connections_.add(grid_->onScrubBegin, [this](ParamGrid&, std::size_t i, double& value) {
             const DetailRow& r = detailRows_[i];
-            if (!r.scrub || r.node == 0) {
+            if (!r.scrub || !r.node.valid()) {
                 return SyncReturn::Ignored;
             }
-            const jitnodes::Node& scrubbed = document_.network().node(r.node);
+            const jitnodes::Node& scrubbed = document_.node(r.node);
             const std::vector<jitnodes::Keyframe>& keys = scrubbed.keyframes(r.param);
             value = r.scale * (keys.empty() ? shownParam(scrubbed, r.param) : jitnodes::evaluateKeyframes(keys, document_.time()));
             scrubBefore_ = std::make_shared<jitnodes::GraphSnapshot>(document_.snapshotGraph());
@@ -309,7 +309,7 @@ namespace curvy {
         resetButton_->setVisible(false);
         detail_->addChild(resetButton_);
         connections_.add(resetButton_->onClick, [this](Control&) {
-            if (detailNode_ != 0) {
+            if (detailNode_.valid()) {
                 resetTransform(detailNode_);
             }
             return SyncReturn::Handled;
@@ -322,9 +322,9 @@ namespace curvy {
             return SyncReturn::Handled;
         });
         connections_.add(pathButtons_[1]->onClick, [this](Control&) {
-            if (detailNode_ != 0 && document_.network().node(detailNode_).hasGeometryParam("curve")) {
+            if (detailNode_.valid() && document_.node(detailNode_).hasGeometryParam("curve")) {
                 BLPath path;
-                if (pathFromGeometry(*document_.network().node(detailNode_).geometryParam("curve"), path)) {
+                if (pathFromGeometry(*document_.node(detailNode_).geometryParam("curve"), path)) {
                     ClipboardManager::setText(utf8ToWide(pathToText(path)), nullptr);
                     status_->setText("Copied path data");
                 }
@@ -334,7 +334,7 @@ namespace curvy {
         connections_.add(pathButtons_[2]->onClick, [this](Control&) {
             std::wstring text;
             BLPath path;
-            if (detailNode_ != 0 && ClipboardManager::getText(text) && pathFromText(wideToUtf8(text), path) && path.size() > 1) {
+            if (detailNode_.valid() && ClipboardManager::getText(text) && pathFromText(wideToUtf8(text), path) && path.size() > 1) {
                 document_.setGraphGeometry(detailNode_, "curve", geometryFromPath(path));
                 status_->setText("Pasted path data");
             } else if (status_ != nullptr) {
@@ -525,31 +525,32 @@ namespace curvy {
         refresh();
     }
 
-    std::size_t GraphDock::objectOfNode(jitnodes::NodeId node) const {
+    std::size_t GraphDock::objectOfNode(NodeRef node) const {
         // Transform, Tag and Move Points nodes belong to the shape they work on: follow the first input back to it.
-        for (int steps = 0; steps < 1000 && node != jitnodes::invalidNodeId; ++steps) {
-            const std::string type = document_.network().node(node).typeName();
+        const jitnodes::Network& net = document_.networkOf(node.scope);
+        for (int steps = 0; steps < 1000 && node.valid(); ++steps) {
+            const std::string type = net.node(node.id).typeName();
             if (type != kTransformNodeType && type != kTagNodeType && type != kMovePointsNodeType) {
                 break;
             }
-            node = document_.network().inputOf(node, 0);
+            node.id = net.inputOf(node.id, 0);
         }
         for (std::size_t i = 0; i < document_.objectCount(); ++i) {
-            if (document_.object(i).graphNode() == node) {
+            if (document_.object(i).graphRef() == node) {
                 return document_.object(i).id();
             }
         }
         return 0;
     }
 
-    const AppearanceItem* GraphDock::itemOfNode(jitnodes::NodeId node, std::size_t* objectId) const {
-        const jitnodes::Network& net = document_.network();
+    const AppearanceItem* GraphDock::itemOfNode(const NodeRef& node, std::size_t* objectId) const {
+        const jitnodes::Network& net = document_.networkOf(node.scope);
         std::size_t steps = 0;
-        jitnodes::NodeId at = node;
-        while (isAppearanceNodeType(net.node(at).typeName()) && steps < 1000) {
-            at = net.inputOf(at, 0);
+        NodeRef at = node;
+        while (isAppearanceNodeType(net.node(at.id).typeName()) && steps < 1000) {
+            at.id = net.inputOf(at.id, 0);
             ++steps;
-            if (at == jitnodes::invalidNodeId) {
+            if (!at.valid()) {
                 return nullptr;
             }
         }
@@ -563,9 +564,8 @@ namespace curvy {
         return &object->appearance()[steps - 1];
     }
 
-    void GraphDock::describeLook(GraphRow& row, jitnodes::NodeId node) const {
-        const jitnodes::Network& net = document_.network();
-        const std::string type = net.node(node).typeName();
+    void GraphDock::describeLook(GraphRow& row, const NodeRef& node) const {
+        const std::string type = document_.node(node).typeName();
         row.look = true;
         row.text = typeLabel(type);
         std::size_t objectId = 0;
@@ -609,10 +609,11 @@ namespace curvy {
         }
     }
 
-    void GraphDock::describe(GraphRow& row, jitnodes::NodeId node) const {
-        row.node = node;
-        const jitnodes::Network& net = document_.network();
-        const std::string type = net.node(node).typeName();
+    void GraphDock::describe(GraphRow& row, const NodeRef& node) const {
+        row.node = node.id;
+        row.scope = node.scope;
+        const jitnodes::Network& net = document_.networkOf(node.scope);
+        const std::string type = net.node(node.id).typeName();
         row.icon = iconForType(type);
         if (isAppearanceNodeType(type)) {
             describeLook(row, node);
@@ -645,16 +646,22 @@ namespace curvy {
                 row.summary = typeLabel(type);
             }
         } else {
-            row.text = net.node(node).name();
+            row.text = net.node(node.id).name();
             row.summary = typeLabel(type);
         }
     }
 
     std::vector<GraphRow> GraphDock::documentRows() const {
         std::vector<GraphRow> rows;
-        const jitnodes::Network& net = document_.network();
-        const std::vector<jitnodes::NodeId> nodeIds = net.nodeIds();
-        const auto successors = appearanceSuccessors(net, nodeIds);
+        std::map<std::uint32_t, std::unordered_map<jitnodes::NodeId, jitnodes::NodeId>> successors;   // per scope, built when an object of it is met
+        const auto successorsOf = [&](std::uint32_t scope) -> const std::unordered_map<jitnodes::NodeId, jitnodes::NodeId>& {
+            auto found = successors.find(scope);
+            if (found == successors.end()) {
+                const jitnodes::Network& net = document_.networkOf(scope);
+                found = successors.emplace(scope, appearanceSuccessors(net, net.nodeIds())).first;
+            }
+            return found->second;
+        };
         std::function<void(std::size_t, std::size_t)> addLayer = [&](std::size_t parent, std::size_t depth) {
             const std::vector<std::size_t> ids = document_.layerChildren(parent);
             for (std::size_t i = ids.size(); i > 0; --i) {
@@ -670,10 +677,10 @@ namespace curvy {
                 std::vector<std::size_t> open;   // the groups whose rows were written, outermost first
                 for (std::size_t k = document_.objectCount(); k > 0; --k) {
                     const SketchObject& object = document_.object(k - 1);
-                    if (object.layer() != layer.id) {
+                    if (document_.layerOf(object) != layer.id) {
                         continue;
                     }
-                    const std::vector<std::size_t>& chain = object.groups();
+                    const std::vector<std::size_t>& chain = document_.groupsOf(object);
                     std::size_t common = 0;
                     while (common < open.size() && common < chain.size() && open[common] == chain[common]) {
                         ++common;
@@ -696,8 +703,9 @@ namespace curvy {
                     node.depth = depth + 1 + chain.size();
                     node.layerId = layer.id;
                     node.key = "N" + std::to_string(object.id());
-                    if (object.graphNode() != 0 && document_.network().nodeIds().size() > 0) {
-                        describe(node, object.graphNode());
+                    const bool inGraph = object.graphNode() != 0 && document_.hasNode(object.graphRef());
+                    if (inGraph) {
+                        describe(node, object.graphRef());
                     }
                     if (node.node == 0) {
                         node.text = object.name().empty() ? std::string("<") + objectTypeName(object.type()) + ">" : object.name();
@@ -705,14 +713,14 @@ namespace curvy {
                     }
                     node.objectId = object.id();
                     rows.push_back(node);
-                    if (object.graphNode() != 0) {
-                        const std::vector<jitnodes::NodeId> chain = appearanceChain(successors, object.graphNode());
+                    if (inGraph) {
+                        const std::vector<jitnodes::NodeId> chain = appearanceChain(successorsOf(object.graphScope()), object.graphNode());
                         for (std::size_t c = chain.size(); c > 0; --c) {
                             GraphRow look;
                             look.depth = node.depth + 1;
                             look.layerId = layer.id;
                             look.key = node.key + "/" + std::to_string(chain[c - 1]);
-                            describe(look, chain[c - 1]);
+                            describe(look, NodeRef(object.graphScope(), chain[c - 1]));
                             rows.push_back(look);
                         }
                     }
@@ -738,7 +746,7 @@ namespace curvy {
             }
             source.inputs.push_back(std::move(inputs));
         }
-        return flowRows(source, [this](GraphRow& row) { describe(row, row.node); });
+        return flowRows(source, [this](GraphRow& row) { describe(row, NodeRef(row.node)); });
     }
 
     std::vector<GraphRow> GraphDock::buildRows() const {
@@ -761,11 +769,12 @@ namespace curvy {
         for (std::size_t i = 0; i < document_.objectCount(); ++i) {
             const SketchObject& object = document_.object(i);
             mix(object.id());
-            mix(object.layer());
+            mix(document_.layerOf(object));
             mix(object.graphNode());
+            mix(object.graphScope());
             mix(hashText(object.name()));
             mix(std::size_t(object.type()));
-            for (std::size_t g : object.groups()) {
+            for (std::size_t g : document_.groupsOf(object)) {
                 mix(g + 3);
             }
             const SketchPaint& fill = object.fill();
@@ -789,7 +798,7 @@ namespace curvy {
         for (const std::string& key : collapsed_) {
             mix(hashText(key));
         }
-        mix(detailNode_);
+        mix(detailNode_.key());
         mix(hashText(selectedKey_));
         return h;
     }
@@ -803,14 +812,10 @@ namespace curvy {
     }
 
     void GraphDock::refreshDetailValues() {
-        if (updating_ || scrubBefore_ || detailNode_ == 0) {
+        if (updating_ || scrubBefore_ || !detailNode_.valid() || !document_.hasNode(detailNode_)) {
             return;
         }
-        const std::vector<jitnodes::NodeId> ids = document_.network().nodeIds();
-        if (std::find(ids.begin(), ids.end(), detailNode_) == ids.end()) {
-            return;
-        }
-        const jitnodes::Node& node = document_.network().node(detailNode_);
+        const jitnodes::Node& node = document_.node(detailNode_);
         if (node.typeName() != kTransformNodeType && node.typeName() != kMovePointsNodeType) {
             return;
         }
@@ -824,11 +829,10 @@ namespace curvy {
     }
 
     void GraphDock::showParam(DetailRow& row) {
-        const std::vector<jitnodes::NodeId> ids = document_.network().nodeIds();
-        if (row.node == 0 || std::find(ids.begin(), ids.end(), row.node) == ids.end()) {
+        if (!row.node.valid() || !document_.hasNode(row.node)) {
             return;
         }
-        const jitnodes::Node& node = document_.network().node(row.node);
+        const jitnodes::Node& node = document_.node(row.node);
         if (!node.hasFloat(row.param)) {
             return;
         }
@@ -850,10 +854,10 @@ namespace curvy {
             return;
         }
         const DetailRow& row = detailRows_[index];
-        if (!(row.scrub && row.kind == DetailRow::Kind::Text && row.node != 0)) {
+        if (!(row.scrub && row.kind == DetailRow::Kind::Text && row.node.valid())) {
             return;
         }
-        jitnodes::Node& node = document_.network().node(row.node);
+        jitnodes::Node& node = document_.node(row.node);
         if (document_.hasKeyAtTime(row.node, row.param)) {
             document_.removeGraphKey(row.node, row.param);
         } else {
@@ -876,7 +880,7 @@ namespace curvy {
             return;
         }
         DetailRow& row = detailRows_[index];
-        if (!(row.scrub && row.kind == DetailRow::Kind::Text && row.node != 0)) {
+        if (!(row.scrub && row.kind == DetailRow::Kind::Text && row.node.valid())) {
             if (row.apply) {
                 const auto apply = row.apply;   // a copy: the edit rebuilds the rows, and with them this function
                 apply(text);
@@ -884,17 +888,17 @@ namespace curvy {
             return;
         }
         const FieldEntry entry = parseFieldEntry(text);
-        const jitnodes::NodeId id = row.node;
+        const NodeRef id = row.node;
         const std::string param = row.param;
         if (entry.kind == FieldEntry::Kind::Number) {
-            jitnodes::Node& node = document_.network().node(id);
+            jitnodes::Node& node = document_.node(id);
             if (node.expression(param).empty()) {
                 document_.setGraphParam(id, param, float(entry.number));
             } else {
                 const jitnodes::GraphSnapshot before = document_.snapshotGraph();   // typing a number takes the expression away
                 node.setExpression(param, "");
                 node.setFloat(param, float(entry.number));
-                document_.network().markDirty(id);
+                document_.networkOf(id.scope).markDirty(id.id);
                 document_.commitGraphEdit(before, "Change " + param);
             }
             status_->setText("");
@@ -956,7 +960,12 @@ namespace curvy {
         }
         updating_ = false;
         if (info_ != nullptr) {
-            std::size_t nodes = document_.network().nodeIds().size();
+            std::size_t nodes = 0;
+            for (std::uint32_t scope = 0; scope < document_.scopeCount(); ++scope) {
+                if (const jitnodes::Network* net = document_.findNetwork(scope)) {
+                    nodes += net->nodeIds().size();
+                }
+            }
             info_->setText(std::to_string(nodes) + (nodes == 1 ? " node" : " nodes"));
         }
         showDetail(selected.has_value() ? raw->rowAt(*selected) : nullptr);
@@ -1041,7 +1050,7 @@ namespace curvy {
 
     bool GraphDock::editDetailColour(std::size_t index) {
         if (index >= detailRows_.size() || (detailRows_[index].kind != DetailRow::Kind::Colour && detailRows_[index].kind != DetailRow::Kind::Gradient) ||
-            !grid_->row(index).shown || detailNode_ == 0) {
+            !grid_->row(index).shown || !detailNode_.valid()) {
             return false;
         }
         std::size_t objectId = 0;
@@ -1067,9 +1076,9 @@ namespace curvy {
         return true;
     }
 
-    bool GraphDock::selectNode(jitnodes::NodeId node) {
+    bool GraphDock::selectNode(const NodeRef& node) {
         for (const GraphRow& row : rows_) {
-            if (row.node == node && row.kind == GraphRow::Kind::Node && row.objectId != 0) {
+            if (row.node == node.id && row.scope == node.scope && row.kind == GraphRow::Kind::Node && row.objectId != 0) {
                 return selectRow(row.key);
             }
         }
@@ -1127,15 +1136,14 @@ namespace curvy {
         }
     }
 
-    void GraphDock::resetTransform(jitnodes::NodeId id) {
-        jitnodes::Network& net = document_.network();
-        const std::vector<jitnodes::NodeId> ids = net.nodeIds();
-        if (std::find(ids.begin(), ids.end(), id) == ids.end() || net.node(id).typeName() != kTransformNodeType) {
+    void GraphDock::resetTransform(const NodeRef& id) {
+        if (!document_.hasNode(id) || document_.node(id).typeName() != kTransformNodeType) {
             return;
         }
+        jitnodes::Network& net = document_.networkOf(id.scope);
         // The pivot goes back to the middle of the shape, the rest to doing nothing; one undo step.
         float pivotX = 0.0f, pivotY = 0.0f;
-        const jitnodes::NodeId shape = shapeBehind(net, net.inputOf(id, 0));
+        const jitnodes::NodeId shape = shapeBehind(net, net.inputOf(id.id, 0));
         if (shape != jitnodes::invalidNodeId && net.node(shape).hasGeometryParam("curve")) {
             const jitnodes::Geometry& curve = *net.node(shape).geometryParam("curve");
             if (curve.pointCount() > 0) {
@@ -1149,7 +1157,7 @@ namespace curvy {
         const std::pair<const char*, float> values[8] = {{"translateX", 0.0f}, {"translateY", 0.0f}, {"rotation", 0.0f}, {"scaleX", 1.0f},
                                                          {"scaleY", 1.0f}, {"shear", 0.0f}, {"pivotX", pivotX}, {"pivotY", pivotY}};
         for (const auto& [name, value] : values) {
-            net.node(id).setExpression(name, "");
+            net.node(id.id).setExpression(name, "");
             document_.setGraphFloatLive(id, name, value);
         }
         document_.commitGraphEdit(before, "Reset transform");
@@ -1182,7 +1190,7 @@ namespace curvy {
         grid_->changed();
     }
 
-    void GraphDock::lookRows(const jitnodes::Node& node, jitnodes::NodeId id, std::size_t& at) {
+    void GraphDock::lookRows(const jitnodes::Node& node, const NodeRef& id, std::size_t& at) {
         auto number = [&](const char* caption, const char* name, double lowest = 0.0) {
             setRow(at++, caption, numberText(node.baseFloat(name)), [this, id, key = std::string(name)](const std::string& value) {
                 double parsed = 0.0;
@@ -1293,7 +1301,7 @@ namespace curvy {
         grid_->changed();
     }
 
-    void GraphDock::scrubRow(std::size_t index, jitnodes::NodeId id, const std::string& param, double minimum, double maximum, double scale) {
+    void GraphDock::scrubRow(std::size_t index, const NodeRef& id, const std::string& param, double minimum, double maximum, double scale) {
         if (index < detailRows_.size()) {
             DetailRow& row = detailRows_[index];
             row.scrub = true;
@@ -1326,7 +1334,7 @@ namespace curvy {
         grid_->changed();
     }
 
-    void GraphDock::setPaintKind(jitnodes::NodeId id, int kind) {
+    void GraphDock::setPaintKind(const NodeRef& id, int kind) {
         std::size_t objectId = 0;
         const AppearanceItem* item = itemOfNode(id, &objectId);
         if (item == nullptr || kind < 0 || kind > 5) {
@@ -1351,30 +1359,30 @@ namespace curvy {
         }
         const AppearanceParams params = paramsOf(next);
         const jitnodes::GraphSnapshot before = document_.snapshotGraph();
-        store(document_.network().node(id), params);
-        document_.network().markDirty(id);
+        store(document_.node(id), params);
+        document_.networkOf(id.scope).markDirty(id.id);
         document_.commitGraphEdit(before, "Change Paint");
     }
 
-    void GraphDock::showLinks(jitnodes::NodeId id) {
-        const jitnodes::Network& net = document_.network();
+    void GraphDock::showLinks(const NodeRef& id) {
+        const jitnodes::Network& net = document_.networkOf(id.scope);
         inputNodes_.clear();
         userNodes_.clear();
-        for (int i = 0; i < net.node(id).inputCount(); ++i) {
-            const jitnodes::NodeId from = net.inputOf(id, i);
+        for (int i = 0; i < net.node(id.id).inputCount(); ++i) {
+            const jitnodes::NodeId from = net.inputOf(id.id, i);
             if (from != jitnodes::invalidNodeId) {
-                inputNodes_.push_back(from);
+                inputNodes_.emplace_back(id.scope, from);
             }
         }
         for (jitnodes::NodeId other : net.nodeIds()) {
             for (int i = 0; i < net.node(other).inputCount(); ++i) {
-                if (net.inputOf(other, i) == id) {
-                    userNodes_.push_back(other);
+                if (net.inputOf(other, i) == id.id) {
+                    userNodes_.emplace_back(id.scope, other);
                     break;
                 }
             }
         }
-        auto fill = [&](Label* header, Label* none, std::vector<LinkRow>& rows, const std::vector<jitnodes::NodeId>& nodes, bool numbered) {
+        auto fill = [&](Label* header, Label* none, std::vector<LinkRow>& rows, const std::vector<NodeRef>& nodes, bool numbered) {
             header->setVisible(true);
             none->setVisible(nodes.empty());
             for (std::size_t k = 0; k < rows.size(); ++k) {
@@ -1401,7 +1409,7 @@ namespace curvy {
         }
         updating_ = true;
         clearDetail();
-        detailNode_ = 0;
+        detailNode_ = kNoNode;
         detailObject_ = 0;
         if (row == nullptr) {
             detailTitle_->setText("Nothing selected");
@@ -1409,15 +1417,15 @@ namespace curvy {
         } else if (row->kind == GraphRow::Kind::Layer || row->kind == GraphRow::Kind::Group) {
             detailTitle_->setText(row->text);
             detailKind_->setText(row->kind == GraphRow::Kind::Layer ? "Layer" : "Group");
-        } else if (row->node != 0 && [&] { const std::vector<jitnodes::NodeId> ids = document_.network().nodeIds(); return std::find(ids.begin(), ids.end(), row->node) != ids.end(); }()) {
-            detailNode_ = row->node;
+        } else if (row->node != 0 && document_.hasNode(NodeRef(row->scope, row->node))) {
+            const NodeRef id(row->scope, row->node);
+            detailNode_ = id;
             detailObject_ = row->objectId;
-            jitnodes::Node& node = document_.network().node(row->node);
+            jitnodes::Node& node = document_.node(id);
             const std::string type = node.typeName();
             detailTitle_->setText(row->text);
             detailKind_->setText(typeLabel(type));
             std::size_t at = 0;
-            const jitnodes::NodeId id = row->node;
             if (type == kPathNodeType) {
                 setRow(at++, "Curves", curveSummary(*node.geometryParam("curve")), nullptr);
                 for (Button* button : pathButtons_) {

@@ -533,6 +533,7 @@ namespace curvy {
         std::vector<std::shared_ptr<const ImageData>> images;
         ByteWriter objects;
         std::vector<std::uint32_t> graphNodes;
+        std::vector<std::string> graphScopes;
         objects.varint(document.objectCount());
         for (std::size_t i = 0; i < document.objectCount(); ++i) {
             const SketchObject& object = document.object(i);
@@ -625,12 +626,13 @@ namespace curvy {
                 writePath(objects, warp.second, version);
             }
             if (version >= 4) {
-                const bool held = document.pathHeldByNode(object);
+                const bool held = document.pathHeldByNode(object) && object.graphScope() == 0;   // the reader checks the root graph only
                 objects.u8(held ? 1u : 0u);
                 if (!held) {
                     writePath(objects, object.geometry(), version);
                 }
                 graphNodes.push_back(object.graphNode());
+                graphScopes.push_back(document.scopeText(object.graphScope()));
             } else {
                 writePath(objects, object.geometry(), version);
             }
@@ -799,6 +801,9 @@ namespace curvy {
             for (std::uint32_t node : graphNodes) {
                 graphChunk.varint(node);
             }
+            for (const std::string& scope : graphScopes) {   // after the nodes, so a reader that stops at them still works
+                graphChunk.text(scope);
+            }
         }
 
         std::string body;
@@ -879,6 +884,7 @@ namespace curvy {
         bool havePage = false, haveObjects = false, haveGraph = false;
         std::string graphText;
         std::vector<std::uint32_t> graphNodes;   // the shape node of each object (GRPH), in stacking order
+        std::vector<std::string> graphScopes;    // the subnet path each lives in (empty: the root); absent in older files
         std::vector<bool> fromGraph;             // the outline of each object is built from its node
 
         ByteReader file(body, bodySize);
@@ -1119,6 +1125,9 @@ namespace curvy {
                 for (std::size_t i = 0; i < n && in.ok(); ++i) {
                     graphNodes.push_back(std::uint32_t(in.varint()));
                 }
+                for (std::size_t i = 0; i < n && in.ok() && in.left() > 0; ++i) {
+                    graphScopes.push_back(in.text());
+                }
                 if (!in.ok()) {
                     return false;
                 }
@@ -1339,6 +1348,9 @@ namespace curvy {
             ++objectAt;
             if (haveGraph) {
                 object->setGraphNode(graphNodes[at]);
+                if (at < graphScopes.size() && !graphScopes[at].empty()) {
+                    object->setGraphRef(NodeRef(document.scopeOfText(graphScopes[at]), graphNodes[at]));
+                }
             }
             while (runAt < layerRuns.size() && runUsed >= layerRuns[runAt].second) {
                 ++runAt;

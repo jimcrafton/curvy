@@ -406,7 +406,7 @@ namespace curvy {
                 }
                 doc_->setSelection({textId});
                 doc_->setSelection({rectId});
-                expect(graph.detailNode() == rect.graphNode() && graph.title() == "Box", "selecting an object on the canvas shows its node");
+                expect(graph.detailNode() == rect.graphRef() && graph.title() == "Box", "selecting an object on the canvas shows its node");
                 if (!strokeKey.empty()) {
                     const double width = rect.strokeWidth();
                     expect(graph.selectRow(strokeKey) && graph.title() == "Stroke" && graph.detailCaption(2) == "Width", "selecting the stroke row shows the stroke node");
@@ -447,7 +447,7 @@ namespace curvy {
                 graph.setMode(GraphDock::Mode::Document);
 
                 doc_->setSelection({});
-                expect(graph.detailNode() == 0 && graph.title() == "Nothing selected", "no selection, no node in the box");
+                expect(!graph.detailNode().valid() && graph.title() == "Nothing selected", "no selection, no node in the box");
                 w_.runCommand("view.graph");
                 expect(!model_->graphVisible() && !graph.dock()->isVisible() && !toggle->isChecked(), "the View ring's Graph slot hides it and the toggle follows");
                 doc_->clearObjects();

@@ -69,10 +69,31 @@ Ids are per network, so a node is addressed by `NodeRef{scope, id}`: `scope` is 
   `adoptChain` work in any scope. Still root-only until S3/S5: `transformNodeOf`, `hitTestNode`, `selectedNodes`, `setSelectedNodes` and the graph dock (they answer
   `invalidNodeId` / skip an object in a group). Tests `SketchDocumentScopes.*` (a hand-built group moves its member, undo/redo, appearance nodes beside the shape).
   2082 ctest pass; `--check`, `--check-tools`, `--check-workspace` pass. GUI suite not rerun.
-- **S3 Groups by containment.** group/ungroup/move-to-layer move chains between scopes; `groups_`/`groupProps_` removed from `SketchObject`; load builds
-  subnets from old files; clip/opacity/blend read from the subnet.
+- **S2.5 Membership accessors. DONE 2026-10-28.** `SketchDocument::groupsOf`, `outermostGroupOf`, `isGrouped`, `inGroup`, `layerOf`, `setGroupsOf`, `setLayerOf` (inline in
+  `sketchdocument.h`, bodies still read `SketchObject::groups()/layer()`). Every production read and in-document write outside the serializers now goes through them
+  (documentlayers/clip/expand/symbols/trace/transform, sketchdocument, graphdock, layerspanel, canvasview, pdfexport, the SVG load post-pass). Still on `SketchObject`
+  directly, to move in S3/S6 because they have no document in scope: `writeObject` and the SVG readers (`sketchsvg.cpp`), `sketchbin.cpp` read/write, the copy helper in
+  `documentexpand.cpp` (image result), `SketchObject::clone`, and `sketchchecks.cpp`/tests. S3 then changes only the accessor bodies plus those sites. 2082 ctest pass
+  (the clipboard test is flaky in a full run, passes alone); `--check`, `--check-tools`, `--check-workspace` pass.
+- **S3a Containment, derived from the group ids. DONE 2026-10-28.** `SketchObject::groups()` and `groupProps_` stay the carrier for now; `changed()` runs
+  `syncGroupScopes` (before `syncPathNodes`) and `pruneGroupScopes` (after). The first finds or makes the `curvySubnet` (new `groupId` parameter) for each object's
+  group chain and moves the object's whole chain there (shape, deformers, placement, look nodes copied with `copyNode`/`pasteNodes`, so expressions and keys survive;
+  the old nodes are removed); an object with no groups in a group subnet goes back to the root; hand-built subnets (no `groupId`) and live shapes are left alone.
+  The second removes group subnets no object lives in and writes opacity/blend/clip into the rest. Group, ungroup, move-to-layer and their undo needed no change:
+  they set the chain, the sync moves the nodes. Files: SVG writes `data-graph-scope="4/7"` (subnet ids from the root) and `.skb` appends the paths after the GRPH
+  node ids (older files lack them and load as before); both read the scope before `add()` so the sync moves nothing at load. A `.skb` object in a subnet is saved
+  with its path (not held by its node), since that reader checks the root graph only. Tests `SketchDocumentScopes.Grouping*`, `GroupedObjectsKeep*`,
+  `GroupsSurvive*`. ctest passes (the clipboard test fails in some full runs, passes alone); `--check`, `--check-tools`, `--check-workspace` pass. GUI suite not rerun.
+  Limits: a parent link between objects in different groups is dropped by the sync (as S2 does); a live shape (boolean etc.) stays in the root whatever its group;
+  wiring from outside the chain into it is cut when the chain moves.
+- **S3b Flip the carrier.** group/ungroup move chains explicitly, `groups_`/`groupProps_` removed from `SketchObject`; the accessors read the subnet chain and
+  `groupId`; clip/opacity/blend read from the subnet; the loaders build subnets from old files by the SVG `<g>` structure.
 - **S4 Layers by containment.** `layers_` replaced; Layers panel and order via the container merge.
-- **S5 Enter/exit group** in canvas and graph dock; `groupAngle_` stays outside the graph like `frameAngle_`.
+- **S5 Scoped selection and graph dock. DONE 2026-10-28** (the enter/exit-group view is not built). `hitTestNode`, `selectedNodes` and `setSelectedNodes` use `NodeRef`;
+  `selectionOrigin`/`setSelectionOrigin` go through `transformRefOf`. The graph dock works on `NodeRef` throughout (`GraphRow::scope`, `detailNode()`, detail and link rows,
+  edits, paint kind, reset transform), builds appearance chains per scope, and counts nodes over all scopes, so grouped objects list and edit like root ones. Flow view
+  still lists the root network only. Test `NodeSelection.GroupedObjectsAreSelectedAndPickedByTheirScopedNode`; 2086 ctest and the three checks pass; GUI suite not rerun.
+  Remaining from the old S5: entering a group on the canvas/dock, and `groupAngle_` stays outside the graph like `frameAngle_`.
 - **S6 Save formats:** SVG round trip; `.skb` v5 graph chunk; GUI tests for group move/undo/save/load.
 - **S7 Cleanup:** delete `Layer`/`groups_` duplicates, update docs and tracker.
 

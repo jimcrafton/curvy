@@ -541,6 +541,187 @@ namespace curvy {
         return true;
     }
 
+    std::string SketchDocument::scopeText(std::uint32_t scope) const {
+        std::string text;
+        for (jitnodes::NodeId id : scopePath(scope)) {
+            text += (text.empty() ? "" : "/") + std::to_string(id);
+        }
+        return text;
+    }
+
+    std::uint32_t SketchDocument::scopeOfText(const std::string& text) {
+        std::vector<jitnodes::NodeId> path;
+        for (const char* at = text.c_str(); *at != '\0';) {
+            char* end = nullptr;
+            const unsigned long id = std::strtoul(at, &end, 10);
+            if (end == at) {
+                break;
+            }
+            path.push_back(jitnodes::NodeId(id));
+            at = *end == '/' ? end + 1 : end;
+        }
+        return scopeOf(path);
+    }
+
+    std::size_t SketchDocument::groupIdOfScope(std::uint32_t scope) const {
+        if (scope == 0 || scope >= scopeCount()) {
+            return 0;
+        }
+        const NodeRef subnet = parentOfScope(scope);
+        if (!hasNode(subnet) || node(subnet).typeName() != kSubnetNodeType) {
+            return 0;
+        }
+        return std::size_t(node(subnet).getFloat("groupId"));
+    }
+
+    void SketchDocument::syncGroupScopes() {
+        bool work = false;
+        for (const std::unique_ptr<SketchObject>& object : objects_) {
+            if (isGrouped(*object) || object->graphScope() != 0) {
+                work = true;
+                break;
+            }
+        }
+        if (!work) {
+            return;
+        }
+        std::map<std::vector<std::size_t>, std::uint32_t> known;
+        auto scopeFor = [&](const std::vector<std::size_t>& chain) {
+            std::uint32_t scope = 0;
+            std::vector<std::size_t> prefix;
+            for (std::size_t group : chain) {
+                prefix.push_back(group);
+                const auto hit = known.find(prefix);
+                if (hit != known.end()) {
+                    scope = hit->second;
+                    continue;
+                }
+                jitnodes::Network& net = networkOf(scope);
+                jitnodes::NodeId found = jitnodes::invalidNodeId;
+                for (jitnodes::NodeId id : net.nodeIds()) {
+                    if (net.node(id).typeName() == kSubnetNodeType && std::size_t(net.node(id).getFloat("groupId")) == group) {
+                        found = id;
+                        break;
+                    }
+                }
+                if (found == jitnodes::invalidNodeId) {
+                    found = net.addNode(kSubnetNodeType, net.uniqueName("group"));
+                    net.node(found).setFloat("groupId", float(group));
+                }
+                scope = scopeOfSubnet(NodeRef(scope, found));
+                known.emplace(prefix, scope);
+            }
+            return scope;
+        };
+
+        struct Move {
+            SketchObject* object;
+            std::uint32_t to;
+        };
+        std::map<std::uint32_t, std::vector<Move>> bySource;
+        for (const std::unique_ptr<SketchObject>& object : objects_) {
+            const std::uint32_t from = object->graphScope();
+            const std::vector<std::size_t>& chain = groupsOf(*object);
+            std::uint32_t to = from;
+            if (!chain.empty()) {
+                to = scopeFor(chain);
+            } else if (from != 0 && (groupIdOfScope(from) != 0 || findNetwork(from) == nullptr)) {
+                to = 0;
+            }
+            if (to != from) {
+                bySource[from].push_back({object.get(), to});
+            }
+        }
+        if (bySource.empty()) {
+            return;
+        }
+        for (auto& [from, moves] : bySource) {
+            jitnodes::Network* source = findNetwork(from);
+            std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> placed, following;
+            if (source != nullptr) {
+                const std::vector<jitnodes::NodeId> ids = source->nodeIds();
+                placed = placementNodes(*source, ids);
+                following = appearanceSuccessors(*source, ids);
+            }
+            for (const Move& move : moves) {
+                SketchObject& object = *move.object;
+                const jitnodes::NodeId shape = object.graphNode();
+                if (source == nullptr || shape == jitnodes::invalidNodeId || !source->hasNode(shape)) {
+                    object.setGraphRef(NodeRef(move.to, jitnodes::invalidNodeId));
+                    object.forgetNodes();
+                    continue;
+                }
+                if (!isShapeNodeType(source->node(shape).typeName())) {
+                    continue;   // a live shape keeps its inputs where they are
+                }
+                // The chain is shape, what deforms it, its placement, then the look: all of it moves, so expressions and keys on it survive.
+                std::vector<jitnodes::NodeId> chain{shape};
+                if (const auto place = placed.find(shape); place != placed.end()) {
+                    std::vector<jitnodes::NodeId> between;
+                    for (jitnodes::NodeId at = source->inputOf(place->second, 0); at != jitnodes::invalidNodeId && at != shape && between.size() < 1000;
+                         at = source->inputOf(at, 0)) {
+                        between.push_back(at);
+                    }
+                    chain.insert(chain.end(), between.rbegin(), between.rend());
+                    chain.push_back(place->second);
+                }
+                for (jitnodes::NodeId link : appearanceChain(following, shape)) {
+                    chain.push_back(link);
+                }
+                std::vector<jitnodes::NodeClip> clips;
+                for (jitnodes::NodeId id : chain) {
+                    clips.push_back(jitnodes::copyNode(*source, id));
+                }
+                const std::vector<jitnodes::NodeId> made = jitnodes::pasteNodes(networkOf(move.to), clips);
+                for (std::size_t i = 1; i < made.size(); ++i) {
+                    networkOf(move.to).connect(made[i - 1], made[i], 0);
+                }
+                for (jitnodes::NodeId id : chain) {
+                    appearanceSynced_.erase(NodeRef(from, id));
+                    source->removeNode(id);
+                }
+                object.setGraphRef(NodeRef(move.to, made.front()));
+                if (object.everBound()) {
+                    object.setBoundToNodes(false);   // its placement is rewritten relative to the new group
+                }
+            }
+        }
+        placedCache_.clear();
+        appearanceChains_.clear();
+        drivenDirty_ = true;
+    }
+
+    void SketchDocument::pruneGroupScopes() {
+        if (scopeCount() == 1) {
+            return;
+        }
+        std::unordered_set<std::uint32_t> used;
+        for (const std::unique_ptr<SketchObject>& object : objects_) {
+            for (std::uint32_t scope = object->graphScope(); scope != 0 && used.insert(scope).second; scope = parentOfScope(scope).scope) {
+            }
+        }
+        for (std::uint32_t scope = 1; scope < scopeCount(); ++scope) {
+            const std::size_t group = groupIdOfScope(scope);
+            if (group == 0) {
+                continue;
+            }
+            const NodeRef subnet = parentOfScope(scope);
+            if (used.count(scope) == 0) {
+                networkOf(subnet.scope).removeNode(subnet.id);
+                continue;
+            }
+            jitnodes::Node& held = node(subnet);
+            const GroupProps props = groupProps(group);
+            if (held.getFloat("opacity") != float(props.opacity)) {
+                held.setFloat("opacity", float(props.opacity));
+            }
+            if (held.getFloat("clip") != (props.clip ? 1.0f : 0.0f)) {
+                held.setFloat("clip", props.clip ? 1.0f : 0.0f);
+            }
+            held.setString("blend", blendModeCss(props.blendMode));
+        }
+    }
+
     void SketchDocument::syncPathNodes() {
         std::map<std::uint32_t, std::vector<SketchObject*>> byScope;
         for (const std::unique_ptr<SketchObject>& object : objects_) {
@@ -1087,25 +1268,25 @@ namespace curvy {
         return 0;
     }
 
-    jitnodes::NodeId SketchDocument::hitTestNode(const BLPoint& point, double tolerance) const {
+    NodeRef SketchDocument::hitTestNode(const BLPoint& point, double tolerance) const {
         const SketchObject* hit = hitTest(point, tolerance);
-        return hit != nullptr ? transformNodeOf(hit->id()) : jitnodes::invalidNodeId;
+        return hit != nullptr ? transformRefOf(hit->id()) : kNoNode;
     }
 
-    std::vector<jitnodes::NodeId> SketchDocument::selectedNodes() const {
-        std::vector<jitnodes::NodeId> nodes;
+    std::vector<NodeRef> SketchDocument::selectedNodes() const {
+        std::vector<NodeRef> nodes;
         for (std::size_t id : selection_) {
-            const jitnodes::NodeId place = transformNodeOf(id);
-            if (place != jitnodes::invalidNodeId) {
+            const NodeRef place = transformRefOf(id);
+            if (place.valid()) {
                 nodes.push_back(place);
             }
         }
         return nodes;
     }
 
-    void SketchDocument::setSelectedNodes(const std::vector<jitnodes::NodeId>& nodes) {
+    void SketchDocument::setSelectedNodes(const std::vector<NodeRef>& nodes) {
         std::vector<std::size_t> ids;
-        for (jitnodes::NodeId node : nodes) {
+        for (const NodeRef& node : nodes) {
             if (const std::size_t id = objectOfNode(node)) {
                 ids.push_back(id);
             }

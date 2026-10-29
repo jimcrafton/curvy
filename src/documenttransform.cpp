@@ -127,7 +127,8 @@ namespace curvy {
                 if (object == nullptr) {
                     continue;
                 }
-                const std::size_t key = object->groups().empty() ? object->id() * 2 : object->groups().front() * 2 + 1;
+                const std::size_t group = document.outermostGroupOf(*object);
+                const std::size_t key = group == 0 ? object->id() * 2 : group * 2 + 1;
                 const BLBox b = object->geometryBounds();
                 auto [it, fresh] = indexOf.emplace(key, pieces.size());
                 if (fresh) {

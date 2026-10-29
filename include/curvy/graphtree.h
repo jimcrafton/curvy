@@ -29,6 +29,7 @@ namespace curvy {
         std::string icon;               // resource name, drawn before the name
         std::string key;                // stable identity, so a rebuilt tree keeps what was open
         jitnodes::NodeId node = 0;      // Node and Link rows
+        std::uint32_t scope = 0;        // the network the node is in (a document scope; 0 is the root)
         std::size_t objectId = 0;       // a Node row that stands for a document object
         std::size_t layerId = 0;        // a Layer row, or the layer a Group or Node row is in
         std::size_t groupId = 0;

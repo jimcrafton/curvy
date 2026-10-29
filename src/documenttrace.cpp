@@ -33,7 +33,7 @@ namespace curvy {
             std::snprintf(hex, sizeof(hex), "#%06x", unsigned(shape.rgb & 0xFFFFFFu));
             object->setFill(SketchPaint::solid(SketchColor::fromHex(hex).convertedTo(colorMode_)));
             object->setStroke(SketchPaint::none());
-            object->setGroups({group});
+            setGroupsOf(*object, {group});
             objects.push_back(std::move(object));
         }
         return addObjectsUndoable(std::move(objects), "Image Trace");

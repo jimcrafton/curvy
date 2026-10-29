@@ -1679,7 +1679,10 @@ namespace curvy {
                 object->setName(*id);
             }
             if (const std::string* graphNode = node.attr("data-graph-node")) {
-                object->setGraphNode(std::uint32_t(std::strtoul(graphNode->c_str(), nullptr, 10)));
+                object->setGraphRef(NodeRef(0, std::uint32_t(std::strtoul(graphNode->c_str(), nullptr, 10))));
+                if (const std::string* scope = node.attr("data-graph-scope")) {
+                    object->setGraphRef(NodeRef(ctx.document->scopeOfText(*scope), object->graphNode()));
+                }
             }
             if (const std::string* angle = node.attr("data-frame-angle")) {
                 object->setFrameAngle(number(angle, 0.0));
@@ -2121,7 +2124,10 @@ namespace curvy {
                 object->setName(*id);
             }
             if (const std::string* graphNode = node.attr("data-graph-node")) {
-                object->setGraphNode(std::uint32_t(std::strtoul(graphNode->c_str(), nullptr, 10)));
+                object->setGraphRef(NodeRef(0, std::uint32_t(std::strtoul(graphNode->c_str(), nullptr, 10))));
+                if (const std::string* scope = node.attr("data-graph-scope")) {
+                    object->setGraphRef(NodeRef(ctx.document->scopeOfText(*scope), object->graphNode()));
+                }
             }
             if (const std::string* angle = node.attr("data-frame-angle")) {
                 object->setFrameAngle(number(angle, 0.0));
@@ -2181,7 +2187,8 @@ namespace curvy {
     namespace {
     // One object as SVG: a plain <path>, or - for several fills / strokes, per-item opacity / blend / visibility or effects - a
     // <g data-sketch="appearance"> with one path per item. `idText` is its id attribute.
-    void writeObject(const SketchObject& object, const std::string& idText, std::ostringstream& body, std::ostringstream& defs, int& gradientCount, bool withLayers = false) {
+    void writeObject(const SketchObject& object, const std::string& idText, std::ostringstream& body, std::ostringstream& defs, int& gradientCount, bool withLayers = false,
+        const std::string& scope = std::string()) {
         if (object.isImage() && object.image()) {
             // A real <image>, so that other viewers show the picture; its quadrilateral is the matrix that places the pixels.
             const BLMatrix2D m = object.imageMatrix();
@@ -2224,6 +2231,9 @@ namespace curvy {
                     }
                     if (object.graphNode() != 0) {
                         body << " data-graph-node=\"" << object.graphNode() << "\"";
+                        if (!scope.empty()) {
+                            body << " data-graph-scope=\"" << scope << "\"";
+                        }
                     }
                     if (object.frameAngle() != 0.0) {
                         body << " data-frame-angle=\"" << num(object.frameAngle()) << "\"";
@@ -2294,6 +2304,9 @@ namespace curvy {
             }
             if (object.graphNode() != 0) {
                 body << " data-graph-node=\"" << object.graphNode() << "\"";
+                if (!scope.empty()) {
+                    body << " data-graph-scope=\"" << scope << "\"";
+                }
             }
             if (object.frameAngle() != 0.0) {
                 body << " data-frame-angle=\"" << num(object.frameAngle()) << "\"";
@@ -2359,7 +2372,7 @@ namespace curvy {
                     openGroups.push_back(groups[k]);
                 }
             }
-            writeObject(object, "obj" + std::to_string(object.id()), body, defs, gradientCount, document.layers().size() > 1);
+            writeObject(object, "obj" + std::to_string(object.id()), body, defs, gradientCount, document.layers().size() > 1, document.scopeText(object.graphScope()));
         }
         for (std::size_t k = openGroups.size(); k > 0; --k) {
             body << "</g>\n";
@@ -2612,19 +2625,19 @@ namespace curvy {
         // A <g> holding a single object (or none that survived) is not worth a group.
         std::map<std::size_t, std::size_t> members;
         for (std::size_t i = 0; i < document.objectCount(); ++i) {
-            for (std::size_t g : document.object(i).groups()) {
+            for (std::size_t g : document.groupsOf(document.object(i))) {
                 ++members[g];
             }
         }
         for (std::size_t i = 0; i < document.objectCount(); ++i) {
             std::vector<std::size_t> kept;
-            for (std::size_t g : document.object(i).groups()) {
+            for (std::size_t g : document.groupsOf(document.object(i))) {
                 if (members[g] > 1) {
                     kept.push_back(g);
                 }
             }
-            if (kept.size() != document.object(i).groups().size()) {
-                document.object(i).setGroups(kept);
+            if (kept.size() != document.groupsOf(document.object(i)).size()) {
+                document.setGroupsOf(document.object(i), kept);
             }
         }
         document.bindBrushStrokes();

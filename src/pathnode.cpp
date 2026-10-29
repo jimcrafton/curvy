@@ -256,6 +256,7 @@ namespace curvy {
             CurvySubnetNode() : SubnetNode(kSubnetNodeType, 0) {
                 const Placement none;
                 declareString("role", "group");
+                declareFloat("groupId", 0.0f);
                 declareFloat("visible", 1.0f);
                 declareFloat("locked", 0.0f);
                 declareFloat("opacity", 1.0f);

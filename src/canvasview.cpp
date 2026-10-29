@@ -1202,7 +1202,7 @@ namespace curvy {
                     continue;
                 }
                 const SelectionFrame own = document_->objectFrame(*object);
-                if (const Layer* ownLayer = document_->findLayer(object->layer())) {
+                if (const Layer* ownLayer = document_->findLayer(document_->layerOf(*object))) {
                     ctx.set_stroke_style(BLRgba32(layerColor(*ownLayer) | 0xFF000000u));
                 }
                 ctx.stroke_path(frameOutline(own));

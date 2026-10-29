@@ -11,12 +11,9 @@ namespace curvy {
         const SketchObject* mask = nullptr;
         std::size_t members = 0;
         for (const std::unique_ptr<SketchObject>& object : objects_) {
-            for (std::size_t g : object->groups()) {
-                if (g == groupId) {
-                    mask = object.get();
-                    ++members;
-                    break;
-                }
+            if (inGroup(*object, groupId)) {
+                mask = object.get();
+                ++members;
             }
         }
         return members >= 2 ? mask : nullptr;

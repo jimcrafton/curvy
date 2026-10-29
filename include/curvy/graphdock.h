@@ -62,7 +62,7 @@ namespace curvy {
         bool selectObject(std::size_t objectId);
         // Selects the row with this key (a Fill, Stroke or Effect row as well as an object's) and the object it belongs to.
         bool selectRow(const std::string& key);
-        jitnodes::NodeId detailNode() const { return detailNode_; }
+        NodeRef detailNode() const { return detailNode_; }
         // The parameter box, for tests: the text of row `index` (caption and value) and whether it is shown.
         std::string detailCaption(std::size_t index) const;
         std::string detailValue(std::size_t index) const;
@@ -72,7 +72,8 @@ namespace curvy {
         // fill or stroke the row stands for is made the active one, and the card is put beside the dock. False when that row has no colour.
         bool editDetailColour(std::size_t index);
         // Selects the row of this node (and its object); false when it has none.
-        bool selectNode(jitnodes::NodeId node);
+        bool selectNode(const NodeRef& node);
+        bool selectNode(jitnodes::NodeId node) { return selectNode(NodeRef(node)); }
         bool detailShown(std::size_t index) const;
         // Types into row `index` as if the user had, and applies it (what Return does).
         void setDetailValue(std::size_t index, const std::string& text);
@@ -90,7 +91,7 @@ namespace curvy {
             // Dragging the caption scrubs the number: the node and parameter it changes, within [minimum, maximum]; `scale` is how many
             // times the box's number is the parameter (a percent slider shows 100 times its parameter).
             bool scrub = false;
-            jitnodes::NodeId node = 0;
+            NodeRef node;
             std::string param;
             double minimum = 0.0, maximum = 0.0, scale = 1.0;
             double unit = 1.0;                  // the plain drag step of the box's number
@@ -100,7 +101,7 @@ namespace curvy {
             newui::Label* index = nullptr;
             newui::Label* name = nullptr;
             newui::Label* go = nullptr;
-            jitnodes::NodeId node = 0;
+            NodeRef node;
         };
         void layout();
         void buildDetail();
@@ -113,12 +114,12 @@ namespace curvy {
         void setColourRow(std::size_t index, const std::string& caption, const SketchColor& color, std::function<void(const std::string&)> apply);
         // `value` is 0..1; `apply` gets the percent as text.
         void setSliderRow(std::size_t index, const std::string& caption, double value, std::function<void(const std::string&)> apply);
-        void showLinks(jitnodes::NodeId id);
+        void showLinks(const NodeRef& id);
         // Gives a Fill or Stroke node another kind of paint (none, solid, linear, radial, pattern), carrying what the current paint has
         // so the look does not vanish: a colour becomes a gradient from that colour, and back. One undo step.
-        void setPaintKind(jitnodes::NodeId id, int kind);
+        void setPaintKind(const NodeRef& id, int kind);
         void setGradientRow(std::size_t index, const std::string& caption, const SketchPaint& paint, std::function<void(const std::string&)> apply);
-        void scrubRow(std::size_t index, jitnodes::NodeId id, const std::string& param, double minimum, double maximum, double scale = 1.0);
+        void scrubRow(std::size_t index, const NodeRef& id, const std::string& param, double minimum, double maximum, double scale = 1.0);
         // The text of a detail row was entered: a number or expression for a parameter row, otherwise the row's own apply.
         void commitDetail(std::size_t index, const std::string& text);
         // Ctrl+K in a parameter box: puts a key at the current time with the shown value, or takes the key there away.
@@ -127,19 +128,19 @@ namespace curvy {
         void showParam(DetailRow& row);
         void clearDetail();
         // Puts a transform node back to doing nothing, its pivot in the middle of its shape.
-        void resetTransform(jitnodes::NodeId id);
+        void resetTransform(const NodeRef& id);
         // The numbers of the shown node change while the shape is dragged on the canvas; the rows follow without rebuilding the tree.
         void refreshDetailValues();
         std::vector<GraphRow> buildRows() const;
         std::vector<GraphRow> documentRows() const;
         std::vector<GraphRow> flowRowsFromGraph() const;
-        void describe(GraphRow& row, jitnodes::NodeId node) const;
-        void describeLook(GraphRow& row, jitnodes::NodeId node) const;
+        void describe(GraphRow& row, const NodeRef& node) const;
+        void describeLook(GraphRow& row, const NodeRef& node) const;
         // The appearance item a Fill, Stroke or Effect node stands for, and the object it belongs to; null when the node has no object.
-        const AppearanceItem* itemOfNode(jitnodes::NodeId node, std::size_t* objectId = nullptr) const;
-        void lookRows(const jitnodes::Node& node, jitnodes::NodeId id, std::size_t& at);
+        const AppearanceItem* itemOfNode(const NodeRef& node, std::size_t* objectId = nullptr) const;
+        void lookRows(const jitnodes::Node& node, const NodeRef& id, std::size_t& at);
         std::size_t signature() const;
-        std::size_t objectOfNode(jitnodes::NodeId node) const;
+        std::size_t objectOfNode(NodeRef node) const;
         void expandAll();
 
         newui::Frame& frame_;
@@ -167,12 +168,12 @@ namespace curvy {
         newui::Label* usersHeader_ = nullptr;
         newui::Label* noInputs_ = nullptr;
         newui::Label* noUsers_ = nullptr;
-        std::vector<jitnodes::NodeId> inputNodes_, userNodes_;
+        std::vector<NodeRef> inputNodes_, userNodes_;
         Mode mode_ = Mode::Document;
         std::string filter_;
         std::vector<GraphRow> rows_;              // as shown
         std::set<std::string> collapsed_;         // keys of the rows the user closed (everything starts open)
-        jitnodes::NodeId detailNode_ = 0;
+        NodeRef detailNode_;
         std::size_t detailObject_ = 0;
         std::string selectedKey_;                  // the row the user clicked, kept while its object stays selected
         std::size_t lastSignature_ = 0;

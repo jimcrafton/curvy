@@ -288,17 +288,33 @@ namespace curvy {
         std::size_t objectOfNode(jitnodes::NodeId node) const { return objectOfNode(NodeRef(node)); }
         std::size_t objectOfNode(const NodeRef& node) const;
         // The node of the topmost visible, unlocked object under the point (invalidNodeId when none).
-        jitnodes::NodeId hitTestNode(const BLPoint& point, double tolerance) const;
+        NodeRef hitTestNode(const BLPoint& point, double tolerance) const;
         // The placement nodes of the selected objects, in selection order.
-        std::vector<jitnodes::NodeId> selectedNodes() const;
+        std::vector<NodeRef> selectedNodes() const;
         // Selects the objects the nodes belong to (a node of no object is ignored).
-        void setSelectedNodes(const std::vector<jitnodes::NodeId>& nodes);
+        void setSelectedNodes(const std::vector<NodeRef>& nodes);
 
         // ---- Groups ----
         // A group is a set of objects sharing a group id in SketchObject::groups() (nested groups: several ids), kept
         // adjacent in the stacking order. Selecting one member selects the whole outermost group (the canvas does it
         // through withGroupMembers; Ctrl-click bypasses it to pick a single member).
         std::size_t newGroupId() { return nextGroupId_++; }
+        // Membership accessors: the one place that knows where an object's groups and layer are stored. Code outside the loaders
+        // reads and writes membership through these, so moving the storage into the graph (DG-04 S3/S4) changes only their bodies.
+        // The chain is outermost first; the reference is valid until the next membership edit.
+        const std::vector<std::size_t>& groupsOf(const SketchObject& object) const { return object.groups(); }
+        std::size_t outermostGroupOf(const SketchObject& object) const { return object.groups().empty() ? 0 : object.groups().front(); }
+        bool isGrouped(const SketchObject& object) const { return !object.groups().empty(); }
+        bool inGroup(const SketchObject& object, std::size_t group) const;
+        std::size_t layerOf(const SketchObject& object) const { return object.layer(); }
+        void setGroupsOf(SketchObject& object, const std::vector<std::size_t>& groups) { object.setGroups(groups); }
+        void setLayerOf(SketchObject& object, std::size_t layer) { object.setLayer(layer); }
+        // Where an object's nodes live as a file stores it: the path of subnet ids from the root ("4/7"; empty for the root scope), and back
+        // (the file's graph is loaded first, so the path names its subnets).
+        std::string scopeText(std::uint32_t scope) const;
+        std::uint32_t scopeOfText(const std::string& text);
+        // The group id a scope's subnet stands for; 0 for the root and for a subnet that is not a document group.
+        std::size_t groupIdOfScope(std::uint32_t scope) const;
         // Group opacity / blend mode (default: opaque, normal). Setting is not an undo step by itself - the Appearance panel
         // edits live and commits with commitStyle(), whose snapshots carry the group's props.
         GroupProps groupProps(std::size_t groupId) const;
@@ -911,6 +927,11 @@ namespace curvy {
         // `scan` looks for appearance nodes nothing owns any more (after objects went away).
         void syncAppearanceNodes(bool scan);
         void pullAppearanceNodes();
+        // Containment of groups: a group is a curvySubnet (its `groupId` parameter is the group id) holding the node chains of its members.
+        // syncGroupScopes moves each object's chain into the subnet its group chain names, making subnets as needed; pruneGroupScopes
+        // removes the subnets no object lives in and writes the group props into the rest. Objects in a subnet without a groupId are left alone.
+        void syncGroupScopes();
+        void pruneGroupScopes();
         // syncPathNodes for the objects of one scope; true when it removed a shape node.
         bool syncPathScope(std::uint32_t scope, const std::vector<SketchObject*>& objects);
         std::map<NodeRef, AppearanceParams> appearanceSynced_;

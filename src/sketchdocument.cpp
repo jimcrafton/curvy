@@ -116,7 +116,7 @@ namespace curvy {
             if (object->hitTest(point, tolerance, &outline)) {
                 // Inside a clipping group only what shows through the mask can be hit.
                 bool cutAway = false;
-                for (std::size_t group : object->groups()) {
+                for (std::size_t group : groupsOf(*object)) {
                     const SketchObject* mask = clipMaskOf(group);
                     if (mask != nullptr && mask != object && mask->geometry().hit_test(point, BL_FILL_RULE_NON_ZERO) != BL_HIT_TEST_IN) {
                         cutAway = true;
@@ -170,14 +170,14 @@ namespace curvy {
         std::size_t i = begin;
         while (i < end) {
             const SketchObject& object = *objects_[i];
-            if (object.groups().size() <= depth) {
+            if (groupsOf(object).size() <= depth) {
                 object.paint(ctx);
                 ++i;
                 continue;
             }
-            std::size_t group = object.groups()[depth];
+            std::size_t group = groupsOf(object)[depth];
             std::size_t j = i + 1;
-            while (j < end && objects_[j]->groups().size() > depth && objects_[j]->groups()[depth] == group) {
+            while (j < end && groupsOf(*objects_[j]).size() > depth && groupsOf(*objects_[j])[depth] == group) {
                 ++j;
             }
             GroupProps props = groupProps(group);
@@ -232,6 +232,11 @@ namespace curvy {
         }
     }
 
+    bool SketchDocument::inGroup(const SketchObject& object, std::size_t group) const {
+        const std::vector<std::size_t>& chain = object.groups();
+        return std::find(chain.begin(), chain.end(), group) != chain.end();
+    }
+
     GroupProps SketchDocument::groupProps(std::size_t groupId) const {
         auto it = groupProps_.find(groupId);
         return it != groupProps_.end() ? it->second : GroupProps();
@@ -251,17 +256,17 @@ namespace curvy {
             return 0;
         }
         const SketchObject* first = findById(selection_.front());
-        if (first == nullptr || first->groups().empty()) {
+        if (first == nullptr || !isGrouped(*first)) {
             return 0;
         }
-        std::size_t group = first->groups().front();
+        std::size_t group = outermostGroupOf(*first);
         std::size_t members = 0;
         for (const std::unique_ptr<SketchObject>& object : objects_) {
-            members += !object->groups().empty() && object->groups().front() == group ? 1 : 0;
+            members += outermostGroupOf(*object) == group ? 1 : 0;
         }
         for (std::size_t id : selection_) {
             const SketchObject* object = findById(id);
-            if (object == nullptr || object->groups().empty() || object->groups().front() != group) {
+            if (object == nullptr || outermostGroupOf(*object) != group) {
                 return 0;
             }
         }
@@ -332,7 +337,7 @@ namespace curvy {
                 continue;
             }
             BLBox box = outlineBounds(*object);
-            for (std::size_t group : object->groups()) {
+            for (std::size_t group : groupsOf(*object)) {
                 const SketchObject* mask = clipMaskOf(group);
                 if (mask != nullptr && mask != object) {
                     BLBox m = outlineBounds(*mask);
@@ -492,9 +497,9 @@ namespace curvy {
 
     BLPoint SketchDocument::selectionOrigin(const SelectionFrame& frame) const {
         if (selection_.size() == 1) {
-            const jitnodes::NodeId place = transformNodeOf(selection_.front());
-            if (place != jitnodes::invalidNodeId) {
-                const jitnodes::Node& node = network().node(place);
+            const NodeRef place = transformRefOf(selection_.front());
+            if (place.valid()) {
+                const jitnodes::Node& node = this->node(place);
                 return findById(selection_.front())->paintToPage().map_point(node.baseFloat("pivotX"), node.baseFloat("pivotY"));
             }
         }
@@ -510,20 +515,20 @@ namespace curvy {
 
     void SketchDocument::setSelectionOrigin(const SelectionFrame& frame, const BLPoint& world, bool live) {
         if (selection_.size() == 1) {
-            const jitnodes::NodeId place = transformNodeOf(selection_.front());
+            const NodeRef place = transformRefOf(selection_.front());
             BLMatrix2D back = findById(selection_.front())->paintToPage();
-            if (place != jitnodes::invalidNodeId && back.invert() == BL_SUCCESS) {
+            if (place.valid() && back.invert() == BL_SUCCESS) {
                 const BLPoint local = back.map_point(world.x, world.y);
                 if (live) {
                     if (pivotBefore_ == nullptr) {
                         pivotBefore_ = std::make_shared<jitnodes::GraphSnapshot>(snapshotGraph());
                     }
-                    setTransformPivot(network().node(place), local.x, local.y);
+                    setTransformPivot(node(place), local.x, local.y);
                     changed();
                     return;
                 }
                 const jitnodes::GraphSnapshot before = snapshotGraph();
-                setTransformPivot(network().node(place), local.x, local.y);
+                setTransformPivot(node(place), local.x, local.y);
                 commitGraphEdit(before, "Move Pivot");
                 return;
             }
@@ -664,7 +669,7 @@ namespace curvy {
         // Groups come along, but as new groups of their own (copies must not share a group with the originals).
         std::map<std::size_t, std::size_t> freshGroups;
         for (std::unique_ptr<SketchObject>& object : objects) {
-            std::vector<std::size_t> groups = object->groups();
+            std::vector<std::size_t> groups = groupsOf(*object);
             for (std::size_t& g : groups) {
                 auto it = freshGroups.find(g);
                 if (it == freshGroups.end()) {
@@ -677,7 +682,7 @@ namespace curvy {
                 }
                 g = it->second;
             }
-            object->setGroups(groups);
+            setGroupsOf(*object, groups);
             auto slot = std::make_shared<Slot>();
             slot->object = std::move(object);
             slot->object->setId(nextId_++);
@@ -884,16 +889,16 @@ namespace curvy {
         std::vector<std::size_t> outer;
         for (std::size_t id : ids) {
             const SketchObject* object = findById(id);
-            if (object != nullptr && !object->groups().empty()) {
-                outer.push_back(object->groups().front());
+            if (object != nullptr && isGrouped(*object)) {
+                outer.push_back(outermostGroupOf(*object));
             }
         }
         if (outer.empty()) {
             return out;
         }
         for (const std::unique_ptr<SketchObject>& object : objects_) {
-            if (object->groups().empty() || !object->isVisible() || object->isLocked() ||
-                std::find(outer.begin(), outer.end(), object->groups().front()) == outer.end() ||
+            if (!isGrouped(*object) || !object->isVisible() || object->isLocked() ||
+                std::find(outer.begin(), outer.end(), outermostGroupOf(*object)) == outer.end() ||
                 std::find(out.begin(), out.end(), object->id()) != out.end()) {
                 continue;
             }
@@ -905,7 +910,7 @@ namespace curvy {
     bool SketchDocument::canUngroup() const {
         for (std::size_t id : selection_) {
             const SketchObject* object = findById(id);
-            if (object != nullptr && !object->groups().empty()) {
+            if (object != nullptr && isGrouped(*object)) {
                 return true;
             }
         }
@@ -915,7 +920,7 @@ namespace curvy {
     void SketchDocument::applyGroups(const std::vector<GroupState>& states) {
         for (const GroupState& state : states) {
             if (SketchObject* object = findById(state.id)) {
-                object->setGroups(state.groups);
+                setGroupsOf(*object, state.groups);
             }
         }
     }
@@ -929,7 +934,7 @@ namespace curvy {
         std::size_t top = 0;
         for (std::size_t i = 0; i < objects_.size(); ++i) {
             orderBefore.push_back(objects_[i]->id());
-            groupsBefore.push_back({objects_[i]->id(), objects_[i]->groups()});
+            groupsBefore.push_back({objects_[i]->id(), groupsOf(*objects_[i])});
             if (isSelected(objects_[i]->id())) {
                 top = i;
             }
@@ -947,13 +952,13 @@ namespace curvy {
         // Members from different layers all move to the layer of the topmost one.
         std::vector<std::pair<std::size_t, std::size_t>> layersBefore, layersAfter;
         for (const std::unique_ptr<SketchObject>& object : objects_) {
-            layersBefore.push_back({object->id(), object->layer()});
-            layersAfter.push_back({object->id(), isSelected(object->id()) ? objects_[top]->layer() : object->layer()});
+            layersBefore.push_back({object->id(), layerOf(*object)});
+            layersAfter.push_back({object->id(), isSelected(object->id()) ? layerOf(*objects_[top]) : layerOf(*object)});
         }
         auto applyObjectLayers = [this](const std::vector<std::pair<std::size_t, std::size_t>>& states) {
             for (const auto& [id, layer] : states) {
                 if (SketchObject* object = findById(id)) {
-                    object->setLayer(layer);
+                    setLayerOf(*object, layer);
                 }
             }
         };
@@ -984,11 +989,12 @@ namespace curvy {
         std::vector<GroupState> before, after;
         for (std::size_t id : selection_) {
             const SketchObject* object = findById(id);
-            if (object == nullptr || object->groups().empty()) {
+            if (object == nullptr || !isGrouped(*object)) {
                 continue;
             }
-            before.push_back({id, object->groups()});
-            std::vector<std::size_t> rest(object->groups().begin() + 1, object->groups().end());
+            const std::vector<std::size_t>& chain = groupsOf(*object);
+            before.push_back({id, chain});
+            std::vector<std::size_t> rest(chain.begin() + 1, chain.end());
             after.push_back({id, rest});
         }
         if (before.empty()) {
@@ -1033,9 +1039,8 @@ namespace curvy {
                 std::vector<std::vector<std::size_t>> units;
                 std::vector<bool> unitFlags;
                 for (std::size_t i = 0; i < n; ++i) {
-                    const std::vector<std::size_t>& groups = objects_[i]->groups();
-                    bool joins = i > 0 && !groups.empty() && !objects_[i - 1]->groups().empty() &&
-                        groups.front() == objects_[i - 1]->groups().front();
+                    const std::size_t outer = outermostGroupOf(*objects_[i]);
+                    bool joins = i > 0 && outer != 0 && outer == outermostGroupOf(*objects_[i - 1]);
                     if (joins) {
                         units.back().push_back(after[i]);
                         unitFlags.back() = unitFlags.back() || flags[i];
@@ -1086,7 +1091,7 @@ namespace curvy {
         FrameState frameBefore = frameState();
         BLBox target = artboards_[activeArtboard_].box();  // one object (or one group) lines up with the active artboard
         // A group aligns as one piece: its members share the group's bounds.
-        auto unitKey = [this](const SketchObject& o) { return o.groups().empty() ? o.id() * 2 : o.groups().front() * 2 + 1; };
+        auto unitKey = [this](const SketchObject& o) { return !isGrouped(o) ? o.id() * 2 : outermostGroupOf(o) * 2 + 1; };
         std::map<std::size_t, BLBox> unitBounds;
         for (const GeometryState& entry : before) {
             if (const SketchObject* object = findById(entry.id)) {
@@ -1336,7 +1341,9 @@ namespace curvy {
             return;
         }
         syncLayers();   // new objects find their layer, layer state reaches the objects, the stack follows the layers
+        syncGroupScopes();
         syncPathNodes();
+        pruneGroupScopes();
         markModified();
         updateAllViews();
         onChanged(*this);
@@ -1346,8 +1353,8 @@ namespace curvy {
 
     StyleState SketchDocument::withGroup(StyleState state) const {
         const SketchObject* object = findById(state.id);
-        if (object != nullptr && !object->groups().empty()) {
-            state.group = object->groups().front();
+        if (object != nullptr && isGrouped(*object)) {
+            state.group = outermostGroupOf(*object);
             state.groupProps = groupProps(state.group);
         }
         return state;

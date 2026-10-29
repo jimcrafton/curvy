@@ -6480,6 +6480,96 @@ TEST(SketchDocumentScopes, AppearanceNodesLiveBesideTheShapeInTheGroup) {
     EXPECT_EQ(rootAppearance, int(doc.object(1).appearance().size())) << "the root keeps the second rectangle's appearance nodes only";
 }
 
+namespace {
+    int groupSubnetCount(const SketchDocument& doc) {
+        int count = 0;
+        for (jitnodes::NodeId id : doc.network().nodeIds()) {
+            count += doc.network().node(id).typeName() == kSubnetNodeType ? 1 : 0;
+        }
+        return count;
+    }
+}
+
+TEST(SketchDocumentScopes, GroupingMovesTheMembersIntoASubnet) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    const std::size_t b = doc.add(SketchObject::makeRect(20, 0, 10, 10)).id();
+    const std::size_t c = doc.add(SketchObject::makeRect(40, 0, 10, 10)).id();
+    doc.setSelection({a, b});
+    ASSERT_TRUE(doc.groupSelection());
+
+    const std::uint32_t scope = doc.findById(a)->graphScope();
+    EXPECT_NE(scope, 0u);
+    EXPECT_EQ(doc.findById(b)->graphScope(), scope);
+    EXPECT_EQ(doc.findById(c)->graphScope(), 0u);
+    EXPECT_EQ(groupSubnetCount(doc), 1);
+    EXPECT_EQ(doc.groupIdOfScope(scope), doc.outermostGroupOf(*doc.findById(a)));
+    EXPECT_TRUE(doc.hasNode(doc.findById(a)->graphRef()));
+    EXPECT_NEAR(doc.outlineBounds(*doc.findById(b)).x0, 20.0, 1e-3);
+
+    // The group's subnet carries the members: moving the group subnet moves both.
+    const NodeRef subnet = doc.parentOfScope(scope);
+    doc.setGraphParam(subnet, "translateX", 100.0f);
+    EXPECT_NEAR(doc.outlineBounds(*doc.findById(a)).x0, 100.0, 1e-3);
+    EXPECT_NEAR(doc.outlineBounds(*doc.findById(b)).x0, 120.0, 1e-3);
+    doc.undoStack().undo();
+
+    doc.undoStack().undo();   // the grouping
+    EXPECT_EQ(doc.findById(a)->graphScope(), 0u);
+    EXPECT_EQ(groupSubnetCount(doc), 0) << "the empty group's subnet goes";
+    EXPECT_NEAR(doc.outlineBounds(*doc.findById(b)).x0, 20.0, 1e-3);
+    doc.undoStack().redo();
+    EXPECT_NE(doc.findById(a)->graphScope(), 0u);
+    EXPECT_EQ(groupSubnetCount(doc), 1);
+
+    ASSERT_TRUE(doc.ungroupSelection());
+    EXPECT_EQ(doc.findById(a)->graphScope(), 0u);
+    EXPECT_EQ(groupSubnetCount(doc), 0);
+}
+
+TEST(SketchDocumentScopes, GroupedObjectsKeepTheirNodesThroughAMove) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    const std::size_t b = doc.add(SketchObject::makeRect(20, 0, 10, 10)).id();
+    doc.setGraphExpression(doc.transformRefOf(a), "translateX", "1 + 2");
+    const std::string held = doc.node(doc.transformRefOf(a)).expression("translateX");
+    ASSERT_FALSE(held.empty());
+    doc.setSelection({a, b});
+    ASSERT_TRUE(doc.groupSelection());
+    const NodeRef place = doc.transformRefOf(a);
+    EXPECT_NE(place.scope, 0u);
+    EXPECT_EQ(doc.node(place).expression("translateX"), held);
+}
+
+TEST(SketchDocumentScopes, GroupsSurviveSvgAndBinaryRoundTrips) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    const std::size_t b = doc.add(SketchObject::makeRect(20, 0, 10, 10)).id();
+    doc.add(SketchObject::makeRect(40, 0, 10, 10));
+    doc.setSelection({a, b});
+    ASSERT_TRUE(doc.groupSelection());
+
+    auto check = [](const SketchDocument& loaded) {
+        ASSERT_EQ(loaded.objectCount(), 3u);
+        const SketchObject& first = loaded.object(0);
+        const SketchObject& second = loaded.object(1);
+        EXPECT_TRUE(loaded.isGrouped(first));
+        EXPECT_EQ(loaded.outermostGroupOf(first), loaded.outermostGroupOf(second));
+        EXPECT_NE(first.graphScope(), 0u);
+        EXPECT_EQ(first.graphScope(), second.graphScope());
+        EXPECT_EQ(loaded.object(2).graphScope(), 0u);
+        EXPECT_TRUE(loaded.hasNode(first.graphRef()));
+        EXPECT_EQ(groupSubnetCount(loaded), 1);
+        EXPECT_NEAR(loaded.outlineBounds(second).x0, 20.0, 1e-3);
+    };
+    SketchDocument fromSvg;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), fromSvg));
+    check(fromSvg);
+    SketchDocument fromBinary;
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc, true), fromBinary));
+    check(fromBinary);
+}
+
 TEST(GraphDocument, EditsAreUndoableSteps) {
     GraphDocument doc;
     const jitnodes::NodeId circle = doc.addGraphNode("circle").id;
@@ -7344,6 +7434,25 @@ TEST(PointTags, ATagBetweenAShapeAndItsTransformChangesNothingElse) {
     EXPECT_EQ(taggedPoints(*doc.cook(place), "pins"), (std::vector<int>{0, 1, 0, 0})) << "and the tag reaches the placed shape";
 }
 
+TEST(NodeSelection, GroupedObjectsAreSelectedAndPickedByTheirScopedNode) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 40, 40)).id();
+    const std::size_t b = doc.add(SketchObject::makeRect(100, 0, 40, 40)).id();
+    doc.setGroupsOf(*doc.findById(a), {doc.newGroupId()});
+    doc.add(SketchObject::makeRect(300, 0, 5, 5));   // any change runs the sync that moves a into its group's subnet
+    ASSERT_NE(doc.findById(a)->graphScope(), 0u);
+
+    const NodeRef placeA = doc.transformRefOf(a);
+    ASSERT_TRUE(placeA.valid());
+    EXPECT_NE(placeA.scope, 0u);
+    EXPECT_EQ(doc.hitTestNode(BLPoint(20, 20), 0.0), placeA);
+    EXPECT_EQ(doc.objectOfNode(placeA), a);
+
+    doc.setSelectedNodes({placeA, doc.transformRefOf(b)});
+    EXPECT_EQ(doc.selection(), (std::vector<std::size_t>{a, b}));
+    EXPECT_EQ(doc.selectedNodes(), (std::vector<NodeRef>{placeA, doc.transformRefOf(b)}));
+}
+
 TEST(NodeSelection, SelectionAndPickingGoByNode) {
     SketchDocument doc;
     const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 40, 40)).id();
@@ -7352,22 +7461,22 @@ TEST(NodeSelection, SelectionAndPickingGoByNode) {
     ASSERT_NE(placeA, jitnodes::invalidNodeId);
     ASSERT_NE(placeB, jitnodes::invalidNodeId);
 
-    EXPECT_EQ(doc.hitTestNode(BLPoint(20, 20), 0.0), placeA);
-    EXPECT_EQ(doc.hitTestNode(BLPoint(120, 20), 0.0), placeB);
-    EXPECT_EQ(doc.hitTestNode(BLPoint(70, 20), 0.0), jitnodes::invalidNodeId);
+    EXPECT_EQ(doc.hitTestNode(BLPoint(20, 20), 0.0), NodeRef(placeA));
+    EXPECT_EQ(doc.hitTestNode(BLPoint(120, 20), 0.0), NodeRef(placeB));
+    EXPECT_EQ(doc.hitTestNode(BLPoint(70, 20), 0.0), kNoNode);
 
     EXPECT_EQ(doc.objectOfNode(placeB), b);
     EXPECT_EQ(doc.objectOfNode(doc.findById(b)->graphNode()), b) << "the shape node belongs to the object too";
     EXPECT_EQ(doc.objectOfNode(jitnodes::invalidNodeId), 0u);
 
-    doc.setSelectedNodes({placeB, placeA});
+    doc.setSelectedNodes({NodeRef(placeB), NodeRef(placeA)});
     EXPECT_EQ(doc.selection(), (std::vector<std::size_t>{b, a}));
-    EXPECT_EQ(doc.selectedNodes(), (std::vector<jitnodes::NodeId>{placeB, placeA}));
+    EXPECT_EQ(doc.selectedNodes(), (std::vector<NodeRef>{NodeRef(placeB), NodeRef(placeA)}));
 
     // The outline picking reads is the nodes': a translate typed into the placement node moves what can be picked.
     doc.setGraphParam(placeA, "translateX", 200.0f);
-    EXPECT_EQ(doc.hitTestNode(BLPoint(220, 20), 0.0), placeA);
-    EXPECT_EQ(doc.hitTestNode(BLPoint(20, 20), 0.0), jitnodes::invalidNodeId);
+    EXPECT_EQ(doc.hitTestNode(BLPoint(220, 20), 0.0), NodeRef(placeA));
+    EXPECT_EQ(doc.hitTestNode(BLPoint(20, 20), 0.0), kNoNode);
     BLBox outline(0, 0, 0, 0);
     doc.placedOutline(*doc.findById(a)).get_bounding_box(&outline);
     EXPECT_NEAR(outline.x0, doc.findById(a)->geometryBounds().x0, 1e-2) << "the nodes and the object agree";

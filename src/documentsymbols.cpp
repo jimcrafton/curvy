@@ -34,9 +34,9 @@ namespace curvy {
                 BLBox b = object->paintBounds();
                 box = BLBox(std::min(box.x0, b.x0), std::min(box.y0, b.y0), std::max(box.x1, b.x1), std::max(box.y1, b.y1));
                 SketchObject* copy = object->clone();
-                copy->setLayer(0);
+                def->content->setLayerOf(*copy, 0);
                 def->content->add(copy);
-                for (std::size_t g : copy->groups()) {
+                for (std::size_t g : def->content->groupsOf(*copy)) {
                     def->content->setGroupProps(g, document.groupProps(g));
                 }
                 if (copy->isSymbol() && std::find(used.begin(), used.end(), copy->symbol()) == used.end()) {
@@ -137,7 +137,7 @@ namespace curvy {
         symbols_.push_back(def);
 
         std::unique_ptr<SketchObject> instance(SketchObject::makeSymbolInstance(def, BLMatrix2D::make_identity()));
-        instance->setLayer(picked.back()->layer());
+        setLayerOf(*instance, layerOf(*picked.back()));
         Replacement replacement;
         replacement.remove = selection_;
         replacement.add.push_back(std::move(instance));
@@ -230,9 +230,9 @@ namespace curvy {
             for (std::size_t i = 0; i < content.objectCount(); ++i) {
                 std::unique_ptr<SketchObject> copy(content.object(i).clone());
                 copy->transform(matrix);
-                copy->setLayer(object->layer());
+                setLayerOf(*copy, layerOf(*object));
                 std::vector<std::size_t> groups;
-                for (std::size_t g : copy->groups()) {
+                for (std::size_t g : content.groupsOf(*copy)) {
                     auto it = fresh.find(g);
                     if (it == fresh.end()) {
                         std::size_t made = nextGroupId_++;
@@ -248,7 +248,7 @@ namespace curvy {
                 if (copy->isSymbol()) {
                     copy->setSymbol(importSymbol(copy->symbol()));
                 }
-                copy->setGroups(groups);
+                setGroupsOf(*copy, groups);
                 replacement.add.push_back(std::move(copy));
             }
             replacement.atTop = true;
