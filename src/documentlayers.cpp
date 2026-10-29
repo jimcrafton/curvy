@@ -562,7 +562,7 @@ namespace curvy {
                     it = groupOf.emplace(g, nextGroupId_++).first;
                     GroupProps props = groupProps(g);
                     if (!props.isDefault()) {
-                        groupProps_[it->second] = props;
+                        putGroupProps(it->second, props);
                     }
                 }
                 g = it->second;

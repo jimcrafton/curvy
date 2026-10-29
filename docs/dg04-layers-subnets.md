@@ -86,8 +86,15 @@ Ids are per network, so a node is addressed by `NodeRef{scope, id}`: `scope` is 
   `GroupsSurvive*`. ctest passes (the clipboard test fails in some full runs, passes alone); `--check`, `--check-tools`, `--check-workspace` pass. GUI suite not rerun.
   Limits: a parent link between objects in different groups is dropped by the sync (as S2 does); a live shape (boolean etc.) stays in the root whatever its group;
   wiring from outside the chain into it is cut when the chain moves.
-- **S3b Flip the carrier.** group/ungroup move chains explicitly, `groups_`/`groupProps_` removed from `SketchObject`; the accessors read the subnet chain and
-  `groupId`; clip/opacity/blend read from the subnet; the loaders build subnets from old files by the SVG `<g>` structure.
+- **S3b Flip the carrier. DONE 2026-10-29** (in a smaller form than first planned: `SketchObject::groups_` stays as the object's requested chain, the graph wins).
+  Membership: `syncGroupScopes` merges per object. If `groups()` differs from `placedGroups()` (new field, the chain last placed) it was edited, so the chain moves into the
+  subnets it names; otherwise the subnet the chain sits in wins and `groups()` adopts its group ids (`groupChainOfScope`), so a node moved in the graph or an undo of the graph
+  changes membership. Group props: `groupProps`/`setGroupProps` read and write the subnet's `opacity`/`blend`/`clip` (`groupSubnetOf` finds it by `groupId`, cached in
+  `groupSubnets_`); `groupProps_` now holds only the props of a group with no subnet yet (a new id, or a group whose subnet was pruned), applied when the subnet is made.
+  All direct writers go through `putGroupProps`. Opacity is a float in the node, so it round-trips to float precision. `GraphDocument::scopeOf` now interns the enclosing
+  scopes too (a nested scope read from a file had no parent entry and `parentOfScope` threw). Loaders still build subnets from the `<g>`/group ids through the sync.
+  Not done: `groups_`/`groupProps_` are not deleted (clones, loaders and unplaced objects have no document to ask), and group/ungroup still move chains in the sync rather than
+  at the call. Test `SketchDocumentScopes.GroupPropsLiveInTheSubnet`; 2087 ctest (clipboard test flaky) and the three checks pass; GUI suite not rerun.
 - **S4 Layers by containment.** `layers_` replaced; Layers panel and order via the container merge.
 - **S5 Scoped selection and graph dock. DONE 2026-10-28** (the enter/exit-group view is not built). `hitTestNode`, `selectedNodes` and `setSelectedNodes` use `NodeRef`;
   `selectionOrigin`/`setSelectionOrigin` go through `transformRefOf`. The graph dock works on `NodeRef` throughout (`GraphRow::scope`, `detailNode()`, detail and link rows,

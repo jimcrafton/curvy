@@ -3170,7 +3170,7 @@ TEST(SketchBinary, ADocumentRoundTripsWithNothingLost) {
         EXPECT_EQ(copy.object(0).activeEffectIndex(), 2u);
         EXPECT_EQ(copy.object(1).groups().size(), 2u);
         EXPECT_EQ(copy.object(1).groups()[0], copy.object(2).groups()[0]) << "members of a group share it";
-        EXPECT_DOUBLE_EQ(copy.groupProps(copy.object(1).groups()[0]).opacity, 0.4);
+        EXPECT_NEAR(copy.groupProps(copy.object(1).groups()[0]).opacity, 0.4, 1e-6);   // the subnet holds it as a float
         EXPECT_EQ(copy.graphicStyles().size(), 1u);
         EXPECT_EQ(copy.colorMode(), ColorSpace::CMYK);
         EXPECT_FALSE(copy.undoStack().canUndo());
@@ -6525,6 +6525,31 @@ TEST(SketchDocumentScopes, GroupingMovesTheMembersIntoASubnet) {
     ASSERT_TRUE(doc.ungroupSelection());
     EXPECT_EQ(doc.findById(a)->graphScope(), 0u);
     EXPECT_EQ(groupSubnetCount(doc), 0);
+}
+
+TEST(SketchDocumentScopes, GroupPropsLiveInTheSubnet) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    const std::size_t b = doc.add(SketchObject::makeRect(20, 0, 10, 10)).id();
+    doc.setSelection({a, b});
+    ASSERT_TRUE(doc.groupSelection());
+    const std::size_t group = doc.outermostGroupOf(*doc.findById(a));
+    const NodeRef subnet = doc.parentOfScope(doc.findById(a)->graphScope());
+
+    GroupProps props;
+    props.opacity = 0.5;
+    props.blendMode = BlendMode::Multiply;
+    doc.setGroupProps(group, props);
+    EXPECT_FLOAT_EQ(doc.node(subnet).getFloat("opacity"), 0.5f);
+    EXPECT_EQ(doc.node(subnet).getString("blend"), std::string(blendModeCss(BlendMode::Multiply)));
+
+    doc.setGraphParam(subnet, "opacity", 0.25f);
+    EXPECT_NEAR(doc.groupProps(group).opacity, 0.25, 1e-6);
+
+    ASSERT_TRUE(doc.ungroupSelection());
+    doc.undoStack().undo();
+    const std::size_t again = doc.outermostGroupOf(*doc.findById(a));
+    EXPECT_NEAR(doc.groupProps(again).opacity, 0.25, 1e-6) << "a regrouped group keeps its look";
 }
 
 TEST(SketchDocumentScopes, GroupedObjectsKeepTheirNodesThroughAMove) {

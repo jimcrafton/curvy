@@ -607,6 +607,12 @@ namespace curvy {
                 if (found == jitnodes::invalidNodeId) {
                     found = net.addNode(kSubnetNodeType, net.uniqueName("group"));
                     net.node(found).setFloat("groupId", float(group));
+                    groupSubnets_[group] = NodeRef(scope, found);
+                    if (const auto aside = groupProps_.find(group); aside != groupProps_.end()) {
+                        const GroupProps props = aside->second;
+                        groupProps_.erase(aside);
+                        putGroupProps(group, props);
+                    }
                 }
                 scope = scopeOfSubnet(NodeRef(scope, found));
                 known.emplace(prefix, scope);
@@ -621,7 +627,15 @@ namespace curvy {
         std::map<std::uint32_t, std::vector<Move>> bySource;
         for (const std::unique_ptr<SketchObject>& object : objects_) {
             const std::uint32_t from = object->graphScope();
-            const std::vector<std::size_t>& chain = groupsOf(*object);
+            std::vector<std::size_t> chain = groupsOf(*object);
+            if (chain == object->placedGroups() && findNetwork(from) != nullptr) {
+                std::vector<std::size_t> derived = groupChainOfScope(from);
+                if (derived != chain) {
+                    object->setGroups(derived);
+                    chain = std::move(derived);
+                }
+            }
+            object->setPlacedGroups(chain);
             std::uint32_t to = from;
             if (!chain.empty()) {
                 to = scopeFor(chain);
@@ -706,18 +720,68 @@ namespace curvy {
                 continue;
             }
             const NodeRef subnet = parentOfScope(scope);
-            if (used.count(scope) == 0) {
+            if (used.count(scope) == 0 && hasNode(subnet)) {
+                // A regrouped or restored group keeps its look: the props wait aside until a subnet for the id is made again.
+                const GroupProps props = groupProps(group);
+                if (!props.isDefault()) {
+                    groupProps_[group] = props;
+                }
+                groupSubnets_.erase(group);
                 networkOf(subnet.scope).removeNode(subnet.id);
-                continue;
             }
-            jitnodes::Node& held = node(subnet);
-            const GroupProps props = groupProps(group);
-            if (held.getFloat("opacity") != float(props.opacity)) {
-                held.setFloat("opacity", float(props.opacity));
+        }
+    }
+
+    std::vector<std::size_t> SketchDocument::groupChainOfScope(std::uint32_t scope) const {
+        std::vector<std::size_t> chain;
+        for (; scope != 0 && scope < scopeCount(); scope = parentOfScope(scope).scope) {
+            if (const std::size_t group = groupIdOfScope(scope)) {
+                chain.push_back(group);
             }
-            if (held.getFloat("clip") != (props.clip ? 1.0f : 0.0f)) {
-                held.setFloat("clip", props.clip ? 1.0f : 0.0f);
+        }
+        std::reverse(chain.begin(), chain.end());
+        return chain;
+    }
+
+    NodeRef SketchDocument::groupSubnetOf(std::size_t group) const {
+        if (group == 0) {
+            return NodeRef();
+        }
+        const auto isIt = [&](const NodeRef& ref) {
+            return hasNode(ref) && node(ref).typeName() == kSubnetNodeType && std::size_t(node(ref).getFloat("groupId")) == group;
+        };
+        if (const auto hit = groupSubnets_.find(group); hit != groupSubnets_.end() && isIt(hit->second)) {
+            return hit->second;
+        }
+        for (std::uint32_t scope = 1; scope < scopeCount(); ++scope) {
+            const NodeRef ref = parentOfScope(scope);
+            if (isIt(ref)) {
+                groupSubnets_[group] = ref;
+                return ref;
             }
+        }
+        return NodeRef();
+    }
+
+    void SketchDocument::putGroupProps(std::size_t group, const GroupProps& props) {
+        const NodeRef subnet = groupSubnetOf(group);
+        if (!subnet.valid()) {
+            if (props.isDefault()) {
+                groupProps_.erase(group);
+            } else {
+                groupProps_[group] = props;
+            }
+            return;
+        }
+        groupProps_.erase(group);
+        jitnodes::Node& held = node(subnet);
+        if (held.getFloat("opacity") != float(props.opacity)) {
+            held.setFloat("opacity", float(props.opacity));
+        }
+        if (held.getFloat("clip") != (props.clip ? 1.0f : 0.0f)) {
+            held.setFloat("clip", props.clip ? 1.0f : 0.0f);
+        }
+        if (held.getString("blend") != blendModeCss(props.blendMode)) {
             held.setString("blend", blendModeCss(props.blendMode));
         }
     }

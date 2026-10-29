@@ -499,6 +499,9 @@ namespace curvy {
         // adjacent in the document's stacking order; the document keeps it that way. Empty = not grouped.
         const std::vector<std::size_t>& groups() const { return groups_; }
         void setGroups(const std::vector<std::size_t>& groups) { groups_ = groups; }
+        // The chain the document last placed this object's nodes by; differing from groups() means groups() was edited since.
+        const std::vector<std::size_t>& placedGroups() const { return placedGroups_; }
+        void setPlacedGroups(const std::vector<std::size_t>& groups) { placedGroups_ = groups; }
         // How the whole object (fill and stroke) is blended with what is below it.
         BlendMode blendMode() const { return blendMode_; }
         void setBlendMode(BlendMode mode) { blendMode_ = mode; }
@@ -663,7 +666,8 @@ namespace curvy {
         double opacity_ = 1.0;
         BlendMode blendMode_ = BlendMode::Normal;
         std::vector<std::size_t> groups_;
-        std::size_t activeFill_ = 0;    // indices into items_ (validated on use)
+        std::vector<std::size_t> placedGroups_;
+        std::size_t activeFill_ = 0;   // indices into items_ (validated on use)
         std::size_t activeStroke_ = 1;
         std::size_t activeEffect_ = 0;
         double frameAngle_ = 0.0;

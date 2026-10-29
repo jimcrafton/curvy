@@ -238,16 +238,20 @@ namespace curvy {
     }
 
     GroupProps SketchDocument::groupProps(std::size_t groupId) const {
+        if (const NodeRef subnet = groupId != 0 ? groupSubnetOf(groupId) : NodeRef(); subnet.valid()) {
+            const jitnodes::Node& held = node(subnet);
+            GroupProps props;
+            props.opacity = held.getFloat("opacity");
+            props.blendMode = blendModeFromCss(held.getString("blend"));
+            props.clip = held.getFloat("clip") != 0.0f;
+            return props;
+        }
         auto it = groupProps_.find(groupId);
         return it != groupProps_.end() ? it->second : GroupProps();
     }
 
     void SketchDocument::setGroupProps(std::size_t groupId, const GroupProps& props) {
-        if (props.isDefault()) {
-            groupProps_.erase(groupId);
-        } else {
-            groupProps_[groupId] = props;
-        }
+        putGroupProps(groupId, props);
         changed();
     }
 
@@ -676,7 +680,7 @@ namespace curvy {
                     std::size_t fresh = nextGroupId_++;
                     GroupProps props = (groupsFrom != nullptr ? groupsFrom : this)->groupProps(g);
                     if (!props.isDefault()) {
-                        groupProps_[fresh] = props;
+                        putGroupProps(fresh, props);
                     }
                     it = freshGroups.emplace(g, fresh).first;
                 }
@@ -974,7 +978,7 @@ namespace curvy {
         GroupProps clipProps;
         clipProps.clip = clip;
         auto applyProps = [this, group, clipProps](bool on) {
-            if (on && clipProps.clip) { groupProps_[group] = clipProps; } else { groupProps_.erase(group); }
+            putGroupProps(group, on && clipProps.clip ? clipProps : GroupProps());
         };
         applyProps(true);
         applyGroups(groupsAfter);
@@ -1740,7 +1744,7 @@ namespace curvy {
                     state.applyTo(*object);
                 }
                 if (state.group != 0) {
-                    if (state.groupProps.isDefault()) { groupProps_.erase(state.group); } else { groupProps_[state.group] = state.groupProps; }
+                    putGroupProps(state.group, state.groupProps);
                 }
             }
             changed();

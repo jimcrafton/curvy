@@ -140,7 +140,7 @@ namespace curvy {
                 props.opacity = object->opacity();
                 props.blendMode = object->blendMode();
                 if (!props.isDefault()) {
-                    groupProps_[group] = props;
+                    putGroupProps(group, props);
                 }
                 for (std::unique_ptr<SketchObject>& part : parts) {
                     std::vector<std::size_t> groups = groupsOf(*part);

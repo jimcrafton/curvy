@@ -29,6 +29,9 @@ namespace curvy {
         if (found != scopeIndex_.end()) {
             return found->second;
         }
+        if (!path.empty()) {
+            scopeOf(std::vector<jitnodes::NodeId>(path.begin(), path.end() - 1));   // parentOfScope needs the enclosing scope to exist
+        }
         const std::uint32_t scope = static_cast<std::uint32_t>(scopePaths_.size());
         scopePaths_.push_back(path);
         scopeIndex_.emplace(path, scope);

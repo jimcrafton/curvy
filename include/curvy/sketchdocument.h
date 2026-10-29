@@ -928,10 +928,17 @@ namespace curvy {
         void syncAppearanceNodes(bool scan);
         void pullAppearanceNodes();
         // Containment of groups: a group is a curvySubnet (its `groupId` parameter is the group id) holding the node chains of its members.
-        // syncGroupScopes moves each object's chain into the subnet its group chain names, making subnets as needed; pruneGroupScopes
-        // removes the subnets no object lives in and writes the group props into the rest. Objects in a subnet without a groupId are left alone.
+        // The graph is the carrier. syncGroupScopes reconciles each object with it: if SketchObject::groups() was edited since the last sync
+        // (it differs from placedGroups()) the object's chain moves into the subnets that chain names, making them as needed; otherwise the
+        // subnet the chain sits in wins and groups() adopts its group ids (a node moved in the graph, an undo). pruneGroupScopes removes the
+        // subnets no object lives in, keeping their props aside. Group props live in the subnet; groupProps_ holds only those of a group with no subnet.
+        // Objects in a subnet without a groupId are left alone.
         void syncGroupScopes();
         void pruneGroupScopes();
+        std::vector<std::size_t> groupChainOfScope(std::uint32_t scope) const;
+        NodeRef groupSubnetOf(std::size_t group) const;
+        void putGroupProps(std::size_t group, const GroupProps& props);
+        mutable std::unordered_map<std::size_t, NodeRef> groupSubnets_;
         // syncPathNodes for the objects of one scope; true when it removed a shape node.
         bool syncPathScope(std::uint32_t scope, const std::vector<SketchObject*>& objects);
         std::map<NodeRef, AppearanceParams> appearanceSynced_;

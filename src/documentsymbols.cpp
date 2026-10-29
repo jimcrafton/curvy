@@ -238,7 +238,7 @@ namespace curvy {
                         std::size_t made = nextGroupId_++;
                         GroupProps props = content.groupProps(g);
                         if (!props.isDefault()) {
-                            groupProps_[made] = props;
+                            putGroupProps(made, props);
                         }
                         it = fresh.emplace(g, made).first;
                     }
