@@ -31,6 +31,11 @@ namespace curvy {
     // turned, scaled or sheared by the matrix) and the paints are laid out on the shape before it, so they follow every one of those.
     inline constexpr const char* kTransformNodeType = "curvyTransform";
 
+    // A group or layer: a jitnodes subnet whose child network holds its members' node chains and whose display node is what it shows. `role` is
+    // "group" or "layer". The placement numbers are those of the transform node and are promoted, so a member reads them as `parent.rotation`;
+    // the cook carries the contents by that matrix.
+    inline constexpr const char* kSubnetNodeType = "curvySubnet";
+
     // Tags some of a shape's points: it passes its input through and adds the point group `group` (jitnodes' "group.<name>" int attribute).
     // Who is in it comes from the selectors: `ids` (point ids as "3,7,10-14"), `every`/`offset` (every nth anchor), `box` (inside x0,y0,x1,y1 of
     // the shape's own space) - a point matching any enabled one - narrowed by `kind` (any, anchors, handles, corners, smooth), then joined with a
@@ -55,6 +60,7 @@ namespace curvy {
     BLMatrix2D transformOf(const jitnodes::Node& node);
     // The same from the values the node last resolved (an expression or keys give their value at the document's time); what a cook uses.
     BLMatrix2D resolvedTransformOf(const jitnodes::Node& node);
+    // Within one network: the parent links of transform nodes only. The matrices of the subnets holding the network come on top (see SketchDocument::scopeMatrix).
     BLMatrix2D worldTransformOf(const jitnodes::Network& network, jitnodes::NodeId place);
     void storeTransform(jitnodes::Node& node, const BLMatrix2D& matrix);
     // The perspective map of the object's paints (identity when never warped), kept on the transform node beside its placement as text at the

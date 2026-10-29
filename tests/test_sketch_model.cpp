@@ -6362,9 +6362,127 @@ TEST(SketchStrokeDecor, AlignAndArrowsSurviveSavingAndOpening) {
     EXPECT_EQ(pdfFromDocument(doc).compare(0, 8, "%PDF-1.4"), 0);
 }
 
+TEST(GraphDocument, ScopesAddressNodesInsideSubnets) {
+    GraphDocument doc;
+    const NodeRef group = doc.addGraphNode("subnet", "group");
+    const std::uint32_t scope = doc.scopeOfSubnet(group);
+    EXPECT_NE(scope, 0u);
+    EXPECT_EQ(doc.scopeOfSubnet(group), scope) << "the same path is the same scope";
+    EXPECT_EQ(doc.parentOfScope(scope), group);
+    EXPECT_FALSE(doc.parentOfScope(0).valid());
+
+    const NodeRef circle = doc.addGraphNode("circle", "inner", scope);
+    EXPECT_EQ(circle.scope, scope);
+    EXPECT_TRUE(doc.hasNode(circle));
+    EXPECT_FALSE(doc.hasNode(NodeRef(scope, circle.id + 50)));
+    doc.setGraphParam(circle, "radius", 7.0f);
+    EXPECT_EQ(doc.node(circle).getFloat("radius"), 7.0f);
+    EXPECT_NE(circle, NodeRef(circle.id)) << "the same id in the root is another node";
+
+    // A node one subnet deeper gets a scope of its own.
+    const NodeRef inner = doc.addGraphNode("subnet", "inner", scope);
+    const std::uint32_t deeper = doc.scopeOfSubnet(inner);
+    EXPECT_NE(deeper, scope);
+    EXPECT_EQ(doc.parentOfScope(deeper), inner);
+    const NodeRef leaf = doc.addGraphNode("circle", "leaf", deeper);
+    EXPECT_TRUE(doc.hasNode(leaf));
+
+    // Undo removes the edit inside the subnet; redo brings it back under the same reference.
+    doc.setGraphParam(leaf, "radius", 3.0f);
+    doc.undoStack().undo();
+    EXPECT_NE(doc.node(leaf).getFloat("radius"), 3.0f);
+    doc.undoStack().redo();
+    EXPECT_EQ(doc.node(leaf).getFloat("radius"), 3.0f);
+
+    // Undoing the subnet's creation makes its scope unreachable; redo makes it reachable again.
+    while (doc.undoStack().canUndo()) {
+        doc.undoStack().undo();
+    }
+    EXPECT_FALSE(doc.hasNode(circle));
+    EXPECT_EQ(doc.findNetwork(scope), nullptr);
+    while (doc.undoStack().canRedo()) {
+        doc.undoStack().redo();
+    }
+    EXPECT_TRUE(doc.hasNode(circle));
+    EXPECT_TRUE(doc.hasNode(leaf));
+    EXPECT_EQ(doc.node(circle).getFloat("radius"), 7.0f);
+    EXPECT_EQ(doc.scopeOfSubnet(group), scope);
+
+    EXPECT_THROW(doc.connectGraphNodes(group, circle), std::runtime_error);
+}
+
+TEST(SketchDocumentScopes, ObjectInsideAHandBuiltGroupFollowsTheGroup) {
+    SketchDocument doc;
+    SketchObject& rect = doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    const std::size_t id = rect.id();
+    const NodeRef group = doc.addGraphNode(kSubnetNodeType, "group");
+    const std::uint32_t scope = doc.scopeOfSubnet(group);
+    ASSERT_NE(scope, 0u);
+
+    // Moving the object's nodes into the group's scope: the next sync builds them there and drops the root ones.
+    rect.setGraphRef(NodeRef(scope, jitnodes::invalidNodeId));
+    doc.add(SketchObject::makeRect(50, 50, 5, 5));
+    SketchObject* member = doc.findById(id);
+    ASSERT_NE(member, nullptr);
+    EXPECT_EQ(member->graphScope(), scope);
+    EXPECT_TRUE(doc.hasNode(member->graphRef()));
+    const NodeRef place = doc.transformRefOf(id);
+    EXPECT_EQ(place.scope, scope) << "the transform node is made beside the shape node";
+    EXPECT_EQ(doc.transformNodeOf(id), jitnodes::invalidNodeId) << "the root-scope shortcut does not answer for a group member";
+    EXPECT_EQ(doc.objectOfNode(place), id);
+    int rootShapes = 0;
+    for (jitnodes::NodeId nodeId : doc.network().nodeIds()) {
+        rootShapes += isShapeNodeType(doc.network().node(nodeId).typeName()) ? 1 : 0;
+    }
+    EXPECT_EQ(rootShapes, 1) << "only the second rectangle keeps a root shape node; the moved object's is gone";
+    EXPECT_NEAR(doc.outlineBounds(*member).x0, 0.0, 1e-3);
+
+    // The group's own placement carries its members: the object follows when the group moves, and again on undo and redo.
+    doc.setGraphParam(group, "translateX", 100.0f);
+    member = doc.findById(id);
+    EXPECT_NEAR(doc.outlineBounds(*member).x0, 100.0, 1e-3);
+    EXPECT_NEAR(doc.scopeMatrix(scope).m20, 100.0, 1e-6);
+    EXPECT_NEAR(doc.worldOf(doc.transformRefOf(id)).m20, 100.0, 1e-6);
+
+    // Moving the object by hand writes the placement relative to the group, so the page position stays what the user made.
+    doc.transformObjects({id}, BLMatrix2D::make_translation(20, 0), "Move");
+    member = doc.findById(id);
+    EXPECT_NEAR(doc.outlineBounds(*member).x0, 120.0, 1e-3);
+    EXPECT_NEAR(doc.node(doc.transformRefOf(id)).getFloat("translateX"), 20.0, 1e-3);
+
+    doc.undoStack().undo();
+    EXPECT_NEAR(doc.outlineBounds(*doc.findById(id)).x0, 100.0, 1e-3);
+    doc.undoStack().undo();
+    EXPECT_NEAR(doc.outlineBounds(*doc.findById(id)).x0, 0.0, 1e-3);
+    doc.undoStack().redo();
+    EXPECT_NEAR(doc.outlineBounds(*doc.findById(id)).x0, 100.0, 1e-3);
+}
+
+TEST(SketchDocumentScopes, AppearanceNodesLiveBesideTheShapeInTheGroup) {
+    SketchDocument doc;
+    SketchObject& rect = doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    const std::size_t id = rect.id();
+    const NodeRef group = doc.addGraphNode(kSubnetNodeType, "group");
+    const std::uint32_t scope = doc.scopeOfSubnet(group);
+    rect.setGraphRef(NodeRef(scope, jitnodes::invalidNodeId));
+    doc.add(SketchObject::makeRect(50, 50, 5, 5));
+
+    const jitnodes::Network& inside = doc.networkOf(scope);
+    int appearance = 0;
+    for (jitnodes::NodeId nodeId : inside.nodeIds()) {
+        appearance += isAppearanceNodeType(inside.node(nodeId).typeName()) ? 1 : 0;
+    }
+    EXPECT_EQ(appearance, int(doc.findById(id)->appearance().size()));
+    int rootAppearance = 0;
+    for (jitnodes::NodeId nodeId : doc.network().nodeIds()) {
+        rootAppearance += isAppearanceNodeType(doc.network().node(nodeId).typeName()) ? 1 : 0;
+    }
+    EXPECT_EQ(rootAppearance, int(doc.object(1).appearance().size())) << "the root keeps the second rectangle's appearance nodes only";
+}
+
 TEST(GraphDocument, EditsAreUndoableSteps) {
     GraphDocument doc;
-    const jitnodes::NodeId circle = doc.addGraphNode("circle");
+    const jitnodes::NodeId circle = doc.addGraphNode("circle").id;
     doc.setGraphParam(circle, "radius", 5.0f);
     EXPECT_EQ(doc.network().node(circle).getFloat("radius"), 5.0f);
     doc.undoStack().undo();

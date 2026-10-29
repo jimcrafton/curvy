@@ -258,21 +258,22 @@ namespace curvy {
         menu_->setBounds(Rect(0.0f, 0.0f, canvas_->bounds().size().width, canvas_->bounds().size().height));
         menu_->onCommand.add(this, &WorkspaceController::handleRingCommand);
 
-        document_.onModifiedChanged += [this](Document&) {
+        // The document and frame outlive this controller, so their handlers are disconnected with it.
+        connections_.add(document_.onModifiedChanged, [this](Document&) {
             if (!document_.isModified()) {
                 clearRecovery();
             }
             return SyncReturn::Handled;
-        };
-        frame_.onClosed += [this](Frame&) {
+        });
+        connections_.add(frame_.onClosed, [this](Frame&) {
             clearRecovery();
             return SyncReturn::Handled;
-        };
+        });
         // Closing the window (X, Alt+F4) asks to save a modified document; Cancel keeps it open.
-        frame_.onClosing += [this](Frame&, bool& canClose) {
+        connections_.add(frame_.onClosing, [this](Frame&, bool& canClose) {
             canClose = files_->canClose();
             return SyncReturn::Handled;
-        };
+        });
         canvas_->onPressFilter = [this](const Point& pt, std::uint32_t buttons, std::uint32_t keys) { return filterPress(pt, buttons, keys); };
         canvas_->onKeyFilter = [this](std::uint32_t mask, std::uint32_t vk) { return filterKey(mask, vk); };
         canvas_->onToolDefaultsChanged += [this](CanvasView&) { toolDefaultsChanged(); return SyncReturn::Handled; };
@@ -298,7 +299,7 @@ namespace curvy {
         canvas_->onMouseMove.add(this, &WorkspaceController::handleMouseMove);
         canvas_->onMouseUp.add(this, &WorkspaceController::handleMouseUp);
         canvas_->onToolChanged.add(this, &WorkspaceController::handleToolChanged);
-        document_.onSelectionChanged.add(this, &WorkspaceController::handleSelectionChanged);
+        connections_.add(document_.onSelectionChanged, [this](SketchDocument& sender) { return handleSelectionChanged(sender); });
         files_->onDocumentReplaced.add(this, &WorkspaceController::handleDocumentReplaced);
     }
 

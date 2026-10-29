@@ -1,5 +1,6 @@
 #pragma once
 
+#include "curvy/noderef.h"
 #include "curvy/sketchcolor.h"
 #include "curvy/textoutline.h"
 
@@ -441,6 +442,10 @@ namespace curvy {
         // The graph node whose cooked polyline is this object's outline (0 when it is an ordinary object).
         std::uint32_t graphNode() const { return graphNode_; }
         void setGraphNode(std::uint32_t node) { graphNode_ = node; }
+        // The scope (network) the node lives in; 0 is the document's root graph.
+        std::uint32_t graphScope() const { return graphScope_; }
+        NodeRef graphRef() const { return NodeRef(graphScope_, graphNode_); }
+        void setGraphRef(const NodeRef& ref) { graphScope_ = ref.scope; graphNode_ = ref.id; }
 
         const std::string& name() const { return name_; }
         void setName(const std::string& name) { name_ = name; }
@@ -642,6 +647,7 @@ namespace curvy {
         BLPath path_;
         std::size_t id_ = 0;
         std::uint32_t graphNode_ = 0;
+        std::uint32_t graphScope_ = 0;
         std::uint64_t geometryRevision_ = 1;
         bool bound_ = false;
         bool everBound_ = false;

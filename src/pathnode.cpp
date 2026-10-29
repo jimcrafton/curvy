@@ -4,6 +4,7 @@
 #include "curvy/sketchobject.h"
 
 #include <jitnodes/graph/network.h>
+#include <jitnodes/graph/subnet.h>
 
 #include <algorithm>
 #include <charconv>
@@ -246,6 +247,38 @@ namespace curvy {
                 for (int i = 0; i < 6; ++i) {
                     placed->setDetail(kWorldDetails[i], float(world.m[i]));
                 }
+                return placed;
+            }
+        };
+
+        class CurvySubnetNode : public jitnodes::SubnetNode {
+        public:
+            CurvySubnetNode() : SubnetNode(kSubnetNodeType, 0) {
+                const Placement none;
+                declareString("role", "group");
+                declareFloat("visible", 1.0f);
+                declareFloat("locked", 0.0f);
+                declareFloat("opacity", 1.0f);
+                declareString("blend", "normal");
+                declareFloat("clip", 0.0f);
+                addSpareFloat("translateX", none.translateX);
+                addSpareFloat("translateY", none.translateY);
+                addSpareFloat("rotation", none.rotation);
+                addSpareFloat("scaleX", none.scaleX);
+                addSpareFloat("scaleY", none.scaleY);
+                addSpareFloat("shear", none.shear);
+                addSpareFloat("pivotX", none.pivotX);
+                addSpareFloat("pivotY", none.pivotY);
+            }
+
+            jitnodes::GeometryHandle cook(jitnodes::CookContext& ctx, const std::vector<jitnodes::GeometryHandle>& inputs) override {
+                jitnodes::GeometryHandle inner = SubnetNode::cook(ctx, inputs);
+                const BLMatrix2D matrix = resolvedTransformOf(*this);
+                if (!inner || inner->pointCount() == 0 || matrix == BLMatrix2D::make_identity()) {
+                    return inner;
+                }
+                auto placed = std::make_shared<jitnodes::Geometry>(*inner);
+                movePoints(*placed, matrix);
                 return placed;
             }
         };
@@ -639,6 +672,7 @@ namespace curvy {
             registry.registerType(kSymbolNodeType, [] { return std::make_unique<PathNode>(kSymbolNodeType, Extras{"symbol"}); });
             registry.registerType(kImageNodeType, [] { return std::make_unique<PathNode>(kImageNodeType, Extras{"image"}); });
             registry.registerType(kTransformNodeType, [] { return std::make_unique<TransformNode>(); });
+            registry.registerType(kSubnetNodeType, [] { return std::make_unique<CurvySubnetNode>(); });
             registry.registerType(kTagNodeType, [] { return std::make_unique<TagNode>(); });
             registry.registerType(kMovePointsNodeType, [] { return std::make_unique<MovePointsNode>(); });
             registerAppearanceNodes();

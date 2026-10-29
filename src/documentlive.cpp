@@ -31,15 +31,19 @@ namespace curvy {
             return path;
         }
 
+        // A parent link is a wire between two transform nodes, so it only counts inside one scope.
         const SketchObject* parentOf(const SketchDocument& document, const SketchObject& object) {
-            return object.parent() != 0 ? document.findById(object.parent()) : nullptr;
+            const SketchObject* parent = object.parent() != 0 ? document.findById(object.parent()) : nullptr;
+            return parent != nullptr && parent->graphScope() == object.graphScope() ? parent : nullptr;
         }
 
-        // Where the object sits relative to its parent: what its transform node holds.
-        BLMatrix2D localPlacement(const SketchObject& object, const SketchObject* parent) {
+        // Where the object sits relative to its parent, or to the groups holding it when it has none: what its transform node holds.
+        BLMatrix2D localPlacement(const SketchDocument& document, const SketchObject& object, const SketchObject* parent) {
             BLMatrix2D local = object.paintToPage();
             if (parent != nullptr) {
                 local.post_transform(inverseOf(parent->paintToPage()));
+            } else if (object.graphScope() != 0) {
+                local.post_transform(inverseOf(document.scopeMatrix(object.graphScope())));
             }
             return local;
         }
@@ -132,15 +136,80 @@ namespace curvy {
             }
             return path;
         }
+
+        // What one pass over the objects needs to know of each scope's network, worked out the first time an object of that scope asks.
+        class ScopeViews {
+        public:
+            struct View {
+                jitnodes::Network* net = nullptr;   // null when the subnet holding the scope is gone
+                std::unordered_set<jitnodes::NodeId> existing;
+                std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> placed, next;
+                bool haveNext = false;
+            };
+
+            explicit ScopeViews(GraphDocument& document) : document_(document) {}
+
+            // The appearance chain wiring, which only some passes need.
+            const std::unordered_map<jitnodes::NodeId, jitnodes::NodeId>& nextOf(View& view) {
+                if (!view.haveNext && view.net != nullptr) {
+                    view.next = appearanceSuccessors(*view.net, view.net->nodeIds());
+                    view.haveNext = true;
+                }
+                return view.next;
+            }
+
+            View& of(std::uint32_t scope) {
+                auto [it, fresh] = views_.try_emplace(scope);
+                if (fresh) {
+                    it->second.net = document_.findNetwork(scope);
+                    if (it->second.net != nullptr) {
+                        const std::vector<jitnodes::NodeId> ids = it->second.net->nodeIds();
+                        it->second.existing.insert(ids.begin(), ids.end());
+                        it->second.placed = placementNodes(*it->second.net, ids);
+                    }
+                }
+                return it->second;
+            }
+
+        private:
+            GraphDocument& document_;
+            std::unordered_map<std::uint32_t, View> views_;
+        };
     }
 
-    bool SketchDocument::drivenPlace(jitnodes::NodeId place) const {
+    BLMatrix2D SketchDocument::scopeMatrix(std::uint32_t scope) const {
+        BLMatrix2D matrix = BLMatrix2D::make_identity();
+        for (int guard = 0; scope != 0 && guard < 64; ++guard) {
+            const NodeRef subnet = parentOfScope(scope);
+            if (!hasNode(subnet)) {
+                break;
+            }
+            matrix.post_transform(resolvedTransformOf(node(subnet)));
+            scope = subnet.scope;
+        }
+        return matrix;
+    }
+
+    BLMatrix2D SketchDocument::worldOf(const NodeRef& place) const {
+        BLMatrix2D world = worldTransformOf(networkOf(place.scope), place.id);
+        if (place.scope != 0) {
+            world.post_transform(scopeMatrix(place.scope));
+        }
+        return world;
+    }
+
+    bool SketchDocument::drivenPlace(const NodeRef& place) const {
         if (drivenDirty_) {
             drivenPlaces_.clear();
-            const jitnodes::Network& net = network();
-            for (jitnodes::NodeId id : net.nodeIds()) {
-                if (net.node(id).typeName() == kTransformNodeType && drivenBy(net, id, shapeBehind(net, net.inputOf(id, 0)))) {
-                    drivenPlaces_.insert(id);
+            for (std::uint32_t scope = 0; scope < scopeCount(); ++scope) {
+                const jitnodes::Network* net = findNetwork(scope);
+                if (net == nullptr) {
+                    continue;
+                }
+                for (jitnodes::NodeId id : net->nodeIds()) {
+                    if (net->node(id).typeName() == kTransformNodeType && drivenBy(*net, id, shapeBehind(*net, net->inputOf(id, 0)))) {
+                        drivenPlaces_.insert(NodeRef(scope, id));
+                    }
                 }
             }
             drivenDirty_ = false;
@@ -152,13 +221,12 @@ namespace curvy {
         if (graphAffected) {
             outlineCache_.clear();
         }
-        jitnodes::Network& net = network();
-        const std::vector<jitnodes::NodeId> ids = net.nodeIds();
-        const auto placed = placementNodes(net, ids);
+        ScopeViews views(*this);
         bool moved = false;
         for (const std::unique_ptr<SketchObject>& object : objects_) {
-            const auto driver = placed.find(object->graphNode());
-            if (driver != placed.end() && drivenPlace(driver->second)) {
+            const ScopeViews::View& view = views.of(object->graphScope());
+            const auto driver = view.placed.find(object->graphNode());
+            if (view.net != nullptr && driver != view.placed.end() && drivenPlace(NodeRef(object->graphScope(), driver->second))) {
                 moved = adoptChain(*object, driver->second) || moved;
             }
         }
@@ -178,15 +246,15 @@ namespace curvy {
     }
 
     void SketchDocument::refreshLiveShapes() {
-        const std::vector<jitnodes::NodeId> ids = network().nodeIds();
-        const std::unordered_set<jitnodes::NodeId> existing(ids.begin(), ids.end());
+        ScopeViews views(*this);
         for (const std::unique_ptr<SketchObject>& object : objects_) {
+            const ScopeViews::View& view = views.of(object->graphScope());
             const jitnodes::NodeId node = object->graphNode();
-            if (node == jitnodes::invalidNodeId || existing.count(node) == 0 || isShapeNodeType(network().node(node).typeName())) {
+            if (view.net == nullptr || node == jitnodes::invalidNodeId || view.existing.count(node) == 0 || isShapeNodeType(view.net->node(node).typeName())) {
                 continue;
             }
             try {
-                const jitnodes::GeometryHandle geometry = cook(node);
+                const jitnodes::GeometryHandle geometry = cook(object->graphRef());
                 BLPath path = outlineOf(*geometry);
                 if (path.size() > 0) {
                     object->setGeometry(path);
@@ -197,17 +265,22 @@ namespace curvy {
     }
 
     void SketchDocument::pullPathNodes() {
-        jitnodes::Network& net = network();
-        const std::vector<jitnodes::NodeId> ids = net.nodeIds();
-        const std::unordered_set<jitnodes::NodeId> existing(ids.begin(), ids.end());
-        const auto placed = placementNodes(net, ids);
+        ScopeViews views(*this);
         for (const std::unique_ptr<SketchObject>& object : objects_) {
+            const std::uint32_t scope = object->graphScope();
+            ScopeViews::View& view = views.of(scope);
+            if (view.net == nullptr) {
+                continue;
+            }
+            jitnodes::Network& net = *view.net;
+            const auto& existing = view.existing;
+            const auto& placed = view.placed;
             const jitnodes::NodeId node = object->graphNode();
             if (node == jitnodes::invalidNodeId || existing.count(node) == 0 || net.node(node).typeName() != shapeNodeType(*object)) {
                 continue;
             }
             // An object whose chain deforms its shape shows what the chain cooks, whatever was drawn on it since.
-            if (const auto driver = placed.find(node); driver != placed.end() && drivenPlace(driver->second)) {
+            if (const auto driver = placed.find(node); driver != placed.end() && drivenPlace(NodeRef(scope, driver->second))) {
                 adoptChain(*object, driver->second);
                 continue;
             }
@@ -225,7 +298,7 @@ namespace curvy {
             if (object->isText()) {
                 // A text follows its placement node like any shape: the move is carried by the object and by the text's own matrix string.
                 if (const auto home = placed.find(node); home != placed.end() && existing.count(home->second) != 0) {
-                    const BLMatrix2D want = worldTransformOf(net, home->second);
+                    const BLMatrix2D want = worldOf(NodeRef(scope, home->second));
                     if (!sameMatrix(want, object->paintToPage(), 1e-6)) {
                         BLMatrix2D delta = inverseOf(object->paintToPage());
                         delta.post_transform(want);
@@ -247,7 +320,7 @@ namespace curvy {
             // What the graph says the object is: the drawn curve carried by the transform node.
             const jitnodes::Geometry& drawn = *target.geometryParam("curve");
             const auto place = placed.find(node);
-            const BLMatrix2D matrix = place != placed.end() ? worldTransformOf(net, place->second) : object->paintToPage();
+            const BLMatrix2D matrix = place != placed.end() ? worldOf(NodeRef(scope, place->second)) : object->paintToPage();
             BLPath path;
             BLPath back = object->geometry();
             back.transform(inverseOf(matrix));
@@ -263,17 +336,16 @@ namespace curvy {
     }
 
     void SketchDocument::pullAppearanceNodes() {
-        const jitnodes::Network& net = network();
-        const std::vector<jitnodes::NodeId> ids = net.nodeIds();
-        const std::unordered_set<jitnodes::NodeId> existing(ids.begin(), ids.end());
-        const auto next = appearanceSuccessors(net, ids);
+        ScopeViews views(*this);
         const AppearanceLibrary library{[this](std::size_t id) { return findPattern(id); }, [this](std::size_t id) { return findBrush(id); }};
         for (const std::unique_ptr<SketchObject>& object : objects_) {
+            ScopeViews::View& view = views.of(object->graphScope());
             const jitnodes::NodeId shape = object->graphNode();
-            if (shape == jitnodes::invalidNodeId || existing.count(shape) == 0) {
+            if (view.net == nullptr || shape == jitnodes::invalidNodeId || view.existing.count(shape) == 0) {
                 continue;
             }
-            const std::vector<jitnodes::NodeId> chain = appearanceChain(next, shape);
+            const jitnodes::Network& net = *view.net;
+            const std::vector<jitnodes::NodeId> chain = appearanceChain(views.nextOf(view), shape);
             std::vector<AppearanceItem> items = object->appearance();
             if (chain.size() != items.size()) {
                 continue;
@@ -281,7 +353,7 @@ namespace curvy {
             bool adopted = false;
             for (std::size_t i = 0; i < items.size(); ++i) {
                 const jitnodes::Node& node = net.node(chain[i]);
-                const auto held = appearanceSynced_.find(chain[i]);
+                const auto held = appearanceSynced_.find(NodeRef(object->graphScope(), chain[i]));
                 if (held == appearanceSynced_.end() || node.typeName() != appearanceNodeType(items[i].kind)) {
                     continue;
                 }
@@ -301,42 +373,32 @@ namespace curvy {
     }
 
     void SketchDocument::syncAppearanceNodes(bool scan) {
-        jitnodes::Network& net = network();
-        std::vector<jitnodes::NodeId> ids;
-        std::unordered_set<jitnodes::NodeId> existing;
-        std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> next, placed;
-        bool loaded = false;
-        auto load = [&] {
-            if (!loaded) {
-                loaded = true;
-                ids = net.nodeIds();
-                existing.insert(ids.begin(), ids.end());
-                next = appearanceSuccessors(net, ids);
-                placed = placementNodes(net, ids);
-            }
-        };
+        ScopeViews views(*this);
         scan = scan || appearanceObjectCount_ != objects_.size();
         appearanceObjectCount_ = objects_.size();
         for (const std::unique_ptr<SketchObject>& object : objects_) {
+            const std::uint32_t scope = object->graphScope();
             const jitnodes::NodeId shape = object->graphNode();
             const std::vector<AppearanceItem>& items = object->appearance();
-            const auto cached = appearanceChains_.find(shape);
+            const auto cached = appearanceChains_.find(object->graphRef());
             if (cached != appearanceChains_.end() && cached->second.items == items) {
                 continue;
             }
-            load();
-            if (shape == jitnodes::invalidNodeId || existing.count(shape) == 0) {
+            ScopeViews::View& view = views.of(scope);
+            if (view.net == nullptr || shape == jitnodes::invalidNodeId || view.existing.count(shape) == 0) {
                 continue;
             }
+            jitnodes::Network& net = *view.net;
+            const auto& placed = view.placed;
             scan = true;
-            std::vector<jitnodes::NodeId> chain = appearanceChain(next, shape);
+            std::vector<jitnodes::NodeId> chain = appearanceChain(views.nextOf(view), shape);
             std::size_t keep = 0;
             while (keep < chain.size() && keep < items.size() && net.node(chain[keep]).typeName() == appearanceNodeType(items[keep].kind)) {
                 ++keep;
             }
             while (chain.size() > keep) {
                 net.removeNode(chain.back());
-                appearanceSynced_.erase(chain.back());
+                appearanceSynced_.erase(NodeRef(scope, chain.back()));
                 chain.pop_back();
             }
             const auto place = placed.find(shape);
@@ -349,36 +411,44 @@ namespace curvy {
             for (std::size_t i = 0; i < items.size(); ++i) {
                 jitnodes::Node& node = net.node(chain[i]);
                 const AppearanceParams want = paramsOf(items[i]);
-                const auto held = appearanceSynced_.find(chain[i]);
+                const auto held = appearanceSynced_.find(NodeRef(scope, chain[i]));
                 if (held == appearanceSynced_.end() || held->second != want) {
                     if (paramsOf(node) != want) {
                         store(node, want);
                     }
-                    appearanceSynced_[chain[i]] = want;
+                    appearanceSynced_[NodeRef(scope, chain[i])] = want;
                 }
             }
-            appearanceChains_[shape] = AppearanceChain{chain, items};
+            appearanceChains_[object->graphRef()] = AppearanceChain{chain, items};
         }
         if (!scan) {
             return;
         }
-        std::unordered_set<jitnodes::NodeId> shapes;
+        std::unordered_set<NodeRef> shapes;
         for (const std::unique_ptr<SketchObject>& object : objects_) {
-            shapes.insert(object->graphNode());
+            shapes.insert(object->graphRef());
         }
-        std::unordered_set<jitnodes::NodeId> used;
+        std::unordered_set<NodeRef> used;
         for (auto it = appearanceChains_.begin(); it != appearanceChains_.end();) {
             if (shapes.count(it->first) == 0) {
                 it = appearanceChains_.erase(it);
             } else {
-                used.insert(it->second.nodes.begin(), it->second.nodes.end());
+                for (std::uint32_t id : it->second.nodes) {
+                    used.insert(NodeRef(it->first.scope, id));
+                }
                 ++it;
             }
         }
-        for (jitnodes::NodeId id : net.nodeIds()) {
-            if (used.count(id) == 0 && isAppearanceNodeType(net.node(id).typeName())) {
-                net.removeNode(id);
-                appearanceSynced_.erase(id);
+        for (std::uint32_t scope = 0; scope < scopeCount(); ++scope) {
+            jitnodes::Network* net = findNetwork(scope);
+            if (net == nullptr) {
+                continue;
+            }
+            for (jitnodes::NodeId id : net->nodeIds()) {
+                if (used.count(NodeRef(scope, id)) == 0 && isAppearanceNodeType(net->node(id).typeName())) {
+                    net->removeNode(id);
+                    appearanceSynced_.erase(NodeRef(scope, id));
+                }
             }
         }
     }
@@ -447,11 +517,12 @@ namespace curvy {
     }
 
     bool SketchDocument::writeObjectNodes(SketchObject& object, bool curve) {
-        const jitnodes::NodeId place = transformNodeOf(object.id());
-        if (place == jitnodes::invalidNodeId || drivenPlace(place)) {
+        const NodeRef placeRef = transformRefOf(object.id());
+        if (!placeRef.valid() || drivenPlace(placeRef)) {
             return false;   // not in the graph yet, or shown from what its chain cooks: the next changed() writes it
         }
-        jitnodes::Network& net = network();
+        const jitnodes::NodeId place = placeRef.id;
+        jitnodes::Network& net = networkOf(placeRef.scope);
         jitnodes::Node& shape = net.node(object.graphNode());
         if (shape.typeName() != shapeNodeType(object)) {
             return false;
@@ -463,7 +534,7 @@ namespace curvy {
                 shape.setString(name, value);
             }
         }
-        storeTransform(net.node(place), localPlacement(object, parentOf(*this, object)));
+        storeTransform(net.node(place), localPlacement(*this, object, parentOf(*this, object)));
         storePaintWarp(net.node(place), object.paintWarp());
         object.setBoundToNodes(true);
         outlineCache_[object.id()] = PlacedOutline{object.geometryRevision(), object.geometry()};   // what the node would cook
@@ -471,8 +542,28 @@ namespace curvy {
     }
 
     void SketchDocument::syncPathNodes() {
+        std::map<std::uint32_t, std::vector<SketchObject*>> byScope;
+        for (const std::unique_ptr<SketchObject>& object : objects_) {
+            byScope[object->graphScope()].push_back(object.get());
+        }
         bool removedShape = false;
-        jitnodes::Network& net = network();
+        // Every scope is visited, also one whose objects are all gone, so its shape nodes go too.
+        for (std::uint32_t scope = 0; scope < scopeCount(); ++scope) {
+            const auto found = byScope.find(scope);
+            static const std::vector<SketchObject*> none;
+            removedShape = syncPathScope(scope, found != byScope.end() ? found->second : none) || removedShape;
+        }
+        syncAppearanceNodes(removedShape);
+    }
+
+    bool SketchDocument::syncPathScope(std::uint32_t scope, const std::vector<SketchObject*>& objects) {
+        jitnodes::Network* netPtr = findNetwork(scope);
+        if (netPtr == nullptr) {
+            return false;
+        }
+        bool removedShape = false;
+        jitnodes::Network& net = *netPtr;
+        auto& placedCache = placedCache_[scope];
         const std::vector<jitnodes::NodeId> ids = net.nodeIds();
         const std::unordered_set<jitnodes::NodeId> existing(ids.begin(), ids.end());
         std::unordered_set<jitnodes::NodeId> used;
@@ -482,7 +573,7 @@ namespace curvy {
             bool known;
         };
         std::vector<Bound> bound;
-        for (const std::unique_ptr<SketchObject>& object : objects_) {
+        for (SketchObject* object : objects) {
             const char* type = shapeNodeType(*object);
             jitnodes::NodeId node = object->graphNode();
             const bool known = node != jitnodes::invalidNodeId && existing.count(node) != 0;
@@ -497,7 +588,7 @@ namespace curvy {
                 object->forgetNodes();
             }
             used.insert(node);
-            bound.push_back({object.get(), node, known});
+            bound.push_back({object, node, known});
         }
         for (jitnodes::NodeId id : ids) {
             if (used.count(id) == 0 && isShapeNodeType(net.node(id).typeName())) {
@@ -509,11 +600,11 @@ namespace curvy {
         // Every shape node is followed by a transform node, which takes over the appearance nodes that were wired to the shape (a graph made
         // before there were transform nodes). The wiring is only searched for when a shape has none or one was left without its shape.
         auto cached = [&](jitnodes::NodeId shape) {
-            const auto it = placedCache_.find(shape);
-            return it != placedCache_.end() && existing.count(it->second) != 0 && net.node(it->second).typeName() == kTransformNodeType &&
+            const auto it = placedCache.find(shape);
+            return it != placedCache.end() && existing.count(it->second) != 0 && net.node(it->second).typeName() == kTransformNodeType &&
                 shapeBehind(net, net.inputOf(it->second, 0)) == shape;
         };
-        bool rewire = placedCache_.empty() || removedShape;
+        bool rewire = placedCache.empty() || removedShape;
         for (const Bound& entry : bound) {
             rewire = rewire || !cached(entry.node);
         }
@@ -521,9 +612,9 @@ namespace curvy {
         if (rewire) {
             const std::vector<jitnodes::NodeId> live = net.nodeIds();
             const auto following = appearanceSuccessors(net, live);
-            placedCache_ = placementNodes(net, live);
+            placedCache = placementNodes(net, live);
             for (const Bound& entry : bound) {
-                if (placedCache_.count(entry.node) != 0) {
+                if (placedCache.count(entry.node) != 0) {
                     continue;
                 }
                 const jitnodes::NodeId place = net.addNode(kTransformNodeType, net.uniqueName("transform"));
@@ -531,13 +622,13 @@ namespace curvy {
                 if (const auto first = following.find(entry.node); first != following.end()) {
                     net.connect(place, first->second, 0);
                 }
-                placedCache_.emplace(entry.node, place);
+                placedCache.emplace(entry.node, place);
                 created.insert(entry.node);
             }
-            for (auto it = placedCache_.begin(); it != placedCache_.end();) {
+            for (auto it = placedCache.begin(); it != placedCache.end();) {
                 if (used.count(it->first) == 0) {
                     net.removeNode(it->second);
-                    it = placedCache_.erase(it);
+                    it = placedCache.erase(it);
                 } else {
                     ++it;
                 }
@@ -548,7 +639,7 @@ namespace curvy {
         std::unordered_set<jitnodes::NodeId> relinked;
         std::unordered_map<jitnodes::NodeId, SketchObject*> byPlace;
         for (const Bound& entry : bound) {
-            const jitnodes::NodeId placeId = placedCache_.at(entry.node);
+            const jitnodes::NodeId placeId = placedCache.at(entry.node);
             const jitnodes::NodeId linked = net.inputOf(placeId, 1);
             const SketchObject* parent = parentOf(*this, *entry.object);
             if (entry.object->parent() != 0 && parent == nullptr) {
@@ -556,13 +647,13 @@ namespace curvy {
             }
             jitnodes::NodeId want = jitnodes::invalidNodeId;
             if (parent != nullptr && parent->graphNode() != jitnodes::invalidNodeId) {
-                const auto it = placedCache_.find(parent->graphNode());
-                want = it != placedCache_.end() ? it->second : jitnodes::invalidNodeId;
+                const auto it = placedCache.find(parent->graphNode());
+                want = it != placedCache.end() ? it->second : jitnodes::invalidNodeId;
             }
             if (linked != jitnodes::invalidNodeId && entry.known && !entry.object->everBound() && entry.object->parent() == 0) {
                 if (byPlace.empty()) {
                     for (const Bound& other : bound) {
-                        byPlace.emplace(placedCache_.at(other.node), other.object);
+                        byPlace.emplace(placedCache.at(other.node), other.object);
                     }
                 }
                 const auto owner = byPlace.find(linked);
@@ -586,9 +677,9 @@ namespace curvy {
             const bool stale = !entry.object->boundToNodes();
             const bool fresh = created.count(entry.node) != 0;
             const bool follows = relinked.count(entry.node) != 0 || (parent != nullptr && !parent->boundToNodes());
-            jitnodes::Node* place = (stale || fresh || follows) ? &net.node(placedCache_.at(entry.node)) : nullptr;
-            const BLMatrix2D world = place != nullptr ? worldTransformOf(net, placedCache_.at(entry.node)) : BLMatrix2D::make_identity();
-            const bool driven = drivenPlace(placedCache_.at(entry.node));
+            jitnodes::Node* place = (stale || fresh || follows) ? &net.node(placedCache.at(entry.node)) : nullptr;
+            const BLMatrix2D world = place != nullptr ? worldOf(NodeRef(scope, placedCache.at(entry.node))) : BLMatrix2D::make_identity();
+            const bool driven = drivenPlace(NodeRef(scope, placedCache.at(entry.node)));
             if (driven || !(entry.known && !entry.object->everBound() && place != nullptr && bindLoadedNode(net.node(entry.node), &world, *entry.object))) {
                 writeNode(net.node(entry.node), *entry.object, !driven);
             }
@@ -596,14 +687,14 @@ namespace curvy {
                 if (fresh) {
                     centerTransformPivot(*place, *net.node(entry.node).geometryParam("curve"));
                 }
-                storeTransform(*place, localPlacement(*entry.object, parent));
+                storeTransform(*place, localPlacement(*this, *entry.object, parent));
                 storePaintWarp(*place, entry.object->paintWarp());
             }
             if (driven) {
-                adoptChain(*entry.object, placedCache_.at(entry.node));
+                adoptChain(*entry.object, placedCache.at(entry.node));
             }
         }
-        syncAppearanceNodes(removedShape);
+        return removedShape;
     }
 
     SketchObject* SketchDocument::addLiveShape(const std::string& nodeType, const std::map<std::string, float>& params, const std::string& description) {
@@ -667,35 +758,44 @@ namespace curvy {
         return true;
     }
 
-    jitnodes::NodeId SketchDocument::transformNodeOf(std::size_t objectId) const {
+    NodeRef SketchDocument::transformRefOf(std::size_t objectId) const {
         const SketchObject* object = findById(objectId);
         if (object == nullptr || object->graphNode() == jitnodes::invalidNodeId) {
-            return jitnodes::invalidNodeId;
+            return kNoNode;
         }
-        const auto it = placedCache_.find(object->graphNode());
-        if (it == placedCache_.end()) {
-            return jitnodes::invalidNodeId;
+        const auto scoped = placedCache_.find(object->graphScope());
+        if (scoped == placedCache_.end()) {
+            return kNoNode;
+        }
+        const auto it = scoped->second.find(object->graphNode());
+        if (it == scoped->second.end()) {
+            return kNoNode;
         }
         try {
-            const jitnodes::Network& net = network();
-            if (net.node(it->second).typeName() == kTransformNodeType && shapeBehind(net, net.inputOf(it->second, 0)) == object->graphNode()) {
-                return it->second;
+            const jitnodes::Network* net = findNetwork(object->graphScope());
+            if (net != nullptr && net->node(it->second).typeName() == kTransformNodeType && shapeBehind(*net, net->inputOf(it->second, 0)) == object->graphNode()) {
+                return NodeRef(object->graphScope(), it->second);
             }
         } catch (const std::exception&) {
         }
-        return jitnodes::invalidNodeId;
+        return kNoNode;
+    }
+
+    jitnodes::NodeId SketchDocument::transformNodeOf(std::size_t objectId) const {
+        const NodeRef ref = transformRefOf(objectId);
+        return ref.scope == 0 ? ref.id : jitnodes::invalidNodeId;
     }
 
     bool SketchDocument::pathHeldByNode(const SketchObject& object) const {
         if (object.isText() || object.graphNode() == jitnodes::invalidNodeId || !object.boundToNodes()) {
             return false;
         }
-        const jitnodes::NodeId place = transformNodeOf(object.id());
-        if (place == jitnodes::invalidNodeId || drivenPlace(place)) {
+        const NodeRef place = transformRefOf(object.id());
+        if (!place.valid() || drivenPlace(place)) {
             return false;
         }
         try {
-            const jitnodes::Node& shape = network().node(object.graphNode());
+            const jitnodes::Node& shape = node(object.graphRef());
             return shape.typeName() == shapeNodeType(object) && shape.hasGeometryParam("curve") && shape.geometryParam("curve")->primitiveCount() > 0;
         } catch (const std::exception&) {
             return false;
@@ -718,11 +818,12 @@ namespace curvy {
 
     jitnodes::NodeId SketchDocument::tagNodeOf(std::size_t objectId, const std::string& group, bool create) {
         const SketchObject* object = findById(objectId);
-        const jitnodes::NodeId place = transformNodeOf(objectId);
-        if (object == nullptr || place == jitnodes::invalidNodeId || group.empty()) {
+        const NodeRef placeRef = transformRefOf(objectId);
+        if (object == nullptr || !placeRef.valid() || group.empty()) {
             return jitnodes::invalidNodeId;
         }
-        jitnodes::Network& net = network();
+        const jitnodes::NodeId place = placeRef.id;
+        jitnodes::Network& net = networkOf(placeRef.scope);
         for (jitnodes::NodeId tag : tagsBetween(net, place, object->graphNode())) {
             if (net.node(tag).getString("group") == group) {
                 return tag;
@@ -741,10 +842,10 @@ namespace curvy {
     std::vector<std::string> SketchDocument::tagNames(std::size_t objectId) const {
         std::vector<std::string> names;
         const SketchObject* object = findById(objectId);
-        const jitnodes::NodeId place = transformNodeOf(objectId);
-        if (object != nullptr && place != jitnodes::invalidNodeId) {
-            const jitnodes::Network& net = network();
-            for (jitnodes::NodeId tag : tagsBetween(net, place, object->graphNode())) {
+        const NodeRef place = transformRefOf(objectId);
+        if (object != nullptr && place.valid()) {
+            const jitnodes::Network& net = networkOf(place.scope);
+            for (jitnodes::NodeId tag : tagsBetween(net, place.id, object->graphNode())) {
                 names.push_back(net.node(tag).getString("group"));
             }
         }
@@ -753,12 +854,12 @@ namespace curvy {
 
     std::vector<int> SketchDocument::taggedIds(std::size_t objectId, const std::string& group) const {
         const SketchObject* object = findById(objectId);
-        const jitnodes::NodeId place = transformNodeOf(objectId);
-        if (object == nullptr || place == jitnodes::invalidNodeId) {
+        const NodeRef place = transformRefOf(objectId);
+        if (object == nullptr || !place.valid()) {
             return {};
         }
-        const jitnodes::Network& net = network();
-        for (jitnodes::NodeId tag : tagsBetween(net, place, object->graphNode())) {
+        const jitnodes::Network& net = networkOf(place.scope);
+        for (jitnodes::NodeId tag : tagsBetween(net, place.id, object->graphNode())) {
             if (net.node(tag).getString("group") == group) {
                 return pointIdList(net.node(tag).getString("ids"));
             }
@@ -783,7 +884,7 @@ namespace curvy {
         if (tag == jitnodes::invalidNodeId) {
             return false;
         }
-        network().node(tag).setString("ids", text);
+        networkOf(findById(objectId)->graphScope()).node(tag).setString("ids", text);
         commitGraphEdit(snapshot, on ? "Tag Points" : "Untag Points");
         return true;
     }
@@ -794,9 +895,10 @@ namespace curvy {
             return false;
         }
         const jitnodes::GraphSnapshot snapshot = snapshotGraph();
-        jitnodes::Network& net = network();
+        const NodeRef placeRef = transformRefOf(objectId);
+        jitnodes::Network& net = networkOf(placeRef.scope);
         // Whatever read the tag (the next node towards the placement node) reads what fed it.
-        jitnodes::NodeId consumer = transformNodeOf(objectId);
+        jitnodes::NodeId consumer = placeRef.id;
         for (jitnodes::NodeId at = net.inputOf(consumer, 0); at != tag && at != jitnodes::invalidNodeId; at = net.inputOf(at, 0)) {
             consumer = at;
         }
@@ -808,13 +910,16 @@ namespace curvy {
 
     bool SketchDocument::adoptChain(SketchObject& object, jitnodes::NodeId place) {
         try {
-            const jitnodes::Network& net = network();
-            const jitnodes::GeometryHandle cooked = cook(place);
+            const NodeRef placeRef(object.graphScope(), place);
+            jitnodes::GeometryHandle cooked = cook(placeRef);
+            if (cooked && placeRef.scope != 0) {
+                cooked = placeGeometry(*cooked, scopeMatrix(placeRef.scope));   // the cook is in the group's space
+            }
             BLPath path;
             if (!cooked || cooked->primitiveCount() == 0 || !pathFromGeometry(*cooked, path)) {
                 return false;
             }
-            const BLMatrix2D world = worldTransformOf(net, place);
+            const BLMatrix2D world = worldOf(placeRef);
             if (!sameCurveShape(*cooked, *geometryFromPath(object.geometry()), kFileTolerance / 10)) {
                 object.setGeometry(path);
             }
@@ -828,12 +933,13 @@ namespace curvy {
 
     jitnodes::NodeId SketchDocument::addMovePoints(std::size_t objectId, const std::string& group) {
         const SketchObject* object = findById(objectId);
-        const jitnodes::NodeId place = transformNodeOf(objectId);
-        if (object == nullptr || place == jitnodes::invalidNodeId) {
+        const NodeRef placeRef = transformRefOf(objectId);
+        if (object == nullptr || !placeRef.valid()) {
             return jitnodes::invalidNodeId;
         }
+        const jitnodes::NodeId place = placeRef.id;
         const jitnodes::GraphSnapshot snapshot = snapshotGraph();
-        jitnodes::Network& net = network();
+        jitnodes::Network& net = networkOf(placeRef.scope);
         const jitnodes::NodeId mover = net.addNode(kMovePointsNodeType, net.uniqueName("movePoints"));
         net.node(mover).setString("group", group);
         // Rotating and scaling hold still about the middle of the points it moves.
@@ -841,7 +947,7 @@ namespace curvy {
         net.connect(feeder, mover, 0);
         net.connect(mover, place, 0);
         try {
-            const jitnodes::GeometryHandle fed = cook(feeder);
+            const jitnodes::GeometryHandle fed = cook(NodeRef(placeRef.scope, feeder));
             const jitnodes::AttribArray* flags = group.empty() || !fed ? nullptr : fed->findAttrib(jitnodes::AttribClass::point, "group." + group);
             if (fed && fed->pointCount() > 0) {
                 float x0 = 1e30f, x1 = -1e30f, y0 = 1e30f, y1 = -1e30f;
@@ -866,18 +972,18 @@ namespace curvy {
 
     int SketchDocument::pointIdNear(std::size_t objectId, const BLPoint& world, double reach) const {
         const SketchObject* object = findById(objectId);
-        const jitnodes::NodeId place = transformNodeOf(objectId);
-        if (object == nullptr || place == jitnodes::invalidNodeId) {
+        const NodeRef place = transformRefOf(objectId);
+        if (object == nullptr || !place.valid()) {
             return -1;
         }
         try {
-            const jitnodes::Network& net = network();
+            const jitnodes::Network& net = networkOf(place.scope);
             const jitnodes::GeometryHandle& curve = net.node(object->graphNode()).geometryParam("curve");
             const jitnodes::AttribArray* ids = curve ? curve->findAttrib(jitnodes::AttribClass::point, kPointIdAttrib) : nullptr;
             if (ids == nullptr || ids->type() != jitnodes::AttribType::int32) {
                 return -1;
             }
-            const BLMatrix2D matrix = worldTransformOf(net, place);
+            const BLMatrix2D matrix = worldOf(place);
             int best = -1;
             double nearest = reach;
             for (const jitnodes::Primitive& prim : curve->primitives()) {
@@ -904,18 +1010,18 @@ namespace curvy {
         std::vector<BLPoint> spots;
         const std::vector<int> wanted = taggedIds(objectId, group);
         const SketchObject* object = findById(objectId);
-        const jitnodes::NodeId place = transformNodeOf(objectId);
-        if (wanted.empty() || object == nullptr || place == jitnodes::invalidNodeId) {
+        const NodeRef place = transformRefOf(objectId);
+        if (wanted.empty() || object == nullptr || !place.valid()) {
             return spots;
         }
         try {
-            const jitnodes::Network& net = network();
+            const jitnodes::Network& net = networkOf(place.scope);
             const jitnodes::GeometryHandle& curve = net.node(object->graphNode()).geometryParam("curve");
             const jitnodes::AttribArray* ids = curve ? curve->findAttrib(jitnodes::AttribClass::point, kPointIdAttrib) : nullptr;
             if (ids == nullptr || ids->type() != jitnodes::AttribType::int32) {
                 return spots;
             }
-            const BLMatrix2D matrix = worldTransformOf(net, place);
+            const BLMatrix2D matrix = worldOf(place);
             for (const jitnodes::Primitive& prim : curve->primitives()) {
                 for (std::uint32_t k = 0; k < prim.count; ++k) {
                     const std::size_t at = prim.start + k;
@@ -938,14 +1044,13 @@ namespace curvy {
         if (cached != outlineCache_.end() && cached->second.revision == object.geometryRevision()) {
             return cached->second.path;
         }
-        const jitnodes::NodeId place = transformNodeOf(object.id());
+        const NodeRef place = transformRefOf(object.id());
         // A driven object shows what its chain cooks (adoptChain), which the object holds and its shape node does not.
-        if (place != jitnodes::invalidNodeId && !drivenPlace(place)) {
+        if (place.valid() && !drivenPlace(place)) {
             try {
-                const jitnodes::Network& net = network();
-                const jitnodes::GeometryHandle& curve = net.node(object.graphNode()).geometryParam("curve");
+                const jitnodes::GeometryHandle& curve = node(object.graphRef()).geometryParam("curve");
                 BLPath path;
-                if (curve && curve->primitiveCount() > 0 && pathFromGeometry(*placeGeometry(*curve, worldTransformOf(net, place)), path)) {
+                if (curve && curve->primitiveCount() > 0 && pathFromGeometry(*placeGeometry(*curve, worldOf(place)), path)) {
                     outlineCache_[object.id()] = PlacedOutline{object.geometryRevision(), path};
                     return path;
                 }
@@ -955,18 +1060,18 @@ namespace curvy {
         return object.geometry();
     }
 
-    std::size_t SketchDocument::objectOfNode(jitnodes::NodeId node) const {
-        if (node == jitnodes::invalidNodeId) {
+    std::size_t SketchDocument::objectOfNode(const NodeRef& ref) const {
+        if (!ref.valid() || findNetwork(ref.scope) == nullptr) {
             return 0;
         }
-        const jitnodes::Network& net = network();
+        const jitnodes::Network& net = networkOf(ref.scope);
         std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> next;
         bool haveChains = false;
         for (const std::unique_ptr<SketchObject>& object : objects_) {
-            if (object->graphNode() == jitnodes::invalidNodeId) {
+            if (object->graphNode() == jitnodes::invalidNodeId || object->graphScope() != ref.scope) {
                 continue;
             }
-            if (object->graphNode() == node || transformNodeOf(object->id()) == node) {
+            if (object->graphNode() == ref.id || transformRefOf(object->id()) == ref) {
                 return object->id();
             }
             if (!haveChains) {
@@ -974,7 +1079,7 @@ namespace curvy {
                 haveChains = true;
             }
             for (jitnodes::NodeId link : appearanceChain(next, object->graphNode())) {
-                if (link == node) {
+                if (link == ref.id) {
                     return object->id();
                 }
             }

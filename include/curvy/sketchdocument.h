@@ -285,7 +285,8 @@ namespace curvy {
         // The bounding box of placedOutline(); what the selection box and frame are measured on.
         BLBox outlineBounds(const SketchObject& object) const;
         // The object a shape, placement or appearance node belongs to (0 for any other node).
-        std::size_t objectOfNode(jitnodes::NodeId node) const;
+        std::size_t objectOfNode(jitnodes::NodeId node) const { return objectOfNode(NodeRef(node)); }
+        std::size_t objectOfNode(const NodeRef& node) const;
         // The node of the topmost visible, unlocked object under the point (invalidNodeId when none).
         jitnodes::NodeId hitTestNode(const BLPoint& point, double tolerance) const;
         // The placement nodes of the selected objects, in selection order.
@@ -505,7 +506,13 @@ namespace curvy {
         std::vector<GeometryState> snapshotSelection(bool withChildren = false) const;
         // The transform node that places an object's shape (invalidNodeId when it has none). With one object selected the transform origin
         // is that node's pivot, so the canvas and the node show and edit the same point.
+        // Only for an object in the root scope; transformRefOf answers for any scope.
         jitnodes::NodeId transformNodeOf(std::size_t objectId) const;
+        NodeRef transformRefOf(std::size_t objectId) const;
+        // The matrix the groups holding `scope` put on everything inside it (identity for the root).
+        BLMatrix2D scopeMatrix(std::uint32_t scope) const;
+        // Where a placement node puts its shape on the page: its parent links, then the groups holding it.
+        BLMatrix2D worldOf(const NodeRef& place) const;
         // True when the object's outline is nothing but its shape node's curve under its placement, so a file can leave the outline out and
         // build it from the graph (not text, whose words make the outline; not a chain-driven or out-of-step object).
         bool pathHeldByNode(const SketchObject& object) const;
@@ -888,8 +895,8 @@ namespace curvy {
         // Makes a driven object show what the chain ending at its placement node cooks; false when the chain cooks to nothing usable.
         bool adoptChain(SketchObject& object, jitnodes::NodeId place);
         // Whether the object placed by `place` is driven (a move-points node or an expression or keys on the way). Worked out once per graph change.
-        bool drivenPlace(jitnodes::NodeId place) const;
-        mutable std::unordered_set<jitnodes::NodeId> drivenPlaces_;
+        bool drivenPlace(const NodeRef& place) const;
+        mutable std::unordered_set<NodeRef> drivenPlaces_;
         mutable bool drivenDirty_ = true;
         // One object's nodes made to match it now: the placement, the paint warp and the shape node's strings, and the curve when `curve`.
         // False (nothing written) for an object with no placement node yet or one that is driven.
@@ -904,14 +911,16 @@ namespace curvy {
         // `scan` looks for appearance nodes nothing owns any more (after objects went away).
         void syncAppearanceNodes(bool scan);
         void pullAppearanceNodes();
-        std::map<std::uint32_t, AppearanceParams> appearanceSynced_;
+        // syncPathNodes for the objects of one scope; true when it removed a shape node.
+        bool syncPathScope(std::uint32_t scope, const std::vector<SketchObject*>& objects);
+        std::map<NodeRef, AppearanceParams> appearanceSynced_;
         // What each shape node's chain looked like at the last sync, so an object whose look did not change is passed over without touching
         // the graph (a thousand-object document syncs on every edit). A graph change throws it away.
         struct AppearanceChain {
             std::vector<std::uint32_t> nodes;
             std::vector<AppearanceItem> items;
         };
-        std::map<std::uint32_t, AppearanceChain> appearanceChains_;
+        std::map<NodeRef, AppearanceChain> appearanceChains_;
         std::size_t appearanceObjectCount_ = 0;
         std::string activeTag_ = "tag1";
         std::shared_ptr<jitnodes::GraphSnapshot> pivotBefore_;   // the graph when a live pivot drag started
@@ -923,7 +932,7 @@ namespace curvy {
         mutable std::unordered_map<std::size_t, PlacedOutline> outlineCache_;
         // Where findById last found each id; every hit is checked against the object there, so a stale entry only costs a rescan.
         mutable std::unordered_map<std::size_t, std::size_t> indexOfId_;
-        std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> placedCache_;   // a shape node's transform node, rebuilt when the graph's wiring may have changed
+        std::unordered_map<std::uint32_t, std::unordered_map<jitnodes::NodeId, jitnodes::NodeId>> placedCache_;   // per scope, a shape node's transform node; rebuilt when the graph's wiring may have changed
         // Puts the objects in the stacking order given by ids (all of them, back to front).
         void reorder(const std::vector<std::size_t>& ids);
         // Records a visible/locked change of some objects (already applied) as one undo step.

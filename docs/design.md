@@ -160,3 +160,17 @@ nothing of sketch types (paths, layers, artboards), so it can be unit tested alo
   have the same exposure). Not yet: `key` (keyframes in the fields), easing curves, the frame range and fps as document settings (saved), the ruler, keyed rows and dopesheet from
   `animation.html`, a key for Play, per-frame caching.
 - **Risks.** Node ids must stay stable across undo (restoreSnapshot preserves them); the Network must not be edited while cooking.
+- **DG-04 spike S0 (2026-10-28), layers/groups as subnets.** 2000 shapes' Transform nodes inside a subnet versus flat in the root (plus 2000 outside, release build,
+  `snapshotNetwork`/`restoreSnapshot`): edit one node + snapshot 21 ms vs 2.0 ms, undo 22 ms vs 0.8 ms, redo 27 ms vs 0.8 ms, full snapshot 39 vs 50 ms, save/load about the same
+  (35/51 ms vs 28/49 ms). A subnet's contents are one text in the root snapshot, so every edit inside rewrites it. Over the 5 ms budget, so the decision is **option B**: structure nodes
+  (`curvyGroup`/`curvyLayer`) in the flat root network, members referenced by links; real subnets wait for the Symbols/Library step. Plan: `docs/dg04-layers-subnets.md`.
+- **jitnodes hierarchical snapshots (2026-10-28).** `NodeSnapshot` gained `child` (a `GraphSnapshot` of the subnet's contents); a subnet's own text no longer includes its graph and keeps a
+  node revision like any other node. `snapshotNetwork` recurses with the previous child snapshot (per-node text reuse inside subnets), `restoreSnapshot` diffs the child network in place
+  instead of reloading it (the child `Network` object, untouched nodes and their cook caches survive), `sameGraph` compares children. Asset instances still have no child snapshot (their graph comes
+  from the definition). Same 2000-shape measurement as the spike: edit+snapshot 1.1 ms (flat 1.5), undo 0.6 ms (0.7), redo 0.6 ms (0.7), so option A no longer has an undo-cost problem;
+  its remaining cost is the (network, id) pair change in curvy. Tests: jitnodes `snapshotsOfSubnetsRestoreThemInPlace`, `snapshotsOfBigSubnetsCostAboutAsMuchAsFlatOnes` (188 pass), curvy ctest 2079 pass.
+  Uncommitted in the jitnodes submodule (serialize.h/.cpp, tests/testMain.cpp): user commits+pushes, then bumps.
+- **DG-04 S1 (2026-10-28): `NodeRef` and scopes.** `curvy::NodeRef{scope,id}` (include/curvy/noderef.h); `GraphDocument` interns scope numbers for subnet paths and resolves them
+  (`networkOf`, `node(ref)`, `hasNode`, `parentOfScope`), and its edit/cook methods take a `NodeRef` (root-scope `NodeId` shortcuts remain). `SketchObject` carries `graphScope()`.
+  jitnodes got `Network::hasNode` (uncommitted in the submodule with the snapshot change). The sync code in `documentlive.cpp` is still root-only; it becomes per-scope in S2/S3.
+  Idea logged for later: a packed-paths node (many paths in one node, Houdini packed-geometry style), see `docs/dg04-layers-subnets.md`.
