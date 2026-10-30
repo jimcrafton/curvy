@@ -260,8 +260,8 @@ namespace curvy {
         // The tag the canvas adds points to (a name, "tag1" to start with).
         const std::string& activeTag() const { return activeTag_; }
         void setActiveTag(const std::string& name) { activeTag_ = name.empty() ? "tag1" : name; }
-        // The object's tag node for `group`; made (and wired in just before the placement node) when `create` is set. invalidNodeId when none.
-        jitnodes::NodeId tagNodeOf(std::size_t objectId, const std::string& group, bool create);
+        // The object's tag node for `group`; made (and wired in just before the placement node) when `create` is set. kNoNode when none.
+        NodeRef tagNodeOf(std::size_t objectId, const std::string& group, bool create);
         // The ids (SketchObject points' `id` attribute) the tag lists.
         std::vector<int> taggedIds(std::size_t objectId, const std::string& group) const;
         // Adds the ids to the tag (`on`) or takes them away, as one undo step. False when nothing changed.
@@ -276,7 +276,7 @@ namespace curvy {
         std::vector<std::string> tagNames(std::size_t objectId) const;
         // Adds a move-points node for `group` (every point when empty) just before the object's placement node, as one undo step, and returns it.
         // The object is driven from then on: it shows what its chain cooks (see kMovePointsNodeType).
-        jitnodes::NodeId addMovePoints(std::size_t objectId, const std::string& group);
+        NodeRef addMovePoints(std::size_t objectId, const std::string& group);
 
         // ---- Nodes: what is selected and picked is the placement (transform) node of a shape ----
         // The outline the graph makes for the object (its shape node's curve carried by the page matrix of its transform node); the object's own
@@ -318,6 +318,8 @@ namespace curvy {
         // Group opacity / blend mode (default: opaque, normal). Setting is not an undo step by itself - the Appearance panel
         // edits live and commits with commitStyle(), whose snapshots carry the group's props.
         GroupProps groupProps(std::size_t groupId) const;
+        // The subnet node that holds the group's members (an invalid ref when it has none).
+        NodeRef groupSubnetOf(std::size_t group) const;
         void setGroupProps(std::size_t groupId, const GroupProps& props);
         // The outermost group the selection is exactly (all its members and nothing else), else 0.
         std::size_t selectedGroup() const;
@@ -520,10 +522,8 @@ namespace curvy {
         // Selected objects' ids and current outlines - the `before` for a drag.
         // `withChildren` also records the objects hanging from the selection, for edits that carry them along (a move, resize, rotate or flip).
         std::vector<GeometryState> snapshotSelection(bool withChildren = false) const;
-        // The transform node that places an object's shape (invalidNodeId when it has none). With one object selected the transform origin
+        // The transform node that places an object's shape (kNoNode when it has none). With one object selected the transform origin
         // is that node's pivot, so the canvas and the node show and edit the same point.
-        // Only for an object in the root scope; transformRefOf answers for any scope.
-        jitnodes::NodeId transformNodeOf(std::size_t objectId) const;
         NodeRef transformRefOf(std::size_t objectId) const;
         // The matrix the groups holding `scope` put on everything inside it (identity for the root).
         BLMatrix2D scopeMatrix(std::uint32_t scope) const;
@@ -936,7 +936,6 @@ namespace curvy {
         void syncGroupScopes();
         void pruneGroupScopes();
         std::vector<std::size_t> groupChainOfScope(std::uint32_t scope) const;
-        NodeRef groupSubnetOf(std::size_t group) const;
         void putGroupProps(std::size_t group, const GroupProps& props);
         mutable std::unordered_map<std::size_t, NodeRef> groupSubnets_;
         // syncPathNodes for the objects of one scope; true when it removed a shape node.

@@ -812,6 +812,34 @@ class Grouping(CurvyCase):
         self.app.key("ctrl+z")
         self.assertEqual("1 object", self.picked())
 
+    def test_the_flow_view_enters_a_group_and_escape_leaves_it(self):
+        self.draw_two()
+        self.app.key("ctrl+g")
+        self.app.click("graphToggle")
+        self.app.wait_until(lambda: self.app.prop("graphToggle", "checked"), "the graph dock")
+        self.app.click_segment("graphModeControl", 1)
+        self.app.wait_until(lambda: "nobody uses" in self.app.prop("graphStatus", "text"), "the Flow view")
+        self.app.click_row("graphTree", "group")                         # the group's subnet node, a top row of the root
+        self.app.wait_until(lambda: self.app.prop("graphDetailKind", "text") == "Group", "the group's box")
+        self.app.click("graphEnterButton")
+        self.app.wait_until(lambda: "Inside" in self.app.prop("graphStatus", "text"), "the view to enter the group")
+        self.app.find_row("graphTree", "..")                              # the way back is the first row
+        self.app.find_row("graphTree", "Transform")                       # and the members' nodes are listed
+        self.app.key("escape")
+        self.app.wait_until(lambda: "nobody uses" in self.app.prop("graphStatus", "text"), "Escape to leave the group")
+
+    def test_a_group_row_of_the_document_view_enters_the_group(self):
+        self.draw_two()
+        self.app.key("ctrl+g")
+        self.app.click("graphToggle")
+        self.app.wait_until(lambda: self.app.prop("graphToggle", "checked"), "the graph dock")
+        self.app.click_row("graphTree", "<Group>")
+        self.app.wait_until(lambda: self.app.prop("graphDetailKind", "text") == "Group", "the group's box")
+        self.app.click("graphEnterButton")
+        self.app.wait_until(lambda: "Inside" in self.app.prop("graphStatus", "text"), "the view to enter the group")
+        self.app.click_row("graphTree", "..")
+        self.app.wait_until(lambda: "nobody uses" in self.app.prop("graphStatus", "text"), "the .. row to leave")
+
 
 class Welcome(CurvyCase):
     first_run = True

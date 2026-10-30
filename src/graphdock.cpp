@@ -24,6 +24,7 @@ namespace curvy {
 
     namespace {
         constexpr float kRowHeight = 24.0f, kCaptionWidth = 74.0f;
+        constexpr const char* kUpKey = "UP";   // the ".." row at the top of an entered group
 
         template <typename T>
         T* find(View& root, const char* name) {
@@ -41,6 +42,7 @@ namespace curvy {
             if (nodeType == kTransformNodeType) return "Transform";
             if (nodeType == kTagNodeType) return "Tag";
             if (nodeType == kMovePointsNodeType) return "Move Points";
+            if (nodeType == kSubnetNodeType) return "Group";
             if (nodeType == kFillNodeType) return "Fill";
             if (nodeType == kStrokeNodeType) return "Stroke";
             if (nodeType == kEffectNodeType) return "Effect";
@@ -55,6 +57,7 @@ namespace curvy {
             if (nodeType == kFillNodeType) return "icons/node-fill.svg";
             if (nodeType == kStrokeNodeType) return "icons/node-stroke.svg";
             if (nodeType == kEffectNodeType) return "icons/node-effect.svg";
+            if (nodeType == kSubnetNodeType) return "icons/node-group.svg";
             return "icons/node-shape.svg";
         }
 
@@ -183,6 +186,17 @@ namespace curvy {
                 refresh();
             }
             return SyncReturn::Handled;
+        });
+        // Esc leaves the entered group while the keyboard is in the dock; anywhere else it keeps its other jobs (cards, drags).
+        connections_.add(frame_.rootView().onKeyDown, [this](View&, std::uint32_t mods, int, int, std::uint32_t vk) {
+            if (vk != vkEscape || mods != 0 || !shown_ || viewScope_ == 0 || mode_ != Mode::Flow) {
+                return SyncReturn::Ignored;
+            }
+            const View* focus = frame_.rootView().focusedSubView();
+            while (focus != nullptr && focus != dock_) {
+                focus = focus->parent();
+            }
+            return focus != nullptr && exitGroup() ? SyncReturn::Handled : SyncReturn::Ignored;
         });
         restyle();
         sync();
@@ -314,6 +328,19 @@ namespace curvy {
             }
             return SyncReturn::Handled;
         });
+        enterButton_ = new Button();
+        enterButton_->setText("Enter");
+        enterButton_->setName("graphEnterButton");
+        enterButton_->setVisible(false);
+        detail_->addChild(enterButton_);
+        connections_.add(enterButton_->onClick, [this](Control&) {
+            if (detailNode_.valid() && document_.node(detailNode_).typeName() == kSubnetNodeType) {
+                enterSubnet(detailNode_);
+            } else if (detailGroup_ != 0) {
+                enterSubnet(document_.groupSubnetOf(detailGroup_));
+            }
+            return SyncReturn::Handled;
+        });
         connections_.add(pathButtons_[0]->onClick, [this](Control&) {
             if (detailObject_ != 0) {
                 document_.setSelection({detailObject_});
@@ -366,6 +393,10 @@ namespace curvy {
         }
         if (resetButton_->isVisible()) {
             resetButton_->setBounds(Rect(fieldLeft, y, 64.0f, 22.0f));
+            y += kRowHeight;
+        }
+        if (enterButton_->isVisible()) {
+            enterButton_->setBounds(Rect(fieldLeft, y, 64.0f, 22.0f));
             y += kRowHeight;
         }
         auto section = [&](Label* header, Label* none, std::vector<LinkRow>& links) {
@@ -514,7 +545,68 @@ namespace curvy {
         }
         collapsed_.clear();
         refresh();
-        status_->setText(mode == Mode::Document ? "Layers and groups, each shape with the node behind it" : "The nodes nobody uses, each with what feeds it");
+        status_->setText("Layers and groups, each shape with the node behind it");
+        showScope();
+    }
+
+    bool GraphDock::enterGroup(std::uint32_t scope) {
+        if (scope == 0 || scope >= document_.scopeCount() || document_.findNetwork(scope) == nullptr) {
+            return false;
+        }
+        viewScope_ = scope;
+        collapsed_.clear();
+        if (mode_ != Mode::Flow) {
+            setMode(Mode::Flow);   // rebuilds
+        } else {
+            refresh();
+        }
+        showScope();
+        return true;
+    }
+
+    bool GraphDock::enterSubnet(const NodeRef& subnet) {
+        if (!document_.hasNode(subnet) || document_.node(subnet).typeName() != kSubnetNodeType) {
+            return false;
+        }
+        return enterGroup(document_.scopeOfSubnet(subnet));
+    }
+
+    bool GraphDock::exitGroup() {
+        if (viewScope_ == 0) {
+            return false;
+        }
+        const std::uint32_t from = viewScope_;
+        viewScope_ = document_.parentOfScope(from).scope;
+        collapsed_.clear();
+        refresh();
+        showScope();
+        return true;
+    }
+
+    void GraphDock::leaveMissingScope() {
+        while (viewScope_ != 0 && (viewScope_ >= document_.scopeCount() || document_.findNetwork(viewScope_) == nullptr)) {
+            viewScope_ = viewScope_ < document_.scopeCount() ? document_.parentOfScope(viewScope_).scope : 0;
+        }
+    }
+
+    std::string GraphDock::scopeTitle() const {
+        std::vector<std::string> names;
+        for (std::uint32_t scope = viewScope_; scope != 0 && scope < document_.scopeCount(); scope = document_.parentOfScope(scope).scope) {
+            const NodeRef subnet = document_.parentOfScope(scope);
+            names.push_back(document_.hasNode(subnet) ? document_.node(subnet).name() : std::string("?"));
+        }
+        std::string title;
+        for (std::size_t i = names.size(); i > 0; --i) {
+            title += (title.empty() ? "" : " > ") + names[i - 1];
+        }
+        return title.empty() ? title : "Root > " + title;
+    }
+
+    void GraphDock::showScope() {
+        if (status_ == nullptr || mode_ != Mode::Flow) {
+            return;
+        }
+        status_->setText(viewScope_ == 0 ? "The nodes nobody uses, each with what feeds it" : "Inside " + scopeTitle() + " - Esc leaves the group");
     }
 
     void GraphDock::setFilter(const std::string& filter) {
@@ -734,7 +826,7 @@ namespace curvy {
 
     std::vector<GraphRow> GraphDock::flowRowsFromGraph() const {
         FlowSource source;
-        const jitnodes::Network& net = document_.network();
+        const jitnodes::Network& net = document_.networkOf(viewScope_);
         source.nodes = net.nodeIds();
         for (jitnodes::NodeId id : source.nodes) {
             std::vector<jitnodes::NodeId> inputs;
@@ -746,7 +838,18 @@ namespace curvy {
             }
             source.inputs.push_back(std::move(inputs));
         }
-        return flowRows(source, [this](GraphRow& row) { describe(row, NodeRef(row.node)); });
+        const std::uint32_t scope = viewScope_;
+        std::vector<GraphRow> rows = flowRows(source, [this, scope](GraphRow& row) { describe(row, NodeRef(scope, row.node)); });
+        if (scope != 0) {
+            GraphRow up;
+            up.kind = GraphRow::Kind::Group;
+            up.text = "..";
+            up.summary = scopeTitle();
+            up.icon = "icons/node-group.svg";
+            up.key = kUpKey;
+            rows.insert(rows.begin(), up);
+        }
+        return rows;
     }
 
     std::vector<GraphRow> GraphDock::buildRows() const {
@@ -764,8 +867,8 @@ namespace curvy {
             mix(layer.parent);
             mix(hashText(layer.name));
         }
-        const jitnodes::Network& net = document_.network();
-        mix(net.nodeIds().size());
+        mix(viewScope_);
+        mix(document_.networkOf(viewScope_).nodeIds().size());
         for (std::size_t i = 0; i < document_.objectCount(); ++i) {
             const SketchObject& object = document_.object(i);
             mix(object.id());
@@ -913,6 +1016,11 @@ namespace curvy {
         if (dock_ == nullptr || tree_ == nullptr) {
             return;
         }
+        const std::uint32_t entered = viewScope_;
+        leaveMissingScope();
+        if (viewScope_ != entered) {
+            showScope();
+        }
         const std::size_t sig = signature();
         if (built_ && sig == lastSignature_) {
             refreshDetailValues();
@@ -962,6 +1070,9 @@ namespace curvy {
         if (info_ != nullptr) {
             std::size_t nodes = 0;
             for (std::uint32_t scope = 0; scope < document_.scopeCount(); ++scope) {
+                if (viewScope_ != 0 && mode_ == Mode::Flow && scope != viewScope_) {
+                    continue;   // inside a group: the nodes of that group
+                }
                 if (const jitnodes::Network* net = document_.findNetwork(scope)) {
                     nodes += net->nodeIds().size();
                 }
@@ -984,6 +1095,10 @@ namespace curvy {
         }
         // Changing the selection rebuilds the tree and frees the model the row lives in.
         const GraphRow row = *found;
+        if (row.key == kUpKey) {
+            exitGroup();
+            return;
+        }
         selectedKey_ = row.key;
         updating_ = true;
         if (row.kind == GraphRow::Kind::Layer) {
@@ -1133,6 +1248,9 @@ namespace curvy {
         }
         if (resetButton_ != nullptr) {
             resetButton_->setVisible(false);
+        }
+        if (enterButton_ != nullptr) {
+            enterButton_->setVisible(false);
         }
     }
 
@@ -1411,12 +1529,17 @@ namespace curvy {
         clearDetail();
         detailNode_ = kNoNode;
         detailObject_ = 0;
+        detailGroup_ = 0;
         if (row == nullptr) {
             detailTitle_->setText("Nothing selected");
             detailKind_->setText("");
         } else if (row->kind == GraphRow::Kind::Layer || row->kind == GraphRow::Kind::Group) {
             detailTitle_->setText(row->text);
             detailKind_->setText(row->kind == GraphRow::Kind::Layer ? "Layer" : "Group");
+            if (row->kind == GraphRow::Kind::Group && row->groupId != 0 && document_.groupSubnetOf(row->groupId).valid()) {
+                detailGroup_ = row->groupId;
+                enterButton_->setVisible(true);
+            }
         } else if (row->node != 0 && document_.hasNode(NodeRef(row->scope, row->node))) {
             const NodeRef id(row->scope, row->node);
             detailNode_ = id;
@@ -1495,6 +1618,9 @@ namespace curvy {
                 }
                 if (type == kTransformNodeType) {
                     resetButton_->setVisible(true);
+                }
+                if (type == kSubnetNodeType) {
+                    enterButton_->setVisible(true);
                 }
             }
             showLinks(id);

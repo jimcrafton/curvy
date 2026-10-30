@@ -95,12 +95,38 @@ Ids are per network, so a node is addressed by `NodeRef{scope, id}`: `scope` is 
   scopes too (a nested scope read from a file had no parent entry and `parentOfScope` threw). Loaders still build subnets from the `<g>`/group ids through the sync.
   Not done: `groups_`/`groupProps_` are not deleted (clones, loaders and unplaced objects have no document to ask), and group/ungroup still move chains in the sync rather than
   at the call. Test `SketchDocumentScopes.GroupPropsLiveInTheSubnet`; 2087 ctest (clipboard test flaky) and the three checks pass; GUI suite not rerun.
-- **S4 Layers by containment.** `layers_` replaced; Layers panel and order via the container merge.
+- **S4 Layers by containment.** `layers_` replaced; Layers panel and order via the container merge. **Not started; trial 2026-10-29 reverted.** A first cut (layer
+  subnets with a `layerId` parameter, objects moved into root > layer > sublayer > group by the same sync as S3a, graph-wins merge for the layer) built and ran, but
+  every object, in the default one-layer document too, then lives in a subnet. Result: about 15 `PathNode.*` tests, the `SketchDocumentScopes.*` tests, the big-example
+  load (27 s) and the thousand-object test (4 s) failed, because root-scope assumptions are everywhere (`network()` node ids in tests, root-only Flow view, `NodeId`
+  shortcuts) and the sync's per-object scope walks cost too much. Before retrying: (1) move the remaining root-only code and the tests to `NodeRef` (2026-10-30: `transformNodeOf` removed, `tagNodeOf`/`addMovePoints` return `NodeRef`, the checks and the placement/tag/key/expression tests converted; still root-only: Flow view and `GraphRow::node`, the `NodeId` shortcuts, tests that count `doc.network()` nodes, the .skb loader's curve fix-up); (2) make the sync
+  incremental (only objects whose layer/groups changed) and cache chain-of-scope; (3) decide whether the default document keeps its one layer as the root itself;
+  (4) only then replace `layers_` and the flat paint order with merge nodes.
+  **Prerequisites 2 and 3, 2026-10-30.** *(2) Measured, not rebuilt.* Test `SketchDocumentScopes.AnEditCostsLittleWhenManyObjectsAreGrouped` (1000 objects in 100 groups, 50
+  adds): about 1.2 ms per edit, of which the group sync is 0.6 ms and the path/appearance sync 0.6 ms, i.e. a linear 1 to 1.5 us per object per `changed()` (about 15 ms at
+  10 000 objects). The steady-state walk is therefore not what made the trial slow; the cost is in **moving** objects (about 0.25 ms per object: copy the chain, paste, remove,
+  per object) and in loading a flat file whose objects are then all moved. So the sync is not made incremental yet; what S4 needs instead is (a) files saved after S4 keep the
+  subnets, so a load moves nothing, (b) the migration of an old flat file batched per source scope, (c) a per-object dirty set only if the linear walk shows up in a real
+  document. One cheap fix landed: `syncAppearanceNodes` no longer rescans every node of every scope for orphaned look nodes when a single object is added (only on a removal or
+  a bulk change), about 28% of the path sync at 1000 objects.
+  *(3) Decision: the root holds the first top-level layer's own objects ("base layer").* Every other layer, and every sublayer, is a subnet of its parent's scope; a layer's
+  sublayers are subnets inside the scope of the layer, then its own objects, which matches "paints its sublayers and then its own objects". Why: a one-layer document stays flat, so
+  today's code, tests and file size are unchanged and the common case pays nothing; adding a layer moves no existing object (only the new layer is a subnet); the alternative of
+  making every layer a subnet puts every object of every document through the move path and breaks the root-scope assumptions all at once (the trial). Cost: deleting or
+  reordering the first layer promotes another layer to root, one batched bulk move of two layers' objects; rare, and bounded by the objects of those layers. The paint order is
+  the merge node in the root: sublayer subnets of the base layer, its own objects, then the next top-level layer's subnet, and so on.
 - **S5 Scoped selection and graph dock. DONE 2026-10-28** (the enter/exit-group view is not built). `hitTestNode`, `selectedNodes` and `setSelectedNodes` use `NodeRef`;
   `selectionOrigin`/`setSelectionOrigin` go through `transformRefOf`. The graph dock works on `NodeRef` throughout (`GraphRow::scope`, `detailNode()`, detail and link rows,
   edits, paint kind, reset transform), builds appearance chains per scope, and counts nodes over all scopes, so grouped objects list and edit like root ones. Flow view
   still lists the root network only. Test `NodeSelection.GroupedObjectsAreSelectedAndPickedByTheirScopedNode`; 2086 ctest and the three checks pass; GUI suite not rerun.
-  Remaining from the old S5: entering a group on the canvas/dock, and `groupAngle_` stays outside the graph like `frameAngle_`.
+  Remaining from the old S5: entering a group on the canvas, and `groupAngle_` stays outside the graph like `frameAngle_`.
+  **Enter/exit-group view in the dock, 2026-10-30.** The Flow view lists one network, `GraphDock::viewScope()` (0 = root). A group's subnet node is a row of its parent's Flow
+  view (type label "Group"); selecting it, or a group row of the Document view, shows an **Enter** button in the box, and `enterGroup(scope)` / `enterSubnet(ref)` switch to the Flow
+  view of that scope. Inside, the first row is `..` (click it), Esc leaves while the keyboard focus is in the dock (the root-view key delegate, so Esc keeps its other jobs
+  elsewhere), `exitGroup()` goes up one. The status line reads "Inside Root > group1 - Esc leaves the group", the node count is that group's, and a group that is ungrouped or
+  undone away takes the view back to the nearest scope that still exists. Not done: the canvas does not scope (it still shows and picks everything); the Flow view of an entered
+  group does not yet draw a different background. Checks in `--check-workspace`; GUI tests `Grouping.test_the_flow_view_enters_a_group_and_escape_leaves_it` and
+  `test_a_group_row_of_the_document_view_enters_the_group` (not yet run).
 - **S6 Save formats:** SVG round trip; `.skb` v5 graph chunk; GUI tests for group move/undo/save/load.
 - **S7 Cleanup:** delete `Layer`/`groups_` duplicates, update docs and tracker.
 

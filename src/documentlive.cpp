@@ -374,7 +374,8 @@ namespace curvy {
 
     void SketchDocument::syncAppearanceNodes(bool scan) {
         ScopeViews views(*this);
-        scan = scan || appearanceObjectCount_ != objects_.size();
+        // Look nodes are orphaned only by a removal or a bulk change (a load, a restore); adding one object never leaves any.
+        scan = scan || appearanceObjectCount_ > objects_.size() || objects_.size() > appearanceObjectCount_ + 1;
         appearanceObjectCount_ = objects_.size();
         for (const std::unique_ptr<SketchObject>& object : objects_) {
             const std::uint32_t scope = object->graphScope();
@@ -390,7 +391,6 @@ namespace curvy {
             }
             jitnodes::Network& net = *view.net;
             const auto& placed = view.placed;
-            scan = true;
             std::vector<jitnodes::NodeId> chain = appearanceChain(views.nextOf(view), shape);
             std::size_t keep = 0;
             while (keep < chain.size() && keep < items.size() && net.node(chain[keep]).typeName() == appearanceNodeType(items[keep].kind)) {
@@ -1026,11 +1026,6 @@ namespace curvy {
         return kNoNode;
     }
 
-    jitnodes::NodeId SketchDocument::transformNodeOf(std::size_t objectId) const {
-        const NodeRef ref = transformRefOf(objectId);
-        return ref.scope == 0 ? ref.id : jitnodes::invalidNodeId;
-    }
-
     bool SketchDocument::pathHeldByNode(const SketchObject& object) const {
         if (object.isText() || object.graphNode() == jitnodes::invalidNodeId || !object.boundToNodes()) {
             return false;
@@ -1061,27 +1056,27 @@ namespace curvy {
         }
     }
 
-    jitnodes::NodeId SketchDocument::tagNodeOf(std::size_t objectId, const std::string& group, bool create) {
+    NodeRef SketchDocument::tagNodeOf(std::size_t objectId, const std::string& group, bool create) {
         const SketchObject* object = findById(objectId);
         const NodeRef placeRef = transformRefOf(objectId);
         if (object == nullptr || !placeRef.valid() || group.empty()) {
-            return jitnodes::invalidNodeId;
+            return kNoNode;
         }
         const jitnodes::NodeId place = placeRef.id;
         jitnodes::Network& net = networkOf(placeRef.scope);
         for (jitnodes::NodeId tag : tagsBetween(net, place, object->graphNode())) {
             if (net.node(tag).getString("group") == group) {
-                return tag;
+                return NodeRef(placeRef.scope, tag);
             }
         }
         if (!create) {
-            return jitnodes::invalidNodeId;
+            return kNoNode;
         }
         const jitnodes::NodeId tag = net.addNode(kTagNodeType, net.uniqueName("tag"));
         net.node(tag).setString("group", group);
         net.connect(net.inputOf(place, 0), tag, 0);
         net.connect(tag, place, 0);
-        return tag;
+        return NodeRef(placeRef.scope, tag);
     }
 
     std::vector<std::string> SketchDocument::tagNames(std::size_t objectId) const {
@@ -1125,20 +1120,21 @@ namespace curvy {
             return false;
         }
         const jitnodes::GraphSnapshot snapshot = snapshotGraph();
-        const jitnodes::NodeId tag = tagNodeOf(objectId, group, on);
-        if (tag == jitnodes::invalidNodeId) {
+        const NodeRef tag = tagNodeOf(objectId, group, on);
+        if (!tag.valid()) {
             return false;
         }
-        networkOf(findById(objectId)->graphScope()).node(tag).setString("ids", text);
+        networkOf(tag.scope).node(tag.id).setString("ids", text);
         commitGraphEdit(snapshot, on ? "Tag Points" : "Untag Points");
         return true;
     }
 
     bool SketchDocument::clearTag(std::size_t objectId, const std::string& group) {
-        const jitnodes::NodeId tag = tagNodeOf(objectId, group, false);
-        if (tag == jitnodes::invalidNodeId) {
+        const NodeRef tagRef = tagNodeOf(objectId, group, false);
+        if (!tagRef.valid()) {
             return false;
         }
+        const jitnodes::NodeId tag = tagRef.id;
         const jitnodes::GraphSnapshot snapshot = snapshotGraph();
         const NodeRef placeRef = transformRefOf(objectId);
         jitnodes::Network& net = networkOf(placeRef.scope);
@@ -1176,11 +1172,11 @@ namespace curvy {
         }
     }
 
-    jitnodes::NodeId SketchDocument::addMovePoints(std::size_t objectId, const std::string& group) {
+    NodeRef SketchDocument::addMovePoints(std::size_t objectId, const std::string& group) {
         const SketchObject* object = findById(objectId);
         const NodeRef placeRef = transformRefOf(objectId);
         if (object == nullptr || !placeRef.valid()) {
-            return jitnodes::invalidNodeId;
+            return kNoNode;
         }
         const jitnodes::NodeId place = placeRef.id;
         const jitnodes::GraphSnapshot snapshot = snapshotGraph();
@@ -1212,7 +1208,7 @@ namespace curvy {
         } catch (const std::exception&) {
         }
         commitGraphEdit(snapshot, "Move Points");
-        return mover;
+        return NodeRef(placeRef.scope, mover);
     }
 
     int SketchDocument::pointIdNear(std::size_t objectId, const BLPoint& world, double reach) const {

@@ -51,6 +51,16 @@ namespace curvy {
 
         Mode mode() const { return mode_; }
         void setMode(Mode mode);
+        // The Flow view lists the nodes of one network: the root's, or that of a group entered with enterGroup. Leaving goes up one group.
+        std::uint32_t viewScope() const { return viewScope_; }
+        // Switches to the Flow view of the group's contents (a document scope); false when the scope has no network.
+        bool enterGroup(std::uint32_t scope);
+        // Enters the group a subnet node stands for.
+        bool enterSubnet(const NodeRef& subnet);
+        // Goes up to the group holding this one; false at the root.
+        bool exitGroup();
+        // "Root > group1 > group2" for the entered group, empty at the root.
+        std::string scopeTitle() const;
         void setFilter(const std::string& filter);
 
         newui::SubView* dock() const { return dock_; }
@@ -142,6 +152,9 @@ namespace curvy {
         std::size_t signature() const;
         std::size_t objectOfNode(NodeRef node) const;
         void expandAll();
+        // Back to the root when the entered group is gone (ungrouped, or undone away).
+        void leaveMissingScope();
+        void showScope();
 
         newui::Frame& frame_;
         CanvasView& canvas_;
@@ -162,6 +175,8 @@ namespace curvy {
         std::vector<DetailRow> detailRows_;
         std::vector<newui::Button*> pathButtons_;
         newui::Button* resetButton_ = nullptr;
+        newui::Button* enterButton_ = nullptr;
+        std::uint32_t viewScope_ = 0;             // the network the Flow view lists
         std::vector<LinkRow> inputRows_, userRows_;
         std::shared_ptr<jitnodes::GraphSnapshot> scrubBefore_;   // the graph when the drag started
         newui::Label* inputsHeader_ = nullptr;
@@ -175,6 +190,7 @@ namespace curvy {
         std::set<std::string> collapsed_;         // keys of the rows the user closed (everything starts open)
         NodeRef detailNode_;
         std::size_t detailObject_ = 0;
+        std::size_t detailGroup_ = 0;              // the group a Group row of the Document view stands for
         std::string selectedKey_;                  // the row the user clicked, kept while its object stays selected
         std::size_t lastSignature_ = 0;
         bool built_ = false;

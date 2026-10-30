@@ -446,6 +446,34 @@ namespace curvy {
                 expect(nodes == doc_->network().nodeIds().size() && graph.rows().front().kind == GraphRow::Kind::Node, "Flow view lists the nodes");
                 graph.setMode(GraphDock::Mode::Document);
 
+                // Entering a group scopes the Flow view to the nodes inside it; Esc, the ".." row or exitGroup leaves.
+                doc_->setSelection({doc_->object(0).id(), doc_->object(1).id()});
+                expect(doc_->groupSelection(), "two objects are grouped");
+                graph.setMode(GraphDock::Mode::Flow);
+                const GraphRow* groupRow = nullptr;
+                for (const GraphRow& r : graph.rows()) {
+                    if (r.kind == GraphRow::Kind::Node && r.summary == "Group") {
+                        groupRow = &r;
+                    }
+                }
+                expect(groupRow != nullptr, "the group is a node of the root in the Flow view");
+                if (groupRow != nullptr) {
+                    const NodeRef subnet(groupRow->scope, groupRow->node);
+                    expect(graph.enterSubnet(subnet) && graph.viewScope() != 0 && graph.mode() == GraphDock::Mode::Flow, "a group node can be entered");
+                    std::size_t inside = 0;
+                    for (const GraphRow& r : graph.rows()) {
+                        inside += r.kind == GraphRow::Kind::Node ? 1 : 0;
+                    }
+                    expect(inside == doc_->networkOf(graph.viewScope()).nodeIds().size() && graph.rows().front().text == "..", "inside it the rows are the group's nodes under a .. row");
+                    expect(graph.scopeTitle().rfind("Root > ", 0) == 0, "and the title names the path");
+                    expect(graph.exitGroup() && graph.viewScope() == 0 && !graph.exitGroup(), "leaving goes back to the root, and the root has no further up");
+                    expect(graph.enterSubnet(subnet), "entered again");
+                    doc_->undoStack().undo();
+                    graph.refresh();
+                    expect(graph.viewScope() == 0, "a group that is undone away takes the view back to the root");
+                }
+                graph.setMode(GraphDock::Mode::Document);
+
                 doc_->setSelection({});
                 expect(!graph.detailNode().valid() && graph.title() == "Nothing selected", "no selection, no node in the box");
                 w_.runCommand("view.graph");
@@ -498,12 +526,12 @@ namespace curvy {
                 GraphDock& graph = w_.graph();
                 w_.runCommand("view.graph");
                 graph.setMode(GraphDock::Mode::Flow);
-                const jitnodes::NodeId place = doc_->transformNodeOf(id);
+                const NodeRef place = doc_->transformRefOf(id);
                 expect(graph.selectNode(place) && graph.detailCaption(0) == "translateX", "the Transform node's box starts with Translate X");
                 timeline.setFrame(0);
                 graph.setDetailValue(0, "sin(time) * 50");
                 expect(graph.detailValue(0) == "=sin(time) * 50", "text that is not a number becomes an expression, shown with the =");
-                expect(doc_->network().node(place).expression("translateX") == "sin(time) * 50", "and is on the node");
+                expect(doc_->node(place).expression("translateX") == "sin(time) * 50", "and is on the node");
                 timeline.setFrame(12);
                 expect(std::fabs(left() - (10.0 + 50.0 * std::sin(0.5))) < 1e-2, "the shape follows the time the timeline sets");
                 timeline.setFrame(6);
@@ -511,7 +539,7 @@ namespace curvy {
                 graph.setDetailValue(0, "sin((");
                 expect(graph.detailValue(0) == "=sin(time) * 50", "a bad expression is refused and the field keeps the old one");
                 graph.setDetailValue(0, "5");
-                expect(graph.detailValue(0) == "5" && doc_->network().node(place).expression("translateX").empty(), "typing a number takes the expression away");
+                expect(graph.detailValue(0) == "5" && doc_->node(place).expression("translateX").empty(), "typing a number takes the expression away");
                 timeline.setFrame(24);
                 expect(std::fabs(left() - 15.0) < 1e-3, "the shape holds still again");
                 doc_->undoStack().undo();
@@ -519,19 +547,14 @@ namespace curvy {
 
                 // A Tag node's box: kind and operation are choices, the counts are numbers from zero up.
                 expect(doc_->tagPoints(id, "pins", {1, 2}, true), "two points are tagged");
-                jitnodes::NodeId tag = jitnodes::invalidNodeId;
-                for (jitnodes::NodeId candidate : doc_->network().nodeIds()) {
-                    if (doc_->network().node(candidate).typeName() == kTagNodeType) {
-                        tag = candidate;
-                    }
-                }
+                const NodeRef tag = doc_->tagNodeOf(id, "pins", false);
                 graph.refresh();
-                expect(tag != jitnodes::invalidNodeId, "a Tag node exists");
+                expect(tag.valid(), "a Tag node exists");
                 expect(graph.selectNode(tag), "its row can be selected");
                 expect(graph.detailCaption(5) == "kind" && graph.detailCaption(6) == "operation", "the Tag node's box lists kind and operation");                graph.setDetailValue(5, "anchors");
-                expect(graph.detailValue(5) == "anchors" && doc_->network().node(tag).getString("kind") == "anchors", "a choice sets the node's string");
+                expect(graph.detailValue(5) == "anchors" && doc_->node(tag).getString("kind") == "anchors", "a choice sets the node's string");
                 graph.setDetailValue(3, "2");
-                expect(doc_->network().node(tag).baseFloat("offset") == 2.0f, "offset takes a number");
+                expect(doc_->node(tag).baseFloat("offset") == 2.0f, "offset takes a number");
 
                 doc_->setTime(0.0);
                 w_.runCommand("view.graph");

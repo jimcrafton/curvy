@@ -125,7 +125,7 @@ nothing of sketch types (paths, layers, artboards), so it can be unit tested alo
   the transform tools, numeric Transform panel and hold-scrub, align, distribute, rotate 90, flip, Transform Again) goes through `SketchDocument::placeObjects`, which writes the
   transform nodes (and a text object's strings) first and refreshes the object from the same numbers; its undo step is `commitPlacement`. A whole-graph `GraphSnapshot` costs
   135 ms at 2000 objects, so undo restores the touched nodes' numbers instead (plan in `docs/dg03-node-truth.md`). `paintWarp` is a text parameter of the transform node.
-- **Point ids and tags (2026-10-25).** Every point of a shape node's curve has an int attribute `id` (`kPointIdAttrib`) that travels with it through the nodes (and into saved
+- **Point ids and tags (2026-10-25).** How tags work and how to use them: `docs/point-tags.md`. Every point of a shape node's curve has an int attribute `id` (`kPointIdAttrib`) that travels with it through the nodes (and into saved
   files). `geometryFromPath` numbers a new shape's points 0..n-1; when the object is edited and its points are added or removed, the points still where they were (matched in order,
   64-point lookahead) keep their `id` and every other attribute, and new points get ids above all the old ones. Research behind it: Houdini renumbers points on delete and the
   recommended practice is a stable `id` attribute; Blender loses groups wherever a node rebuilds geometry without carrying the attribute; CAD calls it the topological naming
