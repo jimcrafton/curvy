@@ -6526,6 +6526,36 @@ TEST(SketchDocumentScopes, GroupingMovesTheMembersIntoASubnet) {
     EXPECT_EQ(groupSubnetCount(doc), 0);
 }
 
+TEST(SketchDocumentScopes, EnteringAGroupLimitsPickingAndSelectionToIt) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    const std::size_t b = doc.add(SketchObject::makeRect(20, 0, 10, 10)).id();
+    const std::size_t c = doc.add(SketchObject::makeRect(40, 0, 10, 10)).id();
+    doc.setSelection({a, b});
+    ASSERT_TRUE(doc.groupSelection());
+    const std::uint32_t scope = doc.findById(a)->graphScope();
+    ASSERT_NE(scope, 0u);
+
+    EXPECT_EQ(doc.withGroupMembers({a}).size(), 2u) << "outside, a click picks the whole group";
+    doc.setSelection({a, b, c});
+    doc.setEnteredScope(scope);
+    EXPECT_EQ(doc.enteredScope(), scope);
+    EXPECT_EQ(doc.selection(), (std::vector<std::size_t>{a, b})) << "entering drops what lies outside";
+    EXPECT_TRUE(doc.inEnteredScope(*doc.findById(a)));
+    EXPECT_FALSE(doc.inEnteredScope(*doc.findById(c)));
+    EXPECT_EQ(doc.withGroupMembers({a}).size(), 1u) << "inside, a member is picked alone";
+    EXPECT_EQ(doc.hitTest(BLPoint(45, 5), 0.5), nullptr) << "the shape outside cannot be hit";
+    EXPECT_EQ(doc.hitTest(BLPoint(25, 5), 0.5), doc.findById(b));
+    doc.selectAll();
+    EXPECT_EQ(doc.selection().size(), 2u);
+    EXPECT_TRUE(doc.selectInRect(BLBox(-5, -5, 55, 15), false));
+    EXPECT_EQ(doc.selection().size(), 2u);
+
+    doc.setEnteredScope(0);
+    EXPECT_NE(doc.hitTest(BLPoint(45, 5), 0.5), nullptr);
+    EXPECT_TRUE(doc.inEnteredScope(*doc.findById(c)));
+}
+
 TEST(SketchDocumentScopes, GroupPropsLiveInTheSubnet) {
     SketchDocument doc;
     const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
@@ -6616,6 +6646,322 @@ TEST(SketchDocumentScopes, GroupsSurviveSvgAndBinaryRoundTrips) {
     check(fromBinary);
 }
 
+TEST(SketchDocumentScopes, TheBaseLayerStaysInTheRootAndOtherLayersAreSubnets) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    const std::size_t b = doc.add(SketchObject::makeRect(20, 0, 10, 10)).id();
+    EXPECT_EQ(groupSubnetCount(doc), 0) << "a one-layer document is flat";
+
+    const std::size_t second = doc.addLayer(0, "Second");
+    doc.setSelection({b});
+    ASSERT_TRUE(doc.moveSelectionToLayer(second));
+    EXPECT_EQ(doc.findById(a)->graphScope(), 0u);
+    const std::uint32_t scope = doc.findById(b)->graphScope();
+    ASSERT_NE(scope, 0u);
+    EXPECT_EQ(doc.layerIdOfScope(scope), second);
+    EXPECT_EQ(doc.groupIdOfScope(scope), 0u);
+    EXPECT_EQ(groupSubnetCount(doc), 1);
+    EXPECT_NEAR(doc.outlineBounds(*doc.findById(b)).x0, 20.0, 1e-3);
+
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.findById(b)->graphScope(), 0u);
+    EXPECT_EQ(groupSubnetCount(doc), 1) << "the layer is empty again but keeps its subnet";
+    doc.undoStack().redo();
+    EXPECT_NE(doc.findById(b)->graphScope(), 0u);
+    EXPECT_EQ(doc.layerOf(*doc.findById(b)), second);
+}
+
+TEST(SketchDocumentScopes, AnEmptyLayerHasASubnetUntilTheLayerIsDeleted) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    const auto subnets = [&] {
+        int count = 0;
+        for (std::uint32_t scope = 0; scope < doc.scopeCount(); ++scope) {
+            if (const jitnodes::Network* net = doc.findNetwork(scope)) {
+                for (jitnodes::NodeId id : net->nodeIds()) {
+                    count += net->node(id).typeName() == kSubnetNodeType ? 1 : 0;
+                }
+            }
+        }
+        return count;
+    };
+    EXPECT_EQ(subnets(), 0);
+    const std::size_t second = doc.addLayer(0, "Second");
+    const std::size_t sub = doc.addLayer(second, "Sub");
+    EXPECT_EQ(subnets(), 2) << "the layer and its sublayer, both empty";
+    ASSERT_TRUE(doc.deleteLayer(sub));
+    EXPECT_EQ(subnets(), 1);
+    ASSERT_TRUE(doc.deleteLayer(second));
+    EXPECT_EQ(subnets(), 0);
+}
+
+TEST(SketchDocumentScopes, ALayerSubnetShowsTheLayersNameAndFlags) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    const std::size_t second = doc.addLayer(0, "Ink Lines");
+    const std::size_t b = doc.add(SketchObject::makeRect(20, 0, 10, 10)).id();
+    ASSERT_EQ(doc.layerOf(*doc.findById(b)), second);
+    const NodeRef subnet = doc.parentOfScope(doc.findById(b)->graphScope());
+    ASSERT_TRUE(doc.hasNode(subnet));
+    EXPECT_EQ(doc.node(subnet).name(), "Ink_Lines");
+    EXPECT_EQ(doc.node(subnet).getString("label"), "Ink Lines");
+
+    doc.renameLayer(second, "Paint");
+    doc.setLayerVisible(second, false);
+    doc.setLayerLocked(second, true);
+    doc.setLayerColor(second, 0x112233);
+    EXPECT_EQ(doc.node(subnet).name(), "Paint");
+    EXPECT_EQ(doc.node(subnet).getFloat("visible"), 0.0f);
+    EXPECT_EQ(doc.node(subnet).getFloat("locked"), 1.0f);
+    EXPECT_EQ(doc.node(subnet).getFloat("color"), float(0x112233));
+}
+
+TEST(SketchDocumentScopes, AnEditOfALayerNodeIsReadBackIntoTheLayer) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    const std::size_t second = doc.addLayer(0, "Ink");
+    const NodeRef subnet = doc.parentOfScope(doc.add(SketchObject::makeRect(20, 0, 10, 10)).graphScope());
+    ASSERT_TRUE(doc.hasNode(subnet));
+    ASSERT_EQ(doc.layerOf(doc.object(1)), second);
+
+    doc.node(subnet).setString("label", "Pencil");
+    doc.node(subnet).setFloat("visible", 0.0f);
+    doc.node(subnet).setFloat("color", float(0x445566));
+    doc.touch();
+    ASSERT_NE(doc.findLayer(second), nullptr);
+    EXPECT_EQ(doc.findLayer(second)->name, "Pencil");
+    EXPECT_FALSE(doc.findLayer(second)->visible);
+    EXPECT_EQ(doc.findLayer(second)->color, 0x445566u);
+}
+
+TEST(SketchDocumentScopes, TheBaseLayerLivesOnAMarkerNodeWhileItIsNotTheDefault) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    EXPECT_EQ(doc.network().findNode("baseLayer"), jitnodes::invalidNodeId);
+
+    const std::size_t base = doc.layerChildren(0).front();
+    doc.renameLayer(base, "Backdrop");
+    doc.setLayerLocked(base, true);
+    const jitnodes::NodeId marker = doc.network().findNode("baseLayer");
+    ASSERT_NE(marker, jitnodes::invalidNodeId);
+    EXPECT_EQ(doc.network().node(marker).getString("label"), "Backdrop");
+    EXPECT_EQ(doc.network().node(marker).getFloat("locked"), 1.0f);
+
+    doc.network().node(marker).setString("label", "Sky");
+    doc.network().node(marker).setFloat("locked", 0.0f);
+    doc.touch();
+    EXPECT_EQ(doc.findLayer(base)->name, "Sky");
+    EXPECT_FALSE(doc.findLayer(base)->locked);
+
+    doc.renameLayer(base, "Layer 1");
+    EXPECT_EQ(doc.network().findNode("baseLayer"), jitnodes::invalidNodeId);
+}
+
+TEST(SketchDocumentScopes, TheOrderOfLayerNodesReordersTheLayers) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    const std::size_t b = doc.addLayer(0, "B");
+    const std::size_t c = doc.addLayer(0, "C");
+    doc.add(SketchObject::makeRect(20, 0, 10, 10));
+    ASSERT_EQ(doc.layerChildren(0).size(), 3u);
+    NodeRef bNode, cNode;
+    for (std::uint32_t scope = 1; scope < doc.scopeCount(); ++scope) {
+        const NodeRef at = doc.parentOfScope(scope);
+        (doc.layerIdOfScope(scope) == b ? bNode : cNode) = at;
+    }
+    ASSERT_TRUE(doc.hasNode(bNode));
+    ASSERT_TRUE(doc.hasNode(cNode));
+    doc.node(bNode).setFloat("layerOrder", 2.0f);
+    doc.node(cNode).setFloat("layerOrder", 1.0f);
+    doc.touch();
+    const std::vector<std::size_t> order = doc.layerChildren(0);
+    ASSERT_EQ(order.size(), 3u);
+    EXPECT_EQ(order[1], c);
+    EXPECT_EQ(order[2], b);
+}
+
+TEST(SketchDocumentScopes, ThePaintMergeNodeListsTheStackingOrder) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    const std::size_t b = doc.add(SketchObject::makeRect(20, 0, 10, 10)).id();
+    const std::size_t c = doc.add(SketchObject::makeRect(40, 0, 10, 10)).id();
+    const auto paintOrder = [&](std::uint32_t scope) {
+        std::vector<NodeRef> out;
+        jitnodes::Network* net = doc.findNetwork(scope);
+        const jitnodes::NodeId merge = net != nullptr ? net->findNode("paint") : jitnodes::invalidNodeId;
+        if (merge == jitnodes::invalidNodeId) {
+            return out;
+        }
+        for (int i = 0; i < net->node(merge).inputCount(); ++i) {
+            if (net->inputOf(merge, i) != jitnodes::invalidNodeId) {
+                out.push_back(NodeRef(scope, net->inputOf(merge, i)));
+            }
+        }
+        return out;
+    };
+    const auto tailOf = [&](std::size_t id) {
+        const SketchObject* object = doc.findById(id);
+        jitnodes::Network& net = doc.networkOf(object->graphScope());
+        jitnodes::NodeId at = object->graphNode();
+        for (bool moved = true; moved;) {
+            moved = false;
+            for (jitnodes::NodeId candidate : net.nodeIds()) {
+                if (candidate != at && net.node(candidate).inputCount() > 0 && net.inputOf(candidate, 0) == at && net.node(candidate).typeName() != "merge") {
+                    at = candidate;
+                    moved = true;
+                    break;
+                }
+            }
+        }
+        return NodeRef(object->graphScope(), at);
+    };
+    ASSERT_EQ(paintOrder(0).size(), 3u);
+    EXPECT_EQ(paintOrder(0)[0], tailOf(a));
+    EXPECT_EQ(paintOrder(0)[2], tailOf(c));
+
+    doc.setSelection({a});
+    ASSERT_TRUE(doc.arrangeSelection(SketchDocument::ArrangeOp::BringToFront));
+    const std::vector<NodeRef> reordered = paintOrder(0);
+    ASSERT_EQ(reordered.size(), 3u);
+    EXPECT_EQ(reordered[0], tailOf(b));
+    EXPECT_EQ(reordered[2], tailOf(a));
+
+    doc.setSelection({b, c});
+    ASSERT_TRUE(doc.groupSelection());
+    const std::uint32_t scope = doc.findById(b)->graphScope();
+    ASSERT_NE(scope, 0u);
+    EXPECT_EQ(paintOrder(scope).size(), 2u);
+    ASSERT_EQ(paintOrder(0).size(), 2u) << "the group subnet takes one slot of the root";
+    EXPECT_EQ(paintOrder(0)[0], doc.parentOfScope(scope));
+}
+
+TEST(SketchDocumentScopes, TheStackingOrderIsReadFromThePaintNodes) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    const std::size_t b = doc.add(SketchObject::makeRect(20, 0, 10, 10)).id();
+    const std::size_t c = doc.add(SketchObject::makeRect(40, 0, 10, 10)).id();
+    EXPECT_EQ(doc.stackingOrder(), (std::vector<std::size_t>{a, b, c}));
+
+    doc.setSelection({a});
+    ASSERT_TRUE(doc.arrangeSelection(SketchDocument::ArrangeOp::BringToFront));
+    EXPECT_EQ(doc.stackingOrder(), (std::vector<std::size_t>{b, c, a}));
+
+    doc.setSelection({b, c});
+    ASSERT_TRUE(doc.groupSelection());
+    const std::vector<std::size_t> grouped = doc.stackingOrder();
+    ASSERT_EQ(grouped.size(), 3u);
+    EXPECT_EQ(grouped.back(), a);
+    EXPECT_EQ(std::vector<std::size_t>(grouped.begin(), grouped.begin() + 2), (std::vector<std::size_t>{b, c}));
+
+    const std::size_t second = doc.addLayer(0, "Second");
+    const std::size_t d = doc.add(SketchObject::makeRect(60, 0, 10, 10)).id();
+    ASSERT_EQ(doc.layerOf(*doc.findById(d)), second);
+    const std::vector<std::size_t> layered = doc.stackingOrder();
+    ASSERT_EQ(layered.size(), 4u);
+    EXPECT_EQ(layered.back(), d) << "a layer in front paints last";
+}
+
+TEST(SketchDocumentScopes, AReorderOfThePaintNodeReordersTheObjects) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    const std::size_t b = doc.add(SketchObject::makeRect(20, 0, 10, 10)).id();
+    const std::size_t c = doc.add(SketchObject::makeRect(40, 0, 10, 10)).id();
+    jitnodes::Network& net = doc.network();
+    const jitnodes::NodeId merge = net.findNode("paint");
+    ASSERT_NE(merge, jitnodes::invalidNodeId);
+    std::vector<jitnodes::NodeId> inputs;
+    for (int i = 0; i < net.node(merge).inputCount(); ++i) {
+        if (net.inputOf(merge, i) != jitnodes::invalidNodeId) {
+            inputs.push_back(net.inputOf(merge, i));
+        }
+    }
+    ASSERT_EQ(inputs.size(), 3u);
+    for (int i = net.node(merge).inputCount() - 1; i >= 0; --i) {
+        if (net.inputOf(merge, i) != jitnodes::invalidNodeId) {
+            net.disconnect(merge, i);
+        }
+    }
+    net.connect(inputs[2], merge, 0);
+    net.connect(inputs[0], merge, 1);
+    net.connect(inputs[1], merge, 2);
+    doc.touch();
+    EXPECT_EQ(doc.stackingOrder(), (std::vector<std::size_t>{c, a, b}));
+    ASSERT_EQ(doc.objectCount(), 3u);
+    EXPECT_EQ(doc.object(0).id(), c);
+    EXPECT_EQ(doc.object(2).id(), b);
+
+    doc.setSelection({c});
+    ASSERT_TRUE(doc.arrangeSelection(SketchDocument::ArrangeOp::BringToFront));
+    EXPECT_EQ(doc.object(2).id(), c) << "an edit of the objects wins over the nodes";
+    EXPECT_EQ(doc.stackingOrder(), (std::vector<std::size_t>{a, b, c}));
+}
+
+TEST(SketchDocumentScopes, SublayersAndGroupsNestInsideTheirLayer) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    const std::size_t second = doc.addLayer(0, "Second");
+    const std::size_t sub = doc.addLayer(second, "Sub");
+    const std::size_t a = doc.add(SketchObject::makeRect(20, 0, 10, 10)).id();
+    const std::size_t b = doc.add(SketchObject::makeRect(40, 0, 10, 10)).id();
+    ASSERT_EQ(doc.layerOf(*doc.findById(a)), sub);
+    EXPECT_EQ(groupSubnetCount(doc), 1) << "the root holds the second layer only";
+    const std::uint32_t scope = doc.findById(a)->graphScope();
+    EXPECT_EQ(doc.layerIdOfScope(scope), sub);
+    EXPECT_EQ(doc.layerIdOfScope(doc.parentOfScope(scope).scope), second);
+
+    doc.setSelection({a, b});
+    ASSERT_TRUE(doc.groupSelection());
+    const std::uint32_t grouped = doc.findById(a)->graphScope();
+    EXPECT_NE(grouped, scope);
+    EXPECT_NE(doc.groupIdOfScope(grouped), 0u);
+    EXPECT_EQ(doc.parentOfScope(grouped).scope, scope) << "the group sits in its layer";
+    EXPECT_EQ(doc.layerOf(*doc.findById(a)), sub);
+    EXPECT_NEAR(doc.outlineBounds(*doc.findById(b)).x0, 40.0, 1e-3);
+
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.findById(a)->graphScope(), scope);
+    EXPECT_EQ(doc.layerOf(*doc.findById(a)), sub);
+}
+
+TEST(SketchDocumentScopes, DeletingTheBaseLayerPromotesTheNextOne) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    const std::size_t second = doc.addLayer(0, "Second");
+    const std::size_t b = doc.add(SketchObject::makeRect(20, 0, 10, 10)).id();
+    ASSERT_NE(doc.findById(b)->graphScope(), 0u);
+    ASSERT_TRUE(doc.deleteLayer(doc.layers().front().id));
+    ASSERT_EQ(doc.layers().size(), 1u);
+    EXPECT_EQ(doc.layers().front().id, second);
+    EXPECT_EQ(doc.findById(b)->graphScope(), 0u) << "the new base layer is the root";
+    EXPECT_EQ(groupSubnetCount(doc), 0);
+}
+
+TEST(SketchDocumentScopes, LayersSurviveSvgAndBinaryRoundTrips) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    const std::size_t second = doc.addLayer(0, "Second");
+    const std::size_t b = doc.add(SketchObject::makeRect(20, 0, 10, 10)).id();
+
+    auto check = [second](const SketchDocument& loaded) {
+        ASSERT_EQ(loaded.objectCount(), 2u);
+        EXPECT_EQ(loaded.object(0).graphScope(), 0u);
+        const SketchObject& moved = loaded.object(1);
+        EXPECT_NE(moved.graphScope(), 0u);
+        EXPECT_EQ(loaded.layerOf(moved), loaded.layers().back().id);
+        EXPECT_EQ(loaded.layerIdOfScope(moved.graphScope()), loaded.layerOf(moved));
+        EXPECT_EQ(groupSubnetCount(loaded), 1);
+        EXPECT_NEAR(loaded.outlineBounds(moved).x0, 20.0, 1e-3);
+        (void)second;
+    };
+    ASSERT_EQ(doc.layerOf(*doc.findById(b)), second);
+    SketchDocument fromSvg;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), fromSvg));
+    check(fromSvg);
+    SketchDocument fromBinary;
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc, true), fromBinary));
+    check(fromBinary);
+}
+
 TEST(GraphDocument, EditsAreUndoableSteps) {
     GraphDocument doc;
     const jitnodes::NodeId circle = doc.addGraphNode("circle").id;
@@ -6657,7 +7003,7 @@ TEST(LiveShape, OutlineFollowsTheNodeAndUndo) {
     EXPECT_TRUE(doc.network().nodeIds().empty());
     doc.undoStack().redo();
     ASSERT_NE(doc.findById(id), nullptr);
-    EXPECT_EQ(doc.network().nodeIds().size(), 3u) << "the shape, its fill and its stroke";
+    EXPECT_EQ(doc.network().nodeIds().size(), 4u) << "the shape, its fill and its stroke, and the paint merge";
 }
 
 TEST(LiveShape, SurvivesSvgRoundTrip) {
@@ -6782,7 +7128,7 @@ TEST(PathNode, EveryObjectHasANodeThroughEdits) {
     const jitnodes::NodeId node = doc.findById(a)->graphNode();
     doc.deleteSelection();
     EXPECT_TRUE(pathNodesMatch(doc));
-    EXPECT_EQ(doc.network().nodeIds().size(), 4u) << "the other object's shape, transform, fill and stroke";
+    EXPECT_EQ(doc.network().nodeIds().size(), 5u) << "the other object's shape, transform, fill and stroke, and the paint merge";
     doc.undoStack().undo();
     ASSERT_NE(doc.findById(a), nullptr);
     EXPECT_EQ(doc.findById(a)->graphNode(), node);

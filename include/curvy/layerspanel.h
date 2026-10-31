@@ -51,6 +51,7 @@ namespace curvy {
         newui::TextField* name_ = nullptr;
         newui::DropDownList* color_ = nullptr;
         std::set<std::size_t> openGroups_;       // the groups shown open
+        std::vector<std::size_t> stack_;         // the object ids back to front, read from the paint nodes at the last refresh
         bool focusObject_ = false;               // the name field edits the selected object (the last click was on an object)
         std::vector<std::size_t> lastSelection_;
         std::size_t lastSignature_ = 0;

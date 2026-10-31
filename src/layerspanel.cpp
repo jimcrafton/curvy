@@ -164,8 +164,12 @@ namespace curvy {
         const bool shown = document_.layerShown(layer.id), editable = document_.layerEditable(layer.id);
         const std::uint32_t color = layerColor(layer);
         std::vector<std::size_t> open;   // the groups whose rows have been written, outermost first
-        for (std::size_t i = document_.objectCount(); i > 0; --i) {
-            const SketchObject& object = document_.object(i - 1);
+        for (std::size_t i = stack_.size(); i > 0; --i) {
+            const SketchObject* found = document_.findById(stack_[i - 1]);
+            if (found == nullptr) {
+                continue;
+            }
+            const SketchObject& object = *found;
             if (document_.layerOf(object) != layer.id) {
                 continue;
             }
@@ -279,6 +283,7 @@ namespace curvy {
         mix(focusObject_ ? 1u : 0u);
         for (std::size_t id : document_.selection()) { mix(id + 7); }
         for (std::size_t id : openGroups_) { mix(id + 13); }
+        for (std::size_t id : stack_) { mix(id + 17); }
         for (std::size_t i = 0; i < document_.objectCount(); ++i) {
             const SketchObject& object = document_.object(i);
             mix(object.id());
@@ -298,6 +303,7 @@ namespace curvy {
     }
 
     void LayersPanel::refresh() {
+        stack_ = document_.stackingOrder();
         const std::size_t sig = signature();
         if (rowsBuilt_ && sig == lastSignature_) {
             return;   // nothing the rows show has changed

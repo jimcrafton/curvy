@@ -554,6 +554,7 @@ namespace curvy {
             return false;
         }
         viewScope_ = scope;
+        document_.setEnteredScope(scope);
         collapsed_.clear();
         if (mode_ != Mode::Flow) {
             setMode(Mode::Flow);   // rebuilds
@@ -577,6 +578,7 @@ namespace curvy {
         }
         const std::uint32_t from = viewScope_;
         viewScope_ = document_.parentOfScope(from).scope;
+        document_.setEnteredScope(viewScope_);
         collapsed_.clear();
         refresh();
         showScope();
@@ -587,6 +589,7 @@ namespace curvy {
         while (viewScope_ != 0 && (viewScope_ >= document_.scopeCount() || document_.findNetwork(viewScope_) == nullptr)) {
             viewScope_ = viewScope_ < document_.scopeCount() ? document_.parentOfScope(viewScope_).scope : 0;
         }
+        document_.setEnteredScope(viewScope_);
     }
 
     std::string GraphDock::scopeTitle() const {

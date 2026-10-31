@@ -41,6 +41,8 @@ namespace curvy {
     // the shape's own space) - a point matching any enabled one - narrowed by `kind` (any, anchors, handles, corners, smooth), then joined with a
     // group of the same name already on the input by `operation` (replace, union, subtract, intersect). A handle follows its anchor's tag.
     inline constexpr const char* kTagNodeType = "curvyTag";
+    // Holds the record of the base layer (the layer whose objects sit in the root, so it has no subnet) while it differs from the default.
+    inline constexpr const char* kBaseLayerNodeType = "curvyBaseLayer";
     // Moves some of a shape's points: the transform node's translate, rotate, scale, shear and pivot (in the shape's own space), applied to the points
     // of the point group `group` (every point when it is empty; none when the input has no such group). It sits before the placement node, which
     // still places the whole result, so an object with one is *driven*: its outline is what the chain cooks, not what the object last drew.

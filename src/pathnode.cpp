@@ -256,8 +256,13 @@ namespace curvy {
             CurvySubnetNode() : SubnetNode(kSubnetNodeType, 0) {
                 const Placement none;
                 declareString("role", "group");
-                declareFloat("groupId", 0.0f);                declareFloat("visible", 1.0f);
+                declareFloat("groupId", 0.0f);
+                declareFloat("layerId", 0.0f);
+                declareFloat("visible", 1.0f);
                 declareFloat("locked", 0.0f);
+                declareFloat("color", 0.0f);
+                declareFloat("layerOrder", 0.0f);
+                declareString("label", "");
                 declareFloat("opacity", 1.0f);
                 declareString("blend", "normal");
                 declareFloat("clip", 0.0f);
@@ -364,6 +369,21 @@ namespace curvy {
             flush();
             return !ranges.empty();
         }
+
+        class BaseLayerNode : public jitnodes::Node {
+        public:
+            BaseLayerNode() : Node(kBaseLayerNodeType, 0) {
+                declareFloat("layerId", 0.0f);
+                declareFloat("visible", 1.0f);
+                declareFloat("locked", 0.0f);
+                declareFloat("color", 0.0f);
+                declareString("label", "");
+            }
+
+            jitnodes::GeometryHandle cook(jitnodes::CookContext&, const std::vector<jitnodes::GeometryHandle>&) override {
+                return std::make_shared<jitnodes::Geometry>();
+            }
+        };
 
         class TagNode : public jitnodes::Node {
         public:
@@ -674,6 +694,7 @@ namespace curvy {
             registry.registerType(kTransformNodeType, [] { return std::make_unique<TransformNode>(); });
             registry.registerType(kSubnetNodeType, [] { return std::make_unique<CurvySubnetNode>(); });
             registry.registerType(kTagNodeType, [] { return std::make_unique<TagNode>(); });
+            registry.registerType(kBaseLayerNodeType, [] { return std::make_unique<BaseLayerNode>(); });
             registry.registerType(kMovePointsNodeType, [] { return std::make_unique<MovePointsNode>(); });
             registerAppearanceNodes();
         });

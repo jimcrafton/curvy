@@ -115,6 +115,44 @@ Ids are per network, so a node is addressed by `NodeRef{scope, id}`: `scope` is 
   making every layer a subnet puts every object of every document through the move path and breaks the root-scope assumptions all at once (the trial). Cost: deleting or
   reordering the first layer promotes another layer to root, one batched bulk move of two layers' objects; rare, and bounded by the objects of those layers. The paint order is
   the merge node in the root: sublayer subnets of the base layer, its own objects, then the next top-level layer's subnet, and so on.
+  **S4a Layer containment, 2026-10-30.** Done in the S3a/S3b way: `layers_` and `SketchObject::layer()` stay the carrier, the graph follows and wins on a mismatch. A layer other than
+  the base layer is a `curvySubnet` with a `layerId` parameter (role `layer`), nested for sublayers, made by the same `syncGroupScopes` (keys are layer ids with a high bit, then group
+  ids, so a group sits inside its layer); `layerPathOf` gives the path without the base layer. `SketchObject::placedLayer()` plays the role of `placedGroups()` (layer edited since the
+  last sync: move the chain; else adopt the layer the scope names via `layerOfScope`); `placedBaseLayer_` makes a change of base layer (delete or reorder the first layer) count as an
+  edit for every object, so they are moved and not misread. `pruneGroupScopes` also removes layer subnets no object lives in. A one-layer document has no subnet (test). Tests
+  `SketchDocumentScopes.TheBaseLayerStays*`, `SublayersAndGroupsNest*`, `DeletingTheBaseLayerPromotes*`, `LayersSurviveSvgAndBinaryRoundTrips`; 2092 ctest and the three checks pass;
+  GUI suite not rerun. Not done: `layers_` is not replaced (name, visible, locked, color, expanded and the layer undo steps still live there; an empty layer has no subnet; the subnet
+  node is named `layerN`, not the layer's name); paint order is still the flat `objects_` order, not a merge node; the Layers panel does not read the nodes.
+  **S4b part 1, 2026-10-30.** The layer subnet shows its layer: `putLayerProps` (called from `pruneGroupScopes` for every kept layer subnet) writes `visible`, `locked`,
+  `color` and `label` (the exact name) and renames the node after the layer (letters, digits and underscores; a clash gets a numbered name). `layers_` is still the carrier, so
+  the node follows and edits to it do not flow back. Test `SketchDocumentScopes.ALayerSubnetShowsTheLayersNameAndFlags`; 2093 ctest and the checks pass; GUI suite 57/57.
+  **S4b part 2 (option 1, graph follows), 2026-10-30.** `syncPaintOrder` (end of `changed()`, after `pruneGroupScopes`) keeps a `paint` merge node in every scope that paints
+  something; its inputs are, back to front, the last node of each object's chain (from the `appearanceChains_` cache, else the placement or shape node) and, at the place of its
+  first member, each layer or group subnet. `objects_` stays the carrier, so edits made on the merge node do not flow back yet (that is option 2). Only a changed order is
+  rewritten (an object added on top just connects one more slot); a scope with nothing to paint loses its node. Costs one node per scope, so two old tests count one more node;
+  the 5000-object edit test stays under its limit. Test `ThePaintMergeNodeListsTheStackingOrder`; 2094 ctest, the checks and GUI 57/57 pass.
+  **S4b part 3, empty layers, 2026-10-30.** Every layer except the base layer keeps its subnet while it is empty: `syncGroupScopes` makes the missing ones (also one under the
+  wrong parent after a reparent) and `pruneGroupScopes` removes a layer subnet only when its layer is gone or misplaced and nothing lives in it. The old test that expected the
+  empty layer's subnet to go now expects it to stay; new test `AnEmptyLayerHasASubnetUntilTheLayerIsDeleted`; 2095 ctest, the checks and GUI 57/57 pass.
+  **S4b part 4, hybrid panel read, 2026-10-30.** `SketchDocument::stackingOrder()` returns every object id back to front read from the nodes: it walks the root `paint`
+  merge node, expands a layer or group subnet where it sits in its parent's merge, and maps an input node to its object through `paintOwners_` (filled by `syncPaintOrder`);
+  an object the nodes do not list comes last. The Layers panel takes the order of its object and group rows from it (`stack_`, also in the refresh signature). Layer
+  records (name, flags, colour, tree, empty layers, base layer) and group membership still come from `layers_` and `groups()`, so the rows are unchanged except that
+  the members of a group now sit together. Test `TheStackingOrderIsReadFromThePaintNodes`; 2096 ctest and the three checks pass; GUI suite 57/57.
+  **S4b part 5, the pure node read, 2026-10-30.** The layer records are read from the nodes. A layer subnet holds `visible`, `locked`, `color`, `label` and a new `layerOrder`
+  (its index among its siblings); the base layer, which is the root and has no subnet, is held by a `curvyBaseLayer` node in the root (`layerId`, flags, colour, name), present only
+  while the record differs from the default (id 1, "Layer 1", visible, unlocked, automatic colour), so a plain document gains no node. `pullLayerNodes` (first step of `changed()`)
+  adopts what a graph edit or undo changed in those nodes, including the sibling order (the base layer stays first), unless `layers_` itself was edited since the last sync
+  (`layersEdited`, compared with `placedLayers_`), in which case `putLayerProps` and `putBaseLayer` write `layers_` out, as before. `layers_` is now a cache of the nodes plus the view
+  state (`expanded`, active layer); creation and deletion of layers still come from `layers_` (a missing subnet is not read as a deletion), and so does the parent of a layer (a subnet
+  dragged into another layer's subnet is not adopted). Tests `AnEditOfALayerNodeIsReadBackIntoTheLayer`, `TheBaseLayerLivesOnAMarkerNodeWhileItIsNotTheDefault`,
+  `TheOrderOfLayerNodesReordersTheLayers`; 2099 ctest and the three checks pass; GUI suite not rerun.
+  **S4b part 6, option 2 (reorder on the merge node), 2026-10-31.** `pullPaintOrder` (second step of `changed()`, after `pullLayerNodes`) adopts a reorder made on a `paint` merge node
+  or its undo: when the object id sequence still equals `placedOrder_` (what `syncPaintOrder` last saw) and some scope's merge inputs are the same nodes as `placedPaint_` in a
+  different order, `objects_` is rebuilt in `stackingOrder()` order. If `objects_` changed too (any add, remove or arrange) the objects win and the nodes are rewritten, as before. A
+  change of which nodes the merge takes (not just their order) is left to `syncPaintOrder`. Not done: dragging a node into another scope's merge is not read as a move. Test
+  `AReorderOfThePaintNodeReordersTheObjects`; 2100 ctest pass; GUI suite 57/57.
+  Still open in S4b: dropping `layers_` for good (layer undo steps and structure still use it).
 - **S5 Scoped selection and graph dock. DONE 2026-10-28** (the enter/exit-group view is not built). `hitTestNode`, `selectedNodes` and `setSelectedNodes` use `NodeRef`;
   `selectionOrigin`/`setSelectionOrigin` go through `transformRefOf`. The graph dock works on `NodeRef` throughout (`GraphRow::scope`, `detailNode()`, detail and link rows,
   edits, paint kind, reset transform), builds appearance chains per scope, and counts nodes over all scopes, so grouped objects list and edit like root ones. Flow view
@@ -126,7 +164,13 @@ Ids are per network, so a node is addressed by `NodeRef{scope, id}`: `scope` is 
   elsewhere), `exitGroup()` goes up one. The status line reads "Inside Root > group1 - Esc leaves the group", the node count is that group's, and a group that is ungrouped or
   undone away takes the view back to the nearest scope that still exists. Not done: the canvas does not scope (it still shows and picks everything); the Flow view of an entered
   group does not yet draw a different background. Checks in `--check-workspace`; GUI tests `Grouping.test_the_flow_view_enters_a_group_and_escape_leaves_it` and
-  `test_a_group_row_of_the_document_view_enters_the_group` (not yet run).
+  `test_a_group_row_of_the_document_view_enters_the_group` (run, pass).
+  **Canvas scoped to the entered group, 2026-10-31.** `SketchDocument::enteredScope()/setEnteredScope()/inEnteredScope(object)` hold it (view state, not an undo step; the dock
+  sets it in `enterGroup`/`exitGroup`/`leaveMissingScope`, `clearObjects` resets it, a scope that no longer exists reads as 0). Inside: `hitTest`, `selectAll`, the marquee, lasso,
+  Select Same and the wand reach only objects in the entered scope or below it; entering drops selected objects outside it; `withGroupMembers` picks by the outermost group *below*
+  the entered one, so a click picks the member (or the nested group) and not the group being edited; `paint(ctx, true)` (the canvas only, never export) draws objects outside at 25%
+  opacity. Entering a layer subnet works the same way. Test `SketchDocumentScopes.EnteringAGroupLimitsPickingAndSelectionToIt`; 2101 ctest pass; GUI suite 57/57 pass, then GUI test `Grouping.test_the_canvas_picks_only_inside_an_entered_group` added (a click picks a member alone; a shape outside the entered group cannot be picked; leaving makes it pickable again); Full GUI suite 58/58 pass. Not done: a
+  breadcrumb or exit affordance on the canvas itself (leaving is from the dock), double-click on a group to enter.
 - **S6 Save formats:** SVG round trip; `.skb` v5 graph chunk; GUI tests for group move/undo/save/load.
 - **S7 Cleanup:** delete `Layer`/`groups_` duplicates, update docs and tracker.
 

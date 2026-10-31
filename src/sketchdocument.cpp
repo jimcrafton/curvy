@@ -104,7 +104,7 @@ namespace curvy {
     SketchObject* SketchDocument::hitTest(const BLPoint& point, double tolerance) const {
         for (std::size_t i = objects_.size(); i > 0; --i) {
             SketchObject* object = objects_[i - 1].get();
-            if (!object->isVisible() || object->isLocked()) {
+            if (!object->isVisible() || object->isLocked() || !inEnteredScope(*object)) {
                 continue;
             }
             // The object's cached bounds only rule out the far ones; the nodes' outline decides.
@@ -136,6 +136,7 @@ namespace curvy {
         clearGraph();
         drivenDirty_ = true;
         nextId_ = 1;
+        enteredScope_ = 0;
         selection_.clear();
         guides_.clear();
         {
@@ -162,16 +163,71 @@ namespace curvy {
         onChanged(*this);
     }
 
-    void SketchDocument::paint(BLContext& ctx) const {
-        paintRange(ctx, 0, objects_.size(), 0);
+    std::uint32_t SketchDocument::enteredScope() const {
+        if (enteredScope_ >= scopeCount() || findNetwork(enteredScope_) == nullptr) {
+            return 0;
+        }
+        return enteredScope_;
     }
 
-    void SketchDocument::paintRange(BLContext& ctx, std::size_t begin, std::size_t end, std::size_t depth) const {
+    void SketchDocument::setEnteredScope(std::uint32_t scope) {
+        if (scope >= scopeCount() || findNetwork(scope) == nullptr) {
+            scope = 0;
+        }
+        if (scope == enteredScope_) {
+            return;
+        }
+        enteredScope_ = scope;
+        std::vector<std::size_t> kept;
+        for (std::size_t id : selection_) {
+            const SketchObject* object = findById(id);
+            if (object != nullptr && inEnteredScope(*object)) {
+                kept.push_back(id);
+            }
+        }
+        if (kept.size() != selection_.size()) {
+            setSelection(kept);
+        }
+        updateAllViews();
+    }
+
+    bool SketchDocument::inEnteredScope(const SketchObject& object) const {
+        const std::uint32_t entered = enteredScope();
+        if (entered == 0) {
+            return true;
+        }
+        for (std::uint32_t scope = object.graphScope(); scope != 0 && scope < scopeCount(); scope = parentOfScope(scope).scope) {
+            if (scope == entered) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    std::size_t SketchDocument::outermostGroupBelowEntered(const SketchObject& object) const {
+        const std::size_t entered = groupIdOfScope(enteredScope());
+        if (entered == 0) {
+            return outermostGroupOf(object);
+        }
+        const std::vector<std::size_t>& chain = groupsOf(object);
+        const auto at = std::find(chain.begin(), chain.end(), entered);
+        return at == chain.end() || at + 1 == chain.end() ? 0 : *(at + 1);
+    }
+
+    void SketchDocument::paint(BLContext& ctx, bool dimOutsideEntered) const {
+        paintRange(ctx, 0, objects_.size(), 0, dimOutsideEntered && enteredScope() != 0);
+    }
+
+    void SketchDocument::paintRange(BLContext& ctx, std::size_t begin, std::size_t end, std::size_t depth, bool dim) const {
         std::size_t i = begin;
         while (i < end) {
             const SketchObject& object = *objects_[i];
             if (groupsOf(object).size() <= depth) {
-                object.paint(ctx);
+                if (dim && !inEnteredScope(object)) {
+                    paintIsolated(ctx, object.paintBounds(), 0.25, BlendMode::Normal, [&object](BLContext& layer) { object.paint(layer); });
+                } else {
+                    object.paint(ctx);
+                }
                 ++i;
                 continue;
             }
@@ -183,7 +239,7 @@ namespace curvy {
             GroupProps props = groupProps(group);
             const bool clipped = props.clip && j - i >= 2;
             if (props.isDefault() || (!clipped && props.opacity >= 1.0 && props.blendMode == BlendMode::Normal)) {
-                paintRange(ctx, i, j, depth + 1);
+                paintRange(ctx, i, j, depth + 1, dim);
             } else {
                 bool any = false;
                 BLBox box(0, 0, 0, 0);
@@ -196,9 +252,9 @@ namespace curvy {
                     any = true;
                 }
                 if (any) {
-                    auto paintBody = [this, i, j, depth, clipped](BLContext& target) {
+                    auto paintBody = [this, i, j, depth, clipped, dim](BLContext& target) {
                         if (!clipped) {
-                            paintRange(target, i, j, depth + 1);
+                            paintRange(target, i, j, depth + 1, dim);
                             return;
                         }
                         // The mask is the topmost member: the others draw into a layer that is cut to its outline.
@@ -219,7 +275,7 @@ namespace curvy {
                         if (cut.x1 <= cut.x0 || cut.y1 <= cut.y0) {
                             return;
                         }
-                        paintClipped(target, cut, mask.geometry(), [this, i, j, depth](BLContext& inner) { paintRange(inner, i, j - 1, depth + 1); });
+                        paintClipped(target, cut, mask.geometry(), [this, i, j, depth, dim](BLContext& inner) { paintRange(inner, i, j - 1, depth + 1, dim); });
                     };
                     if (props.opacity < 1.0 || props.blendMode != BlendMode::Normal) {
                         paintIsolated(ctx, box, props.opacity, props.blendMode, paintBody);
@@ -320,7 +376,7 @@ namespace curvy {
     void SketchDocument::selectAll() {
         std::vector<std::size_t> ids;
         for (const std::unique_ptr<SketchObject>& object : objects_) {
-            if (object->isVisible() && !object->isLocked()) {
+            if (object->isVisible() && !object->isLocked() && inEnteredScope(*object)) {
                 ids.push_back(object->id());
             }
         }
@@ -893,16 +949,16 @@ namespace curvy {
         std::vector<std::size_t> outer;
         for (std::size_t id : ids) {
             const SketchObject* object = findById(id);
-            if (object != nullptr && isGrouped(*object)) {
-                outer.push_back(outermostGroupOf(*object));
+            if (object != nullptr && outermostGroupBelowEntered(*object) != 0) {
+                outer.push_back(outermostGroupBelowEntered(*object));
             }
         }
         if (outer.empty()) {
             return out;
         }
         for (const std::unique_ptr<SketchObject>& object : objects_) {
-            if (!isGrouped(*object) || !object->isVisible() || object->isLocked() ||
-                std::find(outer.begin(), outer.end(), outermostGroupOf(*object)) == outer.end() ||
+            if (!object->isVisible() || object->isLocked() || !inEnteredScope(*object) ||
+                std::find(outer.begin(), outer.end(), outermostGroupBelowEntered(*object)) == outer.end() ||
                 std::find(out.begin(), out.end(), object->id()) != out.end()) {
                 continue;
             }
@@ -1344,10 +1400,15 @@ namespace curvy {
             batchPending_ = true;
             return;
         }
+        pullLayerNodes();
+        pullPaintOrder();
         syncLayers();   // new objects find their layer, layer state reaches the objects, the stack follows the layers
         syncGroupScopes();
         syncPathNodes();
         pruneGroupScopes();
+        putBaseLayer();
+        placedLayers_ = layers_;
+        syncPaintOrder();
         markModified();
         updateAllViews();
         onChanged(*this);

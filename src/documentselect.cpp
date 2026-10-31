@@ -83,7 +83,7 @@ namespace curvy {
         }
         std::vector<std::size_t> ids;
         for (const std::unique_ptr<SketchObject>& object : objects_) {
-            if (!selectable(*object)) {
+            if (!selectable(*object) || !inEnteredScope(*object)) {
                 continue;
             }
             for (const SketchObject* reference : references) {
@@ -100,13 +100,13 @@ namespace curvy {
     // The Magic Wand: every object whose fill is like `source`'s (its stroke when it has no fill) - colors within `tolerance` of each other.
     bool SketchDocument::selectSimilar(std::size_t sourceId, bool add, double tolerance) {
         const SketchObject* source = findById(sourceId);
-        if (source == nullptr || !selectable(*source)) {
+        if (source == nullptr || !selectable(*source) || !inEnteredScope(*source)) {
             return false;
         }
         const bool byFill = !source->fill().isNone() && source->isClosed();
         std::vector<std::size_t> ids = add ? selection_ : std::vector<std::size_t>();
         for (const std::unique_ptr<SketchObject>& object : objects_) {
-            if (!selectable(*object) || std::find(ids.begin(), ids.end(), object->id()) != ids.end()) {
+            if (!selectable(*object) || !inEnteredScope(*object) || std::find(ids.begin(), ids.end(), object->id()) != ids.end()) {
                 continue;
             }
             const bool same = byFill ? paintsMatch(object->fill(), source->fill(), tolerance) && !object->fill().isNone()
@@ -125,7 +125,7 @@ namespace curvy {
         if (polygon.size() >= 2) {
             Loops lasso{polygon};
             for (const std::unique_ptr<SketchObject>& object : objects_) {
-                if (!selectable(*object) || std::find(ids.begin(), ids.end(), object->id()) != ids.end()) {
+                if (!selectable(*object) || !inEnteredScope(*object) || std::find(ids.begin(), ids.end(), object->id()) != ids.end()) {
                     continue;
                 }
                 bool hit = false;
@@ -152,7 +152,7 @@ namespace curvy {
         std::vector<std::size_t> ids = add ? selection_ : std::vector<std::size_t>();
         const BLPoint corners[4] = {BLPoint(rect.x0, rect.y0), BLPoint(rect.x1, rect.y0), BLPoint(rect.x1, rect.y1), BLPoint(rect.x0, rect.y1)};
         for (const std::unique_ptr<SketchObject>& object : objects_) {
-            if (!selectable(*object) || std::find(ids.begin(), ids.end(), object->id()) != ids.end()) {
+            if (!selectable(*object) || !inEnteredScope(*object) || std::find(ids.begin(), ids.end(), object->id()) != ids.end()) {
                 continue;
             }
             bool hit = false;

@@ -299,6 +299,12 @@ namespace curvy {
         // adjacent in the stacking order. Selecting one member selects the whole outermost group (the canvas does it
         // through withGroupMembers; Ctrl-click bypasses it to pick a single member).
         std::size_t newGroupId() { return nextGroupId_++; }
+        // The group or layer scope the canvas is inside (0 = the whole document). Picking, the marquee and Select All reach only objects in it
+        // (or in scopes below it); a click picks the member, or the group of the entered one's members, not the entered group itself. The
+        // objects outside paint dimmed when paint() is asked to. View state: not an undo step. A scope that no longer exists reads as 0.
+        std::uint32_t enteredScope() const;
+        void setEnteredScope(std::uint32_t scope);
+        bool inEnteredScope(const SketchObject& object) const;
         // Membership accessors: the one place that knows where an object's groups and layer are stored. Code outside the loaders
         // reads and writes membership through these, so moving the storage into the graph (DG-04 S3/S4) changes only their bodies.
         // The chain is outermost first; the reference is valid until the next membership edit.
@@ -315,6 +321,8 @@ namespace curvy {
         std::uint32_t scopeOfText(const std::string& text);
         // The group id a scope's subnet stands for; 0 for the root and for a subnet that is not a document group.
         std::size_t groupIdOfScope(std::uint32_t scope) const;
+        // The layer id a scope's subnet stands for; 0 for the root and for a subnet that is not a layer.
+        std::size_t layerIdOfScope(std::uint32_t scope) const;
         // Group opacity / blend mode (default: opaque, normal). Setting is not an undo step by itself - the Appearance panel
         // edits live and commits with commitStyle(), whose snapshots carry the group's props.
         GroupProps groupProps(std::size_t groupId) const;
@@ -694,6 +702,10 @@ namespace curvy {
         // tree (layers farther back first, a layer's sublayers below its own objects), which the document keeps true after every change.
         // Arrange commands therefore work inside the object's layer. Hiding or locking a layer hides / locks all it holds.
         const std::vector<Layer>& layers() const { return layers_; }
+        // Every object id, back to front, read from the `paint` merge nodes (a layer or group subnet is walked where it sits in its
+        // parent's node); an object the nodes do not list yet comes last. Same order as objects() except that the members of a group
+        // sit together.
+        std::vector<std::size_t> stackingOrder();
         const Layer* findLayer(std::size_t id) const;
         // The sublayers of `parent` (0 = the top level), back to front.
         std::vector<std::size_t> layerChildren(std::size_t parent) const;
@@ -888,7 +900,7 @@ namespace curvy {
         // Back to an empty page (size and ppi kept), not modified.
         void clearObjects();
 
-        void paint(BLContext& ctx) const;
+        void paint(BLContext& ctx, bool dimOutsideEntered = false) const;
 
         bool empty() const override { return objects_.empty(); }
         std::size_t size() const override { return objects_.size(); }
@@ -926,6 +938,12 @@ namespace curvy {
         // last agreed, which is how the two tell who changed.
         // `scan` looks for appearance nodes nothing owns any more (after objects went away).
         void syncAppearanceNodes(bool scan);
+        void syncPaintOrder();
+        // A reorder made on a paint merge node (or its undo) is adopted into objects_ at the start of changed(), unless objects_ itself changed
+        // since syncPaintOrder last wrote the nodes (placedOrder_ / placedPaint_ are what it wrote).
+        void pullPaintOrder();
+        std::vector<std::size_t> placedOrder_;
+        std::map<std::uint32_t, std::vector<jitnodes::NodeId>> placedPaint_;
         void pullAppearanceNodes();
         // Containment of groups: a group is a curvySubnet (its `groupId` parameter is the group id) holding the node chains of its members.
         // The graph is the carrier. syncGroupScopes reconciles each object with it: if SketchObject::groups() was edited since the last sync
@@ -933,10 +951,25 @@ namespace curvy {
         // subnet the chain sits in wins and groups() adopts its group ids (a node moved in the graph, an undo). pruneGroupScopes removes the
         // subnets no object lives in, keeping their props aside. Group props live in the subnet; groupProps_ holds only those of a group with no subnet.
         // Objects in a subnet without a groupId are left alone.
+        // Layers are contained the same way (a `layerId` parameter, nested for sublayers), except the base layer (the first top-level one),
+        // whose own objects stay in the root so a one-layer document is flat. The layer is merged like the groups, with placedLayer().
         void syncGroupScopes();
         void pruneGroupScopes();
+        std::size_t baseLayer() const;
+        std::vector<std::size_t> layerPathOf(std::size_t layer) const;
+        std::size_t layerOfScope(std::uint32_t scope) const;
+        std::size_t placedBaseLayer_ = 0;
         std::vector<std::size_t> groupChainOfScope(std::uint32_t scope) const;
         void putGroupProps(std::size_t group, const GroupProps& props);
+        void putLayerProps(const NodeRef& subnet, const Layer& layer);
+        // The layer records are read from the nodes: a layer subnet holds its name, flags, colour and `layerOrder`, the base layer a `baseLayer`
+        // node in the root (only while it differs from the default). pullLayerNodes (start of changed()) adopts what a graph edit or undo
+        // changed unless layers_ itself was edited since the last sync (it differs from placedLayers_), in which case putBaseLayer and
+        // putLayerProps write layers_ out. layers_ is therefore a cache of the nodes plus the view state (expanded).
+        void pullLayerNodes();
+        void putBaseLayer();
+        bool layersEdited() const;
+        std::vector<Layer> placedLayers_;
         mutable std::unordered_map<std::size_t, NodeRef> groupSubnets_;
         // syncPathNodes for the objects of one scope; true when it removed a shape node.
         bool syncPathScope(std::uint32_t scope, const std::vector<SketchObject*>& objects);
@@ -949,6 +982,8 @@ namespace curvy {
         };
         std::map<NodeRef, AppearanceChain> appearanceChains_;
         std::size_t appearanceObjectCount_ = 0;
+        std::unordered_map<std::uint32_t, jitnodes::NodeId> paintNodes_;
+        std::map<NodeRef, std::size_t> paintOwners_;   // the node a scope's paint merge takes for an object -> the object's id
         std::string activeTag_ = "tag1";
         std::shared_ptr<jitnodes::GraphSnapshot> pivotBefore_;   // the graph when a live pivot drag started
         // placedOutline() per object, valid for the object's geometry revision at the time; cleared when the graph or the time changes.
@@ -977,7 +1012,8 @@ namespace curvy {
         // `state` plus the group props of its object's outermost group.
         StyleState withGroup(StyleState state) const;
         // Paints objects_[begin, end), which all share the first `depth` groups; a group with opacity / blend goes through a layer.
-        void paintRange(BLContext& ctx, std::size_t begin, std::size_t end, std::size_t depth) const;
+        void paintRange(BLContext& ctx, std::size_t begin, std::size_t end, std::size_t depth, bool dim) const;
+        std::size_t outermostGroupBelowEntered(const SketchObject& object) const;
         bool applyFlags(const std::vector<FlagState>& before, const std::vector<FlagState>& after, const std::string& description);
         // Removes and returns the object (its index is stored in *index); null if not found.
         std::unique_ptr<SketchObject> detach(std::size_t id, std::size_t* index);
@@ -1024,6 +1060,7 @@ namespace curvy {
         std::vector<std::unique_ptr<SketchObject>> objects_;
         std::size_t nextId_ = 1;
         std::size_t nextGroupId_ = 1;
+        std::uint32_t enteredScope_ = 0;
         std::map<std::size_t, GroupProps> groupProps_;
         std::vector<GraphicStyle> graphicStyles_ = defaultGraphicStyles();
         SketchPaint defaultFill_ = SketchPaint::solid(SketchColor::fromHex("#d9e6ff"));

@@ -840,6 +840,45 @@ class Grouping(CurvyCase):
         self.app.click_row("graphTree", "..")
         self.app.wait_until(lambda: "nobody uses" in self.app.prop("graphStatus", "text"), "the .. row to leave")
 
+    def test_the_canvas_picks_only_inside_an_entered_group(self):
+        self.draw_two()
+        self.app.key("ctrl+g")
+        canvas = self.app.find("canvas")
+        cx, cy = canvas.x + canvas.w // 2, canvas.y + canvas.h // 2
+        self.app.click_at((cx + 170, cy))
+        self.tap_space()
+        self.app.key("r")
+        self.app.wait_until(lambda: self.hint_tool() == "Rectangle", "the rectangle tool")
+        self.app.drag((cx + 140, cy - 40), (cx + 200, cy + 40))
+        self.app.key("escape")
+        self.app.wait_until(lambda: self.hint_tool() == "Select", "the Select tool")
+        self.app.click_at((cx + 170, cy))
+        self.app.wait_until(lambda: self.app.prop("transformPanelHeaderInfo", "text") == "1 object", "the rectangle outside the group picked")
+
+        self.app.click("graphToggle")
+        self.app.wait_until(lambda: self.app.prop("graphToggle", "checked"), "the graph dock")
+        self.app.click_row("graphTree", "<Group>")
+        self.app.wait_until(lambda: self.app.prop("graphDetailKind", "text") == "Group", "the group's box")
+        self.app.click("graphEnterButton")
+        self.app.wait_until(lambda: "Inside" in self.app.prop("graphStatus", "text"), "the view to enter the group")
+
+        self.app.click("graphToggle")                                    # the dock covers the right of the canvas; the group stays entered
+        self.app.wait_until(lambda: not self.app.prop("graphToggle", "checked"), "the graph dock to close")
+        self.app.click_at((cx - 120, cy + 250))
+        self.app.click_at((cx - 120, cy))
+        self.app.wait_until(lambda: self.app.prop("transformPanelHeaderInfo", "text") == "1 object", "a member picked alone")
+        self.app.click_at((cx + 170, cy))
+        self.app.wait_until(lambda: self.app.prop("transformPanelHeaderInfo", "text") == "no selection", "a shape outside the entered group not to be picked")
+
+        self.app.click("graphToggle")
+        self.app.wait_until(lambda: self.app.prop("graphToggle", "checked"), "the graph dock")
+        self.app.click_row("graphTree", "..")
+        self.app.wait_until(lambda: "nobody uses" in self.app.prop("graphStatus", "text"), "the .. row to leave")
+        self.app.click("graphToggle")
+        self.app.wait_until(lambda: not self.app.prop("graphToggle", "checked"), "the graph dock to close")
+        self.app.click_at((cx + 170, cy))
+        self.app.wait_until(lambda: self.app.prop("transformPanelHeaderInfo", "text") == "1 object", "the outside shape pickable again")
+
 
 class Welcome(CurvyCase):
     first_run = True

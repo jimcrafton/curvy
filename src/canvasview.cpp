@@ -2224,7 +2224,7 @@ namespace curvy {
             ctx.save();
             ctx.translate(pageLeft, pageTop);
             ctx.scale(double(zoom_));
-            document_->paint(ctx);
+            document_->paint(ctx, true);
             ctx.restore();
             paintOverlay(ctx);
         }
