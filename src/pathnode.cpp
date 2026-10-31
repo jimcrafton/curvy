@@ -262,6 +262,7 @@ namespace curvy {
                 declareFloat("locked", 0.0f);
                 declareFloat("color", 0.0f);
                 declareFloat("layerOrder", 0.0f);
+                declareFloat("layerParent", -1.0f);   // -1 = never written (a file from before the parent was kept on the node)
                 declareString("label", "");
                 declareFloat("opacity", 1.0f);
                 declareString("blend", "normal");

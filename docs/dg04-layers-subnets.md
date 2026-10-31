@@ -152,7 +152,29 @@ Ids are per network, so a node is addressed by `NodeRef{scope, id}`: `scope` is 
   different order, `objects_` is rebuilt in `stackingOrder()` order. If `objects_` changed too (any add, remove or arrange) the objects win and the nodes are rewritten, as before. A
   change of which nodes the merge takes (not just their order) is left to `syncPaintOrder`. Not done: dragging a node into another scope's merge is not read as a move. Test
   `AReorderOfThePaintNodeReordersTheObjects`; 2100 ctest pass; GUI suite 57/57.
-  Still open in S4b: dropping `layers_` for good (layer undo steps and structure still use it).
+  **S4b part 7, the nodes carry the whole layer table, 2026-10-31.** A layer subnet also holds `layerParent` (default -1 = never written, so a file from before keeps its
+  records' parents), and `pullLayerNodes` now reads back everything but `expanded` (view state): the parent (a missing parent or a loop puts the layer at the top), a subnet
+  whose `layerId` no record has (becomes a layer named by its `label`), and a layer other than the base layer that has no subnet any more (removed from the layer list; the active
+  layer falls back to the base layer). Tests `TheParentOfALayerNodeIsReadBackAndBadParentsAreMended`, `ALayerSubnetMadeOnTheGraphSideBecomesALayer`,
+  `ALayerWhoseSubnetLeavesTheGraphLeavesTheDocument`; 2104 ctest pass; GUI suite not rerun. The scan walks the scope table, not every node: a first version that scanned all
+  nodes per edit took 8 to 10 s in three perf tests, so a hand-made subnet is adopted once its scope is known (entered in the dock, a load or a restore), not when it is merely added.
+  **Where this leaves `layers_`.** It holds no information the nodes lack, but it is still the edit buffer: the layer edits (add, delete, move, duplicate, merge, flatten, colour)
+  and their undo snapshots (`LayerState`) write it, and the sync writes it out to the nodes. Removing the member itself means making the object-to-layer link graph-driven
+  (`layerOf` read from the scope an object's nodes sit in, `setLayerOf` a move) and the layer edits operate on subnets; that brings back the per-object move cost of the S4 trial
+  and touches about 30 sites in `documentlayers.cpp`, so it is a separate step, not started.
+  **Plan for removing `layers_` (S4c, not started; user chose "full" on 2026-10-31).** Findings that shape it: (a) `SketchObject::layer()` is a request field like `groups_`;
+  `layerOf(object)` must become `layerOfScope(object.graphScope())` once the object is placed, with the requested layer used only until its first sync (a new object wants the
+  active layer). (b) Reparenting a layer cannot move the subnet node (scope ids and `graphScope` of every object inside would go stale); it works today because the sync
+  compares each object's wanted scope with its placed one and moves the chains, so the new structure must exist (parent known) before the objects are compared. The edit buffer
+  is what gives that ordering, so any replacement needs an equivalent (a pending table that lives only between an edit and its sync). (c) The layer undo currency can stay value
+  snapshots (`LayerState`: layer list, active layer, object layers, order) as long as the list is built from the nodes (`snapshotLayers`) and written back through one
+  `writeLayerTable` that creates, removes, reparents and updates subnets. (d) Keep the scope-table walk; any per-edit scan of all nodes is too slow.
+  Suggested stages, each green before the next: **S4c-1** `layers()` and `findLayer` answer from a table rebuilt from the nodes (cache invalidated by `changed()` and the layer
+  edits), `layers_` kept only as the pending table; test that the rebuilt table equals the buffer after every layer-edit test. **S4c-2** one `writeLayerTable(vector<Layer>)`
+  used by `setLayers`, `applyLayers`, and every edit in `documentlayers.cpp`; delete `placedLayers_`/`layersEdited`. **S4c-3** `layerOf`/`setLayerOf` through the scope with the
+  request field only for unplaced objects; `syncLayers` stops sorting `objects_` (the paint merge node orders it). **S4c-4** remove the member, update the SVG (`data-layers`)
+  and .skb loaders, GUI suite rerun. Watch: `AnEditCostsLittleWhenManyObjectsAreGrouped`, `AThousandsObjectDocumentStaysResponsive`,
+  `TheFrameOfALargeGraphIsCheapToMeasureWhileScrubbing` (the three that caught the node-scan mistake) and the 27 s big-file load.
 - **S5 Scoped selection and graph dock. DONE 2026-10-28** (the enter/exit-group view is not built). `hitTestNode`, `selectedNodes` and `setSelectedNodes` use `NodeRef`;
   `selectionOrigin`/`setSelectionOrigin` go through `transformRefOf`. The graph dock works on `NodeRef` throughout (`GraphRow::scope`, `detailNode()`, detail and link rows,
   edits, paint kind, reset transform), builds appearance chains per scope, and counts nodes over all scopes, so grouped objects list and edit like root ones. Flow view

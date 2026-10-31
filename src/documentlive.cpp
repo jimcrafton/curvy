@@ -1043,6 +1043,7 @@ namespace curvy {
         setFloat("color", float(layer.color));
         const std::vector<std::size_t> siblings = layerChildren(layer.parent);
         setFloat("layerOrder", float(std::find(siblings.begin(), siblings.end(), layer.id) - siblings.begin()));
+        setFloat("layerParent", float(layer.parent));   // a sublayer of the base layer sits in the root beside the top-level subnets
         if (held.getString("label") != layer.name) {
             held.setString("label", layer.name);
         }
@@ -1088,21 +1089,59 @@ namespace curvy {
             layer.color = std::uint32_t(held.getFloat("color"));
             layer.name = held.getString("label");
         };
+        const std::size_t base = baseLayer();
         std::unordered_map<std::size_t, float> orders;
+        std::unordered_map<std::size_t, NodeRef> housing;
+        // Walks the scope table, not every node: a full node scan on each edit costs seconds at a few thousand objects.
         for (std::uint32_t scope = 1; scope < scopeCount(); ++scope) {
             const std::size_t id = layerIdOfScope(scope);
             const NodeRef subnet = parentOfScope(scope);
-            if (id == 0 || !hasNode(subnet) || node(subnet).getString("label").empty()) {
+            if (id != 0 && id != base && hasNode(subnet)) {
+                housing.emplace(id, subnet);
+            }
+        }
+        // A subnet the records do not know is a layer made on the graph side (a restored graph, a hand-built subnet).
+        for (const auto& [id, subnet] : housing) {
+            if (findLayer(id) == nullptr) {
+                Layer made;
+                made.id = id;
+                made.name = node(subnet).getString("label").empty() ? "Layer " + std::to_string(id) : node(subnet).getString("label");
+                layers_.push_back(made);
+            }
+        }
+        // Every layer but the base layer keeps a subnet, so one without any was taken out of the graph.
+        layers_.erase(std::remove_if(layers_.begin(), layers_.end(), [&](const Layer& layer) { return layer.id != base && housing.count(layer.id) == 0; }), layers_.end());
+        if (findLayer(activeLayer_) == nullptr) {
+            activeLayer_ = base;
+        }
+        for (const auto& [id, subnet] : housing) {
+            if (node(subnet).getString("label").empty()) {
                 continue;   // never written: the record is the only source
             }
             for (Layer& layer : layers_) {
                 if (layer.id == id) {
                     adopt(layer, node(subnet));
                     orders[id] = node(subnet).getFloat("layerOrder");
+                    if (node(subnet).getFloat("layerParent") >= 0.0f) {
+                        layer.parent = std::size_t(node(subnet).getFloat("layerParent"));
+                    }
                 }
             }
         }
-        const std::size_t base = baseLayer();
+        // A parent that is gone, or a loop, puts the layer back at the top.
+        for (Layer& layer : layers_) {
+            std::size_t at = layer.parent;
+            for (std::size_t guard = 0; at != 0 && at != layer.id && guard <= layers_.size(); ++guard) {
+                const Layer* up = findLayer(at);
+                at = up != nullptr ? up->parent : std::size_t(-1);
+                if (up == nullptr) {
+                    break;
+                }
+            }
+            if (layer.parent != 0 && (at == layer.id || at == std::size_t(-1))) {
+                layer.parent = 0;
+            }
+        }
         const jitnodes::Network& root = network();
         const jitnodes::NodeId marker = root.findNode(kBaseLayerNodeName);
         for (Layer& layer : layers_) {

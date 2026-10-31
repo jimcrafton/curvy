@@ -6780,6 +6780,72 @@ TEST(SketchDocumentScopes, TheOrderOfLayerNodesReordersTheLayers) {
     EXPECT_EQ(order[2], b);
 }
 
+TEST(SketchDocumentScopes, TheParentOfALayerNodeIsReadBackAndBadParentsAreMended) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    const std::size_t outer = doc.addLayer(0, "Outer");
+    const std::size_t inner = doc.addLayer(outer, "Inner");
+    doc.add(SketchObject::makeRect(20, 0, 10, 10));
+    ASSERT_EQ(doc.findLayer(inner)->parent, outer);
+    const auto innerNodeOf = [&]() {
+        NodeRef found;
+        for (std::uint32_t scope = 1; scope < doc.scopeCount(); ++scope) {
+            if (doc.layerIdOfScope(scope) == inner) {
+                found = doc.parentOfScope(scope);
+            }
+        }
+        return found;
+    };
+    ASSERT_TRUE(doc.hasNode(innerNodeOf()));
+    EXPECT_EQ(doc.node(innerNodeOf()).getFloat("layerParent"), float(outer));
+
+    doc.node(innerNodeOf()).setFloat("layerParent", 0.0f);
+    doc.touch();
+    EXPECT_EQ(doc.findLayer(inner)->parent, 0u);
+
+    ASSERT_TRUE(doc.hasNode(innerNodeOf()));
+    doc.node(innerNodeOf()).setFloat("layerParent", 99.0f);
+    doc.touch();
+    EXPECT_EQ(doc.findLayer(inner)->parent, 0u);
+}
+
+TEST(SketchDocumentScopes, ALayerSubnetMadeOnTheGraphSideBecomesALayer) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    ASSERT_EQ(doc.layers().size(), 1u);
+    const jitnodes::NodeId made = doc.network().addNode(kSubnetNodeType, "hand");
+    doc.network().node(made).setFloat("layerId", 7.0f);
+    doc.network().node(made).setString("label", "Hand");
+    doc.scopeOfSubnet(NodeRef(0, made));   // what entering the subnet in the graph dock, or a load, does
+    doc.touch();
+    ASSERT_NE(doc.findLayer(7), nullptr);
+    EXPECT_EQ(doc.findLayer(7)->name, "Hand");
+    EXPECT_EQ(doc.layers().size(), 2u);
+}
+
+TEST(SketchDocumentScopes, ALayerWhoseSubnetLeavesTheGraphLeavesTheDocument) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    const std::size_t second = doc.addLayer(0, "Ink");
+    doc.add(SketchObject::makeRect(20, 0, 10, 10));
+    ASSERT_EQ(doc.activeLayer(), second);
+    NodeRef subnet;
+    for (std::uint32_t scope = 1; scope < doc.scopeCount(); ++scope) {
+        if (doc.layerIdOfScope(scope) == second) {
+            subnet = doc.parentOfScope(scope);
+        }
+    }
+    ASSERT_TRUE(doc.hasNode(subnet));
+    doc.network().removeNode(subnet.id);
+    doc.touch();
+    EXPECT_EQ(doc.findLayer(second), nullptr);
+    EXPECT_EQ(doc.layers().size(), 1u);
+    EXPECT_EQ(doc.activeLayer(), doc.layerChildren(0).front());
+    for (std::size_t i = 0; i < doc.objectCount(); ++i) {
+        EXPECT_NE(doc.findLayer(doc.layerOf(doc.object(i))), nullptr);
+    }
+}
+
 TEST(SketchDocumentScopes, ThePaintMergeNodeListsTheStackingOrder) {
     SketchDocument doc;
     const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
