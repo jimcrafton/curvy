@@ -210,6 +210,7 @@ namespace curvy {
             dock_.reset();
             return SyncReturn::Handled;
         });
+        canvas_->onEnterGroup = [this](std::size_t group) { return graph_ != nullptr && graph_->enterSubnet(document_.groupSubnetOf(group)); };
         options_= std::make_unique<ToolOptionsCard>(*canvas_, *canvas_);
         dock_->onToolOptions = [this](SketchTool tool, const Point& at) { showToolOptions(tool, at); };
         dock_->onToolPicked = [this](SketchTool tool) { armTool(tool, tool != SketchTool::Select, std::string()); };

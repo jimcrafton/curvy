@@ -840,6 +840,16 @@ class Grouping(CurvyCase):
         self.app.click_row("graphTree", "..")
         self.app.wait_until(lambda: "nobody uses" in self.app.prop("graphStatus", "text"), "the .. row to leave")
 
+    def test_double_clicking_a_group_on_the_canvas_enters_it(self):
+        self.draw_two()
+        self.app.key("ctrl+g")
+        self.assertEqual("2 objects", self.picked())
+        canvas = self.app.find("canvas")
+        cx, cy = canvas.x + canvas.w // 2, canvas.y + canvas.h // 2
+        self.app.double_click((cx - 120, cy))
+        self.app.wait_until(lambda: "Inside" in self.app.prop("graphStatus", "text"), "the double click to enter the group")
+        self.assertEqual("1 object", self.picked())
+
     def test_the_canvas_picks_only_inside_an_entered_group(self):
         self.draw_two()
         self.app.key("ctrl+g")

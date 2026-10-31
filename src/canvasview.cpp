@@ -1157,6 +1157,22 @@ namespace curvy {
         if (document_ == nullptr || (buttons & mbmLeftButton) == 0 || tool_ != SketchTool::Select) {
             return SyncReturn::Ignored;
         }
+        if (onEnterGroup) {
+            if (SketchObject* hit = document_->hitTest(toDocument(pt), 4.0 / double(zoom_))) {
+                const std::vector<std::size_t>& chain = document_->groupsOf(*hit);
+                const std::size_t entered = document_->groupIdOfScope(document_->enteredScope());
+                auto at = entered == 0 ? chain.end() : std::find(chain.begin(), chain.end(), entered);
+                std::size_t next = 0;
+                if (entered == 0 && !chain.empty()) {
+                    next = chain.front();
+                } else if (at != chain.end() && at + 1 != chain.end()) {
+                    next = *(at + 1);
+                }
+                if (next != 0 && onEnterGroup(next)) {
+                    return SyncReturn::Handled;
+                }
+            }
+        }
         if (textObjectAt(toDocument(pt)) == nullptr) {
             return SyncReturn::Ignored;
         }

@@ -176,6 +176,9 @@ namespace curvy {
         std::function<bool(const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys)> onPressFilter;
         // @reflect ignore=true
         std::function<bool(std::uint32_t keyMask, std::uint32_t vkCode)> onKeyFilter;
+        // A double click with the Select tool on a grouped object asks to enter the next group down (the workspace opens its subnet).
+        // @reflect ignore=true
+        std::function<bool(std::size_t group)> onEnterGroup;
         // Painted last, over the rulers, in the canvas's own coordinates (the workspace's scrub card and hover chip).
         // @reflect ignore=true
         std::function<void(BLContext& ctx)> onPaintTop;
