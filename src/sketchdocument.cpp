@@ -1407,7 +1407,7 @@ namespace curvy {
         syncPathNodes();
         pruneGroupScopes();
         putBaseLayer();
-        placedLayers_ = layers_;
+        layersEdited_ = false;
         syncPaintOrder();
         markModified();
         updateAllViews();

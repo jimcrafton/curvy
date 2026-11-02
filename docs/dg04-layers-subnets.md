@@ -171,7 +171,7 @@ Ids are per network, so a node is addressed by `NodeRef{scope, id}`: `scope` is 
   `writeLayerTable` that creates, removes, reparents and updates subnets. (d) Keep the scope-table walk; any per-edit scan of all nodes is too slow.
   Suggested stages, each green before the next: **S4c-1** `layers()` and `findLayer` answer from a table rebuilt from the nodes (cache invalidated by `changed()` and the layer
   edits), `layers_` kept only as the pending table; test that the rebuilt table equals the buffer after every layer-edit test. **S4c-2** one `writeLayerTable(vector<Layer>)`
-  used by `setLayers`, `applyLayers`, and every edit in `documentlayers.cpp`; delete `placedLayers_`/`layersEdited`. **S4c-3** `layerOf`/`setLayerOf` through the scope with the
+  used by `setLayers`, `applyLayers`, and every edit in `documentlayers.cpp`; delete `placedLayers_`/`layersEdited`. **S4c-1/S4c-2 DONE 2026-11-01** (S4c-1 was already true; `writeLayerTable` is the one place the table is replaced and sets `layersEdited_`, replacing the `placedLayers_` compare). **S4c-3** `layerOf`/`setLayerOf` through the scope with the
   request field only for unplaced objects; `syncLayers` stops sorting `objects_` (the paint merge node orders it). **S4c-4** remove the member, update the SVG (`data-layers`)
   and .skb loaders, GUI suite rerun. Watch: `AnEditCostsLittleWhenManyObjectsAreGrouped`, `AThousandsObjectDocumentStaysResponsive`,
   `TheFrameOfALargeGraphIsCheapToMeasureWhileScrubbing` (the three that caught the node-scan mistake) and the 27 s big-file load.

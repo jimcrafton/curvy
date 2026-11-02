@@ -965,12 +965,13 @@ namespace curvy {
         // The layer records are read from the nodes: a layer subnet holds its name, flags, colour and `layerOrder`, the base layer a `baseLayer`
         // node in the root (only while it differs from the default). pullLayerNodes (start of changed()) adopts what a graph edit or undo
         // changed (props, order, `layerParent`, a subnet with a new layerId, a layer whose subnet is gone) unless layers_ itself was edited
-        // since the last sync (it differs from placedLayers_), in which case putBaseLayer and putLayerProps write layers_ out. layers_ is
+        // since the last sync (writeLayerTable set layersEdited_), in which case putBaseLayer and putLayerProps write layers_ out. layers_ is
         // therefore only the edit buffer and a cache of the nodes plus the view state (expanded); it holds nothing the nodes do not.
+        // writeLayerTable is the one place the layer table is replaced.
         void pullLayerNodes();
         void putBaseLayer();
-        bool layersEdited() const;
-        std::vector<Layer> placedLayers_;
+        void writeLayerTable(std::vector<Layer> layers);
+        bool layersEdited_ = false;
         mutable std::unordered_map<std::size_t, NodeRef> groupSubnets_;
         // syncPathNodes for the objects of one scope; true when it removed a shape node.
         bool syncPathScope(std::uint32_t scope, const std::vector<SketchObject*>& objects);

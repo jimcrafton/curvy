@@ -1065,22 +1065,13 @@ namespace curvy {
         }
     }
 
-    bool SketchDocument::layersEdited() const {
-        if (placedLayers_.size() != layers_.size()) {
-            return true;
-        }
-        for (std::size_t i = 0; i < layers_.size(); ++i) {
-            const Layer& a = layers_[i];
-            const Layer& b = placedLayers_[i];
-            if (a.id != b.id || a.parent != b.parent || a.name != b.name || a.visible != b.visible || a.locked != b.locked || a.color != b.color) {
-                return true;
-            }
-        }
-        return false;
+    void SketchDocument::writeLayerTable(std::vector<Layer> layers) {
+        layers_ = std::move(layers);
+        layersEdited_ = true;
     }
 
     void SketchDocument::pullLayerNodes() {
-        if (layersEdited()) {
+        if (layersEdited_) {
             return;
         }
         const auto adopt = [](Layer& layer, const jitnodes::Node& held) {

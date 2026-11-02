@@ -218,12 +218,12 @@ namespace curvy {
     }
 
     void SketchDocument::resetLayers() {
-        layers_ = {Layer{1, 0, "Layer 1", true, false, true}};
+        writeLayerTable({Layer{1, 0, "Layer 1", true, false, true}});
         activeLayer_ = 1;
     }
 
     void SketchDocument::setLayers(std::vector<Layer> layers) {
-        layers_ = std::move(layers);
+        writeLayerTable(std::move(layers));
         if (layers_.empty()) {
             resetLayers();
         }
@@ -250,7 +250,7 @@ namespace curvy {
     }
 
     void SketchDocument::applyLayers(const LayerState& state) {
-        layers_ = state.layers;
+        writeLayerTable(state.layers);
         activeLayer_ = state.activeLayer;
         if (!state.objectLayers.empty()) {
             std::unordered_map<std::size_t, SketchObject*> byId;
@@ -392,13 +392,13 @@ namespace curvy {
                         }
                     }
                 }
-                layers_ = remaining;
+                writeLayerTable(remaining);
                 activeLayer_ = activeAfter;
                 dropUnselectable();
                 changed();
             },
             [this, slots, allBefore, activeBefore]() {
-                layers_ = allBefore;
+                writeLayerTable(allBefore);
                 activeLayer_ = activeBefore;
                 std::vector<std::shared_ptr<DeletedObject>> ordered = slots;
                 std::sort(ordered.begin(), ordered.end(), [](const std::shared_ptr<DeletedObject>& a, const std::shared_ptr<DeletedObject>& b) {
@@ -576,7 +576,7 @@ namespace curvy {
         const std::size_t activeBefore = activeLayer_, activeAfter = fresh[id];
         undoStack_.push({"Duplicate Layer",
             [this, slots, after, activeAfter]() {
-                layers_ = after;
+                writeLayerTable(after);
                 activeLayer_ = activeAfter;
                 for (const std::shared_ptr<DeletedObject>& slot : slots) {
                     if (slot->object) {
@@ -589,7 +589,7 @@ namespace curvy {
                 for (const std::shared_ptr<DeletedObject>& slot : slots) {
                     slot->object = detach(slot->id, &slot->index);
                 }
-                layers_ = before;
+                writeLayerTable(before);
                 activeLayer_ = activeBefore;
                 dropUnselectable();
                 changed();
