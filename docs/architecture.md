@@ -138,8 +138,11 @@ In order of expected gain for a large document:
 7. **Contention and threads.** The cook already runs on jitnodes' thread pool; sync and paint are single-threaded. Splitting paint (static
    background layer cached while only the overlay changes) is the cheapest parallelism win. Note `snapshotGraph` and the touch log are not
    thread-safe (UI thread only).
-8. **Tooling.** A real profile needs symbols: add a `RelWithDebInfo` preset (`/Zi`, `/DEBUG`) so the Visual Studio CPU profiler works on
-   `curvyTests.exe --gtest_filter=...`. DG-12 was done with temporary scoped timers because the release build has no PDBs.
+8. **Tooling.** Use the `x64-profile` preset (Release flags `/O2 /Ob2` plus `/Zi /bigobj`, PDBs next to the exes):
+   `cmake --preset x64-profile && cmake --build --preset x64-profile` from a VS developer prompt, then in Visual Studio open
+   `out/build/x64-profile/curvyTests.exe` (File > Open > Project/Solution, or Debug > Performance Profiler > CPU Usage with that exe and
+   arguments such as `--gtest_filter=ShapeNodeObject.AThousandMixed*`). DG-12 was done with temporary scoped timers because the release
+   build has no PDBs; with this preset a call tree replaces them.
 
 jitnodes and asmjit: the JIT only accelerates numeric kernels over points (cook of point-wise nodes). The remaining time in the editor
 is bookkeeping (hash lookups, string compares, allocation), so more JIT would not help; the gains above are algorithmic.

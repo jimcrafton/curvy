@@ -18,14 +18,27 @@
       "inherits": "base",
       "architecture": { "value": "x64", "strategy": "external" },
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "x64-profile",
+      "description": "Release optimisation with PDBs, for the Visual Studio CPU profiler (Debug > Performance Profiler) or WPA",
+      "inherits": "base",
+      "architecture": { "value": "x64", "strategy": "external" },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_CXX_FLAGS_RELWITHDEBINFO": "/O2 /Ob2 /Zi /bigobj /DNDEBUG",
+        "CMAKE_C_FLAGS_RELWITHDEBINFO": "/O2 /Ob2 /Zi /DNDEBUG"
+      }
     }
   ],
   "buildPresets": [
     { "name": "x64-debug", "configurePreset": "x64-debug" },
-    { "name": "x64-release", "configurePreset": "x64-release" }
+    { "name": "x64-release", "configurePreset": "x64-release" },
+    { "name": "x64-profile", "configurePreset": "x64-profile" }
   ],
   "testPresets": [
     { "name": "x64-debug", "configurePreset": "x64-debug", "output": { "outputOnFailure": true }, "filter": { "exclude": { "name": "newui_tests" } } },
-    { "name": "x64-release", "configurePreset": "x64-release", "output": { "outputOnFailure": true }, "filter": { "exclude": { "name": "newui_tests" } } }
+    { "name": "x64-release", "configurePreset": "x64-release", "output": { "outputOnFailure": true }, "filter": { "exclude": { "name": "newui_tests" } } },
+    { "name": "x64-profile", "configurePreset": "x64-profile", "output": { "outputOnFailure": true }, "filter": { "exclude": { "name": "newui_tests" } } }
   ]
 }
