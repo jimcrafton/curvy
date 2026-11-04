@@ -15,6 +15,8 @@ namespace curvy {
     //   a group (exactly)                        Transform, Opacity
     //   text only                                Transform, Colour, Text, Opacity
     //   any other selection                      Transform, Colour, Stroke, Opacity (and Text when it includes text)
+    //   a lone star, polygon, rounded rectangle  adds Shape (its points, inner radius, corner radius or arc ends; see liveshape.h)
+    //   or arc that is still in its parameter form
     // @reflect ignore=true
     struct DockBoxes {
         bool transform = false;
@@ -22,12 +24,13 @@ namespace curvy {
         bool stroke = false;
         bool opacity = false;
         bool text = false;
+        bool shape = false;
         std::string caption;   // shown above the boxes; empty hides it
 
         bool operator==(const DockBoxes& o) const {
-            return transform == o.transform && colour == o.colour && stroke == o.stroke && opacity == o.opacity && text == o.text && caption == o.caption;
+            return transform == o.transform && colour == o.colour && stroke == o.stroke && opacity == o.opacity && text == o.text && shape == o.shape && caption == o.caption;
         }
-        bool any() const { return transform || colour || stroke || opacity || text; }
+        bool any() const { return transform || colour || stroke || opacity || text || shape; }
     };
 
     // @reflect ignore=true

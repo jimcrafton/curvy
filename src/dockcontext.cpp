@@ -1,5 +1,7 @@
 #include "curvy/dockcontext.h"
 
+#include "curvy/liveshape.h"
+
 namespace curvy {
 
     bool DockContext::isDrawingTool(SketchTool tool) {
@@ -51,6 +53,11 @@ namespace curvy {
         boxes.transform = boxes.colour = boxes.opacity = true;
         boxes.stroke = !allText;
         boxes.text = anyText;
+        if (selection.size() == 1) {
+            const SketchObject* only = document.findById(selection.front());
+            LiveShape live;
+            boxes.shape = only != nullptr && recogniseLiveShape(*only, live);
+        }
         return boxes;
     }
 

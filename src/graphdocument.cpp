@@ -89,6 +89,12 @@ namespace curvy {
         return NodeRef(scopeIndex_.at(up), path.back());
     }
 
+    jitnodes::GraphSnapshot GraphDocument::snapshotGraph() const {
+        jitnodes::GraphSnapshot snapshot = jitnodes::snapshotNetwork(*network_, lastSnapshot_.get());
+        lastSnapshot_ = std::make_shared<const jitnodes::GraphSnapshot>(snapshot);
+        return snapshot;
+    }
+
     void GraphDocument::commitGraphEdit(const jitnodes::GraphSnapshot& before, const std::string& description) {
         jitnodes::GraphSnapshot after = jitnodes::snapshotNetwork(*network_, &before);
         if (jitnodes::sameGraph(before, after)) {

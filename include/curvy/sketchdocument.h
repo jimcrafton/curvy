@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <tuple>
 #include <memory>
 #include <optional>
 #include <unordered_set>
@@ -195,6 +196,16 @@ namespace curvy {
     // groups arrive with S3b; undoable commands with S2 - until then the mutators below are called
     // directly and each ends with changed(), which marks the document modified and repaints its views.
     // File I/O is SVG (sketchsvg.h): load()/save() go through readFromFile/writeToFile.
+    // What the passes over the objects need to know of a scope's network (its node ids, each shape's placement node, the appearance wiring),
+    // kept while the network's topologyRevision() stays the same.
+    struct ScopeTables {
+        jitnodes::Network* net = nullptr;
+        std::uint64_t topology = 0;
+        std::unordered_set<jitnodes::NodeId> existing;
+        std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> placed, next;
+        bool haveNext = false;
+    };
+
     class SketchDocument : public GraphDocument {
     public:
         SketchDocument() = default;
@@ -312,9 +323,10 @@ namespace curvy {
         std::size_t outermostGroupOf(const SketchObject& object) const { return object.groups().empty() ? 0 : object.groups().front(); }
         bool isGrouped(const SketchObject& object) const { return !object.groups().empty(); }
         bool inGroup(const SketchObject& object, std::size_t group) const;
-        std::size_t layerOf(const SketchObject& object) const { return object.layer(); }
+        // A placed object answers from the layer subnet its nodes sit in; the requested layer stands until the next sync and for unplaced objects.
+        std::size_t layerOf(const SketchObject& object) const;
         void setGroupsOf(SketchObject& object, const std::vector<std::size_t>& groups) { object.setGroups(groups); }
-        void setLayerOf(SketchObject& object, std::size_t layer) { object.setLayer(layer); }
+        void setLayerOf(SketchObject& object, std::size_t layer);
         // Where an object's nodes live as a file stores it: the path of subnet ids from the root ("4/7"; empty for the root scope), and back
         // (the file's graph is loaded first, so the path names its subnets).
         std::string scopeText(std::uint32_t scope) const;
@@ -556,6 +568,18 @@ namespace curvy {
         SketchObject* addLiveShape(const std::string& nodeType, const std::map<std::string, float>& params, const std::string& description);
         // Edits one parameter of a live shape's node (one undo step); the outline follows.
         bool setLiveShapeParam(std::size_t objectId, const std::string& name, float value);
+        // Swaps the plain path node of a star, polygon, rounded rectangle or arc for a curvyShape node holding its numbers (one undo step);
+        // false when the object is not such a shape or already follows an input. The outline then follows the node's parameters.
+        bool makeParametric(std::size_t objectId);
+        // Adds a star, polygon, rounded rectangle or arc as one undo step; its node is a curvyShape when the outline is recognised (a plain path otherwise).
+        SketchObject& addParametric(SketchObject* object, const std::string& undoDescription);
+        // True when the object's node is a curvyShape that still draws its outline (no hand edit yet).
+        bool isParametric(std::size_t objectId) const;
+        // Writes the numbers of `placed` (the object's outline after the edit) to its curvyShape node, no undo step: the caller takes a
+        // snapshotGraph() before and commitGraphEdit() after. False when the object is not parametric or the outline is no longer that shape.
+        bool setParametricOutline(SketchObject& object, const BLPath& placed);
+        // Puts a frozen curvyPath after the object's curvyShape, so the outline can be edited by hand; the shape stays upstream (no undo step).
+        bool freezeParametric(std::size_t objectId);
         // Redraw after an edit made directly on an object (drag preview).
         void touch() { changed(); }
         // While a Batch exists the document does not announce changes (views, panels, layer sorting); when the last one ends it does so
@@ -919,6 +943,7 @@ namespace curvy {
         // Adopts the curves of every path node whose text no longer matches its object (a graph edit, undo or redo wrote it), unless the
         // object itself changed since the node was written.
         void pullPathNodes();
+        void pullObject(SketchObject& object, std::uint32_t scope, ScopeTables& view);
         void timeChanged(bool graphAffected) override;
         // Makes a driven object show what the chain ending at its placement node cooks; false when the chain cooks to nothing usable.
         bool adoptChain(SketchObject& object, jitnodes::NodeId place);
@@ -996,6 +1021,38 @@ namespace curvy {
         mutable std::unordered_map<std::size_t, PlacedOutline> outlineCache_;
         // Where findById last found each id; every hit is checked against the object there, so a stale entry only costs a rescan.
         mutable std::unordered_map<std::size_t, std::size_t> indexOfId_;
+        // The id each derived node (a shape's transform node, a look node, a group or layer subnet, a scope's paint merge) was given, by owner and
+        // role. The sync prunes those nodes when their object leaves and builds them again when it returns; building them under the same id
+        // keeps the undo steps that refer to them valid. Only the owner is handed its id back, and the counter never reuses one for another node.
+        using ReservedKey = std::tuple<std::uint32_t, std::uint64_t, std::uint32_t>;   // scope, owner, role
+        std::map<ReservedKey, jitnodes::NodeId> reservedIds_;
+        jitnodes::NodeId addOwnedNode(jitnodes::Network& net, std::uint32_t scope, std::uint64_t owner, std::uint32_t role, const std::string& type,
+            const std::string& name);
+        std::unordered_set<std::size_t> parametric_;   // ids added with addParametric: their node is made a curvyShape whenever it is (re)built
+        std::unordered_map<std::uint32_t, ScopeTables> scopeTables_;
+        // What pullPathNodes saw last: per scope the network's topology and touch revision (so it can ask which nodes changed since), and per
+        // object what it looked like, so an object whose nodes and own state are unchanged is passed over without cooking or comparing.
+        struct PullScope {
+            jitnodes::Network* net = nullptr;
+            std::uint64_t topology = 0;
+            std::uint64_t touched = 0;
+        };
+        struct PullStamp {
+            std::uint64_t geometryRevision = 0;
+            jitnodes::NodeId node = jitnodes::invalidNodeId;
+            bool bound = false;
+            double matrix[6] = {};
+        };
+        std::unordered_map<std::uint32_t, PullScope> pullScopes_, appearanceScopes_;
+        // What syncPathScope left a scope as: when the wiring and the objects with their nodes are the same as then, the shapes are bound,
+        // placed and pruned already and only the objects that changed need writing.
+        struct PathSync {
+            jitnodes::Network* net = nullptr;
+            std::uint64_t topology = 0;
+            std::vector<std::pair<SketchObject*, jitnodes::NodeId>> objects, bound;
+        };
+        std::unordered_map<std::uint32_t, PathSync> pathSync_;
+        std::unordered_map<std::size_t, PullStamp> pullStamps_;
         std::unordered_map<std::uint32_t, std::unordered_map<jitnodes::NodeId, jitnodes::NodeId>> placedCache_;   // per scope, a shape node's transform node; rebuilt when the graph's wiring may have changed
         // Puts the objects in the stacking order given by ids (all of them, back to front).
         void reorder(const std::vector<std::size_t>& ids);

@@ -79,7 +79,7 @@ namespace curvy {
 
     // A new object gets the document's default look (a path with no fill and no stroke would be invisible, so
     // that case gets a plain black stroke).
-    void CanvasView::addDrawn(SketchObject* object, const char* name, const char* undoName, bool filled) {
+    void CanvasView::addDrawn(SketchObject* object, const char* name, const char* undoName, bool filled, bool parametric) {
         object->setName(name);
         object->setFill(filled ? document_->defaultFill() : SketchPaint::none());   // an open line is not filled
         SketchPaint stroke = document_->defaultStroke();
@@ -89,7 +89,11 @@ namespace curvy {
         object->setStroke(stroke);
         object->setStrokeWidth(document_->defaultStrokeWidth());
         object->setStrokeOptions(document_->defaultStrokeOptions());
-        document_->addUndoable(object, undoName);
+        if (parametric) {
+            document_->addParametric(object, undoName);
+        } else {
+            document_->addUndoable(object, undoName);
+        }
     }
 
     // ---- rounded rectangle, polygon and star (a drag, like the rectangle) ----
@@ -158,7 +162,7 @@ namespace curvy {
             BLBox box;
             outline.get_bounding_box(&box);
             double bw = box.x1 - box.x0, bh = box.y1 - box.y0;
-            addDrawn(SketchObject::makeRoundRect(box.x0, box.y0, bw, bh, std::min(cornerRadius_, std::min(bw, bh) * 0.5)), "Rounded Rectangle", "Draw Rounded Rectangle");
+            addDrawn(SketchObject::makeRoundRect(box.x0, box.y0, bw, bh, std::min(cornerRadius_, std::min(bw, bh) * 0.5)), "Rounded Rectangle", "Draw Rounded Rectangle", true, true);
             return;
         }
         if (tool_ == SketchTool::Circle) {
@@ -169,7 +173,7 @@ namespace curvy {
             return;
         }
         if (tool_ == SketchTool::Arc) {
-            addDrawn(SketchObject::makePath(outline), "Arc", "Draw Arc", false);   // an open arc is a line: no fill
+            addDrawn(SketchObject::makePath(outline), "Arc", "Draw Arc", false, true);   // an open arc is a line: no fill
             return;
         }
         // Polygon and star are polygons: read the corners back out of the outline.
@@ -182,7 +186,7 @@ namespace curvy {
             }
         }
         addDrawn(SketchObject::makePolygon(corners), tool_ == SketchTool::Star ? "Star" : "Polygon",
-            tool_ == SketchTool::Star ? "Draw Star" : "Draw Polygon");
+            tool_ == SketchTool::Star ? "Draw Star" : "Draw Polygon", true, true);
     }
 
     void CanvasView::paintShapePreview(BLContext& ctx) const {
@@ -481,6 +485,10 @@ namespace curvy {
             directOriginal_ = directPaths_[ref.sub].anchors[ref.anchor];
             dragBefore_ = document_->snapshotSelection();
             dragFrameBefore_ = document_->frameState();
+            dragGraphBefore_.reset();
+            if (document_->isParametric(ref.object)) {
+                dragGraphBefore_ = document_->snapshotGraph();   // the first move puts a frozen path node after the shape; undo removes it again
+            }
             drag_ = Drag::DirectEdit;
             dragMoved_ = false;
             style().markDirty();
@@ -542,8 +550,14 @@ namespace curvy {
     void CanvasView::finishDirectDrag() {
         directPaths_.clear();
         if (dragMoved_) {
-            document_->commitGeometry(dragBefore_, directDragRef_.part == 0 ? "Move Anchor Point" : "Edit Curve", dragFrameBefore_);
+            const char* what = directDragRef_.part == 0 ? "Move Anchor Point" : "Edit Curve";
+            if (dragGraphBefore_) {
+                document_->commitGraphEdit(*dragGraphBefore_, what);
+            } else {
+                document_->commitGeometry(dragBefore_, what, dragFrameBefore_);
+            }
         }
+        dragGraphBefore_.reset();
         dragBefore_.clear();
         style().markDirty();
     }
@@ -596,9 +610,17 @@ namespace curvy {
         }
         std::vector<GeometryState> before = document_->snapshotSelection();
         FrameState frameBefore = document_->frameState();
+        std::optional<jitnodes::GraphSnapshot> graphBefore;
+        if (document_->isParametric(object->id())) {
+            graphBefore = document_->snapshotGraph();
+        }
         document_->setObjectOutline(*object, subPathsToPath(subs));
         document_->touch();
-        document_->commitGeometry(before, "Delete Anchor Point", frameBefore);
+        if (graphBefore) {
+            document_->commitGraphEdit(*graphBefore, "Delete Anchor Point");
+        } else {
+            document_->commitGeometry(before, "Delete Anchor Point", frameBefore);
+        }
         style().markDirty();
         return true;
     }
@@ -674,38 +696,7 @@ namespace curvy {
         if (object == nullptr || object->isLocked() || !object->isVisible()) {
             return false;
         }
-        out = LiveShape();
-        out.object = object->id();
-        if (object->type() == SketchObjectType::Polygon) {
-            std::vector<SubPath> subs = pathToSubPaths(object->geometry());
-            if (subs.size() != 1 || !subs[0].closed) {
-                return false;
-            }
-            std::vector<BLPoint> corners;
-            for (const PenAnchor& a : subs[0].anchors) {
-                if (a.hasIn || a.hasOut) {
-                    return false;
-                }
-                corners.push_back(a.point);
-            }
-            if (!analyzeRegularShape(corners, out.regular)) {
-                return false;
-            }
-            out.kind = out.regular.star ? LiveKind::Star : LiveKind::Polygon;
-            return true;
-        }
-        if (object->type() == SketchObjectType::RoundRect) {
-            if (!analyzeRoundRect(object->geometry(), object->frameAngle(), out.rect)) {
-                return false;
-            }
-            out.kind = LiveKind::RoundRect;
-            return true;
-        }
-        if (object->type() == SketchObjectType::Path && analyzeArc(object->geometry(), out.arc)) {
-            out.kind = LiveKind::Arc;
-            return true;
-        }
-        return false;
+        return recogniseLiveShape(*object, out);
     }
 
     BLPoint CanvasView::liveHandlePoint(const LiveShape& shape, int handle) const {
@@ -770,6 +761,10 @@ namespace curvy {
             default: liveWhat_ = "Change Arc"; break;
         }
         liveLabel_.clear();
+        dragGraphBefore_.reset();
+        if (document_->isParametric(shape.object)) {
+            dragGraphBefore_ = document_->snapshotGraph();
+        }
         drag_ = Drag::LiveShape;
         style().markDirty();
     }
@@ -827,7 +822,9 @@ namespace curvy {
             }
         }
         liveLabel_ = text;
-        document_->setObjectOutline(*object, path);
+        if (!dragGraphBefore_ || !document_->setParametricOutline(*object, path)) {
+            document_->setObjectOutline(*object, path);
+        }
         dragMoved_ = true;
         document_->touch();
         style().markDirty();
@@ -835,8 +832,13 @@ namespace curvy {
 
     void CanvasView::finishLiveDrag() {
         if (dragMoved_) {
-            document_->commitGeometry(dragBefore_, liveWhat_, dragFrameBefore_);
+            if (dragGraphBefore_) {
+                document_->commitGraphEdit(*dragGraphBefore_, liveWhat_);
+            } else {
+                document_->commitGeometry(dragBefore_, liveWhat_, dragFrameBefore_);
+            }
         }
+        dragGraphBefore_.reset();
         dragBefore_.clear();
         liveHandle_ = kLiveNone;
         liveLabel_.clear();

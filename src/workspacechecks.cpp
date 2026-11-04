@@ -1,5 +1,6 @@
 #include "curvy/workspacechecks.h"
 
+#include "curvy/liveshape.h"
 #include "curvy/pathnode.h"
 
 #include "curvy/colorwheel.h"
@@ -186,6 +187,8 @@ namespace curvy {
 
                 auto shown = [&](const char* name) { return dock->propertyDock()->findView(name)->isVisible(); };
                 expect(shown("transformPanel") && shown("colorPanel") && shown("strokePanel") && shown("opacityPanel"), "a selected shape shows Transform, Colour, Stroke and Opacity");
+                expect(!shown("shapePanel"), "a rectangle has no Shape box");
+                checkShapeBox(shown);
                 doc_->clearSelection();
                 expect(!shown("transformPanel") && !shown("colorPanel") && shown("dockCaption"), "Select tool with nothing selected shows only the note");
                 key(newui::vkLetterS);
@@ -209,6 +212,36 @@ namespace curvy {
                 key(newui::vkLetterT);
                 expect(model_->toolbarVisible() && dock->toolDock()->isVisible(), "T in the View ring turns the toolbar on");
                 w_.runCommand("view.toolbar");
+            }
+
+            // A lone star shows the Shape box with its points and inner radius; typing a number rewrites the outline as one undo step.
+            template <typename Shown>
+            void checkShapeBox(const Shown& shown) {
+                RegularShape star;
+                star.star = true;
+                star.points = 5;
+                star.center = BLPoint(200, 400);
+                star.outer = 50.0;
+                star.inner = 20.0;
+                star.firstAngle = -1.5707963267948966;
+                const std::size_t previous = doc_->selection().empty() ? 0 : doc_->selection().front();
+                const std::size_t id = doc_->addUndoable(SketchObject::make(SketchObjectType::Polygon, regularShapePath(star)), "Star").id();
+                doc_->setSelection({id});
+                auto field = [&](const char* name) { return dynamic_cast<newui::TextField*>(w_.frame().rootView().findView(name)); };
+                expect(shown("shapePanel") && shown("shapeCountRow") && shown("shapeInnerRow") && !shown("shapeRadiusRow") && !shown("shapeStartRow"), "a lone star shows the Shape box with Points and Inner");
+                expect(field("shapeCountField")->text() == L"5" && field("shapeInnerField")->text() == L"40", "the Shape box shows 5 points and an inner radius of 40%");
+                field("shapeCountField")->setText(L"7");
+                field("shapeCountField")->onReturnPressed(*field("shapeCountField"));
+                LiveShape now;
+                expect(recogniseLiveShape(*doc_->findById(id), now) && now.regular.points == 7 && now.kind == LiveKind::Star, "typing 7 points redraws the star with 7 points");
+                field("shapeCountField")->onLostFocus(*field("shapeCountField"));
+                doc_->undoStack().undo();
+                expect(recogniseLiveShape(*doc_->findById(id), now) && now.regular.points == 5, "one undo brings the 5 points back, so losing the focus added no step of its own");
+                expect(field("shapeCountField")->text() == L"5", "and the Points field shows 5 again");
+                doc_->undoStack().undo();   // the star itself
+                if (previous != 0) {
+                    doc_->setSelection({previous});
+                }
             }
 
             // The object ring's Fill and Stroke slots lift the dock's Colour / Stroke box into a card at the pen, with the docks off.

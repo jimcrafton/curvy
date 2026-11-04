@@ -77,6 +77,7 @@ namespace curvy {
         if (propertyDock_ != nullptr) {
             transformPanel_ = std::make_unique<TransformPanel>(frame_.rootView(), document_);
             textPanel_ = std::make_unique<TextPanel>(frame_.rootView(), document_);
+            shapePanel_ = std::make_unique<ShapePanel>(frame_.rootView(), document_);
             stylePanel_ = std::make_unique<StylePanel>(frame_.rootView(), document_);   // binds the views it finds by name; the rest of its panel is not in the dock
             connections_.add(stylePanel_->onContentChanged, [this](StylePanel&) { fitCard(); return SyncReturn::Handled; });
         }
@@ -190,7 +191,10 @@ namespace curvy {
             {"capButtButton", "icons/cap-butt.svg"}, {"capRoundButton", "icons/cap-round.svg"}, {"capSquareButton", "icons/cap-square.svg"},
             {"joinMiterButton", "icons/join-miter.svg"}, {"joinRoundButton", "icons/join-round.svg"}, {"joinBevelButton", "icons/join-bevel.svg"},
             {"fillNoneButton", "icons/fill-none.svg"}, {"fillSolidButton", "icons/fill-solid.svg"}, {"fillLinearButton", "icons/fill-linear.svg"},
-            {"fillRadialButton", "icons/fill-radial.svg"}, {"fillPointsButton", "icons/fill-points.svg"}};
+            {"fillRadialButton", "icons/fill-radial.svg"}, {"fillPointsButton", "icons/fill-points.svg"},
+            {"textBoldButton", "icons/text-bold.svg"}, {"textItalicButton", "icons/text-italic.svg"},
+            {"textAlignLeftButton", "icons/text-align-left.svg"}, {"textAlignCenterButton", "icons/text-align-center.svg"},
+            {"textAlignRightButton", "icons/text-align-right.svg"}, {"textPathFlipButton", "icons/text-flip.svg"}};
         for (const auto& row : kStrokeIcons) {
             if (auto* button = find<ToolbarButton>(frame_.rootView(), row.name)) {
                 button->setIcon(row.icon);
@@ -225,6 +229,7 @@ namespace curvy {
         show("transformPanel", boxes_.transform);
         show("colorPanel", boxes_.colour);
         show("textPanel", boxes_.text);
+        show("shapePanel", boxes_.shape);
         show("strokePanel", boxes_.stroke);
         show("opacityPanel", boxes_.opacity);
         show("dockCaption", !boxes_.caption.empty());

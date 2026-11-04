@@ -98,7 +98,12 @@ namespace curvy {
             const Artboard& board = document_.activeArtboardRect();
             document_.addLiveShape("circle", {{"count", 48.0f}, {"radius", 50.0f}, {"cx", float(board.x + board.width * 0.5)}, {"cy", float(board.y + board.height * 0.5)}}, "New Live Circle");
         });
-        add("object.ungroup", [this]() { document_.ungroupSelection(); });
+        add("liveShape.makeParametric", [this]() {
+            for (std::size_t id : std::vector<std::size_t>(document_.selection())) {
+                document_.makeParametric(id);
+            }
+        });
+        add("object.ungroup",[this]() { document_.ungroupSelection(); });
         add("symbol.new", [this]() { document_.makeSymbol(""); });
         add("symbol.place", [this]() { document_.placeActiveSymbol(); });
         add("symbol.redefine", [this]() { document_.redefineSymbol(document_.activeSymbol()); });

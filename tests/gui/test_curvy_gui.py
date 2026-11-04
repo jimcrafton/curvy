@@ -742,6 +742,93 @@ class TextObject(CurvyCase):
         self.assertFalse(red == green == blue, "the fill kept a hue: " + hexa)
 
 
+class ShapeBox(CurvyCase):
+    """The Shape box of the property dock: the numbers of a lone star, polygon or rounded rectangle, typed into its fields."""
+
+    def draw_alone(self, tool):
+        self.new_a4()
+        self.app.click("toolbarToggle")
+        self.app.click(tool)
+        canvas = self.app.find("canvas")
+        cx, cy = canvas.x + canvas.w // 2, canvas.y + canvas.h // 2
+        self.app.drag((cx - 60, cy - 60), (cx + 60, cy + 60))
+        self.app.click("selectTool")
+        self.app.wait_until(lambda: self.hint_tool() == "Select", "the Select tool")
+        self.app.key("ctrl+a")                                     # the shape is the only object
+        self.app.click("propertiesToggle")
+        self.app.wait_until(lambda: self.app.prop("propertiesToggle", "checked"), "the property dock")
+
+    def shown(self, name):
+        try:
+            box, canvas = self.app.find(name), self.app.find("canvas")
+        except newui_guitest.GuiTestError:
+            return False
+        return box.visible and box.w > 0 and box.x + box.w <= canvas.x + canvas.w + 1
+
+    def type_into(self, field, text):
+        self.app.double_click(field)
+        self.app.key("ctrl+a")
+        self.app.type(text)
+        self.app.key("enter")
+
+    def test_a_star_shows_points_and_inner_and_typing_points_redraws_it(self):
+        self.draw_alone("starTool")
+        self.app.wait_until(lambda: self.shown("shapePanel"), "the Shape box")
+        self.assertTrue(self.shown("shapeCountRow") and self.shown("shapeInnerRow"))
+        self.assertFalse(self.shown("shapeRadiusRow") or self.shown("shapeStartRow") or self.shown("shapeSweepRow"))   # a hidden row, not its field, carries the flag
+        self.assertEqual("Points", self.app.prop("shapeCountLabel", "text"))
+        self.assertEqual("Star", self.app.prop("shapePanelHeaderInfo", "text"))
+        points = self.app.prop("shapeCountField", "text")
+        self.type_into("shapeCountField", "9")
+        self.app.wait_until(lambda: self.app.prop("shapeCountField", "text") == "9", "nine points")
+        self.assertNotEqual(points, "9")
+        canvas = self.app.find("canvas")
+        self.app.click_at((canvas.x + canvas.w // 2, canvas.y + canvas.h // 2))   # the field keeps Ctrl+Z for its own text until the focus leaves it
+        self.app.key("ctrl+z")
+        self.app.wait_until(lambda: self.app.prop("shapeCountField", "text") == points, "undo to bring the points back")
+
+    def test_typing_an_inner_radius_changes_the_star(self):
+        self.draw_alone("starTool")
+        self.app.wait_until(lambda: self.shown("shapePanel"), "the Shape box")
+        self.type_into("shapeInnerField", "80")
+        self.app.wait_until(lambda: self.app.prop("shapeInnerField", "text") == "80", "an inner radius of 80%")
+
+    def test_a_rounded_rectangle_shows_only_the_corner_and_a_value_is_kept(self):
+        self.draw_alone("roundRectTool")
+        self.app.wait_until(lambda: self.shown("shapePanel"), "the Shape box")
+        self.assertTrue(self.shown("shapeRadiusRow"))
+        self.assertFalse(self.shown("shapeCountRow") or self.shown("shapeInnerRow"))
+        self.type_into("shapeRadiusField", "12")
+        self.app.wait_until(lambda: self.app.prop("shapeRadiusField", "text") == "12", "a corner of 12")
+
+    def test_a_drawn_star_stays_editable_through_several_edits_undo_and_redo(self):
+        self.draw_alone("starTool")                                # the tool makes a parametric shape, so every edit is a node parameter
+        self.app.wait_until(lambda: self.shown("shapePanel"), "the Shape box")
+        points = self.app.prop("shapeCountField", "text")
+        self.type_into("shapeCountField", "9")
+        self.app.wait_until(lambda: self.app.prop("shapeCountField", "text") == "9", "nine points")
+        self.type_into("shapeInnerField", "80")
+        self.app.wait_until(lambda: self.app.prop("shapeInnerField", "text") == "80", "an inner radius of 80%")
+        canvas = self.app.find("canvas")
+        centre = (canvas.x + canvas.w // 2, canvas.y + canvas.h // 2)
+        self.app.click_at(centre)                                  # the field keeps Ctrl+Z for its own text until the focus leaves it
+        self.app.key("ctrl+z")
+        self.app.wait_until(lambda: self.app.prop("shapeInnerField", "text") != "80", "the inner radius undone")
+        self.assertEqual("9", self.app.prop("shapeCountField", "text"))
+        self.app.key("ctrl+z")
+        self.app.wait_until(lambda: self.app.prop("shapeCountField", "text") == points, "the points undone")
+        self.app.key("ctrl+y")
+        self.app.wait_until(lambda: self.app.prop("shapeCountField", "text") == "9", "the points redone")
+        self.assertTrue(self.shown("shapePanel"), "the shape is still a shape after undo and redo")
+        self.type_into("shapeCountField", "6")
+        self.app.wait_until(lambda: self.app.prop("shapeCountField", "text") == "6", "six points after a redo")
+
+    def test_a_plain_rectangle_has_no_shape_box(self):
+        self.draw_alone("rectangleTool")
+        self.app.wait_until(lambda: self.shown("transformPanel"), "the dock")
+        self.assertFalse(self.shown("shapePanel"))
+
+
 class Grouping(CurvyCase):
     """Group / Ungroup from the Object ring. A group shows only Transform and Opacity in the dock, so that is what tells grouped from not."""
 

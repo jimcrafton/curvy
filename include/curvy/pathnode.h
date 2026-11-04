@@ -20,6 +20,8 @@ namespace curvy {
     // The graph node type that holds one path object's curves in its geometry parameter "curve": one primitive per sub path, a polyline for a
     // figure of straight lines and a cubic (jitnodes PrimKind) for any other. The node cooks that geometry as it is.
     inline constexpr const char* kPathNodeType = "curvyPath";
+    // A path node may also have an input (and none is needed): unfrozen it passes that input through, so `curvyShape -> curvyPath` follows the shape;
+    // frozen (jitnodes Node::setFrozenGeometry) it outputs the geometry stored on it, which is how a hand edit of a parametric shape is kept (shapenode.h).
     // Text, symbol and image objects keep their outline in "curve" too, plus what shapes it: the words, font and style (text), the definition
     // (symbol) or the picture's name (image). The pixels and definitions stay in the document; a node refers to them.
     inline constexpr const char* kTextNodeType = "curvyText";

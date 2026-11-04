@@ -52,6 +52,8 @@ add_executable(curvy
     src/pdfexport.cpp
     src/documentbrushes.cpp
     src/textpanel.cpp
+    src/liveshape.cpp
+    src/shapepanel.cpp
     src/numberscrubber.cpp
     src/expressionfield.cpp
     src/paramgrid.cpp
@@ -62,6 +64,7 @@ add_executable(curvy
     src/graphdock.cpp
     src/timelinebar.cpp
     src/pathnode.cpp
+    src/shapenode.cpp
     src/appearancenode.cpp
     src/radialmenu.cpp
     src/tooloptionscard.cpp
@@ -132,7 +135,7 @@ set(CURVY_MODEL_SOURCES
     documentlayers documentswatches documentselect documentclip documentsymbols documentbrushes brush
     pathflatten textwarp imagedata documenttextpath documentimages documentexpand pdfexport documentartboards
     documenttrace imagetrace sketchsvg sketchexport shapetools pathops textoutline gzip numberscrubber expressionfield
-    sketchbin cursorset newdocumentmodel graphdocument graphtree pathnode appearancenode documentlive radialmenu holdscrub workspacemodel dockcontext settings)
+    sketchbin cursorset newdocumentmodel graphdocument graphtree pathnode shapenode appearancenode documentlive radialmenu holdscrub workspacemodel dockcontext liveshape settings)
 list(TRANSFORM CURVY_MODEL_SOURCES PREPEND src/)
 list(TRANSFORM CURVY_MODEL_SOURCES APPEND .cpp)
 

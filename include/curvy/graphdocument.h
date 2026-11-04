@@ -81,7 +81,8 @@ namespace curvy {
         void setTime(double seconds);
 
         // For a drag: edit the network directly, then record the finished edit from the snapshot taken first.
-        jitnodes::GraphSnapshot snapshotGraph() const { return jitnodes::snapshotNetwork(*network_); }
+        // Only the nodes edited since the previous snapshot are written out again; the rest share its text.
+        jitnodes::GraphSnapshot snapshotGraph() const;
         void commitGraphEdit(const jitnodes::GraphSnapshot& before, const std::string& description);
         // One step of such a drag: sets the parameter and lets everything that depends on the graph follow, without an undo step.
         void setGraphFloatLive(const NodeRef& ref, const std::string& name, float value);
@@ -116,6 +117,7 @@ namespace curvy {
 
         // One thread: documents are created freely (clipboard, symbols) and live shapes are small. Held by pointer so documents stay movable.
         std::unique_ptr<jitnodes::Network> network_ = std::make_unique<jitnodes::Network>(1);
+        mutable std::shared_ptr<const jitnodes::GraphSnapshot> lastSnapshot_;   // the base snapshotGraph() reuses the text of; a node's revision is process-unique, so a replaced network cannot match it
     };
 
 }

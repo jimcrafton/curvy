@@ -5,6 +5,8 @@
 #include "curvy/sketchsvg.h"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
 #include <cctype>
 #include <cmath>
 #include <fstream>
@@ -133,6 +135,8 @@ namespace curvy {
     void SketchDocument::clearObjects() {
         objects_.clear();
         outlineCache_.clear();   // ids start again from 1
+        parametric_.clear();
+        reservedIds_.clear();
         clearGraph();
         drivenDirty_ = true;
         nextId_ = 1;
@@ -661,12 +665,28 @@ namespace curvy {
         slot->object->setId(nextId_++);
         slot->id = slot->object->id();
         SketchObject* raw = object;
+        // The sync prunes the shape chain of an object that leaves (a hand-edited shape keeps a frozen path node and its shape upstream), so
+        // redo puts the graph back as it was after the add rather than building a plain node again.
+        auto after = std::make_shared<std::shared_ptr<const jitnodes::GraphSnapshot>>();   // taken when the add is undone, so adding stays cheap
         undoStack_.push({description,
-            [this, slot]() {
-                attach(std::move(slot->object), slot->index);
+            [this, slot, after]() {
+                const bool redo = bool(*after);
+                if (redo) {
+                    const jitnodes::GraphSnapshot live = snapshotGraph();
+                    jitnodes::restoreSnapshot(network(), **after, &live);
+                }
+                {
+                    // One sync for the object coming back and the nodes restored with it.
+                    Batch batch(*this);
+                    attach(std::move(slot->object), slot->index);
+                    if (redo) {
+                        graphChanged();
+                    }
+                }
                 setSelection({slot->id});
             },
-            [this, slot]() {
+            [this, slot, after]() {
+                *after = std::make_shared<const jitnodes::GraphSnapshot>(snapshotGraph());
                 slot->object = detach(slot->id, &slot->index);
             }});
         return *raw;
@@ -683,8 +703,11 @@ namespace curvy {
             slots.push_back(slot);
         }
         std::vector<std::size_t> ids = selection_;
+        // Same reason as in addUndoable: undo puts back the graph as it was before the delete, shape chains and frozen edits included.
+        auto before = std::make_shared<std::shared_ptr<const jitnodes::GraphSnapshot>>();
         undoStack_.push({"Delete",
-            [this, slots]() {
+            [this, slots, before]() {
+                *before = std::make_shared<const jitnodes::GraphSnapshot>(snapshotGraph());
                 // Highest stack position first, so every recorded index is its original one.
                 for (std::size_t i = objects_.size(); i > 0; --i) {
                     std::size_t id = objects_[i - 1]->id();
@@ -696,16 +719,23 @@ namespace curvy {
                     }
                 }
             },
-            [this, slots, ids]() {
+            [this, slots, ids, before]() {
+                const jitnodes::GraphSnapshot live = snapshotGraph();
+                jitnodes::restoreSnapshot(network(), **before, &live);
                 // Reinsert lowest index first so each stored index is valid again.
                 std::vector<std::shared_ptr<Slot>> ordered = slots;
                 std::sort(ordered.begin(), ordered.end(),
                     [](const std::shared_ptr<Slot>& a, const std::shared_ptr<Slot>& b) { return a->index < b->index; });
-                for (const std::shared_ptr<Slot>& slot : ordered) {
-                    if (slot->object) {
-                        attach(std::move(slot->object), slot->index);
+                {
+                    // One sync after all are back: between two, the nodes of the objects not yet attached would be pruned.
+                    Batch batch(*this);
+                    for (const std::shared_ptr<Slot>& slot : ordered) {
+                        if (slot->object) {
+                            attach(std::move(slot->object), slot->index);
+                        }
                     }
                 }
+                graphChanged();
                 setSelection(ids);
             }});
     }

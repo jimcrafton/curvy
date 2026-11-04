@@ -3,6 +3,7 @@
 #include "curvy/holdscrub.h"
 
 #include "curvy/cursorset.h"
+#include "curvy/liveshape.h"
 #include "curvy/shapetools.h"
 #include "curvy/sketchdocument.h"
 
@@ -317,7 +318,7 @@ namespace curvy {
         // Up / Down while dragging: more / fewer sides, points or a bigger / smaller corner radius. True when it applied.
         bool adjustShapeParameter(int direction);
         // Adds a drawn object with the document's default fill and stroke as one undo step; it becomes the selection.
-        void addDrawn(SketchObject* object, const char* name, const char* undoName, bool filled = true);
+        void addDrawn(SketchObject* object, const char* name, const char* undoName, bool filled = true, bool parametric = false);
         void pencilMove(const BLPoint& point);
         void finishPencil();
         void paintPencilPreview(BLContext& ctx) const;
@@ -424,14 +425,8 @@ namespace curvy {
         // number of points / sides, the star inner radius, the corner radius, the two ends of an arc. The shape is recognised
         // from its outline each time (shapetools.h), so nothing extra is stored and it also works for files and shapes made
         // before - a shape that was squashed or edited into something irregular simply has none.
-        enum class LiveKind { None, RoundRect, Polygon, Star, Arc };
-        struct LiveShape {
-            LiveKind kind = LiveKind::None;
-            std::size_t object = 0;
-            RegularShape regular;   // polygon, star
-            RoundRectShape rect;    // rounded rectangle
-            ArcShape arc;           // arc
-        };
+        using LiveKind = curvy::LiveKind;
+        using LiveShape = curvy::LiveShape;
         enum LiveHandle { kLiveNone = 0, kLivePoints = 1, kLiveInner = 2, kLiveRadius = 3, kLiveArcStart = 4, kLiveArcEnd = 5 };
         bool liveShape(LiveShape& out) const;
         // Where a handle sits, in view pixels.
@@ -526,6 +521,7 @@ namespace curvy {
         BLPoint dragNowDoc_;
         newui::Point dragNowView_;
         std::vector<GeometryState> dragBefore_;
+        std::optional<jitnodes::GraphSnapshot> dragGraphBefore_;   // set while an edit of a parametric shape runs: its undo step is a graph edit
         BLMatrix2D dragMatrix_ = BLMatrix2D::make_identity();   // the last matrix applyToSelection() applied (what Transform Again repeats)
         double dragAngle_ = 0.0;
         FrameState dragFrameBefore_;  // the document group angle / quad frame when a drag began

@@ -1,6 +1,7 @@
 #include "curvy/pathnode.h"
 
 #include "curvy/appearancenode.h"
+#include "curvy/shapenode.h"
 #include "curvy/sketchobject.h"
 
 #include <jitnodes/graph/network.h>
@@ -132,18 +133,29 @@ namespace curvy {
 
         class PathNode : public jitnodes::Node {
         public:
-            PathNode(const char* type, std::initializer_list<const char*> extras) : Node(type, 0) {
+            PathNode(const char* type, std::initializer_list<const char*> extras, bool optionalInput = false)
+                : Node(type, optionalInput ? 1 : 0), optionalInput_(optionalInput) {
                 declareGeometry("curve");
                 for (const char* name : extras) {
                     declareString(name, "");
                 }
             }
 
+            // Only the plain path node takes an input; text, symbol and image nodes keep none.
+            bool hasVariableInputs() const override { return optionalInput_; }
+            bool inputsOptional() const override { return optionalInput_; }
+
             // The authored curve goes out as it is: polyline and cubic primitives (jitnodes PrimKind); nodes that only know polylines flatten
-            // curves first.
-            jitnodes::GeometryHandle cook(jitnodes::CookContext&, const std::vector<jitnodes::GeometryHandle>&) override {
+            // curves first. With an input wired the node passes it through instead; a frozen node returns its stored geometry before this runs.
+            jitnodes::GeometryHandle cook(jitnodes::CookContext&, const std::vector<jitnodes::GeometryHandle>& inputs) override {
+                if (!inputs.empty() && inputs.front()) {
+                    return inputs.front();
+                }
                 return geometryParam("curve");
             }
+
+        private:
+            bool optionalInput_ = false;
         };
     }
 
@@ -688,7 +700,8 @@ namespace curvy {
         std::call_once(once, [] {
             using Extras = std::initializer_list<const char*>;
             auto& registry = jitnodes::NodeRegistry::instance();
-            registry.registerType(kPathNodeType, [] { return std::make_unique<PathNode>(kPathNodeType, Extras{}); });
+            registry.registerType(kPathNodeType, [] { return std::make_unique<PathNode>(kPathNodeType, Extras{}, true); });
+            registerShapeNode();
             registry.registerType(kTextNodeType, [] { return std::make_unique<PathNode>(kTextNodeType, Extras{"text", "font", "size", "matrix", "style", "warp"}); });
             registry.registerType(kSymbolNodeType, [] { return std::make_unique<PathNode>(kSymbolNodeType, Extras{"symbol"}); });
             registry.registerType(kImageNodeType, [] { return std::make_unique<PathNode>(kImageNodeType, Extras{"image"}); });
@@ -733,7 +746,7 @@ namespace curvy {
     }
 
     bool isShapeNodeType(const std::string& typeName) {
-        return typeName == kPathNodeType || typeName == kTextNodeType || typeName == kSymbolNodeType || typeName == kImageNodeType;
+        return typeName == kPathNodeType || typeName == kShapeNodeType || typeName == kTextNodeType || typeName == kSymbolNodeType || typeName == kImageNodeType;
     }
 
     const char* shapeNodeType(const SketchObject& object) {

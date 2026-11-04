@@ -6,6 +6,7 @@
 #include "curvy/dockcontext.h"
 #include "curvy/stylepanel.h"
 #include "curvy/sketchdocument.h"
+#include "curvy/shapepanel.h"
 #include "curvy/textpanel.h"
 #include "curvy/transformpanel.h"
 #include "curvy/workspacemodel.h"
@@ -110,6 +111,7 @@ namespace curvy {
         std::unique_ptr<TransformPanel> transformPanel_;
         std::unique_ptr<StylePanel> stylePanel_;
         std::unique_ptr<TextPanel> textPanel_;
+        std::unique_ptr<ShapePanel> shapePanel_;
         DockBoxes boxes_;
         newui::Connections connections_;
     };

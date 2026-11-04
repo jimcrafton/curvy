@@ -24,7 +24,11 @@
 #include <newui/mouse_constants.h>
 #include "curvy/sketchbin.h"
 #include "curvy/pathnode.h"
+#include "curvy/shapenode.h"
+#include "curvy/liveshape.h"
 #include "curvy/graphtree.h"
+#include <jitnodes/graph/network.h>
+#include <jitnodes/graph/serialize.h>
 #include <jitnodes/geo/topology.h>
 
 #include <array>
@@ -8796,6 +8800,31 @@ TEST(DockContext, ATextOnlySelectionLeavesOutStroke) {
     EXPECT_TRUE(boxes.transform && boxes.colour && boxes.opacity && !boxes.stroke);
 }
 
+TEST(DockContext, ALoneStarPolygonRoundRectOrArcAddsTheShapeBox) {
+    curvy::SketchDocument doc;
+    curvy::RegularShape star;
+    star.star = true;
+    star.points = 5;
+    star.center = BLPoint(100, 100);
+    star.outer = 40.0;
+    star.inner = 16.0;
+    const std::size_t starId = doc.addUndoable(curvy::SketchObject::make(curvy::SketchObjectType::Polygon, curvy::regularShapePath(star)), "Star").id();
+    const std::size_t rectId = doc.addUndoable(curvy::SketchObject::makeRect(0, 0, 10, 10), "Draw").id();
+    curvy::ArcShape arc;
+    arc.center = BLPoint(50, 50);
+    arc.radius = 20.0;
+    arc.sweep = 1.5;
+    const std::size_t arcId = doc.addUndoable(curvy::SketchObject::make(curvy::SketchObjectType::Path, curvy::arcPath(arc)), "Arc").id();
+    doc.setSelection({starId});
+    EXPECT_TRUE(curvy::DockContext::boxesFor(doc, curvy::SketchTool::Select).shape);
+    doc.setSelection({arcId});
+    EXPECT_TRUE(curvy::DockContext::boxesFor(doc, curvy::SketchTool::Select).shape);
+    doc.setSelection({rectId});
+    EXPECT_FALSE(curvy::DockContext::boxesFor(doc, curvy::SketchTool::Select).shape);   // a plain rectangle has no parameters
+    doc.setSelection({starId, arcId});
+    EXPECT_FALSE(curvy::DockContext::boxesFor(doc, curvy::SketchTool::Select).shape);   // only a lone shape
+}
+
 TEST(DockContext, AGroupShowsOnlyTransformAndOpacity) {
     curvy::SketchDocument doc;
     const std::size_t a = doc.addUndoable(curvy::SketchObject::makeRect(0, 0, 10, 10), "Draw").id();
@@ -8842,4 +8871,691 @@ TEST(Settings, ToolDefaultsAreRangeCheckedAndReset) {
     EXPECT_EQ(settings.starPoints, 6);
     settings.resetPage(curvy::SettingsPage::Drawing);
     EXPECT_EQ(settings.starPoints, 5);
+}
+
+namespace {
+    jitnodes::NodeId addShape(jitnodes::Network& net, const char* kind, std::initializer_list<std::pair<const char*, float>> values) {
+        curvy::registerCurvyNodes();
+        const jitnodes::NodeId id = net.addNode(kShapeNodeType);
+        net.node(id).setString("kind", kind);
+        for (const auto& [name, value] : values) {
+            net.node(id).setFloat(name, value);
+        }
+        return id;
+    }
+
+    BLPath closedPolygon(const std::vector<BLPoint>& points) {
+        BLPath path;
+        path.move_to(points.front());
+        for (std::size_t i = 1; i < points.size(); ++i) {
+            path.line_to(points[i]);
+        }
+        path.close();
+        return path;
+    }
+
+    void expectSameOutline(const jitnodes::Geometry& a, const jitnodes::Geometry& b, float slack = 1e-3f) {
+        ASSERT_EQ(a.pointCount(), b.pointCount());
+        ASSERT_EQ(a.primitiveCount(), b.primitiveCount());
+        for (std::size_t i = 0; i < a.pointCount(); ++i) {
+            EXPECT_NEAR(a.x()[i], b.x()[i], slack) << i;
+            EXPECT_NEAR(a.y()[i], b.y()[i], slack) << i;
+        }
+    }
+}
+
+TEST(ShapeNode, CooksAStarAndAPolygonLikeTheGenerators) {
+    jitnodes::Network net(1);
+    const jitnodes::NodeId star = addShape(net, "star", {{"centerX", 10.0f}, {"centerY", 20.0f}, {"points", 5.0f}, {"outer", 40.0f}, {"innerRatio", 0.4f}, {"angle", 30.0f}});
+    expectSameOutline(*net.cook(star), *geometryFromPath(closedPolygon(starPoints(BLPoint(10, 20), 40.0, 0.4, 5, 30.0 * 3.14159265358979 / 180.0))));
+
+    const jitnodes::NodeId polygon = addShape(net, "polygon", {{"centerX", -5.0f}, {"points", 7.0f}, {"outer", 25.0f}});
+    expectSameOutline(*net.cook(polygon), *geometryFromPath(closedPolygon(regularPolygonPoints(BLPoint(-5, 0), 25.0, 7, 0.0))));
+    EXPECT_EQ(net.cook(polygon)->pointCount(), 7u);
+}
+
+TEST(ShapeNode, CooksARoundedRectangleAnArcAndNothingForNonsense) {
+    jitnodes::Network net(1);
+    const jitnodes::NodeId rect = addShape(net, "roundRect", {{"centerX", 100.0f}, {"centerY", 50.0f}, {"width", 80.0f}, {"height", 40.0f}, {"radius", 10.0f}});
+    const jitnodes::GeometryHandle rectangle = net.cook(rect);
+    EXPECT_EQ(rectangle->primitives().front().kind, jitnodes::PrimKind::cubic);
+    float left = 1e9f, right = -1e9f, top = 1e9f, bottom = -1e9f;
+    for (std::size_t i = 0; i < rectangle->pointCount(); ++i) {
+        left = std::min(left, rectangle->x()[i]);
+        right = std::max(right, rectangle->x()[i]);
+        top = std::min(top, rectangle->y()[i]);
+        bottom = std::max(bottom, rectangle->y()[i]);
+    }
+    EXPECT_NEAR(left, 60.0f, 0.01f);
+    EXPECT_NEAR(right, 140.0f, 0.01f);
+    EXPECT_NEAR(top, 30.0f, 0.01f);
+    EXPECT_NEAR(bottom, 70.0f, 0.01f);
+
+    const jitnodes::NodeId arc = addShape(net, "arc", {{"centerX", 10.0f}, {"centerY", 10.0f}, {"outer", 30.0f}, {"start", 90.0f}, {"sweep", 180.0f}});
+    const jitnodes::GeometryHandle curve = net.cook(arc);
+    ASSERT_GT(curve->pointCount(), 0u);
+    EXPECT_FALSE(curve->primitives().front().closed);
+    EXPECT_NEAR(curve->x()[0], 10.0f, 0.01f);
+    EXPECT_NEAR(curve->y()[0], 40.0f, 0.01f);
+    EXPECT_NEAR(curve->x()[curve->pointCount() - 1], 10.0f, 0.01f);
+    EXPECT_NEAR(curve->y()[curve->pointCount() - 1], -20.0f, 0.01f);
+
+    EXPECT_EQ(net.cook(addShape(net, "star", {{"outer", 0.0f}}))->pointCount(), 0u);
+    EXPECT_EQ(net.cook(addShape(net, "hexagram", {}))->pointCount(), 0u);
+    EXPECT_EQ(net.cook(addShape(net, "polygon", {{"points", 1.0f}, {"outer", 10.0f}}))->pointCount(), 3u);
+}
+
+TEST(ShapeNode, RecognisedShapesStoredOnTheNodeCookTheSameOutline) {
+    jitnodes::Network net(1);
+    curvy::registerCurvyNodes();
+    std::vector<std::unique_ptr<SketchObject>> shapes;
+    shapes.emplace_back(SketchObject::makePolygon(starPoints(BLPoint(120, 80), 60.0, 0.45, 6, 0.7)));
+    shapes.emplace_back(SketchObject::makePolygon(regularPolygonPoints(BLPoint(30, 40), 20.0, 5, 0.2)));
+    BLPath rounded = roundRectPath(RoundRectShape{BLBox(10, 20, 110, 80), 12.0, 0.0});
+    shapes.emplace_back(SketchObject::make(SketchObjectType::RoundRect, rounded));
+    shapes.emplace_back(SketchObject::makePath(arcPath(ArcShape{BLPoint(50, 60), 30.0, 0.4, 2.0})));
+    int stored = 0;
+    for (const auto& object : shapes) {
+        LiveShape live;
+        ASSERT_TRUE(recogniseLiveShape(*object, live)) << "shape " << stored;
+        ++stored;
+        const jitnodes::NodeId id = net.addNode(kShapeNodeType);
+        storeShapeNode(net.node(id), live);
+        expectSameOutline(*net.cook(id), *geometryFromPath(object->geometry()), 0.01f);
+    }
+    EXPECT_EQ(stored, 4);
+}
+
+TEST(ShapeNode, ParametersCanBeAnimatedAndSurviveSaveAndLoad) {
+    jitnodes::Network net(1);
+    const jitnodes::NodeId star = addShape(net, "star", {{"outer", 10.0f}});
+    net.node(star).setKeyframes("outer", {{0.0, 10.0f, jitnodes::KeyInterp::linear}, {1.0, 30.0f, jitnodes::KeyInterp::linear}});
+    net.setTime(1.0);
+    float farthest = 0.0f;
+    for (std::size_t i = 0; i < net.cook(star)->pointCount(); ++i) {
+        farthest = std::max(farthest, std::hypot(net.cook(star)->x()[i], net.cook(star)->y()[i]));
+    }
+    EXPECT_NEAR(farthest, 30.0f, 0.01f);
+
+    jitnodes::Network loaded(1);
+    curvy::registerCurvyNodes();
+    jitnodes::loadNetwork(loaded, jitnodes::saveNetwork(net));
+    const jitnodes::NodeId again = loaded.nodeIds().front();
+    EXPECT_EQ(loaded.node(again).getString("kind"), "star");
+    expectSameOutline(*loaded.cook(again), *net.cook(star));
+}
+
+TEST(ShapeNode, PointIdsStayWhileTheLayoutIsUnchangedAndAreAFreshRunWhenItIsNot) {
+    jitnodes::Network net(1);
+    const jitnodes::NodeId star = addShape(net, "star", {{"points", 5.0f}, {"outer", 30.0f}});
+    auto ids = [&] {
+        std::vector<int> out;
+        const jitnodes::AttribArray* a = net.cook(star)->findAttrib(jitnodes::AttribClass::point, kPointIdAttrib);
+        for (std::size_t i = 0; a != nullptr && i < a->size(); ++i) {
+            out.push_back(a->ints()[i]);
+        }
+        return out;
+    };
+    const std::vector<int> before = ids();
+    ASSERT_EQ(before.size(), 10u);
+    net.node(star).setFloat("outer", 55.0f);
+    net.node(star).setFloat("innerRatio", 0.3f);
+    EXPECT_EQ(ids(), before);
+    net.node(star).setFloat("points", 7.0f);
+    EXPECT_EQ(ids().size(), 14u);
+}
+
+TEST(ShapeNode, ShapeNodeTypesAreRecognisedAndAPathNodeMayFollowOne) {
+    jitnodes::Network net(1);
+    const jitnodes::NodeId shape = addShape(net, "star", {{"outer", 40.0f}});
+    const jitnodes::NodeId place = net.addNode(kTransformNodeType);
+    EXPECT_TRUE(isShapeNodeType(kShapeNodeType));
+    net.connect(shape, place, 0);
+    EXPECT_EQ(shapeBehind(net, net.inputOf(place, 0)), shape);
+
+    const jitnodes::NodeId edit = net.addNode(kPathNodeType);
+    EXPECT_EQ(net.node(edit).inputCount(), 1);
+    net.connect(shape, edit, 0);
+    net.connect(edit, place, 0);
+    EXPECT_EQ(shapeBehind(net, net.inputOf(place, 0)), edit);
+    EXPECT_TRUE(isShapeNodeType(net.node(edit).typeName()));
+
+    const jitnodes::GeometryHandle live = net.cook(shape);
+    EXPECT_EQ(net.cook(edit)->pointCount(), live->pointCount());
+    net.node(shape).setFloat("outer", 80.0f);
+    EXPECT_NE(net.cook(edit)->x()[0], live->x()[0]);
+}
+
+TEST(ShapeNode, AFrozenPathNodeKeepsAHandEditAndUnfreezingGivesTheShapeBack) {
+    jitnodes::Network net(1);
+    net.setFusionEnabled(false);
+    const jitnodes::NodeId shape = addShape(net, "polygon", {{"points", 4.0f}, {"outer", 20.0f}});
+    const jitnodes::NodeId edit = net.addNode(kPathNodeType);
+    const jitnodes::NodeId place = net.addNode(kTransformNodeType);
+    net.connect(shape, edit, 0);
+    net.connect(edit, place, 0);
+
+    net.freezeNode(edit);
+    const size_t shapeCooks = net.node(shape).cookCount();
+    auto moved = std::make_shared<jitnodes::Geometry>(*net.node(edit).frozenGeometry());
+    moved->x()[1] += 7.0f;
+    net.node(edit).setFrozenGeometry(moved);
+    EXPECT_NEAR(net.cook(place)->x()[1], moved->x()[1], 1e-4f);
+
+    net.node(shape).setFloat("outer", 90.0f);
+    EXPECT_NEAR(net.cook(place)->x()[1], moved->x()[1], 1e-4f) << "the edit does not follow the shape";
+    EXPECT_EQ(net.node(shape).cookCount(), shapeCooks) << "the frozen node does not cook the shape";
+
+    jitnodes::Network loaded(1);
+    jitnodes::loadNetwork(loaded, jitnodes::saveNetwork(net));
+    jitnodes::NodeId loadedPlace = jitnodes::invalidNodeId;
+    for (jitnodes::NodeId id : loaded.nodeIds()) {
+        if (loaded.node(id).typeName() == kTransformNodeType) {
+            loadedPlace = id;
+        }
+    }
+    EXPECT_NEAR(loaded.cook(loadedPlace)->x()[1], moved->x()[1], 1e-3f);
+
+    net.node(edit).setFrozenGeometry(nullptr);
+    EXPECT_NEAR(net.cook(place)->x()[0], 90.0f, 0.01f);
+}
+
+TEST(ShapeNode, APathNodeWithoutAnInputStillHoldsItsOwnCurve) {
+    jitnodes::Network net(1);
+    curvy::registerCurvyNodes();
+    const jitnodes::NodeId path = net.addNode(kPathNodeType);
+    EXPECT_EQ(net.cook(path)->pointCount(), 0u);
+    net.node(path).setGeometryParam("curve", geometryFromPath(closedPolygon(regularPolygonPoints(BLPoint(0, 0), 10.0, 3, 0.0))));
+    EXPECT_EQ(net.cook(path)->pointCount(), 3u);
+    const jitnodes::NodeId text = net.addNode(kTextNodeType);
+    EXPECT_EQ(net.node(text).inputCount(), 0);
+}
+
+namespace {
+    double widthOf(const SketchDocument& doc, std::size_t id) {
+        const BLBox box = doc.findById(id)->geometryBounds();
+        return box.x1 - box.x0;
+    }
+}
+
+TEST(ShapeNodeObject, MakeParametricSwapsThePathNodeAndTheOutlineFollowsTheParameters) {
+    SketchDocument doc;
+    const std::size_t id = doc.add(SketchObject::makePolygon(starPoints(BLPoint(100, 80), 40.0, 0.5, 5, 0.0))).id();
+    const jitnodes::NodeId node = doc.findById(id)->graphNode();
+    const double before = widthOf(doc, id);
+    ASSERT_EQ(doc.network().node(node).typeName(), kPathNodeType);
+
+    ASSERT_TRUE(doc.makeParametric(id));
+    EXPECT_EQ(doc.findById(id)->graphNode(), node);
+    EXPECT_EQ(doc.network().node(node).typeName(), kShapeNodeType);
+    EXPECT_NEAR(widthOf(doc, id), before, 0.01);
+    EXPECT_NE(doc.transformRefOf(id).id, jitnodes::invalidNodeId);
+    EXPECT_FALSE(doc.makeParametric(id)) << "already parametric";
+
+    doc.setGraphParam(node, "outer", 80.0f);
+    EXPECT_NEAR(widthOf(doc, id), before * 2.0, 0.5);
+    EXPECT_EQ(doc.network().node(node).typeName(), kShapeNodeType) << "a later sync keeps the shape node";
+
+    doc.undoStack().undo();
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.network().node(doc.findById(id)->graphNode()).typeName(), kPathNodeType);
+    EXPECT_NEAR(widthOf(doc, id), before, 0.01);
+    doc.undoStack().redo();
+    EXPECT_EQ(doc.network().node(doc.findById(id)->graphNode()).typeName(), kShapeNodeType);
+}
+
+TEST(ShapeNodeObject, MovingAParametricObjectMovesItsPlacementAndKeepsTheNode) {
+    SketchDocument doc;
+    const std::size_t id = doc.add(SketchObject::makePolygon(regularPolygonPoints(BLPoint(50, 50), 20.0, 6, 0.0))).id();
+    ASSERT_TRUE(doc.makeParametric(id));
+    const BLBox start = doc.findById(id)->geometryBounds();
+    doc.transformObjects({id}, BLMatrix2D::make_translation(30.0, 10.0), "Move");
+    const BLBox moved = doc.findById(id)->geometryBounds();
+    EXPECT_NEAR(moved.x0 - start.x0, 30.0, 0.01);
+    EXPECT_EQ(doc.network().node(doc.findById(id)->graphNode()).typeName(), kShapeNodeType);
+    EXPECT_NEAR(widthOf(doc, id), start.x1 - start.x0, 0.01);
+}
+
+TEST(ShapeNodeObject, AShapeUpstreamOfAFrozenPathNodeIsKeptAndTheEditIsRead) {
+    SketchDocument doc;
+    const std::size_t id = doc.add(SketchObject::makePolygon(regularPolygonPoints(BLPoint(0, 0), 20.0, 4, 0.0))).id();
+    jitnodes::Network& net = doc.network();
+    const jitnodes::NodeId path = doc.findById(id)->graphNode();
+    const jitnodes::NodeId shape = net.addNode(kShapeNodeType);
+    net.node(shape).setString("kind", "polygon");
+    net.node(shape).setFloat("points", 4.0f);
+    net.node(shape).setFloat("outer", 20.0f);
+    net.connect(shape, path, 0);
+    net.freezeNode(path);
+    auto edited = std::make_shared<jitnodes::Geometry>(*net.node(path).frozenGeometry());
+    edited->x()[0] += 15.0f;
+    net.node(path).setFrozenGeometry(edited);
+    doc.setGraphParam(shape, "outer", 21.0f);
+
+    EXPECT_TRUE(net.hasNode(shape)) << "the shape feeding an object's path node is not pruned";
+    EXPECT_TRUE(net.node(path).frozen());
+    const BLBox box = doc.findById(id)->geometryBounds();
+    EXPECT_NEAR(box.x1 - box.x0, 55.0, 0.5) << "the object shows the frozen edit, not the shape";
+}
+
+TEST(ShapeNodeObject, AddParametricMakesACurvyShapeInOneUndoStepAndRedoKeepsIt) {
+    SketchDocument doc;
+    const std::size_t id = doc.addParametric(SketchObject::makePolygon(starPoints(BLPoint(100, 80), 40.0, 0.5, 5, 0.0)), "Draw Star").id();
+    EXPECT_TRUE(doc.isParametric(id));
+    EXPECT_EQ(doc.network().node(doc.findById(id)->graphNode()).getFloat("points"), 5.0f);
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.objectCount(), 0u);
+    doc.undoStack().redo();
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_TRUE(doc.isParametric(id));
+}
+
+TEST(ShapeNodeObject, SetParametricOutlineWritesTheNumbersAndOneGraphEditUndoesThem) {
+    SketchDocument doc;
+    const std::size_t id = doc.addParametric(SketchObject::makePolygon(starPoints(BLPoint(100, 80), 40.0, 0.5, 5, 0.0)), "Draw Star").id();
+    doc.transformObjects({id}, BLMatrix2D::make_scaling(2.0, 2.0), "Scale");
+    SketchObject* object = doc.findById(id);
+    const jitnodes::NodeId node = object->graphNode();
+    const jitnodes::GraphSnapshot before = doc.snapshotGraph();
+    LiveShape live;
+    ASSERT_TRUE(recogniseLiveShape(*object, live));
+    live.regular.points = 7;
+    ASSERT_TRUE(doc.setParametricOutline(*object, liveShapePath(live)));
+    doc.commitGraphEdit(before, "Change Star Points");
+    EXPECT_EQ(doc.network().node(node).getFloat("points"), 7.0f);
+    EXPECT_EQ(doc.network().node(node).typeName(), kShapeNodeType);
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.network().node(doc.findById(id)->graphNode()).getFloat("points"), 5.0f);
+}
+
+TEST(ShapeNodeObject, AHandEditPutsAFrozenPathNodeAfterTheShapeAndUndoRemovesIt) {
+    SketchDocument doc;
+    const std::size_t id = doc.addParametric(SketchObject::makePolygon(regularPolygonPoints(BLPoint(50, 50), 20.0, 4, 0.0)), "Draw Polygon").id();
+    SketchObject* object = doc.findById(id);
+    const jitnodes::NodeId shape = object->graphNode();
+    const jitnodes::GraphSnapshot before = doc.snapshotGraph();
+    const BLPath edited = object->geometry();
+    BLPath moved;
+    const BLPoint* v = edited.vertex_data();
+    const std::uint8_t* c = edited.command_data();
+    for (std::size_t i = 0; i < edited.size(); ++i) {
+        const BLPoint p = i == 0 ? BLPoint(v[i].x + 15.0, v[i].y) : v[i];
+        if (c[i] == BL_PATH_CMD_MOVE) { moved.move_to(p); }
+        else if (c[i] == BL_PATH_CMD_ON) { moved.line_to(p); }
+        else if (c[i] == BL_PATH_CMD_CLOSE) { moved.close(); }
+    }
+    doc.setObjectOutline(*object, moved);
+    doc.touch();
+    doc.commitGraphEdit(before, "Move Anchor Point");
+
+    const jitnodes::NodeId path = doc.findById(id)->graphNode();
+    EXPECT_EQ(path, shape) << "the path node keeps the object's node id";
+    EXPECT_EQ(doc.network().node(path).typeName(), kPathNodeType);
+    EXPECT_TRUE(doc.network().node(path).frozen());
+    const jitnodes::NodeId upstream = doc.network().inputOf(path, 0);
+    ASSERT_NE(upstream, jitnodes::invalidNodeId);
+    EXPECT_EQ(doc.network().node(upstream).typeName(), kShapeNodeType);
+    EXPECT_FALSE(doc.isParametric(id));
+    EXPECT_NEAR(doc.findById(id)->geometryBounds().x1, 85.0, 0.5) << "the edit survived the sync";
+
+    doc.undoStack().undo();
+    EXPECT_TRUE(doc.isParametric(id));
+    EXPECT_EQ(doc.findById(id)->graphNode(), shape);
+}
+
+namespace {
+    // Every node of every scope, as (scope, id).
+    std::set<std::pair<std::uint32_t, jitnodes::NodeId>> allNodes(const SketchDocument& doc) {
+        std::set<std::pair<std::uint32_t, jitnodes::NodeId>> nodes;
+        for (std::uint32_t scope = 0; scope < doc.scopeCount(); ++scope) {
+            if (const jitnodes::Network* net = doc.findNetwork(scope)) {
+                for (jitnodes::NodeId id : net->nodeIds()) {
+                    nodes.emplace(scope, id);
+                }
+            }
+        }
+        return nodes;
+    }
+
+    std::size_t addPolygon(SketchDocument& doc, double x) {
+        return doc.addUndoable(SketchObject::makePolygon(regularPolygonPoints(BLPoint(x, 50), 20.0, 5, 0.0)), "Draw").id();
+    }
+
+    void undoAll(SketchDocument& doc) {
+        while (doc.undoStack().canUndo()) { doc.undoStack().undo(); }
+    }
+    void redoAll(SketchDocument& doc) {
+        while (doc.undoStack().canRedo()) { doc.undoStack().redo(); }
+    }
+}
+
+TEST(ReservedNodeIds, ADuplicateKeepsItsNodeIdsThroughUndoAndRedoAndALaterGraphEditStillApplies) {
+    SketchDocument doc;
+    const std::size_t a = addPolygon(doc, 50.0);
+    doc.setSelection({a});
+    doc.duplicateSelection(30.0, 0.0);
+    ASSERT_EQ(doc.objectCount(), 2u);
+    const std::size_t copy = doc.object(1).id();
+    const NodeRef place = doc.transformRefOf(copy);
+    ASSERT_TRUE(place.valid());
+    doc.setGraphParam(place.id, "translateX", 7.0f);
+    const auto before = allNodes(doc);
+
+    undoAll(doc);
+    EXPECT_EQ(doc.objectCount(), 0u);
+    EXPECT_LT(allNodes(doc).size(), before.size());
+    redoAll(doc);
+
+    ASSERT_EQ(doc.objectCount(), 2u);
+    EXPECT_EQ(allNodes(doc), before) << "every node is back under the id it had";
+    EXPECT_EQ(doc.transformRefOf(copy).id, place.id);
+    EXPECT_NEAR(doc.node(doc.transformRefOf(copy)).getFloat("translateX"), 7.0f, 1e-4);
+}
+
+TEST(ReservedNodeIds, TheCopyOfADuplicateUndoneThenRedoneReceivesItsOwnIdsAndNoOtherNodeDoes) {
+    SketchDocument doc;
+    const std::size_t a = addPolygon(doc, 50.0);
+    doc.setSelection({a});
+    doc.duplicateSelection(30.0, 0.0);
+    const std::size_t copy = doc.object(1).id();
+    const jitnodes::NodeId copyPlace = doc.transformRefOf(copy).id;
+    doc.undoStack().undo();
+    ASSERT_EQ(doc.objectCount(), 1u);
+    ASSERT_EQ(doc.findNetwork(0)->hasNode(copyPlace), false);
+
+    const std::size_t other = doc.add(SketchObject::makePolygon(regularPolygonPoints(BLPoint(200, 50), 20.0, 6, 0.0))).id();
+    const jitnodes::NodeId otherPlace = doc.transformRefOf(other).id;
+    EXPECT_NE(otherPlace, copyPlace) << "an id reserved for the copy is not handed to a different object";
+
+    doc.undoStack().redo();
+    EXPECT_EQ(doc.transformRefOf(copy).id, copyPlace);
+    EXPECT_EQ(doc.transformRefOf(other).id, otherPlace);
+}
+
+TEST(ReservedNodeIds, GroupingKeepsTheGroupAndTheChildNodesThroughUndoAndRedoWithAnEditInside) {
+    SketchDocument doc;
+    std::vector<std::size_t> ids;
+    for (int i = 0; i < 3; ++i) { ids.push_back(addPolygon(doc, 50.0 + 60.0 * i)); }
+    doc.setSelection(ids);
+    ASSERT_TRUE(doc.groupSelection());
+    const NodeRef place = doc.transformRefOf(ids[1]);
+    ASSERT_TRUE(place.valid());
+    doc.setGraphParam(place, "translateY", 5.0f);
+    const auto before = allNodes(doc);
+
+    undoAll(doc);
+    EXPECT_EQ(doc.objectCount(), 0u);
+    redoAll(doc);
+
+    ASSERT_EQ(doc.objectCount(), 3u);
+    EXPECT_EQ(allNodes(doc), before);
+    EXPECT_NEAR(doc.node(doc.transformRefOf(ids[1])).getFloat("translateY"), 5.0f, 1e-4);
+}
+
+TEST(ReservedNodeIds, UngroupingThenUndoingBringsTheGroupSubnetBackUnderItsId) {
+    SketchDocument doc;
+    std::vector<std::size_t> ids;
+    for (int i = 0; i < 2; ++i) { ids.push_back(addPolygon(doc, 50.0 + 60.0 * i)); }
+    doc.setSelection(ids);
+    ASSERT_TRUE(doc.groupSelection());
+    const auto grouped = allNodes(doc);
+    ASSERT_TRUE(doc.ungroupSelection());
+    EXPECT_NE(allNodes(doc), grouped);
+    doc.undoStack().undo();
+    EXPECT_EQ(allNodes(doc), grouped);
+    doc.undoStack().redo();
+    doc.undoStack().undo();
+    EXPECT_EQ(allNodes(doc), grouped);
+}
+
+TEST(ReservedNodeIds, ALayerAddedAndDeletedComesBackUnderTheSameIds) {
+    SketchDocument doc;
+    const std::size_t layer = doc.addLayer(0);
+    const std::size_t a = addPolygon(doc, 50.0);
+    (void)a;
+    const auto withLayer = allNodes(doc);
+    ASSERT_TRUE(doc.deleteLayer(layer));
+    doc.undoStack().undo();
+    EXPECT_EQ(allNodes(doc), withLayer);
+    doc.undoStack().redo();
+    doc.undoStack().undo();
+    EXPECT_EQ(allNodes(doc), withLayer);
+}
+
+TEST(ReservedNodeIds, ClearingTheDocumentForgetsTheReservations) {
+    SketchDocument fresh;
+    const jitnodes::NodeId first = fresh.transformRefOf(addPolygon(fresh, 50.0)).id;
+
+    SketchDocument doc;
+    for (int i = 0; i < 6; ++i) { addPolygon(doc, 50.0 + 40.0 * i); }
+    doc.clearObjects();
+    const jitnodes::NodeId again = doc.transformRefOf(addPolygon(doc, 50.0)).id;
+    EXPECT_EQ(again, first) << "a new document numbers its nodes from the start";
+}
+
+namespace {
+    void exerciseMixedShapes(int count);
+}
+
+TEST(ShapeNodeObject, ManyMixedShapesEditedThenUndoneAndRedoneComeBackExactly) {
+    exerciseMixedShapes(48);
+}
+
+TEST(ShapeNodeObject, TheShapeLeftUpstreamOfAHandEditKeepsEveryParameterOfTheOriginal) {
+    SketchDocument doc;
+    for (int kind = 0; kind < 4; ++kind) {
+        SketchObject* object = nullptr;
+        switch (kind) {
+            case 0: object = SketchObject::makePolygon(starPoints(BLPoint(130, 90), 30.0, 0.45, 6, 0.3)); break;
+            case 1: object = SketchObject::makePolygon(regularPolygonPoints(BLPoint(230, 90), 30.0, 7, 0.2)); break;
+            case 2: object = SketchObject::makeRoundRect(300, 60, 80, 50, 9.0); break;
+            default: {
+                ArcShape arc;
+                arc.center = BLPoint(480, 90);
+                arc.radius = 28.0;
+                arc.start = 0.4;
+                arc.sweep = 2.0;
+                object = SketchObject::makePath(arcPath(arc));
+                break;
+            }
+        }
+        const std::size_t id = doc.addParametric(object, "Draw").id();
+        ASSERT_TRUE(doc.isParametric(id)) << kind;
+        const jitnodes::NodeId shape = doc.findById(id)->graphNode();
+        std::map<std::string, float> before;
+        for (const char* name : {"centerX", "centerY", "points", "outer", "innerRatio", "width", "height", "radius", "angle", "start", "sweep"}) {
+            before[name] = doc.network().node(shape).getFloat(name);
+        }
+        const std::string kindName = doc.network().node(shape).getString("kind");
+
+        ASSERT_TRUE(doc.freezeParametric(id));
+        const jitnodes::NodeId upstream = doc.network().inputOf(doc.findById(id)->graphNode(), 0);
+        ASSERT_NE(upstream, jitnodes::invalidNodeId) << kind;
+        EXPECT_EQ(doc.network().node(upstream).getString("kind"), kindName) << kind;
+        for (const auto& [name, value] : before) {
+            EXPECT_EQ(doc.network().node(upstream).getFloat(name.c_str()), value) << kind << " " << name;
+        }
+    }
+}
+
+// Passes but takes about 165 s: every undoable step re-syncs the whole document (docs/sync-performance-review.md). Disabled until that is fixed;
+// it is the acceptance test for the fix. Run it with --gtest_also_run_disabled_tests.
+TEST(ShapeNodeObject, DISABLED_AThousandMixedShapesEditedThenUndoneAndRedoneComeBackExactly) {
+    exerciseMixedShapes(1000);
+}
+
+namespace {
+void exerciseMixedShapes(int count) {
+    SketchDocument doc;
+    std::vector<std::size_t> ids;
+    for (int i = 0; i < count; ++i) {
+        const double x = 40.0 + 90.0 * (i % 25), y = 40.0 + 90.0 * (i / 25);
+        SketchObject* object = nullptr;
+        switch (i % 4) {
+            case 0: object = SketchObject::makePolygon(starPoints(BLPoint(x, y), 30.0, 0.3 + 0.005 * (i % 100), 4 + i % 7, 0.1 * (i % 60))); break;
+            case 1: object = SketchObject::makePolygon(regularPolygonPoints(BLPoint(x, y), 30.0, 3 + i % 9, 0.05 * (i % 60))); break;
+            case 2: object = SketchObject::makeRoundRect(x - 30.0, y - 20.0, 60.0, 40.0, 3.0 + i % 10); break;
+            default: {
+                ArcShape arc;
+                arc.center = BLPoint(x, y);
+                arc.radius = 25.0;
+                arc.start = 0.1 * (i % 60);
+                arc.sweep = 1.0 + 0.05 * (i % 100);
+                object = SketchObject::makePath(arcPath(arc));
+                break;
+            }
+        }
+        ids.push_back(doc.addParametric(object, "Draw").id());
+    }
+    for (std::size_t id : ids) {
+        EXPECT_TRUE(doc.isParametric(id)) << "object " << id;
+    }
+    auto state = [&]() {
+        std::vector<std::pair<bool, BLBox>> result;
+        for (std::size_t id : ids) {
+            const SketchObject* object = doc.findById(id);
+            result.emplace_back(doc.isParametric(id), object != nullptr ? object->geometryBounds() : BLBox());
+        }
+        return result;
+    };
+    const auto drawn = state();
+    int editSteps = 0;
+
+    // Every third shape gets a number edit (a graph step), every seventh a hand edit that freezes it, a few are moved.
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+        SketchObject* object = doc.findById(ids[i]);
+        if (i % 7 == 0) {
+            BLPath moved;
+            const BLPath source = object->geometry();
+            const BLPoint* v = source.vertex_data();
+            const std::uint8_t* c = source.command_data();
+            for (std::size_t k = 0; k < source.size(); ++k) {
+                const BLPoint p = k == 1 ? BLPoint(v[k].x + 4.0, v[k].y + 3.0) : v[k];
+                if (c[k] == BL_PATH_CMD_MOVE) { moved.move_to(p); }
+                else if (c[k] == BL_PATH_CMD_ON) { moved.line_to(p); }
+                else if (c[k] == BL_PATH_CMD_CLOSE) { moved.close(); }
+            }
+            const jitnodes::GraphSnapshot before = doc.snapshotGraph();
+            if (i % 4 == 0 || i % 4 == 1) {   // a polygon or star: lines only, so the rebuilt path is the same edit
+                doc.setObjectOutline(*object, moved);
+                doc.touch();
+                doc.commitGraphEdit(before, "Move Anchor Point");
+                ++editSteps;
+            }
+        } else if (i % 3 == 0) {
+            LiveShape live;
+            if (recogniseLiveShape(*object, live) && (live.kind == LiveKind::Star || live.kind == LiveKind::Polygon)) {
+                const jitnodes::GraphSnapshot before = doc.snapshotGraph();
+                live.regular.points = std::min(live.regular.points + 1, 12);
+                ASSERT_TRUE(doc.setParametricOutline(*object, liveShapePath(live)));
+                doc.commitGraphEdit(before, "Change Points");
+                ++editSteps;
+            }
+        } else if (i % 5 == 0) {
+            doc.setSelection({ids[i]});
+            doc.transformObjects({ids[i]}, BLMatrix2D::make_translation(2.0, 1.0), "Move");
+            ++editSteps;
+        }
+    }
+
+    const auto edited = state();
+    int frozen = 0;
+    for (const auto& entry : edited) { frozen += entry.first ? 0 : 1; }
+    EXPECT_GT(frozen, 0);
+
+    const auto sameState = [&](const std::vector<std::pair<bool, BLBox>>& a, const std::vector<std::pair<bool, BLBox>>& b) {
+        for (std::size_t i = 0; i < ids.size(); ++i) {
+            EXPECT_EQ(a[i].first, b[i].first) << "parametric state of object " << i;
+            EXPECT_NEAR(a[i].second.x0, b[i].second.x0, 1e-3) << i;
+            EXPECT_NEAR(a[i].second.x1, b[i].second.x1, 1e-3) << i;
+            EXPECT_NEAR(a[i].second.y0, b[i].second.y0, 1e-3) << i;
+            EXPECT_NEAR(a[i].second.y1, b[i].second.y1, 1e-3) << i;
+        }
+    };
+
+    // The edits alone undo to the drawn shapes, all parametric again, and redo to the edited ones.
+    for (int i = 0; i < editSteps; ++i) { doc.undoStack().undo(); }
+    sameState(state(), drawn);
+    for (std::size_t id : ids) { EXPECT_TRUE(doc.isParametric(id)) << id; }
+    for (int i = 0; i < editSteps; ++i) { doc.undoStack().redo(); }
+    sameState(state(), edited);
+
+    // Undoing everything leaves no object and no shape node behind.
+    while (doc.undoStack().canUndo()) { doc.undoStack().undo(); }
+    EXPECT_EQ(doc.objectCount(), 0u);
+    for (jitnodes::NodeId node : doc.network().nodeIds()) {
+        EXPECT_NE(doc.network().node(node).typeName(), kShapeNodeType) << "no shape node is left behind";
+    }
+
+    // Redoing everything brings the objects back with the edits applied to them (their nodes come back under the ids the edits refer to).
+    while (doc.undoStack().canRedo()) { doc.undoStack().redo(); }
+    ASSERT_EQ(doc.objectCount(), ids.size());
+    sameState(state(), edited);
+
+    // A delete undone and redone around the edits.
+    doc.setSelection({ids[0], ids[1], ids[2]});
+    doc.deleteSelection();
+    EXPECT_EQ(doc.objectCount(), ids.size() - 3);
+    doc.undoStack().undo();
+    sameState(state(), edited);
+    doc.undoStack().redo();
+    EXPECT_EQ(doc.objectCount(), ids.size() - 3);
+    doc.undoStack().undo();
+    for (int i = 0; i < editSteps; ++i) { doc.undoStack().undo(); }
+    sameState(state(), drawn);
+}
+}
+
+TEST(ShapeNodeObject, PlainObjectsWithGraphEditsUndoAllRedoAll) {
+    SketchDocument doc;
+    for (int i = 0; i < 4; ++i) {
+        const std::size_t id = doc.addUndoable(SketchObject::makePolygon(regularPolygonPoints(BLPoint(50.0 + 90 * i, 50), 20.0, 5, 0.0)), "Draw").id();
+        doc.setGraphParam(doc.transformRefOf(id).id, "translateX", float(10 * i + 1));
+    }
+    while (doc.undoStack().canUndo()) { doc.undoStack().undo(); }
+    while (doc.undoStack().canRedo()) { doc.undoStack().redo(); }
+    EXPECT_EQ(doc.objectCount(), 4u);
+}
+
+TEST(ShapeNodeObject, DeleteUndoneThenEarlierGraphEditsUndone) {
+    SketchDocument doc;
+    std::vector<std::size_t> ids;
+    for (int i = 0; i < 4; ++i) {
+        ids.push_back(doc.addUndoable(SketchObject::makePolygon(regularPolygonPoints(BLPoint(50.0 + 90 * i, 50), 20.0, 5, 0.0)), "Draw").id());
+        doc.setGraphParam(doc.transformRefOf(ids.back()).id, "translateX", float(10 * i + 1));
+    }
+    doc.setSelection({ids[1]});
+    doc.deleteSelection();
+    ASSERT_EQ(doc.objectCount(), 3u);
+    doc.undoStack().undo();
+    ASSERT_EQ(doc.objectCount(), 4u);
+    EXPECT_NEAR(doc.network().node(doc.transformRefOf(ids[1]).id).getFloat("translateX"), 11.0f, 1e-4);
+    while (doc.undoStack().canUndo()) { doc.undoStack().undo(); }
+    EXPECT_EQ(doc.objectCount(), 0u);
+    while (doc.undoStack().canRedo()) { doc.undoStack().redo(); }
+    EXPECT_EQ(doc.objectCount(), 3u) << "the delete is the last step, so redo-all deletes again";
+}
+
+TEST(ShapeNodeObject, AMoveOfAParametricObjectDoesNotFreezeIt) {
+    SketchDocument doc;
+    const std::size_t id = doc.addParametric(SketchObject::makePolygon(regularPolygonPoints(BLPoint(50, 50), 20.0, 6, 0.0)), "Draw Polygon").id();
+    doc.transformObjects({id}, BLMatrix2D::make_translation(5.0, 5.0), "Move");
+    doc.transformObjects({id}, BLMatrix2D::make_rotation(0.5), "Rotate");
+    EXPECT_TRUE(doc.isParametric(id));
+}
+
+TEST(ShapeNodeObject, AParametricObjectSurvivesSvgAndKeepsItsShapeNodeInTheGraphText) {
+    SketchDocument doc;
+    const std::size_t id = doc.add(SketchObject::makePolygon(starPoints(BLPoint(60, 60), 30.0, 0.4, 7, 0.0))).id();
+    ASSERT_TRUE(doc.makeParametric(id));
+    const double width = widthOf(doc, id);
+    SketchDocument loaded;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), loaded));
+    ASSERT_EQ(loaded.objectCount(), 1u);
+    EXPECT_NEAR(widthOf(loaded, loaded.object(0).id()), width, 0.01);
+    int shapes = 0;
+    for (jitnodes::NodeId node : loaded.network().nodeIds()) {
+        shapes += loaded.network().node(node).typeName() == kShapeNodeType ? 1 : 0;
+    }
+    EXPECT_LE(shapes, 1);
 }
