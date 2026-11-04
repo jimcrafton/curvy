@@ -50,6 +50,8 @@ add_executable(curvy
     src/documentimages.cpp
     src/documentexpand.cpp
     src/pdfexport.cpp
+    src/epsexport.cpp
+    src/pdfimport.cpp
     src/documentbrushes.cpp
     src/textpanel.cpp
     src/liveshape.cpp
@@ -133,7 +135,7 @@ newui_add_resources(curvy "${CMAKE_CURRENT_SOURCE_DIR}/Resources")
 set(CURVY_MODEL_SOURCES
     sketchcolor sketchobject sketchdocument documentcutting documentpaths documenttransform documentguides
     documentlayers documentswatches documentselect documentclip documentsymbols documentbrushes brush
-    pathflatten textwarp imagedata documenttextpath documentimages documentexpand pdfexport documentartboards
+    pathflatten textwarp imagedata documenttextpath documentimages documentexpand pdfexport epsexport pdfimport documentartboards
     documenttrace imagetrace sketchsvg sketchexport shapetools pathops textoutline gzip numberscrubber expressionfield
     sketchbin cursorset newdocumentmodel graphdocument graphtree pathnode shapenode appearancenode documentlive radialmenu holdscrub workspacemodel dockcontext liveshape settings)
 list(TRANSFORM CURVY_MODEL_SOURCES PREPEND src/)

@@ -2,6 +2,7 @@
 #include "curvy/gzip.h"
 #include "curvy/pathnode.h"
 #include "curvy/sketchbin.h"
+#include "curvy/pdfimport.h"
 #include "curvy/sketchsvg.h"
 
 #include <algorithm>
@@ -1406,6 +1407,9 @@ namespace curvy {
                 return false;
             }
             return documentFromSvg(inflated, *this);
+        }
+        if (isPdfDocument(text)) {   // PDF / Illustrator: told by its first bytes, not its name (the controller makes it an untitled import)
+            return documentFromPdf(text, *this);
         }
         return documentFromSvg(text, *this);
     }

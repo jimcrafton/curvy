@@ -46,6 +46,12 @@ namespace curvy {
         bool exportArtboards();
         // File > Export As PDF: every artboard as a page of one PDF file (pdfexport.h).
         bool exportPdf();
+        // File > Export As EPS: the active artboard as an Encapsulated PostScript file (epsexport.h).
+        bool exportEps();
+        // File > Import PDF / Illustrator: asks for a .pdf or .ai file and replaces the document with its artwork (pdfimport.h), one artboard per
+        // page. The result is an untitled, modified document: Save asks where, so the PDF itself is never overwritten with another format.
+        // An empty path asks with the Open dialog.
+        bool importPdf(const std::string& path = std::string());
         // File > Trace Image: asks for a picture (PNG, BMP or JPEG), traces it into vector shapes (imagetrace.h) and adds them to the page.
         bool traceImage();
         // File > Place Image: asks for a picture (PNG, JPEG, BMP or QOI) and puts it on the active artboard as an Image object.

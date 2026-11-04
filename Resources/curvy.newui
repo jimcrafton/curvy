@@ -42,6 +42,8 @@
               { type: "MenuItem", text: "Trace Image..." },
               { type: "MenuItem", text: "Place Image..." },
               { type: "MenuItem", text: "Export As PDF..." },
+              { type: "MenuItem", text: "Export As EPS..." },
+              { type: "MenuItem", text: "Import PDF / Illustrator..." },
               { type: "MenuItem", text: "", separator: true },
               { type: "MenuItem", text: "Document Setup..." },
               { type: "MenuItem", text: "", separator: true },

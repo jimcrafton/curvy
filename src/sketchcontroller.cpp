@@ -1,6 +1,8 @@
 #include "curvy/sketchcontroller.h"
 
 #include "curvy/pdfexport.h"
+#include "curvy/epsexport.h"
+#include "curvy/pdfimport.h"
 #include "curvy/tracedialog.h"
 
 #include "curvy/imagetrace.h"
@@ -13,6 +15,7 @@
 #include <newui/utils.h>
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -150,7 +153,51 @@ namespace curvy {
         onStateChanged(*this);
     }
 
+    bool SketchDocumentController::importPdf(const std::string& path) {
+        if (!confirmDiscardChanges(document_)) {
+            return false;
+        }
+        std::string file = path;
+        if (file.empty()) {
+            newui::FileDialogOptions options;
+            options.title = "Import PDF / Illustrator";
+            options.filters.push_back({"PDF and Illustrator Files", "*.pdf;*.ai"});
+            options.filters.push_back({"All Files", "*.*"});
+            newui::Dialog::showOpenFile(frame_.frameHandle(), options, file);
+            if (file.empty()) {
+                return false;
+            }
+        }
+        bool read = false;
+        try {
+            std::ifstream in(std::filesystem::u8path(file), std::ios::binary);
+            char head[1024];
+            in.read(head, sizeof(head));
+            read = in.gcount() > 0 && isPdfDocument(std::string(head, std::size_t(in.gcount()))) && openInto(document_, file);
+        } catch (...) {
+            read = false;
+        }
+        if (!read) {
+            reportError("The file can't be read as a PDF or Illustrator file: " + file);
+            return false;
+        }
+        document_.reset();   // untitled, unmodified ...
+        document_.markModified();   // ... but not saved
+        untitledName_ = std::filesystem::path(std::filesystem::u8path(file)).stem().string();
+        onStatus(*this, "Imported " + file);
+        onDocumentReplaced(*this);
+        onStateChanged(*this);
+        return true;
+    }
+
     bool SketchDocumentController::open(const std::string& path) {
+        if (!path.empty()) {
+            std::string extension = std::filesystem::path(std::filesystem::u8path(path)).extension().string();
+            std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+            if (extension == ".pdf" || extension == ".ai") {
+                return importPdf(path);
+            }
+        }
         if (!openInto(document_, path)) {
             if (!path.empty() && !std::filesystem::exists(std::filesystem::u8path(path))) {
                 forget(path);  // a recent file that is gone
@@ -234,6 +281,27 @@ namespace curvy {
         }
         if (!writePdf(document_, path)) {
             reportError("Could not export the PDF to " + path);
+            return false;
+        }
+        onStatus(*this, "Exported " + path);
+        return true;
+    }
+
+    bool SketchDocumentController::exportEps() {
+        newui::FileDialogOptions options;
+        options.title = "Export As EPS";
+        options.filters.push_back({"Encapsulated PostScript", "*.eps"});
+        options.defaultExtension = "eps";
+        std::string stem = document_.hasFilePath() ? std::filesystem::path(document_.filePath()).stem().string() : untitledName_;
+        options.defaultFileName = stem + ".eps";
+        options.initialDirectory = exportFolder_;
+        std::string path;
+        newui::Dialog::showSaveFile(frame_.frameHandle(), options, path);
+        if (path.empty()) {
+            return false;
+        }
+        if (!writeEps(document_, path)) {
+            reportError("Could not export the EPS to " + path);
             return false;
         }
         onStatus(*this, "Exported " + path);

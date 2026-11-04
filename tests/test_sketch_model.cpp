@@ -7,6 +7,8 @@
 #include "curvy/imagetrace.h"
 #include "curvy/imagedata.h"
 #include "curvy/pdfexport.h"
+#include "curvy/epsexport.h"
+#include "curvy/pdfimport.h"
 #include "curvy/gzip.h"
 #include "curvy/sketchsvg.h"
 #include "curvy/gzip.h"
@@ -9558,4 +9560,163 @@ TEST(ShapeNodeObject, AParametricObjectSurvivesSvgAndKeepsItsShapeNodeInTheGraph
         shapes += loaded.network().node(node).typeName() == kShapeNodeType ? 1 : 0;
     }
     EXPECT_LE(shapes, 1);
+}
+
+
+// ---- EPS export and PDF import ----
+
+TEST(SketchEps, AnArtboardBecomesAnEpsWithItsBoundingBoxAndVectorPaths) {
+    SketchDocument doc;
+    doc.setPageSize(200, 100);
+    SketchObject& rect = doc.add(SketchObject::makeRect(10, 10, 80, 40));
+    rect.setFill(SketchPaint::solid(SketchColor::fromHex("#ff0000")));
+    rect.setStroke(SketchPaint::solid(SketchColor::cmyk(1, 0, 0, 0)));
+    rect.setStrokeWidth(3.0);
+    const std::string eps = epsFromDocument(doc);
+    EXPECT_EQ(eps.rfind("%!PS-Adobe-3.0 EPSF-3.0", 0), 0u);
+    EXPECT_NE(eps.find("%%BoundingBox: 0 0 200 100"), std::string::npos);
+    EXPECT_NE(eps.find("1 0 0 setrgbcolor"), std::string::npos);     // the fill
+    EXPECT_NE(eps.find("1 0 0 0 setcmykcolor"), std::string::npos);  // the stroke keeps its color model
+    EXPECT_NE(eps.find("3 setlinewidth"), std::string::npos);
+    EXPECT_NE(eps.find("10 10 moveto"), std::string::npos);
+    EXPECT_NE(eps.find("[1 0 0 -1 0 100] concat"), std::string::npos);   // document y runs down
+    EXPECT_EQ(eps.substr(eps.size() - 6), "%%EOF\n");
+    const std::string path = (std::filesystem::temp_directory_path() / "sketch_test.eps").string();
+    EXPECT_TRUE(writeEps(doc, path));
+    EXPECT_GT(std::filesystem::file_size(path), 200u);
+    std::filesystem::remove(path);
+}
+
+TEST(SketchEps, GradientsAreVectorStepsAndOpacityMixesWithThePage) {
+    SketchDocument doc;
+    doc.setPageSize(100, 100);
+    SketchObject& a = doc.add(SketchObject::makeRect(0, 0, 100, 50));
+    SketchGradient g = SketchGradient::fromColor(SketchColor::fromHex("#000000"));
+    GradientStop end;
+    end.offset = 1.0;
+    end.color = SketchColor::fromHex("#ffffff");
+    g.stops.push_back(end);
+    g.sortStops();
+    a.setFill(SketchPaint::linear(g));
+    SketchObject& b = doc.add(SketchObject::makeRect(0, 60, 40, 40));
+    SketchColor half = SketchColor::rgb(0, 0, 0);
+    half.setAlpha(0.5f);
+    b.setFill(SketchPaint::solid(half));
+    const std::string eps = epsFromDocument(doc);
+    EXPECT_NE(eps.find("clip newpath"), std::string::npos);
+    EXPECT_NE(eps.find("rectfill"), std::string::npos);
+    EXPECT_EQ(eps.find("shfill"), std::string::npos);                 // no level 3 operators
+    EXPECT_NE(eps.find("0.5 0.5 0.5 setrgbcolor"), std::string::npos);   // black at 50% over the white page
+}
+
+TEST(SketchPdfImport, ARoundTripKeepsShapesColorsAndTheArtboardSize) {
+    SketchDocument doc;
+    doc.setPageSize(200, 100);
+    SketchObject& rect = doc.add(SketchObject::makeRect(10, 20, 80, 40));
+    rect.setFill(SketchPaint::solid(SketchColor::fromHex("#ff0000")));
+    rect.setStroke(SketchPaint::solid(SketchColor::fromHex("#0000ff")));
+    rect.setStrokeWidth(3.0);
+    SketchObject& line = doc.add(SketchObject::makeLine(0, 0, 50, 50));
+    line.setStroke(SketchPaint::solid(SketchColor::fromHex("#00ff00")));
+    line.setStrokeWidth(2.0);
+    SketchDocument loaded;
+    ASSERT_TRUE(isPdfDocument(pdfFromDocument(doc)));
+    ASSERT_TRUE(documentFromPdf(pdfFromDocument(doc), loaded));
+    EXPECT_EQ(loaded.pageWidth(), 200.0f);
+    EXPECT_EQ(loaded.pageHeight(), 100.0f);
+    // The page's white background, then the rectangle's fill and its stroke (a PDF paints them separately), then the line.
+    ASSERT_EQ(loaded.objectCount(), 4u);
+    EXPECT_EQ(loaded.object(0).fill().color().toRgba32().value, 0xFFFFFFFFu);
+    const SketchObject& r = loaded.object(1);
+    const BLBox box = r.geometryBounds();
+    EXPECT_NEAR(box.x0, 10.0, 0.01);
+    EXPECT_NEAR(box.y0, 20.0, 0.01);
+    EXPECT_NEAR(box.x1, 90.0, 0.01);
+    EXPECT_NEAR(box.y1, 60.0, 0.01);
+    EXPECT_EQ(r.fill().color().toRgba32().value, 0xFFFF0000u);
+    const SketchObject& outline = loaded.object(2);
+    EXPECT_EQ(outline.stroke().color().toRgba32().value, 0xFF0000FFu);
+    EXPECT_NEAR(outline.strokeWidth(), 3.0, 1e-6);
+    const BLBox lineBox = loaded.object(3).geometryBounds();
+    EXPECT_NEAR(lineBox.x1, 50.0, 0.01);
+    EXPECT_NEAR(lineBox.y1, 50.0, 0.01);
+    EXPECT_EQ(loaded.object(3).stroke().color().toRgba32().value, 0xFF00FF00u);
+}
+
+TEST(SketchPdfImport, EveryPageBecomesAnArtboardAndCmykAndGradientsComeBack) {
+    SketchDocument doc;
+    doc.setPageSize(200, 100);
+    Artboard second;
+    second.name = "Two";
+    second.x = 300;
+    second.width = 50;
+    second.height = 60;
+    doc.addArtboard(second);
+    SketchObject& cmyk = doc.add(SketchObject::makeRect(310, 10, 20, 20));
+    cmyk.setFill(SketchPaint::solid(SketchColor::cmyk(0.1f, 0.2f, 0.3f, 0.4f)));
+    SketchObject& shaded = doc.add(SketchObject::makeRect(10, 10, 80, 40));
+    SketchGradient g = SketchGradient::fromColor(SketchColor::fromHex("#ff0000"));
+    GradientStop end;
+    end.offset = 1.0;
+    end.color = SketchColor::fromHex("#0000ff");
+    g.stops.push_back(end);
+    g.sortStops();
+    shaded.setFill(SketchPaint::linear(g));
+    SketchDocument loaded;
+    ASSERT_TRUE(documentFromPdf(pdfFromDocument(doc), loaded));
+    ASSERT_EQ(loaded.artboards().size(), 2u);
+    EXPECT_EQ(loaded.artboards()[1].width, 50.0);
+    EXPECT_EQ(loaded.artboards()[1].height, 60.0);
+    ASSERT_GE(loaded.objectCount(), 2u);
+    bool sawCmyk = false, sawGradient = false;
+    for (std::size_t i = 0; i < loaded.objectCount(); ++i) {
+        const SketchObject& o = loaded.object(i);
+        if (o.fill().isGradient()) {
+            sawGradient = o.fill().gradient().stops.size() >= 2;
+        } else if (!o.fill().isNone() && o.fill().color().space() == ColorSpace::CMYK) {
+            sawCmyk = std::fabs(o.fill().color().component(3) - 0.4f) < 1e-3f;
+            // The second artboard sits to the right of the first, with a gap.
+            EXPECT_GT(o.geometryBounds().x0, 200.0);
+        }
+    }
+    EXPECT_TRUE(sawCmyk);
+    EXPECT_TRUE(sawGradient);
+}
+
+TEST(SketchPdfImport, HandWrittenFilesAndFormsAreRead) {
+    // Rotated page, a form XObject with its own matrix, dashes, and no cross-reference table at all.
+    const std::string pdf =
+        "%PDF-1.4\n"
+        "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+        "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 100 200] >> endobj\n"
+        "3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R /Rotate 90 /Resources << /XObject << /F 5 0 R >> >> >> endobj\n"
+        "4 0 obj << /Length 66 >>\nstream\nq 1 0 0 1 10 0 cm /F Do Q [3 2] 0 d 4 w 0 0 m 10 0 l S\nendstream\nendobj\n"
+        "5 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 50 50] /Matrix [2 0 0 2 0 0] /Length 22 >>\nstream\n1 0 0 rg 0 0 5 5 re f\nendstream\nendobj\n"
+        "trailer << /Root 1 0 R >>\n%%EOF\n";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(pdf, doc));
+    EXPECT_EQ(doc.pageWidth(), 200.0f);    // turned a quarter: 100 x 200 becomes 200 x 100
+    EXPECT_EQ(doc.pageHeight(), 100.0f);
+    ASSERT_EQ(doc.objectCount(), 2u);
+    const BLBox box = doc.object(0).geometryBounds();   // 10 x 10 square (5 x 5 scaled by the form's matrix)
+    EXPECT_NEAR(box.x1 - box.x0, 10.0, 0.01);
+    EXPECT_NEAR(box.y1 - box.y0, 10.0, 0.01);
+    EXPECT_EQ(doc.object(0).fill().color().toRgba32().value, 0xFFFF0000u);
+    EXPECT_EQ(doc.object(1).strokeOptions().dashes.size(), 2u);
+}
+
+TEST(SketchPdfImport, NotAPdfLeavesTheDocumentAlone) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    EXPECT_FALSE(documentFromPdf("not a pdf", doc));
+    EXPECT_FALSE(documentFromPdf("%PDF-1.4\n%%EOF\n", doc));
+    EXPECT_FALSE(documentFromPdf("%PDF-1.4\n1 0 obj << /Encrypt 2 0 R >> endobj\n", doc));
+    EXPECT_EQ(doc.objectCount(), 1u);
+    SketchDocument source;
+    source.add(SketchObject::makeRect(0, 0, 10, 10));
+    const std::string pdf = pdfFromDocument(source);
+    for (std::size_t length = 0; length < pdf.size(); length += 7) {   // damaged files never crash
+        SketchDocument scratch;
+        documentFromPdf(pdf.substr(0, length), scratch);
+    }
 }
