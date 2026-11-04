@@ -1,7 +1,9 @@
 ﻿#include "curvy/sketchcolor.h"
+#include <set>
 #include "curvy/sketchdocument.h"
 #include "curvy/sketchobject.h"
 #include "curvy/cursorset.h"
+#include "curvy/canvasview.h"
 #include "curvy/shapetools.h"
 #include "curvy/pathops.h"
 #include "curvy/imagetrace.h"
@@ -5201,20 +5203,135 @@ TEST(SketchBrushes, SmoothCornersRoundTheBend) {
     EXPECT_LT(smooth, raw - 2.0);    // the rounding (radius = the art's height, 6) turns it away sooner
 }
 
+namespace {
+    bool hasVertexNear(const BLPath& path, double x, double y, double within) {
+        for (std::size_t i = 0; i < path.size(); ++i) {
+            const BLPoint& p = path.vertex_data()[i];
+            if (std::hypot(p.x - x, p.y - y) <= within) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    BLPath rightAngle() {
+        BLPath corner;
+        corner.move_to(0, 0);
+        corner.line_to(100, 0);
+        corner.line_to(100, 100);
+        return corner;
+    }
+}
+
+TEST(SketchBrushes, AMiterCornerMeetsInASharpPoint) {
+    std::shared_ptr<BrushDef> brush = rectangleBrush(BrushKind::Art, 100, 6);   // 3 either side of the path at weight 1
+    brush->corner = BrushCorner::Miter;
+    BLPath bent = brush->bendAlong(rightAngle(), 1.0)[0].path;
+    EXPECT_TRUE(hasVertexNear(bent, 103, -3, 1.0));   // the outside point, a square corner
+    EXPECT_TRUE(hasVertexNear(bent, 97, 3, 1.0));     // the inside lines meet
+    brush->corner = BrushCorner::Bend;
+    EXPECT_FALSE(hasVertexNear(brush->bendAlong(rightAngle(), 1.0)[0].path, 103, -3, 1.0));   // raw bending leaves the point out
+}
+
+TEST(SketchBrushes, TheMiterLimitBevelsASharpPoint) {
+    std::shared_ptr<BrushDef> brush = rectangleBrush(BrushKind::Art, 100, 6);
+    brush->corner = BrushCorner::Miter;
+    brush->miterLimit = 1.0;   // no point at all
+    BLPath bent = brush->bendAlong(rightAngle(), 1.0)[0].path;
+    EXPECT_FALSE(hasVertexNear(bent, 103, -3, 1.0));
+}
+
+TEST(SketchBrushes, BreakCutsThePathAtSharpCorners) {
+    std::shared_ptr<BrushDef> brush = rectangleBrush(BrushKind::Art, 100, 6);
+    brush->corner = BrushCorner::Break;
+    brush->breakAngle = 60.0;
+    EXPECT_EQ(brush->bendAlong(rightAngle(), 1.0).size(), 2u);   // the 90 degree turn is cut: a copy on each leg
+    brush->breakAngle = 120.0;
+    EXPECT_EQ(brush->bendAlong(rightAngle(), 1.0).size(), 1u);   // not sharp enough
+}
+
+TEST(SketchBrushes, ATopToBottomArtworkRunsAlongThePathWithItsTop) {
+    std::shared_ptr<BrushDef> brush = rectangleBrush(BrushKind::Art, 6, 100);   // tall and narrow
+    BLPath line;
+    line.move_to(0, 0);
+    line.line_to(100, 0);
+    brush->direction = BrushDirection::TopToBottom;
+    BLBox box = boxOfPath(brush->bendAlong(line, 1.0)[0].path);
+    EXPECT_NEAR(box.x0, 0.0, 1e-6);
+    EXPECT_NEAR(box.x1, 100.0, 1e-6);
+    EXPECT_NEAR(box.y0, -3.0, 1e-6);   // 6 wide in the artwork: 6 across the path
+    EXPECT_NEAR(box.y1, 3.0, 1e-6);
+    EXPECT_NEAR(brush->reach(1.0), 3.0, 1e-9);
+    brush->direction = BrushDirection::LeftToRight;
+    EXPECT_NEAR(brush->reach(1.0), 50.0, 1e-9);
+}
+
+TEST(SketchBrushes, FlippingMirrorsTheArtworkAcrossAndAlongThePath) {
+    // A 100 x 6 artwork whose only mark is a bar on its top third (y 0..2): above the path, at y -3..-1.
+    std::shared_ptr<BrushDef> brush = rectangleBrush(BrushKind::Art, 100, 6);
+    auto art = std::make_shared<SymbolDef>(*brush->art);
+    art->content = std::make_shared<SketchDocument>();
+    SketchObject* bar = SketchObject::makeRect(0, 0, 100, 2);
+    bar->setFill(SketchPaint::solid(SketchColor::gray(0.0f)));
+    bar->setStroke(SketchPaint::none());
+    art->content->add(bar);
+    brush->art = art;
+    BLPath line;
+    line.move_to(0, 0);
+    line.line_to(100, 0);
+    BLBox box = boxOfPath(brush->bendAlong(line, 1.0)[0].path);
+    EXPECT_NEAR(box.y0, -3.0, 1e-6);
+    EXPECT_NEAR(box.y1, -1.0, 1e-6);
+    brush->flipAcross = true;
+    box = boxOfPath(brush->bendAlong(line, 1.0)[0].path);
+    EXPECT_NEAR(box.y0, 1.0, 1e-6);
+    EXPECT_NEAR(box.y1, 3.0, 1e-6);
+
+    // Along: a rigid tail (the last fifth of the artwork) ends up at the start of the path instead of its end.
+    brush->flipAcross = false;
+    brush->fit = BrushFit::Guided;
+    brush->headGuide = 0.0;
+    brush->tailGuide = 0.8;
+    BLPath longLine;
+    longLine.move_to(0, 0);
+    longLine.line_to(300, 0);
+    auto crowded = [&](const BrushDef& b) {
+        BLPath bent = b.bendAlong(longLine, 1.0)[0].path;
+        int count = 0;
+        for (std::size_t i = 0; i < bent.size(); ++i) {
+            count += bent.vertex_data()[i].x < 20.0 ? 1 : 0;
+        }
+        return count;
+    };
+    const int before = crowded(*brush);
+    brush->flipAlong = true;
+    EXPECT_GT(crowded(*brush), before * 2);
+}
+
 TEST(SketchBrushes, FitSettingsSurviveParams) {
     BrushDef def;
     def.fit = BrushFit::Repeat;
     def.headGuide = 0.3;
     def.tailGuide = 0.6;
-    def.corner = BrushCorner::Bend;
+    def.corner = BrushCorner::Break;
     def.cornerRadius = 50.0;
+    def.miterLimit = 7.0;
+    def.breakAngle = 100.0;
+    def.direction = BrushDirection::TopToBottom;
+    def.flipAlong = true;
+    def.flipAcross = true;
     BrushDef copy;
     copy.setParams(def.params());
     EXPECT_TRUE(copy.fit == BrushFit::Repeat);
     EXPECT_DOUBLE_EQ(copy.headGuide, 0.3);
     EXPECT_DOUBLE_EQ(copy.tailGuide, 0.6);
-    EXPECT_TRUE(copy.corner == BrushCorner::Bend);
+    EXPECT_TRUE(copy.corner == BrushCorner::Break);
     EXPECT_DOUBLE_EQ(copy.cornerRadius, 50.0);
+    EXPECT_DOUBLE_EQ(copy.miterLimit, 7.0);
+    EXPECT_DOUBLE_EQ(copy.breakAngle, 100.0);
+    EXPECT_TRUE(copy.direction == BrushDirection::TopToBottom);
+    EXPECT_TRUE(copy.flipAlong);
+    EXPECT_TRUE(copy.flipAcross);
 }
 
 TEST(SketchBrushes, AnArtBrushBendsWithACurve) {
@@ -5318,6 +5435,85 @@ TEST(SketchBrushes, AnArtBrushTakesTheSelectionAsItsArtwork) {
     EXPECT_EQ(def->art->content->objectCount(), 1u);
     EXPECT_NEAR(def->art->box.x1 - def->art->box.x0, 60.0, 2.0);   // the box of the artwork (its stroke counts too)
     EXPECT_EQ(doc.objectCount(), 1u);                              // the selection stays
+}
+
+namespace {
+    // A document with a 60 x 10 symbol "Bar" (its one instance at object 0), a brush made from it and a line stroked with that brush.
+    struct LinkedBrushFixture {
+        SketchDocument doc;
+        std::size_t symbol = 0, brush = 0, line = 0;
+
+        LinkedBrushFixture() {
+            doc.setPageSize(200, 200);
+            doc.setSelection({doc.add(SketchObject::makeRect(0, 0, 60, 10)).id()});
+            symbol = doc.makeSymbol("Bar");
+            doc.setSelection({doc.object(0).id()});
+            brush = doc.makeBrush(BrushKind::Art, "Bar");
+            line = doc.add(SketchObject::makeLine(10, 150, 190, 150)).id();
+            doc.setSelection({line});
+            doc.applyBrush(brush);
+        }
+
+        double artWidth() const { return doc.findBrush(brush)->art->box.x1 - doc.findBrush(brush)->art->box.x0; }
+        // Replaces the symbol's artwork with a rectangle `width` wide.
+        bool redefine(double width) {
+            doc.setSelection({doc.add(SketchObject::makeRect(0, 60, width, 10)).id()});
+            return doc.redefineSymbol(symbol);
+        }
+    };
+}
+
+TEST(SketchBrushes, ABrushMadeFromASymbolIsLinkedToIt) {
+    LinkedBrushFixture f;
+    ASSERT_NE(f.symbol, 0u);
+    ASSERT_NE(f.brush, 0u);
+    EXPECT_EQ(f.doc.findBrush(f.brush)->sourceSymbol, f.symbol);
+    EXPECT_NEAR(f.artWidth(), 60.0, 2.0);
+    EXPECT_FALSE(f.doc.findBrush(f.brush)->parts().empty()) << "the artwork of the symbol, not its instance";
+}
+
+TEST(SketchBrushes, RedefiningTheSymbolRedefinesTheBrushAndItsStrokes) {
+    LinkedBrushFixture f;
+    ASSERT_TRUE(f.redefine(120.0));
+    EXPECT_NEAR(f.artWidth(), 120.0, 2.0);
+    EXPECT_EQ(f.doc.findBrush(f.brush)->sourceSymbol, f.symbol);
+    EXPECT_EQ(f.doc.findById(f.line)->strokeOptions().brush, f.doc.findBrush(f.brush)) << "the stroke follows the new brush";
+    f.doc.undoStack().undo();
+    EXPECT_NEAR(f.artWidth(), 60.0, 2.0);
+    EXPECT_EQ(f.doc.findById(f.line)->strokeOptions().brush, f.doc.findBrush(f.brush));
+    f.doc.undoStack().redo();
+    EXPECT_NEAR(f.artWidth(), 120.0, 2.0);
+}
+
+TEST(SketchBrushes, AnUnlinkedBrushKeepsItsOwnArtwork) {
+    LinkedBrushFixture f;
+    ASSERT_TRUE(f.doc.linkBrushToSymbol(f.brush, 0));
+    EXPECT_EQ(f.doc.findBrush(f.brush)->sourceSymbol, 0u);
+    EXPECT_FALSE(f.doc.linkBrushToSymbol(f.brush, 0)) << "already unlinked";
+    ASSERT_TRUE(f.redefine(120.0));
+    EXPECT_NEAR(f.artWidth(), 60.0, 2.0);
+    // Linking again takes the current artwork of the symbol.
+    ASSERT_TRUE(f.doc.linkBrushToSymbol(f.brush, f.symbol));
+    EXPECT_NEAR(f.artWidth(), 120.0, 2.0);
+    EXPECT_FALSE(f.doc.linkBrushToSymbol(f.brush, 9999)) << "no such symbol";
+}
+
+TEST(SketchBrushes, TheLinkSurvivesTheFileAndEndsWithTheSymbol) {
+    LinkedBrushFixture f;
+    SketchDocument loaded;
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(f.doc), loaded));
+    ASSERT_EQ(loaded.brushes().size(), 1u);
+    ASSERT_EQ(loaded.symbols().size(), 1u);
+    EXPECT_EQ(loaded.brushes()[0]->sourceSymbol, loaded.symbols()[0]->id);
+
+    // Deleting the symbol (once no instance is left) unlinks the brush, which keeps its artwork; undo links it again.
+    f.doc.setSelection({f.doc.object(0).id()});
+    ASSERT_TRUE(f.doc.breakSymbolLink());
+    ASSERT_TRUE(f.doc.deleteSymbol(f.symbol));
+    EXPECT_EQ(f.doc.findBrush(f.brush)->sourceSymbol, 0u);
+    EXPECT_NEAR(f.artWidth(), 60.0, 2.0);
+    f.doc.undoStack().undo();
+    EXPECT_EQ(f.doc.findBrush(f.brush)->sourceSymbol, f.symbol);
 }
 
 TEST(SketchBrushes, PresetsAreAddedOnceByName) {
@@ -9643,4 +9839,213 @@ TEST(ShapeNodeObject, AParametricObjectSurvivesSvgAndKeepsItsShapeNodeInTheGraph
         shapes += loaded.network().node(node).typeName() == kShapeNodeType ? 1 : 0;
     }
     EXPECT_LE(shapes, 1);
+}
+
+TEST(DeformAlongPathNode, BendsTheArtworkAlongTheSpineAndPassesItThroughWithoutOne) {
+    curvy::registerCurvyNodes();
+    jitnodes::Network net(1);
+    const BLPath artPath = closedPolygon({BLPoint(0, -5), BLPoint(100, -5), BLPoint(100, 5), BLPoint(0, 5)});
+    BLPath spinePath;
+    spinePath.move_to(0, 0);
+    spinePath.line_to(200, 0);
+    const jitnodes::NodeId art = net.addNode(kPathNodeType, "art");
+    net.node(art).setGeometryParam("curve", geometryFromPath(artPath));
+    const jitnodes::NodeId spine = net.addNode(kPathNodeType, "spine");
+    net.node(spine).setGeometryParam("curve", geometryFromPath(spinePath));
+    const jitnodes::NodeId deform = net.addNode(kDeformAlongPathNodeType, "deform");
+    net.connect(art, deform, 0);
+    EXPECT_EQ(net.cook(deform)->pointCount(), geometryFromPath(artPath)->pointCount());   // no spine: unchanged
+    net.connect(spine, deform, 1);
+    BLPath bent;
+    ASSERT_TRUE(pathFromGeometry(*net.cook(deform), bent));
+    BLBox box;
+    ASSERT_EQ(bent.get_bounding_box(&box), BL_SUCCESS);
+    EXPECT_NEAR(box.x0, 0.0, 0.1);
+    EXPECT_NEAR(box.x1, 200.0, 0.1);   // stretched over the whole spine
+    EXPECT_NEAR(box.y1 - box.y0, 10.0, 0.1);
+    net.node(deform).setString("fit", "repeat");
+    net.node(deform).setFloat("width", 2.0f);
+    ASSERT_TRUE(pathFromGeometry(*net.cook(deform), bent));
+    ASSERT_EQ(bent.get_bounding_box(&box), BL_SUCCESS);
+    EXPECT_NEAR(box.y1 - box.y0, 20.0, 0.1);
+    EXPECT_NEAR(box.x1, 200.0, 0.1);
+}
+
+TEST(SketchBrushes, CategoriesFavoritesAndRecentBrushesFeedThePicker) {
+    SketchDocument doc;
+    doc.addBrushPresets();
+    ASSERT_GE(doc.brushes().size(), 6u);
+    std::set<std::string> categories;
+    for (const auto& brush : doc.brushes()) {
+        categories.insert(brush->categoryName());
+    }
+    EXPECT_TRUE(categories.count("Calligraphic") && categories.count("Scatter") && categories.count("Art"));
+    // A brush without a category is listed under its kind.
+    BrushDef plain;
+    plain.kind = BrushKind::Scatter;
+    EXPECT_EQ(plain.categoryName(), "Scatter");
+
+    // Starring and re-filing are undo steps and do not change how the brush draws.
+    const std::size_t first = doc.brushes()[0]->id;
+    BrushDef edited = *doc.findBrush(first);
+    const bool was = edited.favorite;
+    edited.favorite = !was;
+    edited.category = "Mine";
+    ASSERT_TRUE(doc.changeBrush(first, edited));
+    EXPECT_EQ(doc.findBrush(first)->favorite, !was);
+    EXPECT_EQ(doc.findBrush(first)->categoryName(), "Mine");
+    EXPECT_FALSE(doc.changeBrush(first, edited));   // nothing changed
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.findBrush(first)->favorite, was);
+
+    doc.undoStack().redo();
+    // They are saved and read back.
+    SketchDocument again;
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc, true), again));
+    ASSERT_EQ(again.brushes().size(), doc.brushes().size());
+    for (std::size_t i = 0; i < doc.brushes().size(); ++i) {
+        EXPECT_EQ(again.brushes()[i]->favorite, doc.brushes()[i]->favorite) << i;
+        EXPECT_EQ(again.brushes()[i]->categoryName(), doc.brushes()[i]->categoryName()) << i;
+    }
+
+    // Most recent: newest first, no repeats, at most kRecentBrushes.
+    const std::size_t a = doc.brushes()[1]->id, b = doc.brushes()[2]->id;
+    doc.setActiveBrush(a);
+    doc.setActiveBrush(b);
+    doc.setActiveBrush(a);
+    ASSERT_GE(doc.recentBrushes().size(), 2u);
+    EXPECT_EQ(doc.recentBrushes()[0], a);
+    EXPECT_EQ(doc.recentBrushes()[1], b);
+    for (const auto& brush : doc.brushes()) {
+        doc.setActiveBrush(brush->id);
+    }
+    EXPECT_LE(doc.recentBrushes().size(), SketchDocument::kRecentBrushes);
+}
+
+TEST(SketchBrushes, PressureProfileScalesTheBrushAlongThePath) {
+    BLPath line;
+    line.move_to(0, 0);
+    line.line_to(200, 0);
+    BrushDef art;
+    art.kind = BrushKind::Art;
+    art.fit = BrushFit::Stretch;
+    auto content = std::make_shared<SketchDocument>();
+    content->add(SketchObject::makeRect(0, -5, 100, 10));
+    auto symbol = std::make_shared<SymbolDef>();
+    symbol->box = BLBox(0, -5, 100, 5);
+    symbol->content = content;
+    art.setArt(symbol);
+    auto heightNear = [&](const std::vector<BrushPart>& parts, double x0, double x1) {
+        double low = 1e9, high = -1e9;
+        for (const BrushPart& part : parts) {
+            BLPath copy = part.path;
+            for (std::size_t i = 0; i < copy.size(); ++i) {
+                const BLPoint p = copy.vertex_data()[i];
+                if (p.x >= x0 && p.x <= x1) {
+                    low = std::min(low, p.y);
+                    high = std::max(high, p.y);
+                }
+            }
+        }
+        return high - low;
+    };
+    const std::vector<BrushPart> plain = art.bendAlong(line, 1.0);
+    EXPECT_NEAR(heightNear(plain, 0, 200), 10.0, 0.1);
+    // Full pressure at the start, a quarter at the end.
+    const std::vector<WidthPoint> profile = {{0.0, 1.0, 1.0}, {1.0, 0.25, 0.25}};
+    const std::vector<BrushPart> pressed = art.bendAlong(line, 1.0, profile);
+    EXPECT_GT(heightNear(pressed, 0, 20), 8.0);
+    EXPECT_LT(heightNear(pressed, 180, 200), 4.0);
+    EXPECT_NEAR(art.reach(1.0, profile), art.reach(1.0), 1e-9);   // never wider than the plain stroke here
+    EXPECT_NEAR(art.reach(1.0, {{0.0, 2.0, 2.0}}), art.reach(1.0) * 2.0, 1e-9);
+
+    // The nib follows it too: thin where the pen was light.
+    BrushDef nib;
+    nib.angle = 0.0;
+    nib.roundness = 100.0;
+    const BLPath thick = nib.nibOutline(line, 10.0), varied = nib.nibOutline(line, 10.0, profile);
+    BLBox a, b;
+    ASSERT_EQ(thick.get_bounding_box(&a), BL_SUCCESS);
+    ASSERT_EQ(varied.get_bounding_box(&b), BL_SUCCESS);
+    EXPECT_NEAR(a.y1 - a.y0, 10.0, 0.2);
+    EXPECT_NEAR(b.y1 - b.y0, 10.0, 0.2);   // the start is still full width
+    const BLPath thin = nib.nibOutline(line, 10.0, {{0.0, 0.2, 0.2}, {1.0, 0.2, 0.2}});
+    ASSERT_EQ(thin.get_bounding_box(&a), BL_SUCCESS);
+    EXPECT_NEAR(a.y1 - a.y0, 2.0, 0.2);
+}
+
+TEST(CanvasView, PressureBecomesAWidthProfileOnlyWhenItVaries) {
+    std::vector<BLPoint> points;
+    std::vector<float> flat, varied;
+    for (int i = 0; i <= 100; ++i) {
+        points.push_back(BLPoint(i, 0));
+        flat.push_back(1.0f);
+        varied.push_back(0.2f + 0.8f * float(i) / 100.0f);
+    }
+    EXPECT_TRUE(pressureProfile(points, flat).empty());   // a mouse
+    EXPECT_TRUE(pressureProfile(points, std::vector<float>(5, 0.5f)).empty());   // the lists do not match
+    const std::vector<WidthPoint> profile = pressureProfile(points, varied);
+    ASSERT_GE(profile.size(), 3u);
+    EXPECT_LE(profile.size(), 30u);
+    EXPECT_DOUBLE_EQ(profile.front().t, 0.0);
+    EXPECT_DOUBLE_EQ(profile.back().t, 1.0);
+    EXPECT_NEAR(profile.front().left, 0.2, 1e-6);
+    EXPECT_NEAR(profile.back().right, 1.0, 1e-6);
+    for (std::size_t i = 1; i < profile.size(); ++i) {
+        EXPECT_GT(profile[i].t, profile[i - 1].t);
+    }
+}
+
+TEST(DockContext, TheBrushesBoxFollowsThePaintbrushAndBrushedObjects) {
+    SketchDocument doc;
+    const curvy::DockBoxes armed = curvy::DockContext::boxesFor(doc, curvy::SketchTool::Paintbrush);
+    EXPECT_TRUE(armed.brush && armed.colour && armed.opacity);
+    EXPECT_FALSE(armed.stroke || armed.transform);
+    EXPECT_FALSE(curvy::DockContext::boxesFor(doc, curvy::SketchTool::Pencil).brush);
+    EXPECT_FALSE(curvy::DockContext::boxesFor(doc, curvy::SketchTool::Select).any());
+
+    doc.addBrushPresets();
+    const std::size_t line = doc.add(SketchObject::makeLine(0, 0, 100, 0)).id();
+    doc.setSelection({line});
+    EXPECT_FALSE(curvy::DockContext::boxesFor(doc, curvy::SketchTool::Select).brush);   // a plain stroke
+    ASSERT_TRUE(doc.applyBrush(doc.activeBrush()));
+    const curvy::DockBoxes brushed = curvy::DockContext::boxesFor(doc, curvy::SketchTool::Select);
+    EXPECT_TRUE(brushed.brush && brushed.transform && brushed.stroke);
+    EXPECT_TRUE(brushed.any());
+}
+
+TEST(DeformAlongPath, BendsAnObjectAlongAnotherAndFollowsIt) {
+    SketchDocument doc;
+    const std::size_t art = doc.add(SketchObject::makeRect(300, 40, 100, 10)).id();   // far from the spine, to show the frame at work
+    const std::size_t spine = doc.add(SketchObject::makeLine(0, 100, 200, 100)).id();
+    EXPECT_FALSE(doc.addDeformAlongPath(art, art).valid());
+    EXPECT_FALSE(doc.addDeformAlongPath(art, 9999).valid());
+    EXPECT_FALSE(doc.deformSelectionAlongPath());   // nothing selected
+
+    doc.setSelection({spine, art});   // picked in either order: the open path is the spine
+    ASSERT_TRUE(doc.deformSelectionAlongPath());
+    BLBox box = doc.findById(art)->geometryBounds();
+    EXPECT_NEAR(box.x0, 0.0, 0.5) << "stretched along the whole spine";
+    EXPECT_NEAR(box.x1, 200.0, 0.5);
+    EXPECT_NEAR(box.y0, 95.0, 0.5) << "centred on it";
+    EXPECT_NEAR(box.y1, 105.0, 0.5);
+    EXPECT_NEAR(doc.findById(spine)->geometryBounds().y0, 100.0, 1e-6) << "the spine itself is untouched";
+
+    // Moving the spine takes the bent artwork with it; moving the artwork moves the result as a whole.
+    doc.transformObjects({spine}, BLMatrix2D::make_translation(0.0, 50.0), "Move");
+    box = doc.findById(art)->geometryBounds();
+    EXPECT_NEAR(box.y0, 145.0, 0.5);
+    EXPECT_NEAR(box.y1, 155.0, 0.5);
+    doc.transformObjects({art}, BLMatrix2D::make_translation(20.0, 0.0), "Move");
+    box = doc.findById(art)->geometryBounds();
+    EXPECT_NEAR(box.x0, 20.0, 0.5);
+    EXPECT_NEAR(box.x1, 220.0, 0.5);
+
+    // One undo step for the wiring, and it takes the deformation away again.
+    doc.undoStack().undo();
+    doc.undoStack().undo();
+    doc.undoStack().undo();
+    box = doc.findById(art)->geometryBounds();
+    EXPECT_NEAR(box.x0, 300.0, 0.5);
+    EXPECT_NEAR(box.x1, 400.0, 0.5);
 }

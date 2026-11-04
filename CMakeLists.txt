@@ -56,6 +56,7 @@ add_executable(curvy
     src/artboardpanel.cpp
     src/librarypanel.cpp
     src/brushpanel.cpp
+    src/brushlist.cpp
     src/brush.cpp
     src/pathflatten.cpp
     src/imagedata.cpp

@@ -245,6 +245,7 @@ namespace curvy {
         }
         if (tool_ == SketchTool::Pencil || tool_ == SketchTool::Paintbrush) {
             pencilPoints_.assign(1, dragStartDoc_);
+            pencilPressure_.assign(1, currentPressure());
             drag_ = Drag::Pencil;
             return SyncReturn::Handled;
         }
@@ -1120,6 +1121,7 @@ namespace curvy {
         }
         if (vkCode == vkEscape) {
             pencilPoints_.clear();
+            pencilPressure_.clear();
             cutPoints_.clear();
             if (drag_ != Drag::None) {  // cancel an in-progress drag, restoring the outlines
                 if (drag_ == Drag::GradientNew || drag_ == Drag::GradientEnd || drag_ == Drag::GradientStop) {

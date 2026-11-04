@@ -78,6 +78,7 @@ namespace curvy {
             transformPanel_ = std::make_unique<TransformPanel>(frame_.rootView(), document_);
             textPanel_ = std::make_unique<TextPanel>(frame_.rootView(), document_);
             shapePanel_ = std::make_unique<ShapePanel>(frame_.rootView(), document_);
+            brushPanel_ = std::make_unique<BrushPanel>(frame_.rootView(), document_);
             stylePanel_ = std::make_unique<StylePanel>(frame_.rootView(), document_);   // binds the views it finds by name; the rest of its panel is not in the dock
             connections_.add(stylePanel_->onContentChanged, [this](StylePanel&) { fitCard(); return SyncReturn::Handled; });
         }
@@ -220,6 +221,9 @@ namespace curvy {
         if (propertyDock_ == nullptr) {
             return;
         }
+        if (canvas_.tool() == SketchTool::Paintbrush && document_.brushes().empty()) {
+            document_.addBrushPresets();   // a new document has no brushes: the first time the Paintbrush is armed there is something to pick
+        }
         boxes_ = DockContext::boxesFor(document_, canvas_.tool());
         auto show = [&](const char* name, bool visible) {
             if (View* view = propertyDock_->findView(name)) {
@@ -230,6 +234,7 @@ namespace curvy {
         show("colorPanel", boxes_.colour);
         show("textPanel", boxes_.text);
         show("shapePanel", boxes_.shape);
+        show("brushPanel", boxes_.brush);
         show("strokePanel", boxes_.stroke);
         show("opacityPanel", boxes_.opacity);
         show("dockCaption", !boxes_.caption.empty());
@@ -460,7 +465,7 @@ namespace curvy {
             for (const char* name : {"transformXLabel", "transformYLabel", "transformWLabel", "transformHLabel", "transformAngleLabel", "transformAngleUnit"}) {
                 text(propertyDock_->findView(name), theme.textMuted);
             }
-            for (const char* box : {"colorPanel", "strokePanel", "opacityPanel"}) {
+            for (const char* box : {"colorPanel", "strokePanel", "opacityPanel", "brushPanel"}) {
                 const std::string base = box;
                 fill(propertyDock_->findView((base + "HeaderBar").c_str()), tint(theme.slot, 0x99));
                 text(propertyDock_->findView((base + "Header").c_str()), theme.textPrimary);
@@ -471,6 +476,10 @@ namespace curvy {
                 text(propertyDock_->findView(name), theme.textMuted);
             }
             for (const char* name : {"hexField", "comp0SliderValue", "comp1SliderValue", "comp2SliderValue", "strokeWeightField", "opacitySliderValue"}) {
+                fill(propertyDock_->findView(name), tint(theme.bgApp));
+            }
+            for (const char* name : {"brushNameField", "brushAngleField", "brushRoundnessField", "brushSpacingField", "brushScatterField", "brushSizeVariationField",
+                                     "brushRotationField", "brushHeadGuideField", "brushTailGuideField", "brushCornerRadiusField", "brushMiterLimitField", "brushBreakAngleField"}) {
                 fill(propertyDock_->findView(name), tint(theme.bgApp));
             }
             for (const char* name : {"transformXField", "transformYField", "transformWField", "transformHField", "transformAngleField"}) {

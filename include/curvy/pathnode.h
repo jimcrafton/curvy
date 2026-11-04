@@ -49,6 +49,14 @@ namespace curvy {
     // of the point group `group` (every point when it is empty; none when the input has no such group). It sits before the placement node, which
     // still places the whole result, so an object with one is *driven*: its outline is what the chain cooks, not what the object last drew.
     inline constexpr const char* kMovePointsNodeType = "curvyMovePoints";
+    // Bends artwork along a path (the core of skeletal strokes): input 0 is the artwork, whose bounding box is the unit that is stretched,
+    // input 1 the spine. The output is the artwork's outlines (all subpaths, one copy per spine subpath, or several for repeat) on the page,
+    // ready for fill and stroke nodes. Parameters, as those of an art brush (brush.h): fit (stretch, guided, repeat), headGuide, tailGuide,
+    // corner (bend, smooth, miter, break), cornerRadius, miterLimit, breakAngle, direction (leftToRight, topToBottom), flipAlong,
+    // flipAcross, and `width`, the scale across the path (1 draws the artwork at its own size). Without a spine the artwork passes through. The spine
+    // comes in page space and is carried by the matrix frame0..frame5 into the artwork's space (see SketchDocument::addDeformAlongPath). Like move points,
+    // it sits between a shape and its placement node and makes the object driven.
+    inline constexpr const char* kDeformAlongPathNodeType = "curvyDeformAlongPath";
     // The int point attribute that names every point for good: it travels with the point through the nodes, so a tag by id survives edits that
     // renumber the points. geometryFromPath gives new points fresh ids and keeps those of points that stayed.
     inline constexpr const char* kPointIdAttrib = "id";

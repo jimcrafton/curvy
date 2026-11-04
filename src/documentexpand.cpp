@@ -103,11 +103,11 @@ namespace curvy {
                             AppearanceItem fill = AppearanceItem::makeFill(item.paint);
                             fill.opacity = item.opacity;
                             fill.blendMode = item.blendMode;
-                            add(brush.nibOutline(shown, item.strokeWidth), {fill, AppearanceItem::makeStroke(SketchPaint::none(), 0.0)}, "Expanded Brush");
+                            add(brush.nibOutline(shown, item.strokeWidth, item.strokeOptions.widths), {fill, AppearanceItem::makeStroke(SketchPaint::none(), 0.0)}, "Expanded Brush");
                         } else if (brush.kind == BrushKind::Art) {
-                            artwork(brush.bendAlong(shown, item.strokeWidth));
+                            artwork(brush.bendAlong(shown, item.strokeWidth, item.strokeOptions.widths));
                         } else {
-                            for (const BLMatrix2D& matrix : brush.placements(shown, item.strokeWidth)) {
+                            for (const BLMatrix2D& matrix : brush.placements(shown, item.strokeWidth, item.strokeOptions.widths)) {
                                 std::vector<BrushPart> moved = brush.parts();
                                 for (BrushPart& piece : moved) {
                                     piece.path.transform(matrix);

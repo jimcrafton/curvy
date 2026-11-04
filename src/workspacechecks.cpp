@@ -1,4 +1,5 @@
 #include "curvy/workspacechecks.h"
+#include "curvy/brushlist.h"
 
 #include "curvy/liveshape.h"
 #include "curvy/pathnode.h"
@@ -194,6 +195,20 @@ namespace curvy {
                 key(newui::vkLetterS);
                 expect(canvas_->tool() == SketchTool::Star && !shown("transformPanel") && shown("colorPanel") && shown("strokePanel") && shown("opacityPanel"), "an armed drawing tool shows the colour boxes for new shapes");
                 keyUp(newui::vkLetterS);
+                canvas_->setTool(SketchTool::Paintbrush);
+                expect(shown("brushPanel") && shown("colorPanel") && shown("opacityPanel") && !shown("strokePanel"), "the Paintbrush shows the Brushes box with Colour and Opacity");
+                {
+                    auto* list = dynamic_cast<curvy::BrushList*>(dock->propertyDock()->findView("brushList"));
+                    expect(list != nullptr && list->isVisible() && list->bounds().height() > 100.0f && !list->rows().empty(), "the Brushes box lists brushes");
+                    if (list != nullptr) {
+                        const float view = list->getClientBounds().height();
+                        expect(list->scrollable() && list->thumb().second >= 24.0f && list->thumb().second < view, "a list taller than its view has a scroll bar");
+                        list->setScroll(100000.0f);
+                        expect(std::fabs(list->scroll() - (list->contentHeight() - view)) < 0.01f && std::fabs(list->thumb().first + list->thumb().second - view) < 0.01f, "scrolled to the end the thumb is at the bottom");
+                        list->setScroll(0.0f);
+                    }
+                }
+                canvas_->setTool(SketchTool::Select);
                 key(newui::vkLetterE);
                 key(newui::vkLetterV);
                 expect(canvas_->tool() == SketchTool::Select && model_->heldToolKey().empty(), "V goes back to the Select tool from a held drawing tool");

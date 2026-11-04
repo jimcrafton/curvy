@@ -380,13 +380,13 @@ namespace curvy {
             const BrushDef& brush = *item.strokeOptions.brush;
             const BLPath shown = object.itemOutline(index);
             if (brush.kind == BrushKind::Calligraphic) {
-                return fillPath(brush.nibOutline(shown, item.strokeWidth), item.paint, item.opacity, item.blendMode);
+                return fillPath(brush.nibOutline(shown, item.strokeWidth, item.strokeOptions.widths), item.paint, item.opacity, item.blendMode);
             }
             if (brush.kind == BrushKind::Art) {
-                return drawParts(brush.bendAlong(shown, item.strokeWidth), item.opacity);
+                return drawParts(brush.bendAlong(shown, item.strokeWidth, item.strokeOptions.widths), item.opacity);
             }
             std::string out;
-            for (const BLMatrix2D& matrix : brush.placements(shown, item.strokeWidth)) {
+            for (const BLMatrix2D& matrix : brush.placements(shown, item.strokeWidth, item.strokeOptions.widths)) {
                 std::vector<BrushPart> moved = brush.parts();
                 for (BrushPart& part : moved) {
                     part.path.transform(matrix);

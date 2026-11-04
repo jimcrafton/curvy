@@ -18,9 +18,12 @@ namespace curvy {
     // split it into a rigid head, a stretching middle and a rigid tail (an arrowhead stays an arrowhead). Repeat: whole copies, each
     // stretched a little so that they fill the path exactly.
     enum class BrushFit { Stretch, Guided, Repeat };
+    // Which way the artwork of an art brush runs along the path: its x axis (left to right) or its y axis (top to bottom).
+    enum class BrushDirection { LeftToRight, TopToBottom };
     // What happens at a sharp corner of the path. Bend: the artwork is bent as is (it tears on the outside of the corner and overlaps on
-    // the inside). Smooth: the corner is rounded first.
-    enum class BrushCorner { Bend, Smooth };
+    // the inside). Smooth: the corner is rounded first. Miter: the outline stays continuous and meets in a sharp point (bevelled where
+    // the point would be longer than the miter limit). Break: the path is cut at corners and each piece is fitted on its own.
+    enum class BrushCorner { Bend, Smooth, Miter, Break };
 
     // One piece of the artwork of an art or scatter brush: an outline with the first fill and stroke of the object it came from.
     // @reflect ignore=true
@@ -31,6 +34,10 @@ namespace curvy {
         SketchPaint stroke;
         double strokeWidth = 0.0;
     };
+
+    // The pen pressure at each point of a freehand stroke as a width profile for a brush stroke (see WidthPoint), the pressure itself being the
+    // multiplier; empty when the pressure hardly changes (a mouse) or the two lists do not match.
+    std::vector<WidthPoint> pressureProfile(const std::vector<BLPoint>& points, const std::vector<float>& pressure);
 
     // A brush of the document library. Like symbols and patterns, brushes are never changed once made (editing one swaps in a new
     // definition), so objects can share them.
@@ -58,25 +65,53 @@ namespace curvy {
         double tailGuide = 0.8;
         BrushCorner corner = BrushCorner::Smooth;
         double cornerRadius = 100.0;
+        // Miter: the longest point of a corner, as a multiple of the half-width (like an SVG miter limit). Break: the turn (degrees)
+        // above which the path is cut.
+        double miterLimit = 4.0;
+        double breakAngle = 60.0;
+        // Art: which axis of the artwork runs along the path, and mirroring of the artwork along and across the path.
+        BrushDirection direction = BrushDirection::LeftToRight;
+        bool flipAlong = false;
+        bool flipAcross = false;
+        // The symbol of the document library this brush's artwork was taken from (0 = none: the brush keeps its own copy). While it is set,
+        // redefining that symbol redefines the artwork of the brush, and so every stroke drawn with it. Not part of params().
+        std::size_t sourceSymbol = 0;
+        // The group the brush picker lists it under (empty: the name of its kind) and whether it is in the picker's Favorites. Neither
+        // changes how the brush draws, so neither is part of params() or sameLook().
+        std::string category;
+        bool favorite = false;
+        std::string categoryName() const { return category.empty() ? brushKindName(kind) : category; }
         // Artwork of the two artwork kinds; its box is the unit that is stretched or repeated.
         std::shared_ptr<const SymbolDef> art;
 
+        // Replaces the artwork (and forgets the outlines built from the old one).
+        void setArt(std::shared_ptr<const SymbolDef> artwork) {
+            art = std::move(artwork);
+            parts_.clear();
+            partsBuilt_ = false;
+        }
         bool hasArt() const { return kind != BrushKind::Calligraphic; }
         // The numbers above in a fixed order (angle, roundness, spacing, scatter, sizeVariation, rotation, followPath, then fit, headGuide,
-        // tailGuide, corner, cornerRadius), for saving; the setter keeps what is missing and brings every value into its range.
+        // tailGuide, corner, cornerRadius, miterLimit, breakAngle, direction, flipAlong, flipAcross), for saving; the setter keeps what is missing and brings every value into its range.
         static constexpr std::size_t kBaseParams = 7;
         std::vector<double> params() const;
         void setParams(const std::vector<double>& values);
         bool sameLook(const BrushDef& other) const;
 
         // How far from the path the brush can reach, for a stroke of weight `strokeWidth`.
-        double reach(double strokeWidth) const;
+        // `widths` (a stroke's width profile, see WidthPoint) scales the brush along the path: the artwork's height, the nib, the copies. Pen
+        // pressure is stored this way. Empty = the plain weight all along.
+        double reach(double strokeWidth, const std::vector<WidthPoint>& widths = {}) const;
         // The swept outline of a calligraphic brush (fill it with the stroke paint).
-        BLPath nibOutline(const BLPath& path, double strokeWidth) const;
+        BLPath nibOutline(const BLPath& path, double strokeWidth, const std::vector<WidthPoint>& widths = {}) const;
         // The artwork bent along `path` (one copy per subpath).
-        std::vector<BrushPart> bendAlong(const BLPath& path, double strokeWidth) const;
+        std::vector<BrushPart> bendAlong(const BLPath& path, double strokeWidth, const std::vector<WidthPoint>& widths = {}) const;
+        // The same for any artwork: `artParts` inside `box` (the unit that is stretched), bent by this brush's fit, corner, direction and flips.
+        // This is what the deform-along-path graph node runs.
+        std::vector<BrushPart> bendParts(const std::vector<BrushPart>& artParts, const BLBox& box, const BLPath& path, double strokeWidth,
+            const std::vector<WidthPoint>& widths = {}) const;
         // Where the copies of a scatter brush stand: each matrix carries the artwork coordinates onto the page.
-        std::vector<BLMatrix2D> placements(const BLPath& path, double strokeWidth) const;
+        std::vector<BLMatrix2D> placements(const BLPath& path, double strokeWidth, const std::vector<WidthPoint>& widths = {}) const;
         // The artwork as outlines (built the first time it is asked for).
         const std::vector<BrushPart>& parts() const;
 

@@ -21,7 +21,6 @@ namespace curvy {
 
     // What a left-button drag on the canvas does. The order matches the status bar hints in main.cpp.
     enum class SketchTool { Select, DirectSelect, Rectangle, Ellipse, Circle, RoundRect, Polygon, Star, Arc, Line, Pen, Pencil, Paintbrush, Text, Gradient, Width, Scissors, Knife, Eraser, ShapeBuilder, Eyedropper, MagicWand, Lasso, Artboard, Rotate, Scale, Reflect, Hand, Zoom };
-
     // The drawing surface: the gray pasteboard, the white page with its grid, and (later) the
     // document's objects, the selection overlay and the rulers - all painted by this one view,
     // since a ruler is meaningless without the canvas's zoom/pan. Sketch's own "CanvasView
@@ -454,6 +453,8 @@ namespace curvy {
         int pencilSmoothing_ = 40;
         bool dragShift_ = false;               // Shift was down at the last drag update (the preview follows it)
         std::vector<BLPoint> pencilPoints_;    // the freehand points so far
+        std::vector<float> pencilPressure_;    // the pen pressure (0..1; 1 for a mouse or a pen without pressure) at each of them
+        float currentPressure() const;
         std::vector<PenAnchor> penAnchors_;    // the pen path being built (empty when none)
 
         // ---- Gradient tool ----

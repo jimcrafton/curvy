@@ -6,6 +6,7 @@
 #include "curvy/pathnode.h"
 #include "curvy/sketchdocument.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -759,8 +760,38 @@ namespace curvy {
         for (const std::shared_ptr<const BrushDef>& def : document.brushes()) {
             const std::vector<double> numbers = def->params();
             fitChunk.varint(def->id);
+            fitChunk.varint(numbers.size() - BrushDef::kBaseParams);
             for (std::size_t k = BrushDef::kBaseParams; k < numbers.size(); ++k) {
                 fitChunk.f64(numbers[k]);
+            }
+        }
+
+        // Which brushes are linked to which symbol: a chunk of its own (older readers skip it).
+        ByteWriter sourceChunk;
+        std::size_t linkedBrushes = 0;
+        for (const std::shared_ptr<const BrushDef>& def : document.brushes()) {
+            linkedBrushes += def->sourceSymbol != 0 ? 1 : 0;
+        }
+        sourceChunk.varint(linkedBrushes);
+        for (const std::shared_ptr<const BrushDef>& def : document.brushes()) {
+            if (def->sourceSymbol != 0) {
+                sourceChunk.varint(def->id);
+                sourceChunk.varint(def->sourceSymbol);
+            }
+        }
+
+        // The picker's category and favorite flag of each brush that has either, in a chunk of its own (older readers skip it).
+        ByteWriter categoryChunk;
+        std::size_t sortedBrushes = 0;
+        for (const std::shared_ptr<const BrushDef>& def : document.brushes()) {
+            sortedBrushes += def->favorite || !def->category.empty() ? 1 : 0;
+        }
+        categoryChunk.varint(sortedBrushes);
+        for (const std::shared_ptr<const BrushDef>& def : document.brushes()) {
+            if (def->favorite || !def->category.empty()) {
+                categoryChunk.varint(def->id);
+                categoryChunk.u8(def->favorite ? 1u : 0u);
+                categoryChunk.text(def->category);
             }
         }
 
@@ -831,6 +862,12 @@ namespace curvy {
         chunk(body, "PATN", patternChunk.data());
         chunk(body, "BRSH", brushChunk.data());
         chunk(body, "BFIT", fitChunk.data());
+        if (linkedBrushes != 0) {
+            chunk(body, "BSRC", sourceChunk.data());
+        }
+        if (sortedBrushes != 0) {
+            chunk(body, "BCAT", categoryChunk.data());
+        }
         chunk(body, "IMGS", imageChunk.data());
         chunk(body, "ABRD", boards.data());
         chunk(body, "GSTY", styles.data());
@@ -1094,7 +1131,8 @@ namespace curvy {
                 for (std::size_t i = 0; i < n && in.ok(); ++i) {
                     const std::size_t id = std::size_t(in.varint());
                     std::vector<double> extras;
-                    for (int k = 0; k < 5; ++k) {
+                    const std::size_t extraCount = in.count(8);   // a later version may write more than this one knows
+                    for (std::size_t k = 0; k < extraCount && in.ok(); ++k) {
                         extras.push_back(in.f64());
                     }
                     if (!in.ok()) {
@@ -1108,6 +1146,47 @@ namespace curvy {
                             all.insert(all.end(), extras.begin(), extras.end());
                             edited->setParams(all);
                             entry = edited;
+                        }
+                    }
+                }
+                if (!in.ok()) {
+                    return false;
+                }
+            } else if (tag == "BSRC") {
+                std::size_t n = in.count(2);
+                for (std::size_t i = 0; i < n && in.ok(); ++i) {
+                    const std::size_t brushId = std::size_t(in.varint()), symbolId = std::size_t(in.varint());
+                    if (!in.ok()) {
+                        return false;
+                    }
+                    const bool known = std::any_of(symbolLibrary.begin(), symbolLibrary.end(),
+                                                   [&](const std::shared_ptr<const SymbolDef>& def) { return def->id == symbolId; });
+                    for (std::shared_ptr<const BrushDef>& entry : brushLibrary) {
+                        if (known && entry->id == brushId) {
+                            auto linked = std::make_shared<BrushDef>(*entry);
+                            linked->sourceSymbol = symbolId;
+                            entry = linked;
+                        }
+                    }
+                }
+                if (!in.ok()) {
+                    return false;
+                }
+            } else if (tag == "BCAT") {
+                std::size_t n = in.count(3);
+                for (std::size_t i = 0; i < n && in.ok(); ++i) {
+                    const std::size_t brushId = std::size_t(in.varint());
+                    const bool favorite = in.u8() != 0;
+                    const std::string category = in.text();
+                    if (!in.ok()) {
+                        return false;
+                    }
+                    for (std::shared_ptr<const BrushDef>& entry : brushLibrary) {
+                        if (entry->id == brushId) {
+                            auto sorted = std::make_shared<BrushDef>(*entry);
+                            sorted->favorite = favorite;
+                            sorted->category = category;
+                            entry = sorted;
                         }
                     }
                 }

@@ -42,6 +42,7 @@ namespace curvy {
             if (nodeType == kTransformNodeType) return "Transform";
             if (nodeType == kTagNodeType) return "Tag";
             if (nodeType == kMovePointsNodeType) return "Move Points";
+            if (nodeType == kDeformAlongPathNodeType) return "Deform Along Path";
             if (nodeType == kSubnetNodeType) return "Group";
             if (nodeType == kFillNodeType) return "Fill";
             if (nodeType == kStrokeNodeType) return "Stroke";
@@ -625,7 +626,7 @@ namespace curvy {
         const jitnodes::Network& net = document_.networkOf(node.scope);
         for (int steps = 0; steps < 1000 && node.valid(); ++steps) {
             const std::string type = net.node(node.id).typeName();
-            if (type != kTransformNodeType && type != kTagNodeType && type != kMovePointsNodeType) {
+            if (type != kTransformNodeType && type != kTagNodeType && type != kMovePointsNodeType && type != kDeformAlongPathNodeType) {
                 break;
             }
             node.id = net.inputOf(node.id, 0);
@@ -1573,6 +1574,30 @@ namespace curvy {
                 setRow(at++, "Picture", node.getString("image"), nullptr);
             } else if (isAppearanceNodeType(type)) {
                 lookRows(node, id, at);
+            } else if (type == kDeformAlongPathNodeType) {
+                auto choice = [&](const char* name, std::vector<std::string> options) {
+                    setChoiceRow(at++, name, node.getString(name), std::move(options), [this, id, name](const std::string& value) { document_.setGraphString(id, name, value); });
+                };
+                auto number = [&](const char* name, double lowest, double highest) {
+                    setRow(at++, name, numberText(node.baseFloat(name)), [this, id, name](const std::string& value) {
+                        double parsed = 0.0;
+                        if (parseNumber(value, parsed)) {
+                            document_.setGraphParam(id, name, float(parsed));
+                        }
+                    });
+                    scrubRow(at - 1, id, name, lowest, highest);
+                };
+                choice("fit", {"stretch", "guided", "repeat"});
+                choice("corner", {"bend", "smooth", "miter", "break"});
+                choice("direction", {"leftToRight", "topToBottom"});
+                number("width", 0.0, 100.0);
+                number("headGuide", 0.0, 1.0);
+                number("tailGuide", 0.0, 1.0);
+                number("cornerRadius", 0.0, 1000.0);
+                number("miterLimit", 1.0, 20.0);
+                number("breakAngle", 5.0, 175.0);
+                number("flipAlong", 0.0, 1.0);
+                number("flipAcross", 0.0, 1.0);
             } else if (type == kTagNodeType || type == kMovePointsNodeType) {
                 auto textRow = [&](const char* caption, const char* name) {
                     setRow(at++, caption, node.getString(name), [this, id, name](const std::string& value) { document_.setGraphString(id, name, value); });

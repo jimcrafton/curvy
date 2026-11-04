@@ -15,6 +15,7 @@ namespace curvy {
     //   a group (exactly)                        Transform, Opacity
     //   text only                                Transform, Colour, Text, Opacity
     //   any other selection                      Transform, Colour, Stroke, Opacity (and Text when it includes text)
+    //   the Paintbrush armed, a selection with a brush, or two objects selected  adds Brushes (with the Paintbrush and nothing selected: Brushes, Colour, Opacity)
     //   a lone star, polygon, rounded rectangle  adds Shape (its points, inner radius, corner radius or arc ends; see liveshape.h)
     //   or arc that is still in its parameter form
     // @reflect ignore=true
@@ -25,12 +26,13 @@ namespace curvy {
         bool opacity = false;
         bool text = false;
         bool shape = false;
+        bool brush = false;   // the Brushes box: the picker and the active brush's settings
         std::string caption;   // shown above the boxes; empty hides it
 
         bool operator==(const DockBoxes& o) const {
-            return transform == o.transform && colour == o.colour && stroke == o.stroke && opacity == o.opacity && text == o.text && shape == o.shape && caption == o.caption;
+            return transform == o.transform && colour == o.colour && stroke == o.stroke && opacity == o.opacity && text == o.text && shape == o.shape && brush == o.brush && caption == o.caption;
         }
-        bool any() const { return transform || colour || stroke || opacity || text || shape; }
+        bool any() const { return transform || colour || stroke || opacity || text || shape || brush; }
     };
 
     // @reflect ignore=true

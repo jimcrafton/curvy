@@ -756,6 +756,11 @@ namespace curvy {
         expect(document.brushes().size() == 7, "New Calligraphic Brush adds one");
 
         canvas->setTool(curvy::SketchTool::Paintbrush);
+        {
+            auto* sidebar = dynamic_cast<newui::ScrollView*>(frame_.rootView().findView("sidebar"));
+            auto* brushes = frame_.rootView().findView("brushesPanel");
+            expect(sidebar != nullptr && brushes != nullptr && sidebar->vBar() != nullptr && sidebar->vBar()->value() > 0.0f, "choosing the Paintbrush scrolls the sidebar to the Brushes panel");
+        }
         mouse(0, view(100, 100));
         mouse(1, view(140, 130));
         mouse(1, view(180, 110));

@@ -1613,7 +1613,7 @@ namespace curvy {
             }
             double h = item.strokeWidth * 0.5;
             if (item.strokeOptions.brush) {
-                h = item.strokeOptions.brush->reach(item.strokeWidth);
+                h = item.strokeOptions.brush->reach(item.strokeWidth, item.strokeOptions.widths);
             } else if (!item.strokeOptions.widths.empty()) {
                 double widest = 0.0;
                 for (const WidthPoint& p : item.strokeOptions.widths) { widest = std::max(widest, std::max(p.left, p.right)); }
@@ -1653,7 +1653,7 @@ namespace curvy {
         for (const AppearanceItem& item : items_) {
             if (item.kind == AppearanceKind::Stroke && item.visible && !item.paint.isNone() && item.strokeWidth > 0.0) {
                 any = true;
-                const double covered = item.strokeOptions.brush ? item.strokeOptions.brush->reach(item.strokeWidth) * 2.0 : item.strokeWidth;
+                const double covered = item.strokeOptions.brush ? item.strokeOptions.brush->reach(item.strokeWidth, item.strokeOptions.widths) * 2.0 : item.strokeWidth;
                 if (strokeHit(outline, covered + tolerance * 2.0, item.strokeOptions, point)) {
                     return true;
                 }
@@ -1685,17 +1685,17 @@ namespace curvy {
             if (brush.kind == BrushKind::Calligraphic) {
                 if (setPaintStyle(ctx, item.paint, frame, false)) {
                     ctx.set_global_alpha(alpha);
-                    ctx.fill_path(brush.nibOutline(path, width));
+                    ctx.fill_path(brush.nibOutline(path, width, item.strokeOptions.widths));
                 }
                 return;
             }
             auto draw = [&](BLContext& target) {
                 target.set_global_alpha(1.0);
                 if (brush.kind == BrushKind::Art) {
-                    paintBrushParts(target, brush.bendAlong(path, width));
+                    paintBrushParts(target, brush.bendAlong(path, width, item.strokeOptions.widths));
                 } else {
                     const std::vector<BrushPart>& parts = brush.parts();
-                    for (const BLMatrix2D& matrix : brush.placements(path, width)) {
+                    for (const BLMatrix2D& matrix : brush.placements(path, width, item.strokeOptions.widths)) {
                         target.save();
                         target.apply_transform(matrix);
                         paintBrushParts(target, parts);
@@ -1706,7 +1706,7 @@ namespace curvy {
             if (alpha >= 1.0) {
                 draw(ctx);
             } else {
-                const double reach = brush.reach(width);
+                const double reach = brush.reach(width, item.strokeOptions.widths);
                 const BLBox& box = frame.world;
                 paintIsolated(ctx, BLBox(box.x0 - reach, box.y0 - reach, box.x1 + reach, box.y1 + reach), alpha, BlendMode::Normal, draw);
             }

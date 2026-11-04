@@ -216,10 +216,21 @@ namespace curvy {
 
     // ---- pencil: a freehand drag, smoothed when released ----
 
+    float CanvasView::currentPressure() const {
+        if (const RootView* root = rootView()) {
+            const PenState& pen = root->penState();
+            if (pen.inContact && pen.hasPressure) {
+                return std::min(1.0f, std::max(0.05f, pen.pressure));
+            }
+        }
+        return 1.0f;
+    }
+
     void CanvasView::pencilMove(const BLPoint& point) {
         double gap = 1.5 / double(zoom_);
         if (pencilPoints_.empty() || std::hypot(point.x - pencilPoints_.back().x, point.y - pencilPoints_.back().y) >= gap) {
             pencilPoints_.push_back(point);
+            pencilPressure_.push_back(currentPressure());
         }
         dragMoved_ = true;
         style().markDirty();
@@ -227,7 +238,9 @@ namespace curvy {
 
     void CanvasView::finishPencil() {
         std::vector<BLPoint> points = std::move(pencilPoints_);
+        std::vector<float> pressure = std::move(pencilPressure_);
         pencilPoints_.clear();
+        pencilPressure_.clear();
         if (points.size() < 3) {
             return;
         }
@@ -256,6 +269,9 @@ namespace curvy {
             object->setStroke(document_->defaultStroke().isNone() ? SketchPaint::solid(SketchColor::gray(0.0f)) : document_->defaultStroke());
             StrokeOptions options = document_->defaultStrokeOptions();
             options.brush = document_->findBrush(document_->activeBrush());
+            if (options.brush) {
+                options.widths = pressureProfile(points, pressure);   // empty for a mouse: the plain weight all along
+            }
             object->setStrokeOptions(options);
             object->setStrokeWidth(options.brush && options.brush->kind != BrushKind::Calligraphic ? 1.0 : std::max(2.0, document_->defaultStrokeWidth()));
             document_->addUndoable(object, "Draw with Paintbrush");
@@ -274,6 +290,35 @@ namespace curvy {
         for (std::size_t i = 1; i < pencilPoints_.size(); ++i) {
             BLPoint p = toView(pencilPoints_[i]);
             path.line_to(p.x, p.y);
+        }
+        if (tool_ == SketchTool::Paintbrush) {
+            // A proxy of the stroke while it is drawn: an outlined band as wide as the brush will paint it (the brush's reach for the
+            // weight it is drawn with), with the path you are drawing running down the middle. The real stroke replaces it on release.
+            if (std::shared_ptr<const BrushDef> brush = document_->findBrush(document_->activeBrush())) {
+                const double weight = brush->kind != BrushKind::Calligraphic ? 1.0 : std::max(2.0, document_->defaultStrokeWidth());
+                const double width = std::max(2.0, brush->reach(weight) * 2.0 * double(zoom_));
+                ctx.set_stroke_join(BL_STROKE_JOIN_ROUND);
+                ctx.set_stroke_caps(BL_STROKE_CAP_ROUND);
+                // The pen presses harder, the band widens: each piece is as wide as the pressure at its two ends (their mean) says. The
+                // dark pass goes down for every piece before the light one, so the pieces merge into one outlined band.
+                auto widthAt = [&](std::size_t i) {
+                    const float pressure = i < pencilPressure_.size() ? pencilPressure_[i] : 1.0f;
+                    return std::max(2.0, width * double(pressure));
+                };
+                for (int pass = 0; pass < 2; ++pass) {
+                    ctx.set_stroke_style(BLRgba32(pass == 0 ? 0xCC404040u : 0xE0F4F4F4u));
+                    for (std::size_t i = 1; i < pencilPoints_.size(); ++i) {
+                        const BLPoint a = toView(pencilPoints_[i - 1]), b = toView(pencilPoints_[i]);
+                        const double w = (widthAt(i - 1) + widthAt(i)) * 0.5;
+                        ctx.set_stroke_width(pass == 0 ? w : std::max(0.0, w - 2.0));
+                        ctx.stroke_line(a.x, a.y, b.x, b.y);
+                    }
+                }
+                ctx.set_stroke_style(BLRgba32(0xFFE02020u));
+                ctx.set_stroke_width(1.0);
+                ctx.stroke_path(path);
+                return;
+            }
         }
         ctx.stroke_path(path);
     }

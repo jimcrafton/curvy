@@ -115,7 +115,7 @@ namespace curvy {
         bool drivenBy(const jitnodes::Network& net, jitnodes::NodeId place, jitnodes::NodeId shape) {
             int guard = 0;
             for (jitnodes::NodeId at = net.inputOf(place, 0); at != jitnodes::invalidNodeId && at != shape && guard < 1000; at = net.inputOf(at, 0), ++guard) {
-                if (net.node(at).typeName() == kMovePointsNodeType || animatedNode(net.node(at))) {
+                if (net.node(at).typeName() == kMovePointsNodeType || net.node(at).typeName() == kDeformAlongPathNodeType || animatedNode(net.node(at))) {
                     return true;
                 }
             }
@@ -2129,6 +2129,55 @@ namespace curvy {
         }
         commitGraphEdit(snapshot, "Move Points");
         return NodeRef(placeRef.scope, mover);
+    }
+
+    NodeRef SketchDocument::addDeformAlongPath(std::size_t artId, std::size_t spineId) {
+        const SketchObject* art = findById(artId);
+        const SketchObject* spine = findById(spineId);
+        const NodeRef artPlace = transformRefOf(artId), spinePlace = transformRefOf(spineId);
+        // Both must be in the graph, in the same scope (a wire cannot leave its network), and not the same object.
+        if (art == nullptr || spine == nullptr || artId == spineId || !artPlace.valid() || !spinePlace.valid() || artPlace.scope != spinePlace.scope ||
+            art->isText() || art->isImage()) {
+            return kNoNode;
+        }
+        const jitnodes::GraphSnapshot snapshot = snapshotGraph();
+        jitnodes::Network& net = networkOf(artPlace.scope);
+        const jitnodes::NodeId deform = net.addNode(kDeformAlongPathNodeType, net.uniqueName("deformAlongPath"));
+        try {
+            const jitnodes::NodeId feeder = net.inputOf(artPlace.id, 0);
+            net.connect(feeder, deform, 0);
+            net.connect(spinePlace.id, deform, 1);
+            net.connect(deform, artPlace.id, 0);
+            // The artwork's own placement comes after the deformation, so the spine is brought into the space before it: where the artwork
+            // sits now, the result lands on the spine.
+            const BLMatrix2D into = inverseOf(worldTransformOf(net, artPlace.id));
+            for (int i = 0; i < 6; ++i) {
+                net.node(deform).setFloat(std::string("frame") + std::to_string(i), float(into.m[i]));
+            }
+            const jitnodes::GeometryHandle bent = cook(NodeRef(artPlace.scope, deform));
+            if (!bent || bent->primitiveCount() == 0) {
+                throw std::runtime_error("nothing to bend");
+            }
+        } catch (const std::exception&) {
+            restoreGraph(snapshot);   // a wire that would loop, or nothing to bend: leave the graph as it was
+            return kNoNode;
+        }
+        commitGraphEdit(snapshot, "Deform Along Path");
+        return NodeRef(artPlace.scope, deform);
+    }
+
+    bool SketchDocument::deformSelectionAlongPath() {
+        if (selection_.size() != 2) {
+            return false;
+        }
+        const SketchObject* first = findById(selection_[0]);
+        const SketchObject* second = findById(selection_[1]);
+        if (first == nullptr || second == nullptr) {
+            return false;
+        }
+        const bool firstSpine = !first->isClosed() && second->isClosed();   // an open path is the spine; of two alike the later pick is
+        const std::size_t spine = firstSpine ? first->id() : second->id(), art = firstSpine ? second->id() : first->id();
+        return addDeformAlongPath(art, spine).valid();
     }
 
     int SketchDocument::pointIdNear(std::size_t objectId, const BLPoint& world, double reach) const {

@@ -28,7 +28,10 @@ namespace curvy {
         DockBoxes boxes;
         const std::vector<std::size_t>& selection = document.selection();
         if (selection.empty()) {
-            if (isDrawingTool(tool)) {
+            if (tool == SketchTool::Paintbrush) {
+                boxes.brush = boxes.colour = boxes.opacity = true;   // pick a brush, then paint
+                boxes.caption = "New brush strokes";
+            } else if (isDrawingTool(tool)) {
                 boxes.colour = boxes.stroke = boxes.opacity = true;
                 boxes.caption = "New shapes";
             } else {
@@ -53,6 +56,7 @@ namespace curvy {
         boxes.transform = boxes.colour = boxes.opacity = true;
         boxes.stroke = !allText;
         boxes.text = anyText;
+        boxes.brush = tool == SketchTool::Paintbrush || document.selectedBrush() != nullptr || selection.size() == 2;   // two: bend one along the other
         if (selection.size() == 1) {
             const SketchObject* only = document.findById(selection.front());
             LiveShape live;
