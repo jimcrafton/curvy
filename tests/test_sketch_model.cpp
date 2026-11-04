@@ -5132,6 +5132,91 @@ TEST(SketchBrushes, AnArtBrushStretchesItsArtworkAlongThePath) {
     EXPECT_NEAR(brushedLine(brush, 2.0)->bounds().y1, 56.0, 1e-6);
 }
 
+TEST(SketchBrushes, AGuidedBrushKeepsItsHeadRigid) {
+    // A 100 x 6 block; the last fifth (x 80..100) is a rigid tail, so at weight 1 it stays 20 long however long the path is.
+    std::shared_ptr<BrushDef> brush = rectangleBrush(BrushKind::Art, 100, 6);
+    brush->fit = BrushFit::Guided;
+    brush->headGuide = 0.0;
+    brush->tailGuide = 0.8;
+    BLPath line;
+    line.move_to(0, 0);
+    line.line_to(300, 0);
+    std::vector<BrushPart> parts = brush->bendAlong(line, 1.0);
+    ASSERT_EQ(parts.size(), 1u);
+    BLBox box = boxOfPath(parts[0].path);
+    EXPECT_NEAR(box.x0, 0.0, 1e-6);
+    EXPECT_NEAR(box.x1, 300.0, 1e-6);
+    // The tail is the rigid last 20: the path point at 280 is where the stretch ends, so the geometry there is a vertex of the mapping.
+    brush->tailGuide = 1.0;   // no tail at all: the same as stretching
+    EXPECT_NEAR(boxOfPath(brush->bendAlong(line, 1.0)[0].path).x1, 300.0, 1e-6);
+}
+
+TEST(SketchBrushes, AGuidedBrushShrinksOnAShortPath) {
+    std::shared_ptr<BrushDef> brush = rectangleBrush(BrushKind::Art, 100, 6);
+    brush->fit = BrushFit::Guided;
+    brush->headGuide = 0.5;
+    brush->tailGuide = 0.5;
+    BLPath line;
+    line.move_to(0, 0);
+    line.line_to(40, 0);   // head + tail want 100 at weight 1
+    BLBox box = boxOfPath(brush->bendAlong(line, 1.0)[0].path);
+    EXPECT_NEAR(box.x0, 0.0, 1e-6);
+    EXPECT_NEAR(box.x1, 40.0, 1e-6);
+}
+
+TEST(SketchBrushes, ARepeatBrushMakesWholeCopies) {
+    std::shared_ptr<BrushDef> brush = rectangleBrush(BrushKind::Art, 100, 6);
+    brush->fit = BrushFit::Repeat;
+    BLPath line;
+    line.move_to(0, 0);
+    line.line_to(310, 0);
+    EXPECT_EQ(brush->bendAlong(line, 1.0).size(), 3u);   // 3.1 copies round to 3
+    line = BLPath();
+    line.move_to(0, 0);
+    line.line_to(40, 0);
+    EXPECT_EQ(brush->bendAlong(line, 1.0).size(), 1u);   // never fewer than one
+}
+
+TEST(SketchBrushes, SmoothCornersRoundTheBend) {
+    std::shared_ptr<BrushDef> brush = rectangleBrush(BrushKind::Art, 100, 6);
+    BLPath corner;
+    corner.move_to(0, 0);
+    corner.line_to(100, 0);
+    corner.line_to(100, 100);
+    // How far along the first leg the art's upper edge (y = -3) runs: to the corner when bent raw, only to where the rounding starts when smooth.
+    auto upperEdgeEnd = [&](BrushCorner policy) {
+        brush->corner = policy;
+        BLPath bent = brush->bendAlong(corner, 1.0)[0].path;
+        double reachX = 0.0;
+        for (std::size_t i = 0; i < bent.size(); ++i) {
+            const BLPoint& p = bent.vertex_data()[i];
+            if (p.y < -2.9) {
+                reachX = std::max(reachX, p.x);
+            }
+        }
+        return reachX;
+    };
+    const double raw = upperEdgeEnd(BrushCorner::Bend), smooth = upperEdgeEnd(BrushCorner::Smooth);
+    EXPECT_GT(raw, 98.0);            // runs right up to the corner
+    EXPECT_LT(smooth, raw - 2.0);    // the rounding (radius = the art's height, 6) turns it away sooner
+}
+
+TEST(SketchBrushes, FitSettingsSurviveParams) {
+    BrushDef def;
+    def.fit = BrushFit::Repeat;
+    def.headGuide = 0.3;
+    def.tailGuide = 0.6;
+    def.corner = BrushCorner::Bend;
+    def.cornerRadius = 50.0;
+    BrushDef copy;
+    copy.setParams(def.params());
+    EXPECT_TRUE(copy.fit == BrushFit::Repeat);
+    EXPECT_DOUBLE_EQ(copy.headGuide, 0.3);
+    EXPECT_DOUBLE_EQ(copy.tailGuide, 0.6);
+    EXPECT_TRUE(copy.corner == BrushCorner::Bend);
+    EXPECT_DOUBLE_EQ(copy.cornerRadius, 50.0);
+}
+
 TEST(SketchBrushes, AnArtBrushBendsWithACurve) {
     std::shared_ptr<BrushDef> brush = rectangleBrush(BrushKind::Art, 100, 6);
     std::unique_ptr<SketchObject> arc(SketchObject::makeLine(10, 90, 90, 90));

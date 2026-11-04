@@ -46,6 +46,48 @@ namespace curvy {
             hull.resize(k > 1 ? k - 1 : k);
             return hull;
         }
+
+        // Corners of the measured path sharper than this are rounded by the Smooth policy (the turns between the pieces of a flattened
+        // curve are far smaller).
+        constexpr double kCornerTurn = 15.0 * kPi / 180.0;
+
+        MeasuredPath measuredFrom(std::vector<BLPoint> points) {
+            MeasuredPath m;
+            m.points = std::move(points);
+            m.at.assign(m.points.size(), 0.0);
+            for (std::size_t i = 1; i < m.points.size(); ++i) {
+                m.at[i] = m.at[i - 1] + std::hypot(m.points[i].x - m.points[i - 1].x, m.points[i].y - m.points[i - 1].y);
+            }
+            m.total = m.at.empty() ? 0.0 : m.at.back();
+            return m;
+        }
+
+        // The path with each sharp corner replaced by a quadratic curve that starts and ends `radius` (at most half a segment) away from it.
+        MeasuredPath roundCorners(const MeasuredPath& m, double radius) {
+            if (!(radius > 0.0) || m.points.size() < 3) {
+                return m;
+            }
+            std::vector<BLPoint> out{m.points.front()};
+            for (std::size_t i = 1; i + 1 < m.points.size(); ++i) {
+                const BLPoint &a = m.points[i - 1], &b = m.points[i], &c = m.points[i + 1];
+                const double l1 = std::hypot(b.x - a.x, b.y - a.y), l2 = std::hypot(c.x - b.x, c.y - b.y);
+                const BLPoint u1((b.x - a.x) / l1, (b.y - a.y) / l1), u2((c.x - b.x) / l2, (c.y - b.y) / l2);
+                const double turn = std::atan2(u1.x * u2.y - u1.y * u2.x, u1.x * u2.x + u1.y * u2.y);
+                if (std::fabs(turn) < kCornerTurn) {
+                    out.push_back(b);
+                    continue;
+                }
+                const double d = std::min({radius, l1 * 0.5, l2 * 0.5});
+                const BLPoint from(b.x - u1.x * d, b.y - u1.y * d), to(b.x + u2.x * d, b.y + u2.y * d);
+                const int steps = 8;
+                for (int k = 0; k <= steps; ++k) {
+                    const double t = double(k) / steps, p = (1 - t) * (1 - t), q = 2 * (1 - t) * t, r = t * t;
+                    out.push_back(BLPoint(p * from.x + q * b.x + r * to.x, p * from.y + q * b.y + r * to.y));
+                }
+            }
+            out.push_back(m.points.back());
+            return measuredFrom(std::move(out));
+        }
     }
 
     const char* brushKindName(BrushKind kind) {
@@ -54,7 +96,8 @@ namespace curvy {
     }
 
     std::vector<double> BrushDef::params() const {
-        return {angle, roundness, spacing, scatter, sizeVariation, rotation, followPath ? 1.0 : 0.0};
+        return {angle, roundness, spacing, scatter, sizeVariation, rotation, followPath ? 1.0 : 0.0,
+                double(fit), headGuide, tailGuide, double(corner), cornerRadius};
     }
 
     void BrushDef::setParams(const std::vector<double>& values) {
@@ -72,6 +115,18 @@ namespace curvy {
         if (values.size() > 6) {
             followPath = values[6] != 0.0;
         }
+        if (values.size() > 7 && std::isfinite(values[7])) {
+            fit = values[7] >= 2.0 ? BrushFit::Repeat : values[7] >= 1.0 ? BrushFit::Guided : BrushFit::Stretch;
+        }
+        take(8, headGuide, 0.0, 1.0);
+        take(9, tailGuide, 0.0, 1.0);
+        if (tailGuide < headGuide) {
+            std::swap(headGuide, tailGuide);
+        }
+        if (values.size() > 10 && std::isfinite(values[10])) {
+            corner = values[10] >= 1.0 ? BrushCorner::Smooth : BrushCorner::Bend;
+        }
+        take(11, cornerRadius, 0.0, 1000.0);
     }
 
     bool BrushDef::sameLook(const BrushDef& o) const {
@@ -153,47 +208,80 @@ namespace curvy {
             return result;
         }
         const BLBox& box = art->box;
-        const double w = box.x1 - box.x0, cy = (box.y0 + box.y1) * 0.5;
+        const double w = box.x1 - box.x0, h = box.y1 - box.y0, cy = (box.y0 + box.y1) * 0.5;
         if (!(w > 0.0)) {
             return result;
         }
-        for (const MeasuredPath& m : measurePath(path)) {
-            // The artwork x runs along the path, its y across: up is to the left of the direction of travel.
-            auto map = [&](double x, double y) {
-                BLPoint p, t;
-                sampleMeasured(m, (x - box.x0) / w * m.total, p, t);
-                const double across = (cy - y) * strokeWidth;
-                return BLPoint(p.x + t.y * across, p.y - t.x * across);
-            };
-            for (const BrushPart& part : parts()) {
-                BrushPart bent;
-                bent.closed = part.closed;
-                bent.fill = part.fill;
-                bent.stroke = part.stroke;
-                bent.strokeWidth = part.strokeWidth * strokeWidth;
-                for (Polyline& line : flattenPath(part.path)) {
-                    std::vector<BLPoint> pts = line.points;
-                    if (line.closed) {
-                        pts.push_back(pts.front());
-                    }
-                    for (std::size_t i = 0; i < pts.size(); ++i) {
-                        if (i == 0) {
-                            bent.path.move_to(map(pts[0].x, pts[0].y));
-                            continue;
-                        }
-                        // Long edges are cut up so that they bend with the path.
-                        const double length = std::hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
-                        const int pieces = std::min(300, std::max(1, int(std::ceil(length / (w / 150.0)))));
-                        for (int k = 1; k <= pieces; ++k) {
-                            const double u = double(k) / pieces;
-                            bent.path.line_to(map(pts[i - 1].x + (pts[i].x - pts[i - 1].x) * u, pts[i - 1].y + (pts[i].y - pts[i - 1].y) * u));
-                        }
-                    }
-                    if (line.closed) {
-                        bent.path.close();
-                    }
+        for (const MeasuredPath& original : measurePath(path)) {
+            const MeasuredPath m = corner == BrushCorner::Smooth ? roundCorners(original, cornerRadius / 100.0 * h * strokeWidth) : original;
+            // Where along the path (0 .. m.total) a position in the artwork (0 .. 1 of its width) lands, for one copy.
+            std::size_t copies = 1;
+            double headEnd = 0.0, tailStart = 1.0, headLen = 0.0, tailLen = 0.0;   // the guides and the lengths the rigid parts take
+            if (fit == BrushFit::Repeat) {
+                copies = std::size_t(std::min(2000.0, std::max(1.0, std::round(m.total / (w * strokeWidth)))));
+            } else if (fit == BrushFit::Guided) {
+                headEnd = headGuide;
+                tailStart = tailGuide;
+                headLen = headGuide * w * strokeWidth;
+                tailLen = (1.0 - tailGuide) * w * strokeWidth;
+                if (headLen + tailLen > m.total) {   // too short for both: they shrink together
+                    const double shrink = m.total / (headLen + tailLen);
+                    headLen *= shrink;
+                    tailLen *= shrink;
                 }
-                result.push_back(std::move(bent));
+            }
+            const double span = m.total / double(copies);
+            auto along = [&](double u) {
+                if (fit != BrushFit::Guided) {
+                    return u * span;
+                }
+                if (u < headEnd) {
+                    return headEnd > 0.0 ? u / headEnd * headLen : 0.0;
+                }
+                if (u > tailStart) {
+                    return tailStart < 1.0 ? m.total - tailLen + (u - tailStart) / (1.0 - tailStart) * tailLen : m.total;
+                }
+                return tailStart > headEnd ? headLen + (u - headEnd) / (tailStart - headEnd) * (m.total - headLen - tailLen) : headLen;
+            };
+            for (std::size_t copy = 0; copy < copies; ++copy) {
+                // The artwork x runs along the path, its y across: up is to the left of the direction of travel.
+                auto map = [&](double x, double y) {
+                    BLPoint p, t;
+                    sampleMeasured(m, double(copy) * span + along((x - box.x0) / w), p, t);
+                    const double across = (cy - y) * strokeWidth;
+                    return BLPoint(p.x + t.y * across, p.y - t.x * across);
+                };
+                for (const BrushPart& part : parts()) {
+                    BrushPart bent;
+                    bent.closed = part.closed;
+                    bent.fill = part.fill;
+                    bent.stroke = part.stroke;
+                    bent.strokeWidth = part.strokeWidth * strokeWidth;
+                    for (Polyline& line : flattenPath(part.path)) {
+                        std::vector<BLPoint> pts = line.points;
+                        if (line.closed) {
+                            pts.push_back(pts.front());
+                        }
+                        for (std::size_t i = 0; i < pts.size(); ++i) {
+                            if (i == 0) {
+                                bent.path.move_to(map(pts[0].x, pts[0].y));
+                                continue;
+                            }
+                            // Long edges are cut up so that they bend with the path.
+                            const double length = std::hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+                            const double piece = w / 150.0;
+                            const int pieces = std::min(300, std::max(1, int(std::ceil(length / piece))));
+                            for (int k = 1; k <= pieces; ++k) {
+                                const double u = double(k) / pieces;
+                                bent.path.line_to(map(pts[i - 1].x + (pts[i].x - pts[i - 1].x) * u, pts[i - 1].y + (pts[i].y - pts[i - 1].y) * u));
+                            }
+                        }
+                        if (line.closed) {
+                            bent.path.close();
+                        }
+                    }
+                    result.push_back(std::move(bent));
+                }
             }
         }
         return result;

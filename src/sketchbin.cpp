@@ -741,8 +741,9 @@ namespace curvy {
             brushChunk.varint(def->id);
             brushChunk.text(def->name);
             brushChunk.u8(unsigned(def->kind));
-            for (double value : def->params()) {
-                brushChunk.f64(value);
+            const std::vector<double> numbers = def->params();
+            for (std::size_t k = 0; k < BrushDef::kBaseParams; ++k) {
+                brushChunk.f64(numbers[k]);
             }
             const bool art = def->hasArt() && def->art && def->art->content;
             brushChunk.f64(art ? def->art->box.x0 : 0.0);
@@ -750,6 +751,17 @@ namespace curvy {
             brushChunk.f64(art ? def->art->box.x1 : 1.0);
             brushChunk.f64(art ? def->art->box.y1 : 1.0);
             brushChunk.text(art ? binaryFromDocument(*def->art->content, false) : std::string());
+        }
+
+        // How art brushes are fitted: later than the first version of BRSH, so a chunk of its own (older readers skip it).
+        ByteWriter fitChunk;
+        fitChunk.varint(document.brushes().size());
+        for (const std::shared_ptr<const BrushDef>& def : document.brushes()) {
+            const std::vector<double> numbers = def->params();
+            fitChunk.varint(def->id);
+            for (std::size_t k = BrushDef::kBaseParams; k < numbers.size(); ++k) {
+                fitChunk.f64(numbers[k]);
+            }
         }
 
         ByteWriter imageChunk;
@@ -818,6 +830,7 @@ namespace curvy {
         chunk(body, "SYMB", symbolChunk.data());
         chunk(body, "PATN", patternChunk.data());
         chunk(body, "BRSH", brushChunk.data());
+        chunk(body, "BFIT", fitChunk.data());
         chunk(body, "IMGS", imageChunk.data());
         chunk(body, "ABRD", boards.data());
         chunk(body, "GSTY", styles.data());
@@ -1071,6 +1084,31 @@ namespace curvy {
                     }
                     if (def->id != 0) {
                         brushLibrary.push_back(def);
+                    }
+                }
+                if (!in.ok()) {
+                    return false;
+                }
+            } else if (tag == "BFIT") {
+                std::size_t n = in.count(8);
+                for (std::size_t i = 0; i < n && in.ok(); ++i) {
+                    const std::size_t id = std::size_t(in.varint());
+                    std::vector<double> extras;
+                    for (int k = 0; k < 5; ++k) {
+                        extras.push_back(in.f64());
+                    }
+                    if (!in.ok()) {
+                        return false;
+                    }
+                    for (std::shared_ptr<const BrushDef>& entry : brushLibrary) {
+                        if (entry->id == id) {
+                            auto edited = std::make_shared<BrushDef>(*entry);
+                            std::vector<double> all = edited->params();
+                            all.resize(BrushDef::kBaseParams);
+                            all.insert(all.end(), extras.begin(), extras.end());
+                            edited->setParams(all);
+                            entry = edited;
+                        }
                     }
                 }
                 if (!in.ok()) {

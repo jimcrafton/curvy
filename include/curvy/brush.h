@@ -14,6 +14,14 @@ namespace curvy {
     enum class BrushKind { Calligraphic, Scatter, Art };
     const char* brushKindName(BrushKind kind);
 
+    // How the artwork of an art brush is fitted to the path. Stretch: the whole artwork is stretched over the path. Guided: two guides
+    // split it into a rigid head, a stretching middle and a rigid tail (an arrowhead stays an arrowhead). Repeat: whole copies, each
+    // stretched a little so that they fill the path exactly.
+    enum class BrushFit { Stretch, Guided, Repeat };
+    // What happens at a sharp corner of the path. Bend: the artwork is bent as is (it tears on the outside of the corner and overlaps on
+    // the inside). Smooth: the corner is rounded first.
+    enum class BrushCorner { Bend, Smooth };
+
     // One piece of the artwork of an art or scatter brush: an outline with the first fill and stroke of the object it came from.
     // @reflect ignore=true
     struct BrushPart {
@@ -43,12 +51,20 @@ namespace curvy {
         double sizeVariation = 0.0;
         double rotation = 0.0;
         bool followPath = true;
+        // Art: how the artwork is fitted, where the head ends and the tail starts (as fractions 0..1 of the artwork width, for Guided),
+        // and how corners are treated; the radius of a smoothed corner is a percentage of the artwork height.
+        BrushFit fit = BrushFit::Stretch;
+        double headGuide = 0.2;
+        double tailGuide = 0.8;
+        BrushCorner corner = BrushCorner::Smooth;
+        double cornerRadius = 100.0;
         // Artwork of the two artwork kinds; its box is the unit that is stretched or repeated.
         std::shared_ptr<const SymbolDef> art;
 
         bool hasArt() const { return kind != BrushKind::Calligraphic; }
-        // The numbers above in a fixed order (angle, roundness, spacing, scatter, sizeVariation, rotation, followPath), for saving; the
-        // setter keeps what is missing and brings every value into its range.
+        // The numbers above in a fixed order (angle, roundness, spacing, scatter, sizeVariation, rotation, followPath, then fit, headGuide,
+        // tailGuide, corner, cornerRadius), for saving; the setter keeps what is missing and brings every value into its range.
+        static constexpr std::size_t kBaseParams = 7;
         std::vector<double> params() const;
         void setParams(const std::vector<double>& values);
         bool sameLook(const BrushDef& other) const;

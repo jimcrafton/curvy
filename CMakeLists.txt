@@ -10,6 +10,20 @@ enable_testing()
 
 option(CURVY_GUI_AUTOMATION "Build curvy with newui's automation server" ON)
 
+# Fetch the submodules on first configure (a fresh clone or worktree has them empty).
+find_package(Git QUIET)
+if(NOT EXISTS "${CMAKE_SOURCE_DIR}/3rdparty/newui/CMakeLists.txt" OR NOT EXISTS "${CMAKE_SOURCE_DIR}/3rdparty/jitnodes/CMakeLists.txt")
+    if(NOT GIT_FOUND)
+        message(FATAL_ERROR "3rdparty submodules are missing and git was not found: run 'git submodule update --init --recursive'")
+    endif()
+    message(STATUS "Fetching submodules (git submodule update --init --recursive)")
+    execute_process(COMMAND "${GIT_EXECUTABLE}" submodule update --init --recursive
+                    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" RESULT_VARIABLE CURVY_SUBMODULE_RESULT)
+    if(NOT CURVY_SUBMODULE_RESULT EQUAL 0)
+        message(FATAL_ERROR "git submodule update failed (${CURVY_SUBMODULE_RESULT})")
+    endif()
+endif()
+
 # newui is a full application framework; only the libraries curvy links are built from it.
 # It also provides the one asmjit (embedded in Blend2D) and the json5 header that jitnodes uses.
 add_subdirectory(3rdparty/newui EXCLUDE_FROM_ALL)
