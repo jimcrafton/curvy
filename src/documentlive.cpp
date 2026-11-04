@@ -5,8 +5,6 @@
 #include "curvy/shapenode.h"
 
 #include <algorithm>
-#include <chrono>
-#include <cstdio>
 #include <cmath>
 #include <memory>
 #include <unordered_map>
@@ -256,20 +254,45 @@ namespace curvy {
     }
 
     bool SketchDocument::drivenPlace(const NodeRef& place) const {
-        if (drivenDirty_) {
-            drivenPlaces_.clear();
-            for (std::uint32_t scope = 0; scope < scopeCount(); ++scope) {
-                const jitnodes::Network* net = findNetwork(scope);
-                if (net == nullptr) {
-                    continue;
+        // What makes a place driven is in the graph, so it is worked out again only when some network's wiring or a node in it changed.
+        // It is asked for once per object, and writing the objects' nodes touches them, so the check is made when the graph changed (graphChanged
+        // and the like set drivenDirty_) and only for what was touched since the last time.
+        const bool refresh = drivenDirty_;
+        drivenDirty_ = false;
+        for (std::uint32_t scope = 0; refresh && scope < scopeCount(); ++scope) {
+            const jitnodes::Network* net = findNetwork(scope);
+            if (net == nullptr) {
+                continue;
+            }
+            DrivenMark& mark = drivenMarks_[scope];
+            if (mark.net == net && mark.touched == net->touchRevision()) {
+                continue;
+            }
+            // Only a transform node downstream of something touched can have changed (the test looks at its input chain and its parents).
+            std::vector<jitnodes::NodeId> touched;
+            std::vector<jitnodes::NodeId> candidates;
+            if (mark.net == net && net->touchedSince(mark.touched, touched)) {
+                for (jitnodes::NodeId id : touched) {
+                    drivenPlaces_.erase(NodeRef(scope, id));   // gone, or about to be looked at again
                 }
-                for (jitnodes::NodeId id : net->nodeIds()) {
-                    if (net->node(id).typeName() == kTransformNodeType && drivenBy(*net, id, shapeBehind(*net, net->inputOf(id, 0)))) {
-                        drivenPlaces_.insert(NodeRef(scope, id));
-                    }
+                for (jitnodes::NodeId id : net->dependentsOf(touched)) {
+                    candidates.push_back(id);
+                }
+            } else {
+                for (auto it = drivenPlaces_.begin(); it != drivenPlaces_.end();) {
+                    it = it->scope == scope ? drivenPlaces_.erase(it) : std::next(it);
+                }
+                candidates = net->nodeIds();
+            }
+            for (jitnodes::NodeId id : candidates) {
+                if (net->node(id).typeName() == kTransformNodeType && drivenBy(*net, id, shapeBehind(*net, net->inputOf(id, 0)))) {
+                    drivenPlaces_.insert(NodeRef(scope, id));
+                } else {
+                    drivenPlaces_.erase(NodeRef(scope, id));
                 }
             }
-            drivenDirty_ = false;
+            mark.net = net;
+            mark.touched = net->touchRevision();
         }
         return drivenPlaces_.count(place) != 0;
     }
@@ -294,7 +317,6 @@ namespace curvy {
 
     void SketchDocument::graphChanged() {
         drivenDirty_ = true;
-        placedCache_.clear();
         outlineCache_.clear();
         pullPathNodes();
         refreshLiveShapes();
@@ -1453,6 +1475,7 @@ namespace curvy {
             SketchObject* object;
             jitnodes::NodeId node;
             bool known;
+            bool settled = false;   // untouched since the last sync, with its placement
         };
         std::vector<Bound> bound;
         std::unordered_set<jitnodes::NodeId> created;
@@ -1470,20 +1493,57 @@ namespace curvy {
             }
         }
         if (!steady) {
-        const std::vector<jitnodes::NodeId> ids = net.nodeIds();
-        const std::unordered_set<jitnodes::NodeId> existing(ids.begin(), ids.end());
+        // Since the last sync of this scope, which nodes were touched: an object bound then to a node that, with its placement node, has not been
+        // touched since needs none of the checks below.
+        std::unordered_set<jitnodes::NodeId> touchedNow;
+        std::unordered_map<SketchObject*, jitnodes::NodeId> prevNodeOf;
+        bool incremental = false;
+        if (before != pathSync_.end() && before->second.net == netPtr && !placedCache.empty()) {
+            std::vector<jitnodes::NodeId> touchedIds;
+            if (net.touchedSince(before->second.touched, touchedIds)) {
+                incremental = true;
+                touchedNow.insert(touchedIds.begin(), touchedIds.end());
+                prevNodeOf.reserve(before->second.bound.size());
+                for (const auto& [object, node] : before->second.bound) {
+                    prevNodeOf.emplace(object, node);
+                }
+            }
+        }
+        const auto settledNode = [&](SketchObject* object) {
+            if (!incremental) {
+                return jitnodes::invalidNodeId;
+            }
+            const auto prev = prevNodeOf.find(object);
+            if (prev == prevNodeOf.end() || prev->second != object->graphNode() || touchedNow.count(prev->second) != 0) {
+                return jitnodes::invalidNodeId;
+            }
+            const auto place = placedCache.find(prev->second);
+            return place != placedCache.end() && touchedNow.count(place->second) == 0 ? prev->second : jitnodes::invalidNodeId;
+        };
         std::unordered_set<jitnodes::NodeId> used;
         std::unordered_set<jitnodes::NodeId> madeNow;   // shape nodes created in this call: nothing is wired to them yet
-        for (SketchObject* object : objects) {
+        std::vector<jitnodes::NodeId> settled(objects.size(), jitnodes::invalidNodeId);
+        for (std::size_t i = 0; i < objects.size(); ++i) {
+            settled[i] = settledNode(objects[i]);
+            if (settled[i] != jitnodes::invalidNodeId) {
+                used.insert(settled[i]);
+            }
+        }
+        for (std::size_t index = 0; index < objects.size(); ++index) {
+            SketchObject* object = objects[index];
+            if (settled[index] != jitnodes::invalidNodeId) {
+                bound.push_back({object, settled[index], true, true});
+                continue;
+            }
             const char* type = shapeNodeType(*object);
             jitnodes::NodeId node = object->graphNode();   // `type` may become kShapeNodeType below for a parametric object
-            const bool known = node != jitnodes::invalidNodeId && existing.count(node) != 0;
+            const bool known = node != jitnodes::invalidNodeId && net.hasNode(node);
             if (known && !isShapeNodeType(net.node(node).typeName())) {
                 continue;   // a live shape: its outline comes from its own node
             }
             if (!known || used.count(node) != 0 || !nodeTypeFits(net.node(node).typeName(), *object)) {
                 // The id an object had before it was deleted is free again when undo brings it back, so references to it survive.
-                const bool reuse = node != jitnodes::invalidNodeId && used.count(node) == 0 && existing.count(node) == 0;
+                const bool reuse = node != jitnodes::invalidNodeId && used.count(node) == 0 && !net.hasNode(node);
                 LiveShape live;
                 if (parametric_.count(object->id()) != 0 && recogniseBeforePlacement(*object, object->geometry(), live)) {
                     type = kShapeNodeType;
@@ -1499,16 +1559,40 @@ namespace curvy {
             used.insert(node);
             bound.push_back({object, node, known});
         }
-        std::unordered_set<jitnodes::NodeId> feeding;
-        for (const Bound& entry : bound) {
-            for (jitnodes::NodeId up : upstreamShapes(net, entry.node)) {
-                feeding.insert(up);
+        // Shape nodes no object uses any more: the ones its objects left behind or that were touched (added, restored) since the last sync;
+        // without that history, all of them.
+        std::vector<jitnodes::NodeId> orphans;
+        if (incremental) {
+            for (const auto& [object, node] : before->second.bound) {
+                if (used.count(node) == 0 && net.hasNode(node)) {
+                    orphans.push_back(node);
+                }
             }
+            for (jitnodes::NodeId id : touchedNow) {
+                if (used.count(id) == 0 && net.hasNode(id)) {
+                    orphans.push_back(id);
+                }
+            }
+        } else {
+            orphans = net.nodeIds();
         }
-        for (jitnodes::NodeId id : ids) {
-            if (used.count(id) == 0 && feeding.count(id) == 0 && isShapeNodeType(net.node(id).typeName())) {
-                net.removeNode(id);
-                removedShape = true;
+        if (!orphans.empty()) {
+            std::unordered_set<jitnodes::NodeId> feeding;
+            for (const Bound& entry : bound) {
+                for (jitnodes::NodeId up : upstreamShapes(net, entry.node)) {
+                    feeding.insert(up);
+                }
+            }
+            // Removing a shape node can leave the shape upstream of it with no user either.
+            for (std::size_t at = 0; at < orphans.size(); ++at) {
+                const jitnodes::NodeId id = orphans[at];
+                if (net.hasNode(id) && used.count(id) == 0 && feeding.count(id) == 0 && isShapeNodeType(net.node(id).typeName())) {
+                    for (jitnodes::NodeId up : upstreamShapes(net, id)) {
+                        orphans.push_back(up);
+                    }
+                    net.removeNode(id);
+                    removedShape = true;
+                }
             }
         }
 
@@ -1516,13 +1600,13 @@ namespace curvy {
         // before there were transform nodes). The wiring is only searched for when a shape has none or one was left without its shape.
         auto cached = [&](jitnodes::NodeId shape) {
             const auto it = placedCache.find(shape);
-            return it != placedCache.end() && existing.count(it->second) != 0 && net.node(it->second).typeName() == kTransformNodeType &&
+            return it != placedCache.end() && net.hasNode(it->second) && net.node(it->second).typeName() == kTransformNodeType &&
                 shapeBehind(net, net.inputOf(it->second, 0)) == shape;
         };
         bool rewire = placedCache.empty();
         std::vector<jitnodes::NodeId> bare;   // new shape nodes still without a placement
         for (const Bound& entry : bound) {
-            if (!rewire && !cached(entry.node)) {
+            if (!rewire && !entry.settled && !cached(entry.node)) {
                 if (madeNow.count(entry.node) != 0) {
                     bare.push_back(entry.node);
                     continue;
@@ -1650,6 +1734,7 @@ namespace curvy {
         PathSync& state = pathSync_[scope];
         state.net = netPtr;
         state.topology = net.topologyRevision();
+        state.touched = net.touchRevision();
         state.objects.clear();
         for (SketchObject* object : objects) {
             state.objects.emplace_back(object, object->graphNode());   // binding may have given an object a new node

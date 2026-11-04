@@ -951,6 +951,12 @@ namespace curvy {
         bool drivenPlace(const NodeRef& place) const;
         mutable std::unordered_set<NodeRef> drivenPlaces_;
         mutable bool drivenDirty_ = true;
+        // How far drivenPlaces_ has caught up with each scope's touch log.
+        struct DrivenMark {
+            const jitnodes::Network* net = nullptr;
+            std::uint64_t touched = 0;
+        };
+        mutable std::unordered_map<std::uint32_t, DrivenMark> drivenMarks_;
         // One object's nodes made to match it now: the placement, the paint warp and the shape node's strings, and the curve when `curve`.
         // False (nothing written) for an object with no placement node yet or one that is driven.
         bool writeObjectNodes(SketchObject& object, bool curve);
@@ -1049,6 +1055,7 @@ namespace curvy {
         struct PathSync {
             jitnodes::Network* net = nullptr;
             std::uint64_t topology = 0;
+            std::uint64_t touched = 0;   // the network's touch revision when it was left as it is
             std::vector<std::pair<SketchObject*, jitnodes::NodeId>> objects, bound;
         };
         std::unordered_map<std::uint32_t, PathSync> pathSync_;

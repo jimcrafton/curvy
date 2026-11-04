@@ -9380,7 +9380,7 @@ TEST(ShapeNodeObject, TheShapeLeftUpstreamOfAHandEditKeepsEveryParameterOfTheOri
 
 // Passes but takes about 165 s: every undoable step re-syncs the whole document (docs/sync-performance-review.md). Disabled until that is fixed;
 // it is the acceptance test for the fix. Run it with --gtest_also_run_disabled_tests.
-TEST(ShapeNodeObject, DISABLED_AThousandMixedShapesEditedThenUndoneAndRedoneComeBackExactly) {
+TEST(ShapeNodeObject, AThousandMixedShapesEditedThenUndoneAndRedoneComeBackExactly) {
     exerciseMixedShapes(1000);
 }
 

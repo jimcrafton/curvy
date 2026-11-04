@@ -5,8 +5,6 @@
 #include "curvy/sketchsvg.h"
 
 #include <algorithm>
-#include <chrono>
-#include <cstdio>
 #include <cctype>
 #include <cmath>
 #include <fstream>

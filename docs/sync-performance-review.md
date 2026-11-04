@@ -1,6 +1,10 @@
 # Document sync cost: review and plan
 
-Status 2026-11-03: partly fixed, **165 s -> about 15 s** for the stress test (goal: under 10 s, then drop `DISABLED_`). Every undoable step used to
+Status 2026-11-03 (end): **165 s -> about 9 s**, goal met; the stress test is enabled (`DISABLED_` dropped). Later changes of the day: `drivenPlace`
+updates incrementally from the touch log (refreshed when `graphChanged` sets `drivenDirty_`, not on every call, because `placeObjects` asks per
+object), `graphChanged` no longer clears `placedCache_` (it forced a full rewire per call), and `syncPathScope` skips objects untouched since
+its last run and prunes only candidates. Architecture and the remaining hot spots: `docs/architecture.md`.
+Not done: the scaling test (one edit at 100 versus 1000 objects). Earlier status, 2026-11-03 midday: **165 s -> about 15 s**. Every undoable step used to
 re-sync the whole document, so the cost of one edit grew with the number of objects and a session of n edits was quadratic.
 
 Done 2026-11-03 (all uncommitted; the jitnodes parts are in `3rdparty/jitnodes` and must be carried to `D:\code\jitnodes`):
