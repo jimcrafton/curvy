@@ -1,0 +1,13 @@
+/* Browser preview only: html2newui.py skips <link>, so none of this reaches the generated .newui.
+   It approximates the app theme (include/curvy/theme.h) and lets boxes grow to fit rows that the app shows and hides by mode. */
+html { background: #2A2A2A; }
+body { height: auto !important; min-height: 0; background: #1E1E1E; }
+.box, #transformPanel { height: auto !important; }
+.row { min-height: 24px; height: auto; }
+input[type=text], select { box-sizing: border-box; background: #121212; color: #F0F0F0; border: 1px solid #4A4A4A; border-radius: 3px; padding: 0 4px; font: inherit; }
+input[type=text]:focus, select:focus { outline: 1px solid #FFA94D; }
+canvas[data-newui-type=ToolbarButton] { box-sizing: border-box; background: #2E2E2E; border: 1px solid #4A4A4A; border-radius: 3px; display: inline-block; }
+canvas[data-newui-type=SubView] { box-sizing: border-box; background: #121212; border: 1px solid #4A4A4A; display: inline-block; }
+canvas[data-newui-type=SegmentedControl] { box-sizing: border-box; background: #2E2E2E; border: 1px solid #4A4A4A; border-radius: 3px; display: block; }
+button { box-sizing: border-box; background: #2E2E2E; color: #F0F0F0; border: 1px solid #4A4A4A; border-radius: 3px; font: inherit; }
+input[type=range] { accent-color: #FFA94D; }
