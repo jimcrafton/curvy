@@ -3,6 +3,7 @@
 #include "curvy/appearancenode.h"
 #include "curvy/numberscrubber.h"
 #include "curvy/pathnode.h"
+#include "curvy/shapenode.h"
 #include "curvy/stylepanel.h"
 #include "curvy/theme.h"
 
@@ -36,6 +37,7 @@ namespace curvy {
 
         std::string typeLabel(const std::string& nodeType) {
             if (nodeType == kPathNodeType) return "Path";
+            if (nodeType == kShapeNodeType) return "Shape";
             if (nodeType == kTextNodeType) return "Text";
             if (nodeType == kSymbolNodeType) return "Symbol";
             if (nodeType == kImageNodeType) return "Image";
@@ -341,6 +343,28 @@ namespace curvy {
             }
             return SyncReturn::Handled;
         });
+        bypassButton_ = new Button();
+        bypassButton_->setName("graphBypassButton");
+        bypassButton_->setVisible(false);
+        detail_->addChild(bypassButton_);
+        connections_.add(bypassButton_->onClick, [this](Control&) {
+            if (detailNode_.valid()) {
+                toggleBypass(detailNode_);
+            }
+            returnFocusToCanvas();
+            return SyncReturn::Handled;
+        });
+        freezeButton_ = new Button();
+        freezeButton_->setName("graphFreezeButton");
+        freezeButton_->setVisible(false);
+        detail_->addChild(freezeButton_);
+        connections_.add(freezeButton_->onClick, [this](Control&) {
+            if (detailNode_.valid()) {
+                toggleFreeze(detailNode_);
+            }
+            returnFocusToCanvas();
+            return SyncReturn::Handled;
+        });
         connections_.add(pathButtons_[0]->onClick, [this](Control&) {
             if (detailObject_ != 0) {
                 document_.setSelection({detailObject_});
@@ -397,6 +421,11 @@ namespace curvy {
         }
         if (enterButton_->isVisible()) {
             enterButton_->setBounds(Rect(fieldLeft, y, 64.0f, 22.0f));
+            y += kRowHeight;
+        }
+        if (bypassButton_->isVisible()) {
+            bypassButton_->setBounds(Rect(fieldLeft, y, 80.0f, 22.0f));
+            freezeButton_->setBounds(Rect(fieldLeft + 86.0f, y, 80.0f, 22.0f));
             y += kRowHeight;
         }
         auto section = [&](Label* header, Label* none, std::vector<LinkRow>& links) {
@@ -905,6 +934,10 @@ namespace curvy {
             mix(hashText(key));
         }
         mix(detailNode_.key());
+        if (detailNode_.valid() && document_.hasNode(detailNode_)) {
+            const jitnodes::Node& shown = document_.node(detailNode_);
+            mix(std::size_t(shown.bypassed()) + 2 * std::size_t(shown.frozen()));
+        }
         mix(hashText(selectedKey_));
         return h;
     }
@@ -1255,6 +1288,51 @@ namespace curvy {
         if (enterButton_ != nullptr) {
             enterButton_->setVisible(false);
         }
+        if (bypassButton_ != nullptr) {
+            bypassButton_->setVisible(false);
+            freezeButton_->setVisible(false);
+        }
+    }
+
+    void GraphDock::returnFocusToCanvas() {
+        if (RootView* root = canvas_.rootView()) {
+            if (SubView* target = UIInputManager::instance().resolveClickFocusTarget(&canvas_)) {
+                root->setFocusedSubView(target);
+            }
+        }
+    }
+
+    void GraphDock::toggleBypass(const NodeRef& id) {
+        if (!document_.hasNode(id)) {
+            return;
+        }
+        jitnodes::Node& node = document_.node(id);
+        const bool on = !node.bypassed();
+        const jitnodes::GraphSnapshot before = document_.snapshotGraph();
+        node.setBypassed(on);
+        document_.commitGraphEdit(before, on ? "Bypass node" : "Remove bypass");
+        status_->setText(on ? "Node bypassed" : "Bypass removed");
+    }
+
+    void GraphDock::toggleFreeze(const NodeRef& id) {
+        if (!document_.hasNode(id)) {
+            return;
+        }
+        jitnodes::Network& net = document_.networkOf(id.scope);
+        jitnodes::Node& node = net.node(id.id);
+        const bool on = !node.frozen();
+        if (on && node.bypassed()) {
+            status_->setText("A bypassed node cannot be frozen");
+            return;
+        }
+        const jitnodes::GraphSnapshot before = document_.snapshotGraph();
+        if (on) {
+            net.freezeNode(id.id);
+        } else {
+            node.setFrozenGeometry(nullptr);
+        }
+        document_.commitGraphEdit(before, on ? "Freeze node" : "Unfreeze node");
+        status_->setText(on ? "Node frozen" : "Node unfrozen");
     }
 
     void GraphDock::resetTransform(const NodeRef& id) {
@@ -1573,6 +1651,28 @@ namespace curvy {
                 setRow(at++, "Picture", node.getString("image"), nullptr);
             } else if (isAppearanceNodeType(type)) {
                 lookRows(node, id, at);
+            } else if (type == kShapeNodeType) {
+                const std::string kind = node.getString("kind");
+                setChoiceRow(at++, "kind", kind, {"polygon", "star", "roundRect", "arc"}, [this, id](const std::string& value) { document_.setGraphString(id, "kind", value); });
+                std::vector<const char*> names = {"centerX", "centerY"};
+                if (kind == "polygon") {
+                    names.insert(names.end(), {"points", "outer", "angle"});
+                } else if (kind == "star") {
+                    names.insert(names.end(), {"points", "outer", "innerRatio", "angle"});
+                } else if (kind == "roundRect") {
+                    names.insert(names.end(), {"width", "height", "radius", "angle"});
+                } else {
+                    names.insert(names.end(), {"outer", "start", "sweep"});
+                }
+                for (const char* name : names) {
+                    setRow(at++, name, numberText(shownParam(node, name)), [this, id, name](const std::string& value) {
+                        double number = 0.0;
+                        if (parseNumber(value, number)) {
+                            document_.setGraphParam(id, name, float(number));
+                        }
+                    });
+                    scrubRow(at - 1, id, name, -100000.0, 100000.0);
+                }
             } else if (type == kTagNodeType || type == kMovePointsNodeType) {
                 auto textRow = [&](const char* caption, const char* name) {
                     setRow(at++, caption, node.getString(name), [this, id, name](const std::string& value) { document_.setGraphString(id, name, value); });
@@ -1625,6 +1725,12 @@ namespace curvy {
                 if (type == kSubnetNodeType) {
                     enterButton_->setVisible(true);
                 }
+            }
+            if (!isAppearanceNodeType(type) && type != kSubnetNodeType) {
+                bypassButton_->setText(node.bypassed() ? "Unbypass" : "Bypass");
+                freezeButton_->setText(node.frozen() ? "Unfreeze" : "Freeze");
+                bypassButton_->setVisible(true);
+                freezeButton_->setVisible(true);
             }
             showLinks(id);
         } else {

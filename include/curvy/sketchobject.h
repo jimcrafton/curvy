@@ -469,6 +469,8 @@ namespace curvy {
         // panels and the gradient / width tools - work on those. setAppearance keeps at least one fill and one stroke
         // (a none-painted one is added when missing).
         const std::vector<AppearanceItem>& appearance() const { return items_; }
+        // Changes whenever the stack may have been edited; unique across objects, so a cache keyed by it cannot match another object's stack.
+        std::uint64_t appearanceRevision() const { return appearanceRevision_; }
         void setAppearance(const std::vector<AppearanceItem>& items);
         std::size_t activeIndex(AppearanceKind kind) const;
         std::size_t activeFillIndex() const { return activeFill_; }
@@ -648,6 +650,7 @@ namespace curvy {
         std::size_t storedActive(AppearanceKind kind) const { return kind == AppearanceKind::Fill ? activeFill_ : (kind == AppearanceKind::Stroke ? activeStroke_ : activeEffect_); }
         // The active item of the kind (the first one, added when missing: fills at the bottom, strokes on top).
         AppearanceItem& primary(AppearanceKind kind);
+        static std::uint64_t freshAppearanceRevision();
 
         SketchObjectType type_;
         BLPath path_;
@@ -666,6 +669,7 @@ namespace curvy {
         bool layerLocked_ = false;
         std::vector<AppearanceItem> items_ = {AppearanceItem::makeFill(SketchPaint::solid(SketchColor::gray(1.0f))),
             AppearanceItem::makeStroke(SketchPaint::solid(SketchColor::gray(0.0f)), 1.0)};
+        std::uint64_t appearanceRevision_ = freshAppearanceRevision();
         double opacity_ = 1.0;
         BlendMode blendMode_ = BlendMode::Normal;
         std::vector<std::size_t> groups_;

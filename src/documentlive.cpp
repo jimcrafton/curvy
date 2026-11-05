@@ -104,7 +104,8 @@ namespace curvy {
         // chain cooks, and an edit of its outline cannot be written back to the shape.
         // Also true when any placement or deformation along the way (the parents' too) has an expression or keys, so the object follows the time.
         bool animatedNode(const jitnodes::Node& node) {
-            for (const char* name : {"translateX", "translateY", "rotation", "scaleX", "scaleY", "shear", "pivotX", "pivotY", "every", "offset"}) {
+            for (const char* name : {"translateX", "translateY", "rotation", "scaleX", "scaleY", "shear", "pivotX", "pivotY", "every", "offset",
+                                     "centerX", "centerY", "points", "outer", "innerRatio", "width", "height", "radius", "angle", "start", "sweep"}) {
                 if (node.hasFloat(name) && node.isAnimated(name)) {
                     return true;
                 }
@@ -114,6 +115,13 @@ namespace curvy {
 
         bool drivenBy(const jitnodes::Network& net, jitnodes::NodeId place, jitnodes::NodeId shape) {
             int guard = 0;
+            for (jitnodes::NodeId at = shape; at != jitnodes::invalidNodeId && guard < 1000; ++guard) {
+                const jitnodes::Node& node = net.node(at);
+                if (animatedNode(node)) {
+                    return true;
+                }
+                at = node.inputCount() > 0 ? net.inputOf(at, 0) : jitnodes::invalidNodeId;
+            }
             for (jitnodes::NodeId at = net.inputOf(place, 0); at != jitnodes::invalidNodeId && at != shape && guard < 1000; at = net.inputOf(at, 0), ++guard) {
                 if (net.node(at).typeName() == kMovePointsNodeType || animatedNode(net.node(at))) {
                     return true;
@@ -574,7 +582,7 @@ namespace curvy {
             const jitnodes::NodeId shape = object->graphNode();
             const std::vector<AppearanceItem>& items = object->appearance();
             const auto cached = appearanceChains_.find(object->graphRef());
-            if (cached != appearanceChains_.end() && cached->second.items == items) {
+            if (cached != appearanceChains_.end() && cached->second.revision == object->appearanceRevision()) {
                 continue;
             }
             ScopeViews::View& view = views.of(scope);
@@ -612,7 +620,7 @@ namespace curvy {
                     appearanceSynced_[NodeRef(scope, chain[i])] = want;
                 }
             }
-            appearanceChains_[object->graphRef()] = AppearanceChain{chain, items};
+            appearanceChains_[object->graphRef()] = AppearanceChain{chain, object->appearanceRevision()};
         }
         if (!scan) {
             return;
@@ -1020,7 +1028,30 @@ namespace curvy {
 
     // Each scope's `paint` merge node lists what the scope paints, back to front, so the stacking order is readable in the graph.
     // objects_ stays the carrier: this only follows it, and a subnet takes the place of its first member.
+    std::uint64_t SketchDocument::paintSignature() const {
+        std::uint64_t sig = 1469598103934665603ull;
+        const auto mix = [&sig](std::uint64_t v) { sig = (sig ^ v) * 1099511628211ull; };
+        for (const std::unique_ptr<SketchObject>& object : objects_) {
+            mix(object->id());
+            mix(object->graphScope());
+            mix(object->graphNode());
+        }
+        for (std::uint32_t scope = 0; scope < scopeCount(); ++scope) {
+            const jitnodes::Network* net = findNetwork(scope);
+            mix(net != nullptr ? net->topologyRevision() + 1 : 0);
+        }
+        return sig | 1;
+    }
+
     void SketchDocument::syncPaintOrder() {
+        if (paintSignature_ != 0 && paintSignature_ == paintSignature()) {
+            return;
+        }
+        syncPaintOrderNow();
+        paintSignature_ = paintSignature();
+    }
+
+    void SketchDocument::syncPaintOrderNow() {
         ScopeViews views(*this, scopeTables_);
         std::map<std::uint32_t, std::vector<jitnodes::NodeId>> order;
         std::unordered_set<std::uint32_t> listed;

@@ -113,6 +113,8 @@ never knows what it was, so a file or script can only write the raw points, and 
 
 *Stages (each leaves the tree green; rerun ctest, `--check-workspace`, the three perf tests and the GUI suite)*
 
+**S4 is done in code (2026-11-04, uncommitted):** the graph dock's node box shows a `curvyShape` as a kind choice plus the numbers of that kind (centre, points, outer, inner ratio, size, radius, angle, start, sweep; each scrubbable and keyable), and every geometry node (not fills, strokes, effects or groups) gets Bypass and Freeze buttons that toggle the jitnodes flags as one undo step (`toggleBypass`, `toggleFreeze`; a bypassed node cannot be frozen). GUI test `GraphDock.test_a_shape_node_shows_its_numbers_and_the_freeze_and_bypass_buttons` passes (GUI suite 65/65). Left: the `design.md` Phase 2 text and `ui-design.md`.
+
 **S3 is done (2026-11-02, uncommitted):** the star, polygon, rounded rectangle and arc tools add `curvyShape` objects (`SketchDocument::addParametric`); the canvas
 handles and the Shape box write the node's parameters (`setParametricOutline`) as one graph undo step; Object > Live Shape > Make Parametric; a hand edit puts a
 frozen `curvyPath` after the shape (`freezeParametric`: the path node keeps the object's node id, a copy of the shape goes upstream, and `writeObjectNodes` does it

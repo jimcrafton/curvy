@@ -41,6 +41,12 @@ nothing of sketch types (paths, layers, artboards), so it can be unit tested alo
   attribute), and each live object carries `data-graph-node`. Each document's `Network` has one thread (`Network(1)`), since scratch documents are
   created freely. A live shape's outline is rebuilt from the node on every graph change, so moving or transforming one directly is overwritten;
   placement belongs in a transform node (next slice). Duplicating a live shape yields a plain polygon.
+- **Update (2026-11-04): the slice above is superseded.** Live shapes are no longer a separate object kind. A star, polygon, rounded rectangle or arc is a
+  `curvyShape` node (`shapenode.h/.cpp`; a `kind` parameter and the numbers of the shape, cooked by the same generator as the canvas handles and the Shape
+  box), and the object mirrors the node. A hand edit (point drag, deleting an anchor) puts a frozen `curvyPath` after the shape, which holds the edited
+  curves in its frozen geometry; unfreezing it hands the outline back to the parameters. jitnodes has generic `Node::setBypassed`, `Node::setFrozenGeometry`
+  and `Network::freezeNode` (saved inline in files, snapshots, undo and paste), and the graph dock has Bypass and Freeze buttons. Plan and stages:
+  `docs/graph-migration-roadmap.md` B (DG-10); the UI side is in `docs/ui-design.md` ("Graph tree").
 - **Direction change (2026-10-18, not yet implemented).** The graph is the document: every path becomes a node (a `bezierPath`-style node holding
   its points), and the object list, layers, groups and artboards become views over the graph (layers and groups as subnets). `SketchObject` then
   becomes a cached view of a node rather than the primary store, and the slice above (live shapes beside plain paths) is the stepping stone. The UI

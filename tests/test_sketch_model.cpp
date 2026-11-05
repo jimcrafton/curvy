@@ -9168,6 +9168,34 @@ TEST(ShapeNodeObject, SetParametricOutlineWritesTheNumbersAndOneGraphEditUndoesT
     EXPECT_EQ(doc.network().node(doc.findById(id)->graphNode()).getFloat("points"), 5.0f);
 }
 
+TEST(ShapeNodeObject, AKeyedCornerRadiusMakesTheOutlineFollowTheTimeAndSurvivesUndo) {
+    SketchDocument doc;
+    const BLPath box = roundRectPath(RoundRectShape{BLBox(10, 20, 110, 80), 4.0, 0.0});
+    const std::size_t id = doc.addParametric(SketchObject::make(SketchObjectType::RoundRect, box), "Draw Rounded Rectangle").id();
+    ASSERT_TRUE(doc.isParametric(id));
+    const jitnodes::NodeId node = doc.findById(id)->graphNode();
+    auto radiusNow = [&] {
+        LiveShape live;
+        EXPECT_TRUE(recogniseLiveShape(*doc.findById(id), live));
+        return live.rect.radius;
+    };
+
+    const jitnodes::GraphSnapshot before = doc.snapshotGraph();
+    doc.network().node(node).setKeyframes("radius", {{0.0, 4.0f, jitnodes::KeyInterp::linear}, {1.0, 24.0f, jitnodes::KeyInterp::linear}});
+    doc.commitGraphEdit(before, "Key Radius");
+    doc.setTime(0.0);
+    EXPECT_NEAR(radiusNow(), 4.0, 1e-3);
+    doc.setTime(1.0);
+    EXPECT_NEAR(radiusNow(), 24.0, 1e-3);
+    doc.setTime(0.5);
+    EXPECT_NEAR(radiusNow(), 14.0, 1e-3) << "halfway between the keys";
+
+    doc.undoStack().undo();
+    doc.setTime(1.0);
+    EXPECT_TRUE(doc.network().node(doc.findById(id)->graphNode()).keyframes("radius").empty());
+    EXPECT_NEAR(radiusNow(), 4.0, 1e-3) << "without the keys the radius is the plain number again";
+}
+
 TEST(ShapeNodeObject, AHandEditPutsAFrozenPathNodeAfterTheShapeAndUndoRemovesIt) {
     SketchDocument doc;
     const std::size_t id = doc.addParametric(SketchObject::makePolygon(regularPolygonPoints(BLPoint(50, 50), 20.0, 4, 0.0)), "Draw Polygon").id();
@@ -9378,8 +9406,7 @@ TEST(ShapeNodeObject, TheShapeLeftUpstreamOfAHandEditKeepsEveryParameterOfTheOri
     }
 }
 
-// Passes but takes about 165 s: every undoable step re-syncs the whole document (docs/sync-performance-review.md). Disabled until that is fixed;
-// it is the acceptance test for the fix. Run it with --gtest_also_run_disabled_tests.
+// Takes about 9 s (it was 165 s before the DG-12 sync work, docs/sync-performance-review.md).
 TEST(ShapeNodeObject, AThousandMixedShapesEditedThenUndoneAndRedoneComeBackExactly) {
     exerciseMixedShapes(1000);
 }
@@ -9504,6 +9531,46 @@ void exerciseMixedShapes(int count) {
     for (int i = 0; i < editSteps; ++i) { doc.undoStack().undo(); }
     sameState(state(), drawn);
 }
+
+// Milliseconds for one parametric number edit (edit, commit, undo, redo) in a document of `count` shapes, the best of a few rounds.
+double parametricEditMs(int count, int rounds = 5) {
+    SketchDocument doc;
+    std::vector<std::size_t> ids;
+    for (int i = 0; i < count; ++i) {
+        const double x = 40.0 + 90.0 * (i % 25), y = 40.0 + 90.0 * (i / 25);
+        ids.push_back(doc.addParametric(SketchObject::makePolygon(starPoints(BLPoint(x, y), 30.0, 0.5, 5, 0.0)), "Draw").id());
+    }
+    double best = 1e30;
+    for (int round = 0; round < rounds; ++round) {
+        SketchObject* object = doc.findById(ids[count / 2]);
+        LiveShape live;
+        if (!recogniseLiveShape(*object, live)) { return -1.0; }
+        const auto start = std::chrono::steady_clock::now();
+        const jitnodes::GraphSnapshot before = doc.snapshotGraph();
+        live.regular.points = 5 + (round % 2 == 0 ? 1 : 0);
+        if (!doc.setParametricOutline(*object, liveShapePath(live))) { return -1.0; }
+        doc.commitGraphEdit(before, "Change Points");
+        doc.undoStack().undo();
+        doc.undoStack().redo();
+        best = (std::min)(best, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+    }
+    return best;
+}
+}
+
+// For a sampling profiler: enough edits at 1000 shapes that they, not the setup, dominate the run.
+TEST(ShapeNodeObject, DISABLED_ProfileParametricEditAtAThousandShapes) {
+    ASSERT_GT(parametricEditMs(1000, 3000), 0.0);
+}
+
+// DG-12 acceptance: the edit may cost at most three times as much in ten times the shapes (with a floor of half a millisecond).
+TEST(ShapeNodeObject, OneParametricEditCostsAboutTheSameInTenTimesTheShapes) {
+    const double hundredMs = parametricEditMs(100);
+    const double thousandMs = parametricEditMs(1000);
+    ASSERT_GT(hundredMs, 0.0);
+    ASSERT_GT(thousandMs, 0.0);
+    std::printf("one parametric edit: %.2f ms at 100 shapes, %.2f ms at 1000 (x%.1f)\n", hundredMs, thousandMs, thousandMs / hundredMs);
+    EXPECT_LT(thousandMs, 3.0 * (std::max)(hundredMs, 0.5)) << "an edit should not grow with the size of the document";
 }
 
 TEST(ShapeNodeObject, PlainObjectsWithGraphEditsUndoAllRedoAll) {

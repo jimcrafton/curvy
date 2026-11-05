@@ -213,6 +213,29 @@ class GraphDock(CurvyCase):
         self.app.key("ctrl+z")
         self.app.wait_until(lambda: float(self.param_value(2)) == before, "one undo to bring the width back")
 
+    def test_a_shape_node_shows_its_numbers_and_the_freeze_and_bypass_buttons(self):
+        self.new_a4()
+        self.app.click("toolbarToggle")
+        canvas = self.app.find("canvas")
+        self.app.click("starTool")
+        self.app.drag((canvas.x + 300, canvas.y + 200), (canvas.x + 380, canvas.y + 280))
+        self.app.click("selectTool")
+        self.app.click("graphToggle")
+        self.app.wait_until(lambda: self.app.prop("graphToggle", "checked"), "the toggle to check")
+        tree = self.app.find("graphTree")
+        self.app.click_at((tree.x + 120, tree.y + 1 * 22 + 11))         # the star (layer, star, ...)
+        self.app.wait_until(lambda: self.app.prop("graphDetailKind", "text") == "Shape", "the shape node's box")
+        self.assertEqual("Bypass", self.app.prop("graphBypassButton", "text"))
+        self.assertEqual("Freeze", self.app.prop("graphFreezeButton", "text"))
+        self.app.click("graphFreezeButton")
+        self.app.wait_until(lambda: self.app.prop("graphFreezeButton", "text") == "Unfreeze", "the node to freeze")
+        self.app.click("graphFreezeButton")
+        self.app.wait_until(lambda: self.app.prop("graphFreezeButton", "text") == "Freeze", "the node to unfreeze")
+        self.app.click("graphBypassButton")
+        self.app.wait_until(lambda: self.app.prop("graphBypassButton", "text") == "Unbypass", "the node to bypass")
+        self.app.key("ctrl+z")
+        self.app.wait_until(lambda: self.app.prop("graphBypassButton", "text") == "Bypass", "one undo to remove the bypass")
+
     # The parameter box is painted by one grid; a value is read by opening its editor.
     def param_point(self, row, dx=100):
         grid = self.app.find("graphParams")
