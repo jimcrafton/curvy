@@ -494,6 +494,7 @@ namespace curvy {
             std::size_t group = 0;
             BLPath path;
             int members = 0;
+            bool evenOdd = false;
         };
 
         // A soft mask from an ExtGState, rendered once over the page: one coverage byte per pixel, `scale` pixels per document unit.
@@ -525,7 +526,7 @@ namespace curvy {
         private:
             void addObject(SketchObject* object);
             void flushClips(std::size_t keep);
-            void applyClip(const BLPath& path);
+            void applyClip(const BLPath& path, bool evenOdd);
             void shadingFill(const std::string& name, const PObj& resources);
             void setSoftMask(const PObj& dict);
             SketchObject* masked(SketchObject* object);
@@ -551,6 +552,7 @@ namespace curvy {
             BLMatrix2D base_;
             BLBox pageBox_;
             bool pendingClip_ = false;
+            bool pendingClipEvenOdd_ = false;
             State state_;
             std::vector<State> stack_;
             BLPath path_;
@@ -805,7 +807,8 @@ namespace curvy {
             open_ = false;
             if (pendingClip_) {
                 pendingClip_ = false;
-                if (clipSource.size() > 0) { applyClip(closedSubpaths(clipSource)); }
+                if (clipSource.size() > 0) { applyClip(closedSubpaths(clipSource), pendingClipEvenOdd_); }
+                pendingClipEvenOdd_ = false;
             }
         }
 
@@ -915,6 +918,7 @@ namespace curvy {
                     for (const auto& l : state_.clips) { groups.push_back(l->group); }
                     SketchObject* mask = SketchObject::makePath(level->path);
                     mask->setFill(SketchPaint::solid(SketchColor::gray(0.0f)));
+                    mask->setFillEvenOdd(level->evenOdd);
                     mask->setStroke(SketchPaint::none());
                     mask->setName("Clipping Path");
                     mask->setGroups(groups);
@@ -927,7 +931,7 @@ namespace curvy {
             }
         }
 
-        void Interpreter::applyClip(const BLPath& path) {
+        void Interpreter::applyClip(const BLPath& path, bool evenOdd) {
             BLBox box(0, 0, 0, 0);
             if (path.get_bounding_box(&box) != BL_SUCCESS || !(box.x1 - box.x0 > 1e-6) || !(box.y1 - box.y0 > 1e-6)) { return; }
             // Illustrator wraps a page in a clip to its own bounds; that clip changes nothing.
@@ -944,6 +948,7 @@ namespace curvy {
             auto level = std::make_shared<ClipLevel>();
             level->group = document_.newGroupId();
             level->path = path;
+            level->evenOdd = evenOdd;
             state_.clips.push_back(level);
         }
 
@@ -1140,7 +1145,7 @@ namespace curvy {
             } else if (op == "b") { paint(true, true, true, false);
             } else if (op == "b*") { paint(true, true, true, true);
             } else if (op == "n") { paint(false, false, false);
-            } else if (op == "W" || op == "W*") { pendingClip_ = true;
+            } else if (op == "W" || op == "W*") { pendingClip_ = true; pendingClipEvenOdd_ = op == "W*";
             } else if (op == "sh" && n >= 1) { shadingFill(args[0].s, resources);
             } else if (op == "g" || op == "rg" || op == "k") {
                 state_.fill.space.kind = op == "g" ? Space::Gray : (op == "rg" ? Space::RGB : Space::CMYK);

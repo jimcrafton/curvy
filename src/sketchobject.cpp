@@ -1640,9 +1640,10 @@ namespace curvy {
         if (type_ == SketchObjectType::Symbol || type_ == SketchObjectType::Image) {
             return outline.hit_test(point, BL_FILL_RULE_NON_ZERO) == BL_HIT_TEST_IN;
         }
-        if (isClosed() && outline.hit_test(point, BL_FILL_RULE_NON_ZERO) == BL_HIT_TEST_IN) {
+        if (isClosed()) {
             for (const AppearanceItem& item : items_) {
-                if (item.kind == AppearanceKind::Fill && item.visible && !item.paint.isNone()) {
+                if (item.kind == AppearanceKind::Fill && item.visible && !item.paint.isNone() &&
+                    outline.hit_test(point, item.evenOdd ? BL_FILL_RULE_EVEN_ODD : BL_FILL_RULE_NON_ZERO) == BL_HIT_TEST_IN) {
                     return true;
                 }
             }

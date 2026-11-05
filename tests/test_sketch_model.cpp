@@ -9763,6 +9763,18 @@ TEST(SketchPdfImport, EvenOddFillsKeepTheirRuleThroughSvgAndPdf) {
     EXPECT_EQ(evenOddCount, 2u);
 }
 
+TEST(SketchPdfImport, EvenOddClipsAndHitTestsFollowTheRule) {
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf("", "10 10 80 80 re 30 30 40 40 re W* n 0 0 100 100 re f"), doc));
+    ASSERT_EQ(doc.objectCount(), 2u);
+    EXPECT_TRUE(doc.object(1).fillEvenOdd());
+
+    SketchDocument ring;
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf("", "0 0 100 100 re 25 25 50 50 re f* 200 200 10 10 re f"), ring));
+    EXPECT_FALSE(ring.object(0).hitTest(BLPoint(50, 50), 0.0, nullptr));
+    EXPECT_TRUE(ring.object(0).hitTest(BLPoint(10, 10), 0.0, nullptr));
+}
+
 TEST(SketchPdfImport, ClipsNestAndEndWithTheirSavedState) {
     SketchDocument doc;
     ASSERT_TRUE(documentFromPdf(handWrittenPdf("", "q 10 10 80 80 re W n q 20 20 50 50 re W n 0 0 100 100 re f Q 0 0 5 5 re f Q 0 0 6 6 re f"), doc));
