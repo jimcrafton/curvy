@@ -1,8 +1,10 @@
 #include "curvy/sketchdocument.h"
 
+#include "curvy/graphbrush.h"
 #include "curvy/sketchsvg.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 
 // The brush library (see brush.h): calligraphic brushes, and brushes made of artwork that is stretched or scattered along a stroke.
@@ -229,6 +231,20 @@ namespace curvy {
             presets.push_back(def);
         }
 
+        // One brush per graph brush asset that is loaded ("brush_oil" is "Oil").
+        for (const GraphBrushInfo& info : graphBrushes()) {
+            auto def = std::make_shared<BrushDef>();
+            std::string name = info.type.rfind("brush_", 0) == 0 ? info.type.substr(6) : info.type;
+            if (!name.empty()) {
+                name[0] = char(std::toupper(static_cast<unsigned char>(name[0])));
+            }
+            def->name = name;
+            def->kind = BrushKind::Graph;
+            def->graphType = info.type;
+            def->category = "Graph";
+            presets.push_back(def);
+        }
+
         std::size_t added = 0;
         Library before = brushes_, after = brushes_;
         for (const std::shared_ptr<BrushDef>& preset : presets) {
@@ -279,7 +295,7 @@ namespace curvy {
             object->setStrokeOptions(options);
             if (def && object->stroke().isNone()) {
                 object->setStroke(defaultStroke().isNone() ? SketchPaint::solid(SketchColor::gray(0.0f)) : defaultStroke());
-                object->setStrokeWidth(def->kind == BrushKind::Calligraphic ? std::max(2.0, defaultStrokeWidth()) : 1.0);
+                object->setStrokeWidth(def->startingWeight(defaultStrokeWidth()));
             }
             any = true;
         }

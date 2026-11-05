@@ -11,7 +11,8 @@ namespace curvy {
     // What a brush does to a stroke. Calligraphic: the stroke is swept by a slanted oval nib (width = the stroke weight). Art: artwork
     // is stretched along the path (its x axis runs along it, its height across it). Scatter: copies of the artwork stand along the path.
     // For the two artwork kinds a stroke weight of 1 draws the artwork at its own size; 2 draws it twice as big.
-    enum class BrushKind { Calligraphic, Scatter, Art };
+    // Graph: a jitnodes asset turns the path into dots or polygons (graphbrush.h); the weight is the stroke's width, as for a nib.
+    enum class BrushKind { Calligraphic, Scatter, Art, Graph };
     const char* brushKindName(BrushKind kind);
 
     // How the artwork of an art brush is fitted to the path. Stretch: the whole artwork is stretched over the path. Guided: two guides
@@ -80,6 +81,8 @@ namespace curvy {
         // changes how the brush draws, so neither is part of params() or sameLook().
         std::string category;
         bool favorite = false;
+        // Graph: the node type of the asset that paints it (see graphbrush.h).
+        std::string graphType;
         std::string categoryName() const { return category.empty() ? brushKindName(kind) : category; }
         // Artwork of the two artwork kinds; its box is the unit that is stretched or repeated.
         std::shared_ptr<const SymbolDef> art;
@@ -90,7 +93,12 @@ namespace curvy {
             parts_.clear();
             partsBuilt_ = false;
         }
-        bool hasArt() const { return kind != BrushKind::Calligraphic; }
+        bool hasArt() const { return kind == BrushKind::Scatter || kind == BrushKind::Art; }
+        // The weight a new stroke gets: artwork is drawn at its own size (1); a nib or a graph brush needs a real width.
+        double startingWeight(double documentDefault) const {
+            const double least = kind == BrushKind::Calligraphic ? 2.0 : 16.0;
+            return kind == BrushKind::Scatter || kind == BrushKind::Art ? 1.0 : (documentDefault > least ? documentDefault : least);
+        }
         // The numbers above in a fixed order (angle, roundness, spacing, scatter, sizeVariation, rotation, followPath, then fit, headGuide,
         // tailGuide, corner, cornerRadius, miterLimit, breakAngle, direction, flipAlong, flipAcross), for saving; the setter keeps what is missing and brings every value into its range.
         static constexpr std::size_t kBaseParams = 7;

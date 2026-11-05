@@ -1,5 +1,6 @@
 #include "curvy/pdfexport.h"
 
+#include "curvy/graphbrush.h"
 #include "curvy/gzip.h"
 #include "curvy/sketchdocument.h"
 
@@ -384,6 +385,10 @@ namespace curvy {
             }
             if (brush.kind == BrushKind::Art) {
                 return drawParts(brush.bendAlong(shown, item.strokeWidth, item.strokeOptions.widths), item.opacity);
+            }
+            if (brush.kind == BrushKind::Graph) {
+                const auto cooked = cookGraphBrush(brush.graphType, shown, item.strokeWidth, item.strokeOptions.widths);
+                return cooked ? drawParts(graphBrushParts(cooked), item.opacity) : std::string();
             }
             std::string out;
             for (const BLMatrix2D& matrix : brush.placements(shown, item.strokeWidth, item.strokeOptions.widths)) {

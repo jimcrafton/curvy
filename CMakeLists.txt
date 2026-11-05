@@ -58,6 +58,7 @@ add_executable(curvy
     src/brushpanel.cpp
     src/brushlist.cpp
     src/brush.cpp
+    src/graphbrush.cpp
     src/pathflatten.cpp
     src/imagedata.cpp
     src/textwarp.cpp
@@ -144,10 +145,16 @@ newui_add_reflectgen_output(curvy
     REGISTER_FUNCTION registerCurvyReflection)
 
 newui_add_resources(curvy "${CMAKE_CURRENT_SOURCE_DIR}/Resources")
+
+# Graph brushes (jitnodes assets) are read at run time from Assets/brushes next to the exe, so a brush can be added or edited without a rebuild.
+add_custom_command(TARGET curvy POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/assets/brushes" "$<TARGET_FILE_DIR:curvy>/Assets/brushes"
+    COMMENT "Copying brush assets for curvy")
+
 # Headless tests of the model layer (color, objects, document, file formats).
 set(CURVY_MODEL_SOURCES
     sketchcolor sketchobject sketchdocument documentcutting documentpaths documenttransform documentguides
-    documentlayers documentswatches documentselect documentclip documentsymbols documentbrushes brush
+    documentlayers documentswatches documentselect documentclip documentsymbols documentbrushes brush graphbrush
     pathflatten textwarp imagedata documenttextpath documentimages documentexpand pdfexport documentartboards
     documenttrace imagetrace sketchsvg sketchexport shapetools pathops textoutline gzip numberscrubber expressionfield
     sketchbin cursorset newdocumentmodel graphdocument graphtree pathnode shapenode appearancenode documentlive radialmenu holdscrub workspacemodel dockcontext liveshape settings)
@@ -156,6 +163,11 @@ list(TRANSFORM CURVY_MODEL_SOURCES APPEND .cpp)
 
 add_executable(curvyTests tests/test_sketch_model.cpp ${CURVY_MODEL_SOURCES})
 target_include_directories(curvyTests PRIVATE include)
+target_compile_definitions(curvyTests PRIVATE CURVY_BRUSH_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets/brushes")
+if(MSVC)
+    # test_sketch_model.cpp has grown past the default limit of sections per object file.
+    target_compile_options(curvyTests PRIVATE /bigobj)
+endif()
 target_link_libraries(curvyTests PRIVATE newui jitnodes::jitnodes zlib_static windowscodecs ole32 GTest::gtest_main)
 include(GoogleTest)
 gtest_discover_tests(curvyTests)

@@ -179,7 +179,9 @@ namespace curvy {
         options.brush = brush;
         sample->setStrokeOptions(options);
         double weight = 6.0;
-        if (brush->kind != BrushKind::Calligraphic) {
+        if (brush->kind == BrushKind::Graph) {
+            weight = (height - 6.0) / std::max(brush->reach(1.0) * 2.0, 1e-6);   // as wide as the row allows
+        } else if (brush->kind != BrushKind::Calligraphic) {
             weight = std::min(1.0, (height - 6.0) / std::max(brush->reach(1.0) * 2.0, 1e-6));
         }
         sample->setStrokeWidth(weight);

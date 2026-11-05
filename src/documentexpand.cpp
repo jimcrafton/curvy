@@ -1,5 +1,6 @@
 #include "curvy/sketchdocument.h"
 
+#include "curvy/graphbrush.h"
 #include "curvy/imagedata.h"
 
 #include <algorithm>
@@ -106,6 +107,10 @@ namespace curvy {
                             add(brush.nibOutline(shown, item.strokeWidth, item.strokeOptions.widths), {fill, AppearanceItem::makeStroke(SketchPaint::none(), 0.0)}, "Expanded Brush");
                         } else if (brush.kind == BrushKind::Art) {
                             artwork(brush.bendAlong(shown, item.strokeWidth, item.strokeOptions.widths));
+                        } else if (brush.kind == BrushKind::Graph) {
+                            if (const auto cooked = cookGraphBrush(brush.graphType, shown, item.strokeWidth, item.strokeOptions.widths)) {
+                                artwork(graphBrushParts(cooked));
+                            }
                         } else {
                             for (const BLMatrix2D& matrix : brush.placements(shown, item.strokeWidth, item.strokeOptions.widths)) {
                                 std::vector<BrushPart> moved = brush.parts();

@@ -741,7 +741,8 @@ namespace curvy {
         for (const std::shared_ptr<const BrushDef>& def : document.brushes()) {
             brushChunk.varint(def->id);
             brushChunk.text(def->name);
-            brushChunk.u8(unsigned(def->kind));
+            // A graph brush is written as a plain nib, so a reader that does not know the kind still opens the file; BGRF turns it back.
+            brushChunk.u8(def->kind == BrushKind::Graph ? 0u : unsigned(def->kind));
             const std::vector<double> numbers = def->params();
             for (std::size_t k = 0; k < BrushDef::kBaseParams; ++k) {
                 brushChunk.f64(numbers[k]);
@@ -792,6 +793,20 @@ namespace curvy {
                 categoryChunk.varint(def->id);
                 categoryChunk.u8(def->favorite ? 1u : 0u);
                 categoryChunk.text(def->category);
+            }
+        }
+
+        // Which brushes are graph brushes and the asset that paints each: a chunk of its own (older readers skip it and see a nib).
+        ByteWriter graphBrushChunk;
+        std::size_t graphBrushes = 0;
+        for (const std::shared_ptr<const BrushDef>& def : document.brushes()) {
+            graphBrushes += def->kind == BrushKind::Graph ? 1 : 0;
+        }
+        graphBrushChunk.varint(graphBrushes);
+        for (const std::shared_ptr<const BrushDef>& def : document.brushes()) {
+            if (def->kind == BrushKind::Graph) {
+                graphBrushChunk.varint(def->id);
+                graphBrushChunk.text(def->graphType);
             }
         }
 
@@ -867,6 +882,9 @@ namespace curvy {
         }
         if (sortedBrushes != 0) {
             chunk(body, "BCAT", categoryChunk.data());
+        }
+        if (graphBrushes != 0) {
+            chunk(body, "BGRF", graphBrushChunk.data());
         }
         chunk(body, "IMGS", imageChunk.data());
         chunk(body, "ABRD", boards.data());
@@ -1187,6 +1205,26 @@ namespace curvy {
                             sorted->favorite = favorite;
                             sorted->category = category;
                             entry = sorted;
+                        }
+                    }
+                }
+                if (!in.ok()) {
+                    return false;
+                }
+            } else if (tag == "BGRF") {
+                std::size_t n = in.count(2);
+                for (std::size_t i = 0; i < n && in.ok(); ++i) {
+                    const std::size_t brushId = std::size_t(in.varint());
+                    const std::string type = in.text();
+                    if (!in.ok()) {
+                        return false;
+                    }
+                    for (std::shared_ptr<const BrushDef>& entry : brushLibrary) {
+                        if (entry->id == brushId && !type.empty()) {
+                            auto graph = std::make_shared<BrushDef>(*entry);
+                            graph->kind = BrushKind::Graph;
+                            graph->graphType = type;
+                            entry = graph;
                         }
                     }
                 }

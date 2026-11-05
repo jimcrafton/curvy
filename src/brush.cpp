@@ -146,7 +146,7 @@ namespace curvy {
     }
 
     const char* brushKindName(BrushKind kind) {
-        static const char* kNames[] = {"Calligraphic", "Scatter", "Art"};
+        static const char* kNames[] = {"Calligraphic", "Scatter", "Art", "Graph"};
         return kNames[std::size_t(kind)];
     }
 
@@ -238,6 +238,9 @@ namespace curvy {
 
     double BrushDef::reach(double strokeWidth, const std::vector<WidthPoint>& widths) const {
         strokeWidth *= profileMost(widths);
+        if (kind == BrushKind::Graph) {
+            return strokeWidth * 1.25;   // dots stay inside the ribbon; leaf stamps stray a little past it
+        }
         if (kind == BrushKind::Calligraphic || !art) {
             return strokeWidth * 0.5;
         }

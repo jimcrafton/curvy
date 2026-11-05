@@ -4,6 +4,7 @@
 #include "curvy/pathflatten.h"
 #include "curvy/pathops.h"
 #include "curvy/brush.h"
+#include "curvy/graphbrush.h"
 #include "curvy/textwarp.h"
 #include "curvy/textoutline.h"
 
@@ -1691,7 +1692,15 @@ namespace curvy {
             }
             auto draw = [&](BLContext& target) {
                 target.set_global_alpha(1.0);
-                if (brush.kind == BrushKind::Art) {
+                if (brush.kind == BrushKind::Graph) {
+                    // Dots and polygons come out of the asset already coloured; a missing asset leaves a hairline so the stroke is not lost.
+                    if (const auto cooked = cookGraphBrush(brush.graphType, path, width, item.strokeOptions.widths)) {
+                        paintGraphBrush(target, cooked);   // from a cached image: a stroke has tens of thousands of dots
+                    } else if (setPaintStyle(target, item.paint, frame, true)) {
+                        target.set_stroke_width(1.0);
+                        target.stroke_path(path);
+                    }
+                } else if (brush.kind == BrushKind::Art) {
                     paintBrushParts(target, brush.bendAlong(path, width, item.strokeOptions.widths));
                 } else {
                     const std::vector<BrushPart>& parts = brush.parts();

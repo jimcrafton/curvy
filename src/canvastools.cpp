@@ -273,7 +273,7 @@ namespace curvy {
                 options.widths = pressureProfile(points, pressure);   // empty for a mouse: the plain weight all along
             }
             object->setStrokeOptions(options);
-            object->setStrokeWidth(options.brush && options.brush->kind != BrushKind::Calligraphic ? 1.0 : std::max(2.0, document_->defaultStrokeWidth()));
+            object->setStrokeWidth(options.brush ? options.brush->startingWeight(document_->defaultStrokeWidth()) : std::max(2.0, document_->defaultStrokeWidth()));
             document_->addUndoable(object, "Draw with Paintbrush");
             return;
         }
@@ -295,7 +295,7 @@ namespace curvy {
             // A proxy of the stroke while it is drawn: an outlined band as wide as the brush will paint it (the brush's reach for the
             // weight it is drawn with), with the path you are drawing running down the middle. The real stroke replaces it on release.
             if (std::shared_ptr<const BrushDef> brush = document_->findBrush(document_->activeBrush())) {
-                const double weight = brush->kind != BrushKind::Calligraphic ? 1.0 : std::max(2.0, document_->defaultStrokeWidth());
+                const double weight = brush->startingWeight(document_->defaultStrokeWidth());
                 const double width = std::max(2.0, brush->reach(weight) * 2.0 * double(zoom_));
                 ctx.set_stroke_join(BL_STROKE_JOIN_ROUND);
                 ctx.set_stroke_caps(BL_STROKE_CAP_ROUND);
