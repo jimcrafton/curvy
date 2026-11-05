@@ -19,8 +19,10 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 namespace curvy {
 
@@ -88,6 +90,9 @@ namespace curvy {
         newui::SyncReturn modelChanged(newui::Model& model) override;
 
     private:
+        using CommandHandler = std::function<void(const newui::Point& at)>;
+        void buildCommandTable();
+        void showAppearanceCard(bool fill, const newui::Point& at);
         bool filterPress(const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys);
         bool filterKey(std::uint32_t keyMask, std::uint32_t vkCode);
         newui::SyncReturn handleKeyUp(newui::View& sender, std::uint32_t keyMask, int keyChar, int repeatCount, std::uint32_t vkCode);
@@ -120,6 +125,7 @@ namespace curvy {
         newui::Label* hintInfo_ = nullptr;
         newui::Label* documentName_ = nullptr;
         WorkspaceModel* model_ = nullptr;   // owned by the Controller base (setModel)
+        std::unordered_map<std::string, CommandHandler> handlers_;
         std::unique_ptr<SketchDocumentController> files_;
         std::unique_ptr<SketchCommandController> commands_;
         std::unique_ptr<DockController> dock_;

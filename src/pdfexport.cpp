@@ -81,7 +81,7 @@ namespace curvy {
             // Selects `paint` as the fill / stroke color; false when it paints nothing. `alpha` receives the opacity the paint carries itself.
             bool applyPaint(std::string& out, const SketchPaint& paint, bool stroke, const BLBox& box, double& alpha);
             void pathOps(std::string& out, const BLPath& path);
-            std::string fillPath(const BLPath& path, const SketchPaint& paint, double opacity, BlendMode blend);
+            std::string fillPath(const BLPath& path, const SketchPaint& paint, double opacity, BlendMode blend, bool evenOdd = false);
             std::string drawItem(const SketchObject& object, std::size_t index);
             std::string drawItemBody(const SketchObject& object, std::size_t index);
             const SketchObject* painting_ = nullptr;   // the object whose item is being drawn: its gradients follow its turned frame
@@ -338,7 +338,7 @@ namespace curvy {
             }
         }
 
-        std::string Writer::fillPath(const BLPath& path, const SketchPaint& paint, double opacity, BlendMode blend) {
+        std::string Writer::fillPath(const BLPath& path, const SketchPaint& paint, double opacity, BlendMode blend, bool evenOdd) {
             if (path.size() == 0) {
                 return std::string();
             }
@@ -352,7 +352,7 @@ namespace curvy {
                 out += "/" + graphicsState(alpha, alpha, blend) + " gs\n";
             }
             pathOps(out, path);
-            return out + "f\nQ\n";
+            return out + (evenOdd ? "f*\nQ\n" : "f\nQ\n");
         }
 
         std::string Writer::drawParts(const std::vector<BrushPart>& parts, double opacity) {
@@ -407,9 +407,9 @@ namespace curvy {
         std::string Writer::drawItemBody(const SketchObject& object, std::size_t index) {
             const AppearanceItem& item = object.appearance()[index];
             if (item.kind == AppearanceKind::Fill) {
-                return object.isClosed() ? fillPath(object.itemOutline(index), item.paint, item.opacity, item.blendMode) : std::string();
+                return object.isClosed() ? fillPath(object.itemOutline(index), item.paint, item.opacity, item.blendMode, item.evenOdd) : std::string();
             }
-            if (item.kind != AppearanceKind::Stroke || item.paint.isNone() || item.strokeWidth <= 0.0) {
+            if (item.kind !=AppearanceKind::Stroke || item.paint.isNone() || item.strokeWidth <= 0.0) {
                 return std::string();
             }
             if (item.strokeOptions.brush) {

@@ -16,7 +16,7 @@ namespace curvy {
     // (as gradients), form XObjects (nested, with their matrix) and images (Flate or raw 8-bit gray / RGB / CMYK, JPEG, with a soft mask).
     //
     // Not read: text (a PDF holds glyphs by font, not outlines; the words are skipped), clipping paths, blend modes and soft masks of the
-    // graphics state, tiling patterns, the even-odd fill rule (every fill is non-zero), encrypted files, and the JPEG 2000 / CCITT / JBIG2
+    // graphics state, tiling patterns, encrypted files, and the JPEG 2000 / CCITT / JBIG2
     // image filters. What cannot be read is skipped, not an error.
     //
     // True when `data` is a PDF file image. False - and the document untouched - when it is not a PDF, or has no page the reader can use.

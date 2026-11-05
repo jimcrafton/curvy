@@ -293,6 +293,8 @@ namespace curvy {
         // Normal means "follow the object's blend mode".
         BlendMode blendMode = BlendMode::Normal;
         SketchPaint paint;
+        // Fills only: even-odd instead of non-zero winding.
+        bool evenOdd = false;
         // Strokes only.
         double strokeWidth = 1.0;
         StrokeOptions strokeOptions;
@@ -336,7 +338,7 @@ namespace curvy {
             return item;
         }
         bool operator==(const AppearanceItem& o) const {
-            return kind == o.kind && visible == o.visible && opacity == o.opacity && blendMode == o.blendMode && paint == o.paint &&
+            return kind == o.kind && visible == o.visible && opacity == o.opacity && blendMode == o.blendMode && paint == o.paint && evenOdd == o.evenOdd &&
                 strokeWidth == o.strokeWidth && strokeOptions == o.strokeOptions && effect == o.effect && color == o.color &&
                 softness == o.softness && offsetX == o.offsetX && offsetY == o.offsetY && radius == o.radius;
         }
@@ -480,6 +482,8 @@ namespace curvy {
         const AppearanceItem& activeItem(AppearanceKind kind) const { return activeItemOf(items_, kind, storedActive(kind)); }
         const SketchPaint& fill() const { return activeItem(AppearanceKind::Fill).paint; }
         void setFill(const SketchPaint& paint) { primary(AppearanceKind::Fill).paint = paint; }
+        bool fillEvenOdd() const { return activeItem(AppearanceKind::Fill).evenOdd; }
+        void setFillEvenOdd(bool evenOdd) { primary(AppearanceKind::Fill).evenOdd = evenOdd; }
         const SketchPaint& stroke() const { return activeItem(AppearanceKind::Stroke).paint; }
         void setStroke(const SketchPaint& paint) { primary(AppearanceKind::Stroke).paint = paint; }
         double strokeWidth() const { return activeItem(AppearanceKind::Stroke).strokeWidth; }

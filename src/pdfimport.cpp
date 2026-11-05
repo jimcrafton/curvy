@@ -3,6 +3,7 @@
 #include "curvy/gzip.h"
 #include "curvy/imagedata.h"
 #include "curvy/sketchdocument.h"
+#include "curvy/sketchexport.h"
 
 #include <algorithm>
 #include <cmath>
@@ -469,7 +470,43 @@ namespace curvy {
             std::string pattern;   // the name in /Pattern of the resources, when space is Pattern
         };
 
+        BLPath closedSubpaths(const BLPath& source) {
+            BLPath closed;
+            BLPathView view = source.view();
+            bool opened = false;
+            for (std::size_t i = 0; i < view.size; ++i) {
+                const BLPoint v = view.vertex_data[i];
+                switch (view.command_data[i]) {
+                    case BL_PATH_CMD_MOVE: if (opened) { closed.close(); } closed.move_to(v); opened = true; break;
+                    case BL_PATH_CMD_ON: closed.line_to(v); break;
+                    case BL_PATH_CMD_QUAD: if (i + 1 < view.size) { closed.quad_to(v, view.vertex_data[i + 1]); ++i; } break;
+                    case BL_PATH_CMD_CUBIC: if (i + 2 < view.size) { closed.cubic_to(v, view.vertex_data[i + 1], view.vertex_data[i + 2]); i += 2; } break;
+                    case BL_PATH_CMD_CLOSE: closed.close(); opened = false; break;
+                    default: break;
+                }
+            }
+            if (opened) { closed.close(); }
+            return closed;
+        }
+
+        // One level of clipping: a group of the document that gets the clip path as its topmost member once the level ends.
+        struct ClipLevel {
+            std::size_t group = 0;
+            BLPath path;
+            int members = 0;
+        };
+
+        // A soft mask from an ExtGState, rendered once over the page: one coverage byte per pixel, `scale` pixels per document unit.
+        struct SoftMask {
+            BLBox page;
+            double scale = 1.0;
+            int width = 0, height = 0;
+            std::vector<std::uint8_t> alpha;
+        };
+
         struct State {
+            std::shared_ptr<const SoftMask> softMask;
+            std::vector<std::shared_ptr<ClipLevel>> clips;   // outermost first
             BLMatrix2D ctm = BLMatrix2D::make_identity();
             Paint fill, stroke;
             double lineWidth = 1.0;
@@ -481,12 +518,20 @@ namespace curvy {
 
         class Interpreter {
         public:
-            Interpreter(const PdfFile& file, SketchDocument& document, const BLMatrix2D& base) : file_(file), document_(document), base_(base) { state_.ctm = base; resources_ = &file.null_; }
+            Interpreter(const PdfFile& file, SketchDocument& document, const BLMatrix2D& base, const BLBox& pageBox) : file_(file), document_(document), base_(base), pageBox_(pageBox) { state_.ctm = base; resources_ = &file.null_; }
             void run(const std::string& content, const PObj& resources);
+            void finish() { flushClips(0); }
 
         private:
+            void addObject(SketchObject* object);
+            void flushClips(std::size_t keep);
+            void applyClip(const BLPath& path);
+            void shadingFill(const std::string& name, const PObj& resources);
+            void setSoftMask(const PObj& dict);
+            SketchObject* masked(SketchObject* object);
+            void drawForm(const PObj& entry, const PObj& xobject, const PObj& resources);
             void execute(const std::string& op, std::vector<PObj>& args, const PObj& resources);
-            void paint(bool fill, bool stroke, bool close);
+            void paint(bool fill, bool stroke, bool close, bool evenOdd = false);
             void rect(double x, double y, double w, double h);
             void point(double x, double y, BLPoint& out) const { out = state_.ctm.map_point(x, y); }
             Space spaceOf(const PObj& cs, const PObj& resources, int depth = 0) const;
@@ -494,6 +539,7 @@ namespace curvy {
             static SketchColor initialColor(const Space& space);
             SketchPaint paintFor(const Paint& paint, double alpha, const PObj& resources, const BLPath& path) const;
             bool gradientFor(const PObj& pattern, const BLPath& path, SketchGradient& gradient, bool& radial) const;
+            bool shadingGradient(const PObj& shading, const BLMatrix2D& m, const BLPath& path, SketchGradient& gradient, bool& radial) const;
             bool functionColor(const PObj& function, double t, const Space& space, SketchColor& out, int depth = 0) const;
             void doXObject(const std::string& name, const PObj& resources);
             void doImage(const PObj& image, const PObj& ref);
@@ -503,6 +549,8 @@ namespace curvy {
             const PdfFile& file_;
             SketchDocument& document_;
             BLMatrix2D base_;
+            BLBox pageBox_;
+            bool pendingClip_ = false;
             State state_;
             std::vector<State> stack_;
             BLPath path_;
@@ -637,7 +685,16 @@ namespace curvy {
 
         // A shading pattern (PatternType 2) of an axial or radial shading as a gradient over `path`.
         bool Interpreter::gradientFor(const PObj& pattern, const BLPath& path, SketchGradient& gradient, bool& radial) const {
-            const PObj& shading = file_.get(pattern, "Shading");
+            BLMatrix2D m = BLMatrix2D::make_identity();
+            const PObj& matrix = file_.get(pattern, "Matrix");
+            if (matrix.type == PObj::Arr && matrix.a.size() >= 6) {
+                m = BLMatrix2D(numberOf(&matrix.a[0], 1), numberOf(&matrix.a[1], 0), numberOf(&matrix.a[2], 0), numberOf(&matrix.a[3], 1), numberOf(&matrix.a[4], 0), numberOf(&matrix.a[5], 0));
+            }
+            m.post_transform(base_);   // pattern space is the page's default space
+            return shadingGradient(file_.get(pattern, "Shading"), m, path, gradient, radial);
+        }
+
+        bool Interpreter::shadingGradient(const PObj& shading, const BLMatrix2D& m, const BLPath& path, SketchGradient& gradient, bool& radial) const {
             const int type = int(numberOf(shading.find("ShadingType"), 0));
             if (type != 2 && type != 3) { return false; }
             const PObj& coords = file_.get(shading, "Coords");
@@ -645,12 +702,6 @@ namespace curvy {
             if (coords.type != PObj::Arr || coords.a.size() < need) { return false; }
             std::vector<double> c;
             for (const PObj& v : coords.a) { c.push_back(numberOf(&file_.resolve(v), 0.0)); }
-            BLMatrix2D m = BLMatrix2D::make_identity();
-            const PObj& matrix = file_.get(pattern, "Matrix");
-            if (matrix.type == PObj::Arr && matrix.a.size() >= 6) {
-                m = BLMatrix2D(numberOf(&matrix.a[0], 1), numberOf(&matrix.a[1], 0), numberOf(&matrix.a[2], 0), numberOf(&matrix.a[3], 1), numberOf(&matrix.a[4], 0), numberOf(&matrix.a[5], 0));
-            }
-            m.post_transform(base_);   // pattern space is the page's default space
             const Space space = spaceOf(shading.find("ColorSpace") != nullptr ? *shading.find("ColorSpace") : PObj(), PObj());
             const PObj* function = shading.find("Function");
             if (function == nullptr) { return false; }
@@ -714,26 +765,13 @@ namespace curvy {
             open_ = false;
         }
 
-        void Interpreter::paint(bool fill, bool stroke, bool close) {
+        void Interpreter::paint(bool fill, bool stroke, bool close, bool evenOdd) {
+            const BLPath clipSource = pendingClip_ ? path_ : BLPath();
             if (path_.size() > 0 && (fill || stroke)) {
                 BLPath outline = path_;
                 if (close) { outline.close(); }
                 if (fill) {   // fills close every open subpath
-                    BLPath closed;
-                    BLPathView view = outline.view();
-                    bool opened = false;
-                    for (std::size_t i = 0; i < view.size; ++i) {
-                        const BLPoint v = view.vertex_data[i];
-                        switch (view.command_data[i]) {
-                            case BL_PATH_CMD_MOVE: if (opened) { closed.close(); } closed.move_to(v); opened = true; break;
-                            case BL_PATH_CMD_ON: closed.line_to(v); break;
-                            case BL_PATH_CMD_QUAD: if (i + 1 < view.size) { closed.quad_to(v, view.vertex_data[i + 1]); ++i; } break;
-                            case BL_PATH_CMD_CUBIC: if (i + 2 < view.size) { closed.cubic_to(v, view.vertex_data[i + 1], view.vertex_data[i + 2]); i += 2; } break;
-                            case BL_PATH_CMD_CLOSE: closed.close(); opened = false; break;
-                            default: break;
-                        }
-                    }
-                    if (opened) { closed.close(); }
+                    const BLPath closed = closedSubpaths(outline);
                     if (stroke && !close) {
                         outline = closed;   // B on an open path: the stroke closes it as well (a small difference)
                     } else if (!stroke) {
@@ -742,6 +780,7 @@ namespace curvy {
                 }
                 std::unique_ptr<SketchObject> object(SketchObject::make(SketchObjectType::Path, outline));
                 object->setFill(fill ? paintFor(state_.fill, state_.fillAlpha, *resources_, outline) : SketchPaint::none());
+                object->setFillEvenOdd(fill && evenOdd);
                 if (stroke) {
                     object->setStroke(paintFor(state_.stroke, state_.strokeAlpha, *resources_, outline));
                     const double s = scale();
@@ -760,10 +799,170 @@ namespace curvy {
                 } else {
                     object->setStroke(SketchPaint::none());
                 }
-                document_.add(object.release());
+                addObject(object.release());
             }
             path_.reset();
             open_ = false;
+            if (pendingClip_) {
+                pendingClip_ = false;
+                if (clipSource.size() > 0) { applyClip(closedSubpaths(clipSource)); }
+            }
+        }
+
+        void Interpreter::setSoftMask(const PObj& dict) {
+            state_.softMask.reset();
+            const PObj* g = dict.find("G");
+            if (g == nullptr || file_.resolve(*g).type != PObj::Dict || depth_ >= 8) { return; }
+            const double w = pageBox_.x1 - pageBox_.x0, h = pageBox_.y1 - pageBox_.y0;
+            const double scale = std::min(2.0, 2400.0 / std::max(w, h));
+            if (!(w > 0.0) || !(h > 0.0) || w * scale * h * scale > 16.0 * 1024 * 1024) { return; }
+            SketchDocument scratch;
+            scratch.setPageSize(float(w), float(h));
+            scratch.setArtboards({Artboard{"mask", pageBox_.x0, pageBox_.y0, w, h}}, 0);
+            scratch.setPageBackground(std::nullopt);
+            Interpreter inner(file_, scratch, base_, pageBox_);
+            inner.state_.ctm = state_.ctm;
+            inner.depth_ = depth_ + 1;
+            inner.drawForm(*g, file_.resolve(*g), *resources_);
+            inner.finish();
+            BLImage image;
+            if (!renderPageImage(scratch, scale, image)) { return; }
+            BLImageData data;
+            if (image.get_data(&data) != BL_SUCCESS || data.format != BL_FORMAT_PRGB32) { return; }
+            double backdrop = 0.0;   // luminosity of the backdrop color BC (black by default)
+            const PObj& bc = file_.get(dict, "BC");
+            if (bc.type == PObj::Arr && (bc.a.size() == 1 || bc.a.size() == 3)) {
+                const double r = numberOf(&bc.a[0], 0), g2 = bc.a.size() == 3 ? numberOf(&bc.a[1], 0) : r, b = bc.a.size() == 3 ? numberOf(&bc.a[2], 0) : r;
+                backdrop = 0.3 * r + 0.59 * g2 + 0.11 * b;
+            }
+            const bool alphaOnly = file_.get(dict, "S").isName("Alpha");
+            auto mask = std::make_shared<SoftMask>();
+            mask->page = pageBox_;
+            mask->scale = scale;
+            mask->width = int(data.size.w);
+            mask->height = int(data.size.h);
+            mask->alpha.resize(std::size_t(mask->width) * std::size_t(mask->height));
+            for (int y = 0; y < mask->height; ++y) {
+                const std::uint32_t* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + std::ptrdiff_t(y) * data.stride);
+                for (int x = 0; x < mask->width; ++x) {
+                    const std::uint32_t p = row[x];
+                    const double a = double(p >> 24) / 255.0;
+                    double v = a;
+                    if (!alphaOnly) {   // premultiplied, so the color already is the color over black
+                        v = (0.3 * double((p >> 16) & 255u) + 0.59 * double((p >> 8) & 255u) + 0.11 * double(p & 255u)) / 255.0 + (1.0 - a) * backdrop;
+                    }
+                    mask->alpha[std::size_t(y) * std::size_t(mask->width) + std::size_t(x)] = std::uint8_t(std::lround(std::min(1.0, std::max(0.0, v)) * 255.0));
+                }
+            }
+            state_.softMask = mask;
+        }
+
+        // The object as it shows through the soft mask: drawn on its own, multiplied by the mask, and kept as a picture (the document has no
+        // opacity masks). Objects the mask does not reach are kept as they are.
+        SketchObject* Interpreter::masked(SketchObject* object) {
+            const SoftMask& mask = *state_.softMask;
+            const BLBox bounds = object->paintBounds();
+            const int x0 = std::max(0, int(std::floor((bounds.x0 - mask.page.x0) * mask.scale))), y0 = std::max(0, int(std::floor((bounds.y0 - mask.page.y0) * mask.scale)));
+            const int x1 = std::min(mask.width, int(std::ceil((bounds.x1 - mask.page.x0) * mask.scale))), y1 = std::min(mask.height, int(std::ceil((bounds.y1 - mask.page.y0) * mask.scale)));
+            if (x1 <= x0 || y1 <= y0 || std::int64_t(x1 - x0) * (y1 - y0) > 16 * 1024 * 1024) { return object; }
+            const double rx = mask.page.x0 + x0 / mask.scale, ry = mask.page.y0 + y0 / mask.scale;
+            const double rw = (x1 - x0) / mask.scale, rh = (y1 - y0) / mask.scale;
+            SketchDocument scratch;
+            scratch.setPageSize(float(rw), float(rh));
+            scratch.setArtboards({Artboard{"object", rx, ry, rw, rh}}, 0);
+            scratch.setPageBackground(std::nullopt);
+            scratch.add(object);
+            BLImage image;
+            BLImageData data;
+            if (!renderPageImage(scratch, mask.scale, image) || image.get_data(&data) != BL_SUCCESS || data.format != BL_FORMAT_PRGB32) {
+                return SketchObject::makePath(BLPath());
+            }
+            const int w = std::min(int(data.size.w), x1 - x0), h = std::min(int(data.size.h), y1 - y0);
+            for (int y = 0; y < h; ++y) {
+                std::uint32_t* row = reinterpret_cast<std::uint32_t*>(static_cast<std::uint8_t*>(data.pixel_data) + std::ptrdiff_t(y) * data.stride);
+                const std::uint8_t* coverage = mask.alpha.data() + std::size_t(y0 + y) * std::size_t(mask.width) + std::size_t(x0);
+                for (int x = 0; x < w; ++x) {
+                    const std::uint32_t p = row[x], m = coverage[x];
+                    row[x] = (((p >> 24) * m / 255u) << 24) | ((((p >> 16) & 255u) * m / 255u) << 16) | ((((p >> 8) & 255u) * m / 255u) << 8) | ((p & 255u) * m / 255u);
+                }
+            }
+            BLImageCodec codec;
+            codec.find_by_name("PNG");
+            BLArray<uint8_t> buffer;
+            if (image.write_to_data(buffer, codec) != BL_SUCCESS) { return SketchObject::makePath(BLPath()); }
+            std::shared_ptr<const ImageData> picture = decodeImage(std::string(reinterpret_cast<const char*>(buffer.data()), buffer.size()), "PDF soft mask");
+            if (!picture) { return SketchObject::makePath(BLPath()); }
+            return SketchObject::makeImageObject(picture, BLMatrix2D(1.0 / mask.scale, 0.0, 0.0, 1.0 / mask.scale, rx, ry));
+        }
+
+        void Interpreter::addObject(SketchObject* object) {
+            if (state_.softMask) { object = masked(object); }
+            std::vector<std::size_t> groups;
+            for (const auto& level : state_.clips) {
+                groups.push_back(level->group);
+                ++level->members;
+            }
+            object->setGroups(groups);
+            document_.add(object);
+        }
+
+        // Ends the clip levels deeper than `keep`: each clip path joins its group as the topmost member, which is what makes it the mask.
+        void Interpreter::flushClips(std::size_t keep) {
+            while (state_.clips.size() > keep) {
+                const std::shared_ptr<ClipLevel> level = state_.clips.back();
+                if (level->members > 0) {
+                    std::vector<std::size_t> groups;
+                    for (const auto& l : state_.clips) { groups.push_back(l->group); }
+                    SketchObject* mask = SketchObject::makePath(level->path);
+                    mask->setFill(SketchPaint::solid(SketchColor::gray(0.0f)));
+                    mask->setStroke(SketchPaint::none());
+                    mask->setName("Clipping Path");
+                    mask->setGroups(groups);
+                    document_.add(mask);
+                    GroupProps props;
+                    props.clip = true;
+                    document_.setGroupProps(level->group, props);
+                }
+                state_.clips.pop_back();
+            }
+        }
+
+        void Interpreter::applyClip(const BLPath& path) {
+            BLBox box(0, 0, 0, 0);
+            if (path.get_bounding_box(&box) != BL_SUCCESS || !(box.x1 - box.x0 > 1e-6) || !(box.y1 - box.y0 > 1e-6)) { return; }
+            // Illustrator wraps a page in a clip to its own bounds; that clip changes nothing.
+            const double eps = 0.01;
+            bool rectangle = path.size() <= 6;
+            BLPathView view = path.view();
+            for (std::size_t i = 0; rectangle && i < view.size; ++i) {
+                if (view.command_data[i] == BL_PATH_CMD_CLOSE) { continue; }
+                const BLPoint v = view.vertex_data[i];
+                const bool onX = std::fabs(v.x - box.x0) < eps || std::fabs(v.x - box.x1) < eps, onY = std::fabs(v.y - box.y0) < eps || std::fabs(v.y - box.y1) < eps;
+                rectangle = view.command_data[i] <= BL_PATH_CMD_ON && onX && onY;
+            }
+            if (rectangle && box.x0 <= pageBox_.x0 + eps && box.y0 <= pageBox_.y0 + eps && box.x1 >= pageBox_.x1 - eps && box.y1 >= pageBox_.y1 - eps) { return; }
+            auto level = std::make_shared<ClipLevel>();
+            level->group = document_.newGroupId();
+            level->path = path;
+            state_.clips.push_back(level);
+        }
+
+        void Interpreter::shadingFill(const std::string& name, const PObj& resources) {
+            const PObj& shading = file_.get(file_.get(resources, "Shading"), name.c_str());
+            if (shading.type != PObj::Dict) { return; }
+            BLPath area;
+            if (!state_.clips.empty()) {
+                area = state_.clips.back()->path;
+            } else {
+                area.add_box(pageBox_);
+            }
+            SketchGradient gradient;
+            bool radial = false;
+            if (!shadingGradient(shading, state_.ctm, area, gradient, radial)) { return; }
+            SketchObject* object = SketchObject::make(SketchObjectType::Path, area);
+            object->setFill(radial ? SketchPaint::radial(gradient) : SketchPaint::linear(gradient));
+            object->setStroke(SketchPaint::none());
+            addObject(object);
         }
 
         void Interpreter::applyGState(const PObj& dict) {
@@ -774,6 +973,10 @@ namespace curvy {
             if (const PObj* v = dict.find("ML")) { state_.miter = numberOf(&file_.resolve(*v), 10); }
             if (const PObj* v = dict.find("ca")) { state_.fillAlpha = std::min(1.0, std::max(0.0, numberOf(&file_.resolve(*v), 1.0))); }
             if (const PObj* v = dict.find("CA")) { state_.strokeAlpha = std::min(1.0, std::max(0.0, numberOf(&file_.resolve(*v), 1.0))); }
+            if (const PObj* v = dict.find("SMask")) {
+                const PObj& sm = file_.resolve(*v);
+                if (sm.type == PObj::Dict) { setSoftMask(sm); } else { state_.softMask.reset(); }
+            }
             if (const PObj* v = dict.find("D")) {
                 const PObj& d = file_.resolve(*v);
                 if (d.type == PObj::Arr && !d.a.empty()) {
@@ -844,7 +1047,7 @@ namespace curvy {
             // The image's unit square has its top at y = 1; the picture's pixels are y-down.
             BLMatrix2D placement(1.0 / double(data->width), 0.0, 0.0, -1.0 / double(data->height), 0.0, 1.0);
             placement.post_transform(state_.ctm);
-            document_.add(SketchObject::makeImageObject(data, placement));
+            addObject(SketchObject::makeImageObject(data, placement));
         }
 
         void Interpreter::doXObject(const std::string& name, const PObj& resources) {
@@ -857,9 +1060,13 @@ namespace curvy {
                 doImage(xobject, *entry);
                 return;
             }
-            if (!subtype.isName("Form") || depth_ >= 12) { return; }
+            if (subtype.isName("Form")) { drawForm(*entry, xobject, resources); }
+        }
+
+        void Interpreter::drawForm(const PObj& entry, const PObj& xobject, const PObj& resources) {
+            if (depth_ >= 12) { return; }
             std::string content, rest;
-            if (!file_.streamOf(*entry, content, rest) || !rest.empty()) { return; }
+            if (!file_.streamOf(entry, content, rest) || !rest.empty()) { return; }
             State saved = state_;
             const PObj& matrix = file_.get(xobject, "Matrix");
             if (matrix.type == PObj::Arr && matrix.a.size() >= 6) {
@@ -875,6 +1082,7 @@ namespace curvy {
             stack_.resize(std::min(stack_.size(), stackSize));
             resources_ = savedResources;
             --depth_;
+            flushClips(saved.clips.size());
             state_ = saved;
         }
 
@@ -884,7 +1092,11 @@ namespace curvy {
             if (op == "q") {
                 if (stack_.size() < 256) { stack_.push_back(state_); }
             } else if (op == "Q") {
-                if (!stack_.empty()) { state_ = stack_.back(); stack_.pop_back(); }
+                if (!stack_.empty()) {
+                    flushClips(stack_.back().clips.size());
+                    state_ = stack_.back();
+                    stack_.pop_back();
+                }
             } else if (op == "cm" && n >= 6) {
                 BLMatrix2D m(num(n - 6), num(n - 5), num(n - 4), num(n - 3), num(n - 2), num(n - 1));
                 m.post_transform(state_.ctm);
@@ -921,10 +1133,15 @@ namespace curvy {
                 rect(num(n - 4), num(n - 3), num(n - 2), num(n - 1));
             } else if (op == "S") { paint(false, true, false);
             } else if (op == "s") { paint(false, true, true);
-            } else if (op == "f" || op == "F" || op == "f*") { paint(true, false, false);
-            } else if (op == "B" || op == "B*") { paint(true, true, false);
-            } else if (op == "b" || op == "b*") { paint(true, true, true);
+            } else if (op == "f" || op == "F") { paint(true, false, false, false);
+            } else if (op == "f*") { paint(true, false, false, true);
+            } else if (op == "B") { paint(true, true, false, false);
+            } else if (op == "B*") { paint(true, true, false, true);
+            } else if (op == "b") { paint(true, true, true, false);
+            } else if (op == "b*") { paint(true, true, true, true);
             } else if (op == "n") { paint(false, false, false);
+            } else if (op == "W" || op == "W*") { pendingClip_ = true;
+            } else if (op == "sh" && n >= 1) { shadingFill(args[0].s, resources);
             } else if (op == "g" || op == "rg" || op == "k") {
                 state_.fill.space.kind = op == "g" ? Space::Gray : (op == "rg" ? Space::RGB : Space::CMYK);
                 state_.fill.space.n = op == "g" ? 1 : (op == "rg" ? 3 : 4);
@@ -944,7 +1161,7 @@ namespace curvy {
             } else if (op == "Do" && n >= 1) {
                 doXObject(args[0].s, resources);
             }
-            // Everything else (text, clipping, shading fills, marked content, ...) is skipped.
+            // Everything else (text, marked content, ...) is skipped.
         }
 
         void Interpreter::run(const std::string& content, const PObj& resources) {
@@ -1100,8 +1317,9 @@ namespace curvy {
                         content += '\n';
                     }
                 }
-                Interpreter interpreter(file, document, base);
+                Interpreter interpreter(file, document, base, boards[i].box());
                 interpreter.run(content, page.resources);
+                interpreter.finish();
             }
             document.setActiveArtboard(0);
             return true;

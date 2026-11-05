@@ -53,7 +53,7 @@ namespace curvy {
         RadialRing newRing() {
             return {"New", "Create...", "dialog.new", {
                 {"Letter", "1", "new.letter"}, {"A4", "2", "new.a4"}, {"Full HD", "3", "new.fullhd"}, {"Square", "4", "new.square"},
-                {"Open", "O", "file.open"}, {"Settings", "S", "dialog.settings"}}};
+                {"Custom", "C", "dialog.new"}, {"Open", "O", "file.open"}, {"Import", "I", "file.importPdf"}, {"Settings", "S", "dialog.settings"}}};
         }
         RadialRing createRing() {
             return {"Create", "Shape options...", "dialog.shape", {
@@ -63,7 +63,15 @@ namespace curvy {
         RadialRing documentRing() {
             return {"Document", "Setup...", "dialog.setup", {
                 {"New artboard", "A", "doc.newArtboard"}, {"New document", "N", "ring.new"}, {"Open", "O", "file.open"}, {"Save", "S", "file.save"},
-                {"Export", "E", "file.exportImage"}, {"Place image", "I", "file.placeImage"}, {"View", "V", "ring.view"}}};
+                {"Export", "E", "ring.export"}, {"Import", "I", "ring.import"}, {"View", "V", "ring.view"}}};
+        }
+        RadialRing exportRing() {
+            return {"Export", "Back", "ring.document", {
+                {"Image", "I", "file.exportImage"}, {"PDF", "P", "file.exportPdf"}, {"EPS", "E", "file.exportEps"}, {"Artboards", "A", "file.exportArtboards"}}};
+        }
+        RadialRing importRing() {
+            return {"Import", "Back", "ring.document", {
+                {"Picture", "P", "file.placeImage"}, {"PDF / AI", "F", "file.importPdf"}, {"Trace", "T", "file.traceImage"}}};
         }
         RadialRing viewRing() {
             return {"View", "Back", "ring.document", {
@@ -579,34 +587,88 @@ namespace curvy {
     }
 
     void WorkspaceController::runCommand(const std::string& command) {
+        if (handlers_.empty()) {
+            buildCommandTable();
+        }
         const Rect client = canvas_->getClientBounds();
         const Point at = pointerKnown_ ? pointer_ : Point(client.width() * 0.5f, client.height() * 0.5f);
+        if (auto found = handlers_.find(command); found != handlers_.end()) {
+            found->second(at);
+            return;
+        }
+        // Not in the table: the tool option boxes, then the "dialog.*" stubs, then whatever the shared command controller has.
+        if (SketchTool optionsTool = SketchTool::Select; ToolOptionsCard::toolFromCommand(command, optionsTool)) {
+            showToolOptions(optionsTool, Point(at.x + 28.0f, at.y - 40.0f));
+        } else if (command.compare(0, 7, "dialog.") == 0) {
+            model_->say("The " + command.substr(7) + " dialog is not built yet");
+        } else if (commands_->has(command)) {
+            commands_->run(command);
+        } else {
+            model_->say("(" + command + " is not wired yet)");
+        }
+    }
+
+    void WorkspaceController::showAppearanceCard(bool fill, const Point& at) {
+        if (options_ != nullptr) {
+            options_->close();
+        }
+        if (dock_ == nullptr) {
+            return;
+        }
+        Rect selected;
+        bool haveSelected = false;
+        for (std::size_t id : document_.selection()) {
+            if (const SketchObject* object = document_.findById(id)) {
+                const BLBox box = object->bounds();
+                const BLPoint a = canvas_->toView(BLPoint(box.x0, box.y0)), b = canvas_->toView(BLPoint(box.x1, box.y1));
+                const Rect one(float(std::min(a.x, b.x)), float(std::min(a.y, b.y)), float(std::abs(b.x - a.x)), float(std::abs(b.y - a.y)));
+                selected = haveSelected ? selected.united(one) : one;
+                haveSelected = true;
+            }
+        }
+        dock_->showCard(fill ? DockController::Card::Fill : DockController::Card::Stroke, at, haveSelected ? &selected : nullptr);
+        if (fill && dock_->stylePanel() != nullptr) {
+            // An open path has nothing to fill, so its colour is the stroke's.
+            const SketchObject* shape = document_.selection().empty() ? nullptr : document_.findById(document_.selection().front());
+            const bool strokeOnly = shape != nullptr && (shape->fill().isNone() || !shape->isClosed());
+            dock_->stylePanel()->setTarget(strokeOnly ? StylePanel::Target::Stroke : StylePanel::Target::Fill);
+        }
+        model_->used("appearance");
+    }
+
+    void WorkspaceController::buildCommandTable() {
         for (const PageSize& page : kPages) {
-            if (command == page.command) {
+            handlers_[page.command] = [this, &page](const Point&) {
                 if (files_->newDocument(page.name, page.width, page.height)) {
                     model_->say(std::string("New ") + page.name);
                 }
-                return;
-            }
+            };
         }
         for (const ToolCommand& tool : kToolCommands) {
-            if (command == tool.command) {
+            handlers_[tool.command] = [this, &tool](const Point&) {
                 armTool(tool.tool, true, std::string());
                 model_->say(tool.tool == SketchTool::Select ? std::string("Select") : std::string(toolName(tool.tool)) + " tool armed");
-                return;
-            }
+            };
         }
-        if (command == "ring.document") { menu_->open(documentRing(), at, false); model_->setRing("Document"); }
-        else if (command == "ring.new") { menu_->open(newRing(), at, false); model_->setRing("New"); }
-        else if (command == "ring.object") { menu_->open(objectRing(), at, false); model_->setRing("Object"); }
-        else if (command == "ring.view") { menu_->open(viewRing(), at, false); model_->setRing("View"); }
-        else if (command == "view.toolbar") { model_->setToolbarVisible(!model_->toolbarVisible()); model_->say(model_->toolbarVisible() ? "Toolbar on" : "Toolbar off"); }
-        else if (command == "view.properties") { model_->setPropertiesVisible(!model_->propertiesVisible()); model_->say(model_->propertiesVisible() ? "Properties on" : "Properties off"); }
-        else if (command == "view.graph") { model_->setGraphVisible(!model_->graphVisible()); model_->say(model_->graphVisible() ? "Graph on" : "Graph off"); }
-        else if (command == "view.timeline") { model_->setTimelineVisible(!model_->timelineVisible()); model_->say(model_->timelineVisible() ? "Timeline on" : "Timeline off"); }
-        else if (command == "view.theme") { setDarkTheme(!Theme::current().isDark); model_->say(Theme::current().isDark ? "Dark theme" : "Light theme"); }
-        else if (command == "ring.arrange") { menu_->open(arrangeRing(), at, false); model_->setRing("Arrange"); }
-        else if (command == "doc.newArtboard") {
+
+        auto ring = [this](RadialRing (*make)(), const char* name) {
+            return [this, make, name](const Point& at) { menu_->open(make(), at, false); model_->setRing(name); };
+        };
+        handlers_["ring.document"] = ring(documentRing, "Document");
+        handlers_["ring.new"] = ring(newRing, "New");
+        handlers_["ring.object"] = ring(objectRing, "Object");
+        handlers_["ring.export"] = ring(exportRing, "Export");
+        handlers_["ring.import"] = ring(importRing, "Import");
+        handlers_["ring.view"] = ring(viewRing, "View");
+        handlers_["ring.arrange"] = ring(arrangeRing, "Arrange");
+
+        handlers_["view.toolbar"] = [this](const Point&) { model_->setToolbarVisible(!model_->toolbarVisible()); model_->say(model_->toolbarVisible() ? "Toolbar on" : "Toolbar off"); };
+        handlers_["view.properties"] = [this](const Point&) { model_->setPropertiesVisible(!model_->propertiesVisible()); model_->say(model_->propertiesVisible() ? "Properties on" : "Properties off"); };
+        handlers_["view.graph"] = [this](const Point&) { model_->setGraphVisible(!model_->graphVisible()); model_->say(model_->graphVisible() ? "Graph on" : "Graph off"); };
+        handlers_["view.timeline"] = [this](const Point&) { model_->setTimelineVisible(!model_->timelineVisible()); model_->say(model_->timelineVisible() ? "Timeline on" : "Timeline off"); };
+        handlers_["view.theme"] = [this](const Point&) { setDarkTheme(!Theme::current().isDark); model_->say(Theme::current().isDark ? "Dark theme" : "Light theme"); };
+
+        handlers_["doc.newArtboard"] = [this](const Point& at) {
             const BLPoint world = canvas_->toDocument(at);
             Artboard board;
             board.x = world.x;
@@ -615,46 +677,16 @@ namespace curvy {
             board.height = 300.0;
             document_.addArtboard(board);
             model_->say("New artboard at the pen");
-        }
-        else if (SketchTool optionsTool = SketchTool::Select; ToolOptionsCard::toolFromCommand(command, optionsTool)) {
-            showToolOptions(optionsTool, Point(at.x + 28.0f, at.y - 40.0f));
-        }
-        else if (command == "card.color" || command == "card.stroke") {
-            if (options_ != nullptr) {
-                options_->close();
-            }
-            if (dock_ != nullptr) {
-                Rect selected;
-                bool haveSelected = false;
-                for (std::size_t id : document_.selection()) {
-                    if (const SketchObject* object = document_.findById(id)) {
-                        const BLBox box = object->bounds();
-                        const BLPoint a = canvas_->toView(BLPoint(box.x0, box.y0)), b = canvas_->toView(BLPoint(box.x1, box.y1));
-                        const Rect one(float(std::min(a.x, b.x)), float(std::min(a.y, b.y)), float(std::abs(b.x - a.x)), float(std::abs(b.y - a.y)));
-                        selected = haveSelected ? selected.united(one) : one;
-                        haveSelected = true;
-                    }
-                }
-                dock_->showCard(command == "card.color" ? DockController::Card::Fill : DockController::Card::Stroke, at, haveSelected ? &selected : nullptr);
-                if (command == "card.color" && dock_->stylePanel() != nullptr) {
-                    // An open path has nothing to fill, so its colour is the stroke's.
-                    const SketchObject* shape = document_.selection().empty() ? nullptr : document_.findById(document_.selection().front());
-                    const bool strokeOnly = shape != nullptr && (shape->fill().isNone() || !shape->isClosed());
-                    dock_->stylePanel()->setTarget(strokeOnly ? StylePanel::Target::Stroke : StylePanel::Target::Fill);
-                }
-                model_->used("appearance");
-            }
-        }
-        else if (command == "dialog.new") { files_->newDocument(); }
-        else if (command == "dialog.settings") { openSettings(); }
-        else if (command == "dialog.setup") { commands_->run("file.documentSetup"); }
-        else if (command.compare(0, 7, "dialog.") == 0) { model_->say("The " + command.substr(7) + " dialog is not built yet"); }
-        else if (commands_->has(command)) {
-            if (command == "edit.duplicate") { model_->used("duplicate"); }
-            if (command == "edit.delete") { model_->used("delete"); }
-            commands_->run(command);
-        }
-        else { model_->say("(" + command + " is not wired yet)"); }
+        };
+        handlers_["card.color"] = [this](const Point& at) { showAppearanceCard(true, at); };
+        handlers_["card.stroke"] = [this](const Point& at) { showAppearanceCard(false, at); };
+
+        handlers_["dialog.new"] = [this](const Point&) { files_->newDocument(); };
+        handlers_["dialog.settings"] = [this](const Point&) { openSettings(); };
+        handlers_["dialog.setup"] = [this](const Point&) { commands_->run("file.documentSetup"); };
+
+        handlers_["edit.duplicate"] = [this](const Point&) { model_->used("duplicate"); commands_->run("edit.duplicate"); };
+        handlers_["edit.delete"] = [this](const Point&) { model_->used("delete"); commands_->run("edit.delete"); };
     }
 
     // ---- Document state ----

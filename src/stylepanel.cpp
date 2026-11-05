@@ -336,6 +336,20 @@ namespace curvy {
             };
         }
 
+        if (auto* toggle = find<Toggle>("evenOddToggle")) {
+            toggle->onCheckedChanged += [this](Toggle& changed) {
+                if (updating_) {
+                    return SyncReturn::Ignored;
+                }
+                bool evenOdd = changed.isChecked();
+                if (!document_.selection().empty()) {
+                    edit(evenOdd ? "Even-Odd Fill" : "Non-Zero Fill", [this, evenOdd]() { document_.setSelectionFillEvenOdd(evenOdd); }, []() {});
+                }
+                refresh();
+                return SyncReturn::Handled;
+            };
+        }
+
         // Dashes: the toggle turns the pattern on (from the four fields, 12/6 when blank); editing a field re-applies it.
         if (auto* toggle = find<Toggle>("dashedToggle")) {
             toggle->onCheckedChanged += [this](Toggle&) {
@@ -1335,6 +1349,15 @@ namespace curvy {
         setChecked("fillLinearButton", paint.kind() == SketchPaint::Kind::Linear);
         setChecked("fillRadialButton", paint.kind() == SketchPaint::Kind::Radial);
         setChecked("fillPointsButton", paint.isPoints());
+
+        if (auto* toggle = find<Toggle>("evenOddToggle")) {
+            const SketchObject* selected = document_.selection().empty() ? nullptr : document_.findById(document_.selection().front());
+            bool evenOdd = selected != nullptr && selected->fillEvenOdd();
+            if (toggle->isChecked() != evenOdd) {
+                toggle->setChecked(evenOdd);
+            }
+            toggle->setEnabled(selected != nullptr && target_ == Target::Fill);
+        }
 
         if (auto* mode = find<SegmentedControl>("colorModeControl")) {
             std::size_t index = modeIndex(shown.space());

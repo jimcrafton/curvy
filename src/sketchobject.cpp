@@ -2019,6 +2019,7 @@ namespace curvy {
         if (item.kind == AppearanceKind::Fill) {
             if (isClosed() && setPaintStyle(ctx, item.paint, frame, false)) {
                 ctx.set_global_alpha(item.opacity);
+                ctx.set_fill_rule(item.evenOdd ? BL_FILL_RULE_EVEN_ODD : BL_FILL_RULE_NON_ZERO);
                 ctx.fill_path(shown);
             }
         } else {

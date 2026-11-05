@@ -869,6 +869,7 @@ namespace curvy {
         void setSelectionItemOpacity(AppearanceKind kind, double opacity);
         void setSelectionItemBlendMode(AppearanceKind kind, BlendMode mode);
         void setSelectionItemVisible(AppearanceKind kind, bool visible);
+        void setSelectionFillEvenOdd(bool evenOdd);
         // Each of these is one undo step and returns false when nothing changed.
         // A new fill / stroke on top of the stack (from the document's default paints), which becomes the active one.
         bool addAppearanceItem(AppearanceKind kind);

@@ -1015,7 +1015,7 @@ namespace curvy {
             style.props.erase("display");
             style.props.erase("mix-blend-mode");
             static const char* kKeys[] = {
-                "fill", "fill-opacity", "stroke", "stroke-width", "stroke-opacity", "opacity", "display",
+                "fill", "fill-rule", "fill-opacity", "stroke", "stroke-width", "stroke-opacity", "opacity", "display",
                 "stroke-linecap", "stroke-linejoin", "stroke-miterlimit", "stroke-dasharray", "data-width-profile", "data-brush", "data-stroke-align", "data-arrows",
                 "data-fill-color", "data-stroke-color", "data-fill-pattern", "data-stroke-pattern",
                 "data-fill-points", "data-stroke-points",
@@ -1649,6 +1649,8 @@ namespace curvy {
                         std::max(0.0, number(cs.get("stroke-width"), 1.0) * scale), readStrokeOptions(cs, scale));
                 } else {
                     item = AppearanceItem::makeFill(readPaint(ctx, cs, "fill", box));
+                    const std::string* rule = cs.get("fill-rule");
+                    item.evenOdd = rule != nullptr && trim(*rule) == "evenodd";
                 }
                 item.opacity = std::min(1.0, std::max(0.0, number(cs.get("opacity"), 1.0)));
                 if (const std::string* blend = cs.get("mix-blend-mode")) {
@@ -2098,6 +2100,9 @@ namespace curvy {
             BLBox box = object->geometryBounds();
 
             object->setFill(readPaint(ctx, style, "fill", box));
+            if (const std::string* rule = style.get("fill-rule")) {
+                object->setFillEvenOdd(trim(*rule) == "evenodd");
+            }
             object->setStroke(readPaint(ctx, style, "stroke", box));
             double strokeWidth = number(style.get("stroke-width"), 1.0);
             // A scaling transform scales the stroke too.
@@ -2282,6 +2287,9 @@ namespace curvy {
                                  << strokeAttrs(item.paint, item.strokeWidth, item.strokeOptions);
                         } else {
                             body << paintAttrs("fill", object.isClosed() ? item.paint : SketchPaint::none(), box, defs, gradientCount, object.paintToPage()) << " stroke=\"none\"";
+                            if (item.evenOdd) {
+                                body << " fill-rule=\"evenodd\"";
+                            }
                         }
                         if (item.opacity < 1.0) {
                             body << " opacity=\"" << num(item.opacity) << "\"";
@@ -2314,6 +2322,9 @@ namespace curvy {
             body << paintMatrixAttr(object) << paintWarpAttr(object);
             SketchPaint fill = object.isClosed() ? object.fill() : SketchPaint::none();
             body << paintAttrs("fill", fill, box, defs, gradientCount, object.paintToPage());
+            if (object.fillEvenOdd()) {
+                body << " fill-rule=\"evenodd\"";
+            }
             body << paintAttrs("stroke", object.stroke(), box, defs, gradientCount, object.paintToPage());
             body << strokeAttrs(object.stroke(), object.strokeWidth(), object.strokeOptions());
             if (object.opacity() < 1.0) {

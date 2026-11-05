@@ -42,10 +42,10 @@ namespace curvy {
             Rgb mixed(const SketchColor& color) const;
             void setColor(std::string& out, const SketchColor& color);
             void pathOps(std::string& out, const BLPath& path);
-            void gradientFill(std::string& out, const SketchPaint& paint, const BLPath& path, const BLBox& box);
+            void gradientFill(std::string& out, const SketchPaint& paint, const BLPath& path, const BLBox& box, bool evenOdd = false);
             // Selects `paint` for a solid area; false for the paints that need more than a color (gradient, pattern) or paint nothing.
             bool solidPaint(std::string& out, const SketchPaint& paint, double opacity);
-            std::string fillPath(const BLPath& path, const SketchPaint& paint, double opacity);
+            std::string fillPath(const BLPath& path, const SketchPaint& paint, double opacity, bool evenOdd = false);
             std::string drawBrush(const SketchObject& object, const AppearanceItem& item, std::size_t index);
             std::string drawParts(const std::vector<BrushPart>& parts, double opacity);
             std::string drawItem(const SketchObject& object, std::size_t index);
@@ -137,7 +137,7 @@ namespace curvy {
         }
 
         // The gradient as bands: clip to the shape, then fill stripes (linear) or rings (radial) in the gradient's own space.
-        void Writer::gradientFill(std::string& out, const SketchPaint& paint, const BLPath& path, const BLBox& box) {
+        void Writer::gradientFill(std::string& out, const SketchPaint& paint, const BLPath& path, const BLBox& box, bool evenOdd) {
             const SketchGradient& gradient = paint.gradient();
             const bool radial = paint.kind() == SketchPaint::Kind::Radial;
             struct Stop { double at; SketchColor color; };
@@ -169,7 +169,7 @@ namespace curvy {
 
             out += "gsave\n";
             pathOps(out, path);
-            out += "clip newpath\n";
+            out += evenOdd ? "eoclip newpath\n" : "clip newpath\n";
             if (painting_ != nullptr) {
                 out += matrixText(painting_->paintToPage()) + " concat\n";
             }
@@ -203,7 +203,7 @@ namespace curvy {
             out += "grestore\n";
         }
 
-        std::string Writer::fillPath(const BLPath& path, const SketchPaint& paint, double opacity) {
+        std::string Writer::fillPath(const BLPath& path, const SketchPaint& paint, double opacity, bool evenOdd) {
             if (path.size() == 0 || paint.isNone()) {
                 return std::string();
             }
@@ -211,14 +211,14 @@ namespace curvy {
             if (paint.isGradient() && !paint.gradient().stops.empty()) {
                 BLBox box = painting_ != nullptr ? painting_->paintFrameBounds() : BLBox(0, 0, 0, 0);
                 if (painting_ == nullptr) { path.get_bounding_box(&box); }
-                gradientFill(out, paint, path, box);
+                gradientFill(out, paint, path, box, evenOdd);
                 return out + "grestore\n";
             }
             if (!solidPaint(out, paint, opacity)) {
                 return std::string();
             }
             pathOps(out, path);
-            return out + "fill\ngrestore\n";
+            return out + (evenOdd ? "eofill\ngrestore\n" : "fill\ngrestore\n");
         }
 
         std::string Writer::drawParts(const std::vector<BrushPart>& parts, double opacity) {
@@ -271,7 +271,7 @@ namespace curvy {
                         // A pattern fill: the average of its tile is not known here, so the shape is left to the picture fallback in drawObject.
                         out = std::string();
                     } else {
-                        out = fillPath(object.itemOutline(index), item.paint, item.opacity);
+                        out = fillPath(object.itemOutline(index), item.paint, item.opacity, item.evenOdd);
                     }
                 }
             } else if (item.kind == AppearanceKind::Stroke && !item.paint.isNone() && item.strokeWidth > 0.0) {

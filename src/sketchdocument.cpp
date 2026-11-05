@@ -1549,6 +1549,15 @@ namespace curvy {
         changed();
     }
 
+    void SketchDocument::setSelectionFillEvenOdd(bool evenOdd) {
+        for (std::size_t id : selection_) {
+            if (SketchObject* object = findById(id)) {
+                if (AppearanceItem* item = object->activeItemPtr(AppearanceKind::Fill)) { item->evenOdd = evenOdd; }
+            }
+        }
+        changed();
+    }
+
     bool SketchDocument::addAppearanceItem(AppearanceKind kind) {
         std::vector<StyleState> before = snapshotStyle();
         if (before.empty()) {

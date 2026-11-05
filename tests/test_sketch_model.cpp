@@ -1500,6 +1500,13 @@ TEST(SketchAppearance, ActiveItemEditsAddDuplicateDeleteMoveAndClear) {
     doc.undoStack().undo();
     EXPECT_TRUE(object->activeItem(AppearanceKind::Stroke).visible);
 
+    auto beforeRule = doc.snapshotStyle();
+    doc.setSelectionFillEvenOdd(true);
+    EXPECT_TRUE(doc.commitStyle(beforeRule, "Even-Odd Fill"));
+    EXPECT_TRUE(object->fillEvenOdd());
+    doc.undoStack().undo();
+    EXPECT_FALSE(object->fillEvenOdd());
+
     // Deleting walks back to a neighbour; the last item of a kind turns None instead of vanishing.
     std::size_t before_count = object->appearance().size();
     while (object->appearance().size() > 2) {
@@ -9703,6 +9710,97 @@ TEST(SketchPdfImport, HandWrittenFilesAndFormsAreRead) {
     EXPECT_NEAR(box.y1 - box.y0, 10.0, 0.01);
     EXPECT_EQ(doc.object(0).fill().color().toRgba32().value, 0xFFFF0000u);
     EXPECT_EQ(doc.object(1).strokeOptions().dashes.size(), 2u);
+}
+
+namespace {
+    std::string handWrittenPdf(const std::string& pageExtras, const std::string& content, const std::string& extraObjects = std::string()) {
+        return "%PDF-1.4\n"
+               "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+               "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 100 100] >> endobj\n"
+               "3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R " + pageExtras + " >> endobj\n"
+               "4 0 obj << /Length " + std::to_string(content.size()) + " >>\nstream\n" + content + "\nendstream\nendobj\n" + extraObjects +
+               "trailer << /Root 1 0 R >>\n%%EOF\n";
+    }
+}
+
+TEST(SketchPdfImport, AClipBecomesAClippingGroupWhoseTopMemberIsTheMask) {
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf("", "0 0 1 rg 20 20 30 30 re W n 0 0 100 100 re f"), doc));
+    ASSERT_EQ(doc.objectCount(), 2u);
+    ASSERT_EQ(doc.object(0).groups().size(), 1u);
+    const std::size_t group = doc.object(0).groups().front();
+    EXPECT_TRUE(doc.groupProps(group).clip);
+    EXPECT_EQ(doc.clipMaskOf(group), &doc.object(1));
+    const BLBox mask = doc.object(1).geometryBounds();
+    EXPECT_NEAR(mask.x1 - mask.x0, 30.0, 0.01);
+
+    SketchDocument whole;   // a clip to the page itself changes nothing and adds nothing
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf("", "0 0 100 100 re W n 0 0 10 10 re f"), whole));
+    ASSERT_EQ(whole.objectCount(), 1u);
+    EXPECT_TRUE(whole.object(0).groups().empty());
+}
+
+TEST(SketchPdfImport, EvenOddFillsKeepTheirRuleThroughSvgAndPdf) {
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf("", "0 0 100 100 re 25 25 50 50 re f* 0 0 10 10 re f 0 0 20 20 re 5 5 10 10 re B*"), doc));
+    ASSERT_EQ(doc.objectCount(), 3u);
+    EXPECT_TRUE(doc.object(0).fillEvenOdd());
+    EXPECT_FALSE(doc.object(1).fillEvenOdd());
+    EXPECT_TRUE(doc.object(2).fillEvenOdd());
+
+    SketchDocument viaSvg;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), viaSvg));
+    ASSERT_EQ(viaSvg.objectCount(), 3u);
+    EXPECT_TRUE(viaSvg.object(0).fillEvenOdd());
+    EXPECT_FALSE(viaSvg.object(1).fillEvenOdd());
+
+    SketchDocument viaPdf;
+    ASSERT_TRUE(documentFromPdf(pdfFromDocument(doc), viaPdf));
+    std::size_t evenOddCount = 0;
+    for (std::size_t i = 0; i < viaPdf.objectCount(); ++i) {
+        evenOddCount += viaPdf.object(i).fillEvenOdd() ? 1 : 0;
+    }
+    EXPECT_EQ(evenOddCount, 2u);
+}
+
+TEST(SketchPdfImport, ClipsNestAndEndWithTheirSavedState) {
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf("", "q 10 10 80 80 re W n q 20 20 50 50 re W n 0 0 100 100 re f Q 0 0 5 5 re f Q 0 0 6 6 re f"), doc));
+    ASSERT_EQ(doc.objectCount(), 5u);   // inner fill, inner mask, second fill, outer mask, a fill outside every clip
+    EXPECT_EQ(doc.object(0).groups().size(), 2u);
+    EXPECT_EQ(doc.object(2).groups().size(), 1u);
+    EXPECT_TRUE(doc.object(4).groups().empty());
+    EXPECT_TRUE(doc.groupProps(doc.object(0).groups()[1]).clip);
+    EXPECT_EQ(doc.clipMaskOf(doc.object(0).groups()[0]), &doc.object(3));
+}
+
+TEST(SketchPdfImport, AShadingFillIsAGradientOverTheClip) {
+    const std::string shading = "/Resources << /Shading << /S1 << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 100 0] "
+                                "/Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> >> >>";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf(shading, "q 10 10 50 50 re W n /S1 sh Q"), doc));
+    ASSERT_EQ(doc.objectCount(), 2u);
+    ASSERT_TRUE(doc.object(0).fill().isGradient());
+    EXPECT_GE(doc.object(0).fill().gradient().stops.size(), 2u);
+    EXPECT_TRUE(doc.groupProps(doc.object(0).groups().front()).clip);
+}
+
+TEST(SketchPdfImport, ALuminositySoftMaskHidesWhatItsGroupPaintsBlack) {
+    const std::string mask = "/Type /XObject /Subtype /Form /BBox [0 0 100 100] /Length ";
+    const std::string maskContent = "1 g 0 0 50 100 re f";
+    const std::string objects = "5 0 obj << /Type /ExtGState /SMask << /S /Luminosity /G 6 0 R >> >> endobj\n"
+                                "6 0 obj << " + mask + std::to_string(maskContent.size()) + " >>\nstream\n" + maskContent + "\nendstream\nendobj\n";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf("/Resources << /ExtGState << /GS 5 0 R >> >>", "/GS gs 1 0 0 rg 0 0 100 100 re f", objects), doc));
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_EQ(doc.object(0).type(), SketchObjectType::Image);
+    BLImage image;
+    ASSERT_TRUE(renderPageImage(doc, 1.0, image));
+    BLImageData data;
+    ASSERT_EQ(image.get_data(&data), BL_SUCCESS);
+    auto pixel = [&](int x, int y) { return reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + std::ptrdiff_t(y) * data.stride)[x]; };
+    EXPECT_EQ(pixel(25, 50), 0xFFFF0000u);   // inside the white half: the red fill shows
+    EXPECT_EQ(pixel(75, 50), 0xFFFFFFFFu);   // inside the black half: only the white page
 }
 
 TEST(SketchPdfImport, NotAPdfLeavesTheDocumentAlone) {
