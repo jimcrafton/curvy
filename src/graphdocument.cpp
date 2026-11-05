@@ -56,7 +56,16 @@ namespace curvy {
     }
 
     jitnodes::Network* GraphDocument::findNetwork(std::uint32_t scope) {
-        return const_cast<jitnodes::Network*>(static_cast<const GraphDocument*>(this)->findNetwork(scope));
+        jitnodes::Network* net = const_cast<jitnodes::Network*>(static_cast<const GraphDocument*>(this)->findNetwork(scope));
+        // A subnet normally takes its time from its node's cook, which an object's own cook inside the subnet (a layer or group) never goes
+        // through. The parent is not told: the root already marks the subnet nodes that depend on the time when its own time moves.
+        if (net != nullptr && net != network_.get() && (net->time() != network_->time() || net->fps() != network_->fps())) {
+            const bool notify = net->setPropagateToParent(false);
+            net->setFps(network_->fps());
+            net->setTime(network_->time());
+            net->setPropagateToParent(notify);
+        }
+        return net;
     }
 
     jitnodes::Network& GraphDocument::networkOf(std::uint32_t scope) {

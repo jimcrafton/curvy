@@ -139,7 +139,7 @@ set(CURVY_MODEL_SOURCES
 list(TRANSFORM CURVY_MODEL_SOURCES PREPEND src/)
 list(TRANSFORM CURVY_MODEL_SOURCES APPEND .cpp)
 
-add_executable(curvyTests tests/test_sketch_model.cpp ${CURVY_MODEL_SOURCES})
+add_executable(curvyTests tests/test_sketch_model.cpp tests/sampleart.cpp ${CURVY_MODEL_SOURCES})
 target_include_directories(curvyTests PRIVATE include)
 target_link_libraries(curvyTests PRIVATE newui jitnodes::jitnodes zlib_static windowscodecs ole32 GTest::gtest_main)
 include(GoogleTest)
