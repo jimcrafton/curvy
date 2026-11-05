@@ -1,0 +1,35 @@
+// Oil paint: a loaded flat brush. Input 0 is the guide (the pen path, with the pen pressure in `w`), the output is dots (radius, Cd, alpha, softness).
+// A brush asset promotes referenceWidth (the stroke width the dots were tuned for) and guideLength (set by the host on every cook).
+{
+  format: "jitnodes-asset",
+  version: 1,
+  assetVersion: 1,
+  type: "brush_oil",
+  inputs: 1,
+  promote: { referenceWidth: 1.7, guideLength: 14, guideStart: 0, strokeLength: 0, bristles: 34, dryStart: 50, dryRange: 30 },
+  graph: {
+    fps: 24,
+    display: 7,
+    nodes: [
+      { id: 1, type: "subnetInput", name: "guide", floats: { index: 0 }, inputs: [] },
+      { id: 2, type: "resample", name: "even", floats: { spacing: 0.045 }, inputs: [1] },
+      { id: 3, type: "smooth", name: "clean", floats: { iterations: 4, strength: 0.5, preserve: 1 }, inputs: [2] },
+      {
+        id: 4, type: "ribbon", name: "brush", floats: { width: 1.7, widthEnd: 1.7 }, strings: { widthAttrib: "w", output: "rungs" },
+        expressions: { width: "parent.referenceWidth", widthEnd: "parent.referenceWidth" },
+        inputs: [3]
+      },
+      { id: 5, type: "wrangle", name: "keepAlong", strings: { code: "along = (b + u * a) / max(1, c / d);" },
+        expressions: { a: "parent.guideLength", b: "parent.guideStart", c: "parent.strokeLength", d: "parent.dryStart + parent.dryRange" }, inputs: [4] },
+      { id: 6, type: "curveSample", name: "bristles", floats: { count: 0, spacing: 0.04 }, inputs: [5] },
+      {
+        id: 7, type: "wrangle", name: "paint",
+        strings: {
+          code: "k = floor(u * b); h = sin(k * 12.9898 + 78.233) * 43758.5453; h = h - floor(h); g = sin(k * 39.346 + 11.135) * 24634.6345; g = g - floor(g); t = clamp(h * 0.8 + 0.2 * sin(along * 0.786 + g * 6.28), 0, 1); e = abs(u - 0.5) * 2; e = e * e * e; t = clamp(t + e * 0.35, 0, 1); Cd.x = lerp(0.42, 0.98, t); Cd.y = lerp(0.07, 0.62, t * t); Cd.z = lerp(0.1, 0.3, t * t); cr = h > 0.88 ? 0.75 : 0; Cd.x = lerp(Cd.x, 0.98, cr); Cd.y = lerp(Cd.y, 0.88, cr); Cd.z = lerp(Cd.z, 0.62, cr); radius = 0.05; softness = 0.3; alpha = along < c + d * g ? 1 : 0;"
+        },
+        expressions: { b: "parent.bristles", c: "parent.dryStart", d: "parent.dryRange" },
+        inputs: [6]
+      }
+    ]
+  }
+}

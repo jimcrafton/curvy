@@ -1,5 +1,6 @@
 #include "curvy/brushlist.h"
 
+#include "curvy/graphbrush.h"
 #include "curvy/sketchobject.h"
 #include "curvy/theme.h"
 
@@ -185,6 +186,7 @@ namespace curvy {
             weight = std::min(1.0, (height - 6.0) / std::max(brush->reach(1.0) * 2.0, 1e-6));
         }
         sample->setStrokeWidth(weight);
+        const GraphBrushBlockingScope waitForBrushes;   // the tile is cached, so it must not keep the hairline of a cook still queued
         sample->paint(ctx);
         ctx.end();
         return thumbnails_.emplace(key, std::move(image)).first->second;

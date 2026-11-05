@@ -146,11 +146,6 @@ newui_add_reflectgen_output(curvy
 
 newui_add_resources(curvy "${CMAKE_CURRENT_SOURCE_DIR}/Resources")
 
-# Graph brushes (jitnodes assets) are read at run time from Assets/brushes next to the exe, so a brush can be added or edited without a rebuild.
-add_custom_command(TARGET curvy POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/assets/brushes" "$<TARGET_FILE_DIR:curvy>/Assets/brushes"
-    COMMENT "Copying brush assets for curvy")
-
 # Headless tests of the model layer (color, objects, document, file formats).
 set(CURVY_MODEL_SOURCES
     sketchcolor sketchobject sketchdocument documentcutting documentpaths documenttransform documentguides
@@ -163,7 +158,7 @@ list(TRANSFORM CURVY_MODEL_SOURCES APPEND .cpp)
 
 add_executable(curvyTests tests/test_sketch_model.cpp ${CURVY_MODEL_SOURCES})
 target_include_directories(curvyTests PRIVATE include)
-target_compile_definitions(curvyTests PRIVATE CURVY_BRUSH_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets/brushes")
+target_compile_definitions(curvyTests PRIVATE CURVY_BRUSH_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Resources/brushes")
 if(MSVC)
     # test_sketch_model.cpp has grown past the default limit of sections per object file.
     target_compile_options(curvyTests PRIVATE /bigobj)

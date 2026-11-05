@@ -22,7 +22,26 @@ namespace curvy {
 
     using namespace newui;
 
+    namespace {
+        std::vector<CanvasView*>& canvases() {
+            static std::vector<CanvasView*> all;
+            return all;
+        }
+    }
+
+    CanvasView::~CanvasView() {
+        auto& all = canvases();
+        all.erase(std::remove(all.begin(), all.end(), this), all.end());
+    }
+
+    void CanvasView::repaintAll() {
+        for (CanvasView* canvas : canvases()) {
+            canvas->style().markDirty();
+        }
+    }
+
     CanvasView::CanvasView() {
+        canvases().push_back(this);
         setName("CanvasView");
         setVisible(true);
         setAcceptsFocus(true);

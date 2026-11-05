@@ -33,7 +33,10 @@ namespace curvy {
     public:
         // Declared (not implicit) so reflectgen registers it - a .newui load builds one through it.
         CanvasView();
-        virtual ~CanvasView() {}
+        virtual ~CanvasView();
+
+        // Repaints every canvas (UI thread only): for when something drawn in the background, such as a graph brush stroke, is ready.
+        static void repaintAll();
 
         // Page size in document units (points). A US Letter portrait page by default.
         float pageWidth() const { return pageWidth_; }

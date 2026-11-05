@@ -24,6 +24,7 @@
 #include "newui/frame.h"
 #include "newui/rootview.h"
 
+#include "curvy/canvasview.h"
 #include "curvy/graphbrush.h"
 #include "curvy/newdocumentdialog.h"
 #include "curvy/tracedialog.h"
@@ -128,13 +129,18 @@ int main(int argc, char** argv) {
     }
 
     {
-        // The graph brushes are jitnodes assets next to the exe (CMake copies assets/brushes there); a bad file only costs that brush.
+        // The graph brushes are jitnodes assets in Resources/brushes; a bad file only costs that brush.
         std::vector<std::string> problems;
-        curvy::loadBrushAssets((std::filesystem::path(newui::Bundle::instance().executableDir()) / "Assets" / "brushes").string(), &problems);
+        curvy::loadBrushAssets((std::filesystem::path(newui::Bundle::instance().resourcesDir()) / "brushes").string(), &problems);
         for (const std::string& problem : problems) {
             std::printf("curvy: brush asset skipped: %s\n", problem.c_str());
         }
     }
+
+    // A graph brush stroke cooked in the background asks for a repaint when it is ready; the canvases are touched on the UI thread only.
+    curvy::setGraphBrushReadyHandler([] {
+        newui::Application::instance().runLoop().post([] { curvy::CanvasView::repaintAll(); });
+    });
 
     curvy::WorkspaceController::applyTheme(true);
     newui::Frame frame;

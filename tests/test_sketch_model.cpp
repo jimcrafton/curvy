@@ -35,7 +35,9 @@
 #include <jitnodes/geo/topology.h>
 
 #include <array>
+#include <atomic>
 #include <chrono>
+#include <thread>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -10064,16 +10066,22 @@ TEST(GraphBrushAssets, TheShippedBrushesLoadAndAreRecognisedAsBrushes) {
     std::vector<std::string> problems;
     const std::vector<curvy::GraphBrushInfo> brushes = curvy::loadBrushAssets(CURVY_BRUSH_ASSETS_DIR, &problems);
     EXPECT_TRUE(problems.empty());
-    ASSERT_EQ(brushes.size(), 3u);
-    EXPECT_EQ(brushes[0].type, "brush_ink");   // sorted by file name
-    EXPECT_EQ(brushes[1].type, "brush_leaves");
-    EXPECT_EQ(brushes[2].type, "brush_oil");
-    EXPECT_NEAR(brushes[0].referenceWidth, 1.3, 1e-6);
-    EXPECT_NEAR(brushes[1].referenceWidth, 1.6, 1e-6);
-    EXPECT_NEAR(brushes[2].referenceWidth, 1.7, 1e-6);
+    ASSERT_EQ(brushes.size(), 5u);
+    EXPECT_EQ(brushes[0].type, "brush_gas");   // sorted by file name
+    EXPECT_EQ(brushes[1].type, "brush_ink");
+    EXPECT_EQ(brushes[2].type, "brush_leaves");
+    EXPECT_EQ(brushes[3].type, "brush_light");
+    EXPECT_EQ(brushes[4].type, "brush_oil");
+    EXPECT_TRUE(brushes[0].simulation);
+    EXPECT_NEAR(brushes[0].settleTime, 2.5, 1e-6);
+    EXPECT_TRUE(brushes[3].simulation);
+    EXPECT_FALSE(brushes[1].simulation);
+    EXPECT_NEAR(brushes[1].referenceWidth, 1.3, 1e-6);
+    EXPECT_NEAR(brushes[2].referenceWidth, 1.6, 1e-6);
+    EXPECT_NEAR(brushes[4].referenceWidth, 1.7, 1e-6);
     ASSERT_NE(curvy::findGraphBrush("brush_oil"), nullptr);
     EXPECT_EQ(curvy::findGraphBrush("wobbleAsset"), nullptr);
-    EXPECT_EQ(curvy::graphBrushes().size(), 3u);
+    EXPECT_EQ(curvy::graphBrushes().size(), 5u);
 }
 
 TEST(GraphBrushAssets, AFolderWithPlainAssetsAndBrokenFilesGivesOnlyTheBrushes) {
@@ -10243,6 +10251,99 @@ TEST(GraphBrushAssets, ALongCurvedStrokeIsPaintedAllTheWayToItsEnd) {
     }
 }
 
+TEST(GraphBrushAssets, ALongStrokeIsCookedInChunksThatJoinUp) {
+    BrushAssetsGuard guard;
+    // At weight 4 a 600 long line is many chunks; the oil brush's dryness depends on the distance travelled, so the chunks must carry it on:
+    // the dots near the start are all there and the far end has fewer, not a fresh full load at every chunk.
+    BLPath line;
+    line.move_to(10, 10);
+    line.line_to(610, 10);
+    const auto cooked = curvy::cookGraphBrush("brush_oil", line, 4.0, {});
+    ASSERT_TRUE(cooked);
+    std::size_t first = 0, last = 0;
+    for (const curvy::GraphDot& dot : cooked.shapes->dots) {
+        const double x = dot.x + cooked.origin.x;
+        first += x < 110.0 ? 1 : 0;
+        last += x > 510.0 ? 1 : 0;
+    }
+    EXPECT_GT(first, 0u);
+    EXPECT_GT(first, last * 2);
+}
+
+TEST(GraphBrushAssets, AStrokeLongerThanThePaintLoadIsPaintedToItsEnd) {
+    BrushAssetsGuard guard;
+    // 900 long at weight 10: far more than the oil and ink loads at that weight, yet the stroke must reach nearly to its end.
+    BLPath line;
+    line.move_to(10, 10);
+    line.line_to(910, 10);
+    for (const char* type : {"brush_oil", "brush_ink"}) {
+        SCOPED_TRACE(type);
+        const auto cooked = curvy::cookGraphBrush(type, line, 10.0, {});
+        ASSERT_TRUE(cooked);
+        double endX = -1e9;
+        for (const curvy::GraphDot& dot : cooked.shapes->dots) {
+            endX = std::max(endX, dot.x + cooked.origin.x);
+        }
+        EXPECT_GT(endX, 760.0);
+    }
+}
+
+TEST(GraphBrushAssets, ASimulationBrushIsSettledOverTheWholeStrokeInOneCook) {
+    BrushAssetsGuard guard;
+    BLPath curve;
+    curve.move_to(20, 120);
+    curve.cubic_to(80, 20, 160, 220, 260, 100);
+    for (const char* type : {"brush_gas", "brush_light"}) {
+        SCOPED_TRACE(type);
+        const auto start = std::chrono::steady_clock::now();
+        const auto cooked = curvy::cookGraphBrush(type, curve, 6.0, {});
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        ASSERT_TRUE(cooked);
+        std::printf("%s: %zu dots in %.0f ms\n", type, cooked.shapes->dots.size(), ms);
+        EXPECT_GT(cooked.shapes->dots.size(), 500u);
+        // the paint stays around the stroke: it reaches the far end of the guide
+        EXPECT_GT(cooked.shapes->bounds.x1 + cooked.origin.x, 200.0);
+        if (const char* dir = std::getenv("CURVY_DUMP_DIR")) {   // look at it: set the folder and open <brush>.png
+            BLImage image(340, 300, BL_FORMAT_PRGB32);
+            BLContext ctx(image);
+            ctx.fill_all(BLRgba32(0xFFFFFFFFu));
+            curvy::paintGraphBrush(ctx, cooked);
+            ctx.end();
+            image.write_to_file((std::string(dir) + "/" + type + ".png").c_str());
+        }
+    }
+}
+
+TEST(GraphBrushAssets, ABackgroundCookIsQueuedThenFoundInTheCache) {
+    BrushAssetsGuard guard;
+    std::atomic<int> ready{0};
+    curvy::setGraphBrushReadyHandler([&ready] { ++ready; });
+    BLPath line;
+    line.move_to(10, 10);
+    line.line_to(410, 40);
+    bool pending = false;
+    auto cooked = curvy::cookGraphBrushLater("brush_ink", line, 5.0, {}, &pending);
+    EXPECT_FALSE(cooked);
+    EXPECT_TRUE(pending);
+    for (int i = 0; i < 1000 && ready.load() == 0; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_EQ(ready.load(), 1);
+    cooked = curvy::cookGraphBrushLater("brush_ink", line, 5.0, {}, &pending);
+    EXPECT_TRUE(cooked);
+    EXPECT_FALSE(pending);
+    // painting for a saved image waits instead of queueing
+    BLPath other;
+    other.move_to(10, 10);
+    other.line_to(300, 90);
+    {
+        const curvy::GraphBrushBlockingScope waitForBrushes;
+        EXPECT_TRUE(curvy::cookGraphBrushLater("brush_ink", other, 5.0, {}, &pending));
+        EXPECT_FALSE(pending);
+    }
+    curvy::setGraphBrushReadyHandler(nullptr);
+}
+
 TEST(GraphBrushAssets, PenPressureNarrowsTheCookedStroke) {
     BrushAssetsGuard guard;
     BLPath line;
@@ -10281,7 +10382,7 @@ TEST(GraphBrushAssets, AStrokeWithAGraphBrushPaintsAndSurvivesTheFileFormat) {
             EXPECT_EQ(entry->graphType.rfind("brush_", 0), 0u);
         }
     }
-    EXPECT_EQ(graphBrushes, 3u);
+    EXPECT_EQ(graphBrushes, 5u);
     SketchDocument back;
     ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc, true), back));
     ASSERT_EQ(back.brushes().size(), doc.brushes().size());

@@ -1693,8 +1693,9 @@ namespace curvy {
             auto draw = [&](BLContext& target) {
                 target.set_global_alpha(1.0);
                 if (brush.kind == BrushKind::Graph) {
-                    // Dots and polygons come out of the asset already coloured; a missing asset leaves a hairline so the stroke is not lost.
-                    if (const auto cooked = cookGraphBrush(brush.graphType, path, width, item.strokeOptions.widths)) {
+                    // Dots and polygons come out of the asset already coloured; a missing asset, or one still being cooked in the background,
+                    // leaves a hairline so the stroke is not lost.
+                    if (const auto cooked = cookGraphBrushLater(brush.graphType, path, width, item.strokeOptions.widths)) {
                         paintGraphBrush(target, cooked);   // from a cached image: a stroke has tens of thousands of dots
                     } else if (setPaintStyle(target, item.paint, frame, true)) {
                         target.set_stroke_width(1.0);
