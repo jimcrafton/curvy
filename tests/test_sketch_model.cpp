@@ -9,6 +9,8 @@
 #include "curvy/pdfexport.h"
 #include "curvy/epsexport.h"
 #include "curvy/pdfimport.h"
+#include "curvy/fontprogram.h"
+#include "curvy/pdfcrypt.h"
 #include "curvy/gzip.h"
 #include "curvy/sketchsvg.h"
 #include "curvy/gzip.h"
@@ -9723,6 +9725,41 @@ namespace {
     }
 }
 
+TEST(SketchPdfImport, ABlendModeFromAGraphicsStateIsKeptUntilItIsReset) {
+    const std::string pdf = handWrittenPdf("/Resources << /ExtGState << /M << /BM /Multiply /ca 0.5 >> /N << /BM [/Normal] >> >> >>",
+                                           "/M gs 1 0 0 rg 0 0 10 10 re f /N gs 0 0 1 rg 20 0 10 10 re f");
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(pdf, doc));
+    ASSERT_EQ(doc.objectCount(), 2u);
+    EXPECT_EQ(doc.object(0).blendMode(), BlendMode::Multiply);
+    EXPECT_EQ(doc.object(1).blendMode(), BlendMode::Normal);
+}
+
+TEST(SketchPdfImport, AnImageDrawnUnderAnAlphaKeepsThatOpacity) {
+    const std::string pdf = handWrittenPdf("/Resources << /ExtGState << /A << /ca 0.25 >> >> /XObject << /I 5 0 R >> >>",
+                                           "/A gs 10 0 0 10 0 0 cm /I Do",
+                                           "5 0 obj << /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\nx\nendstream\nendobj\n");
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(pdf, doc));
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_NEAR(doc.object(0).opacity(), 0.25, 1e-6);
+}
+
+TEST(SketchPdfImport, ATransparencyGroupFormCarriesTheOpacityAndBlendModeItWasDrawnWith) {
+    const std::string pdf = handWrittenPdf("/Resources << /ExtGState << /A << /ca 0.25 /BM /Multiply >> >> /XObject << /F 5 0 R >> >>",
+                                           "/A gs /F Do",
+                                           "5 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 100 100] /Group << /S /Transparency >> /Resources << /ExtGState << /B << /ca 1 /BM /Normal >> >> >> /Length 38 >>\n"
+                                           "stream\n/B gs 1 0 0 rg 0 0 10 10 re f\nendstream\nendobj\n");
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(pdf, doc));
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_EQ(doc.object(0).blendMode(), BlendMode::Normal);
+    ASSERT_EQ(doc.object(0).groups().size(), 1u);
+    const GroupProps props = doc.groupProps(doc.object(0).groups()[0]);
+    EXPECT_NEAR(props.opacity, 0.25, 1e-6);
+    EXPECT_EQ(props.blendMode, BlendMode::Multiply);
+}
+
 TEST(SketchPdfImport, AClipBecomesAClippingGroupWhoseTopMemberIsTheMask) {
     SketchDocument doc;
     ASSERT_TRUE(documentFromPdf(handWrittenPdf("", "0 0 1 rg 20 20 30 30 re W n 0 0 100 100 re f"), doc));
@@ -9738,6 +9775,268 @@ TEST(SketchPdfImport, AClipBecomesAClippingGroupWhoseTopMemberIsTheMask) {
     ASSERT_TRUE(documentFromPdf(handWrittenPdf("", "0 0 100 100 re W n 0 0 10 10 re f"), whole));
     ASSERT_EQ(whole.objectCount(), 1u);
     EXPECT_TRUE(whole.object(0).groups().empty());
+}
+
+TEST(SketchPdfImport, TextBecomesLiveTextObjectsInTheNamedFamily) {
+    const std::string fonts = "/Resources << /Font << /F1 5 0 R >> >>";
+    const std::string font = "5 0 obj << /Type /Font /Subtype /TrueType /BaseFont /ABCDEF+Arial-BoldMT /FirstChar 32 /LastChar 32 /Widths [278] >> endobj\n";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf(fonts, "1 0 0 rg BT /F1 20 Tf 10 50 Td (Hello) Tj 0 -30 Td [(a) -500 (b) 100 (c)] TJ ET", font), doc));
+    ASSERT_EQ(doc.objectCount(), 2u);
+    const SketchObject& hello = doc.object(0);
+    ASSERT_TRUE(hello.isText());
+    EXPECT_EQ(hello.text(), "Hello");
+    EXPECT_EQ(hello.fontName(), "Arial");
+    EXPECT_TRUE(hello.textStyle().bold);
+    EXPECT_FALSE(hello.textStyle().italic);
+    EXPECT_NEAR(hello.fontSize(), 20.0, 0.01);
+    EXPECT_NEAR(hello.textMatrix().m20, 10.0, 0.01);   // the baseline: 50 up from the bottom of a 100 high page
+    EXPECT_NEAR(hello.textMatrix().m21, 50.0, 0.01);
+    EXPECT_EQ(hello.fill().color().toRgba32().value, 0xFFFF0000u);
+    EXPECT_EQ(doc.object(1).text(), "a bc");   // a kern of half an em is a space; a small one is not
+    EXPECT_NEAR(doc.object(1).textMatrix().m21, 80.0, 0.01);
+}
+
+namespace {
+    void be16(std::string& s, unsigned v) { s += char((v >> 8) & 255); s += char(v & 255); }
+    void be32(std::string& s, unsigned v) { be16(s, v >> 16); be16(s, v & 0xFFFF); }
+
+    // A TrueType font of two glyphs: .notdef (empty) and a 500 x 700 box that 'A' maps to, on a 1000 unit em.
+    std::string tinyTrueType() {
+        std::string head(54, '\0');
+        head[18] = char(1000 >> 8); head[19] = char(1000 & 255);   // unitsPerEm; indexToLocFormat 0 (short)
+        std::string maxp(6, '\0');
+        maxp[5] = 2;
+        std::string glyf;
+        be16(glyf, 1); be16(glyf, 0); be16(glyf, 0); be16(glyf, 500); be16(glyf, 700);   // one contour and its box
+        be16(glyf, 3);                                                                   // last point of the contour
+        be16(glyf, 0);                                                                   // no instructions
+        for (int i = 0; i < 4; ++i) { glyf += char(1); }                                 // all on-curve, 16-bit deltas
+        for (int dx : {0, 500, 0, -500}) { be16(glyf, unsigned(dx) & 0xFFFF); }
+        for (int dy : {0, 0, 700, 0}) { be16(glyf, unsigned(dy) & 0xFFFF); }
+        std::string loca;
+        be16(loca, 0); be16(loca, 0); be16(loca, unsigned(glyf.size() / 2));
+        std::string cmap;
+        be16(cmap, 0); be16(cmap, 1); be16(cmap, 3); be16(cmap, 1); be32(cmap, 12);
+        be16(cmap, 4); be16(cmap, 32); be16(cmap, 0); be16(cmap, 4); be16(cmap, 4); be16(cmap, 1); be16(cmap, 0);
+        be16(cmap, 65); be16(cmap, 0xFFFF); be16(cmap, 0); be16(cmap, 65); be16(cmap, 0xFFFF);
+        be16(cmap, unsigned(1 - 65) & 0xFFFF); be16(cmap, 1); be16(cmap, 0); be16(cmap, 0);
+        const std::pair<const char*, std::string> tables[] = {{"cmap", cmap}, {"glyf", glyf}, {"head", head}, {"loca", loca}, {"maxp", maxp}};
+        std::string out;
+        be32(out, 0x00010000); be16(out, 5); be16(out, 64); be16(out, 2); be16(out, 16);
+        unsigned offset = 12 + 16 * 5;
+        for (const auto& t : tables) { out += t.first; be32(out, 0); be32(out, offset); be32(out, unsigned(t.second.size())); offset += unsigned(t.second.size()); }
+        for (const auto& t : tables) { out += t.second; }
+        return out;
+    }
+
+    // A CFF font of .notdef and a box glyph from (100,100) to (600,700), on a 1000 unit em.
+    std::string tinyCff() {
+        const std::string name("\x00\x01\x01\x01\x05Test", 9);
+        std::string top("\x00\x01\x01\x01\x07", 5);
+        const std::string strings("\x00\x00\x00\x00", 4);
+        const unsigned charStringsAt = 4 + unsigned(name.size()) + unsigned(top.size() + 6) + 4;
+        top += char(29); be32(top, charStringsAt); top += char(17);
+        const std::string empty = std::string("\x0E");
+        const std::string box = std::string("\xEF\xEF\x15\xF8\x88\x06\xF8\xEC\x07\xFC\x88\x06\x0E", 13);   // 100 100 rmoveto 500 hlineto 600 vlineto -500 hlineto endchar
+        std::string charStrings;
+        be16(charStrings, 2); charStrings += char(1); charStrings += char(1); charStrings += char(1 + int(empty.size())); charStrings += char(1 + int(empty.size() + box.size()));
+        charStrings += empty; charStrings += box;
+        return std::string("\x01\x00\x04\x01", 4) + name + top + strings + charStrings;
+    }
+
+    std::string embeddedFontPdf(const std::string& font) {
+        const std::string objects =
+            "5 0 obj << /Type /Font /Subtype /TrueType /BaseFont /TinyBox /FirstChar 65 /LastChar 65 /Widths [600] /FontDescriptor 6 0 R >> endobj\n"
+            "6 0 obj << /Type /FontDescriptor /FontName /TinyBox /Flags 32 /FontFile2 7 0 R >> endobj\n"
+            "7 0 obj << /Length " + std::to_string(font.size()) + " >>\nstream\n" + font + "\nendstream\nendobj\n";
+        return handWrittenPdf("/Resources << /Font << /F1 5 0 R >> >>", "BT /F1 100 Tf 10 10 Td (A) Tj ET", objects);
+    }
+}
+
+TEST(FontProgram, ReadsTrueTypeGlyfOutlinesAndTheCmap) {
+    const auto font = FontProgram::load(tinyTrueType());
+    ASSERT_TRUE(font);
+    EXPECT_EQ(font->glyphCount(), 2u);
+    EXPECT_EQ(font->glyphForUnicode('A'), 1u);
+    EXPECT_EQ(font->glyphForUnicode('B'), 0u);
+    BLPath path;
+    ASSERT_TRUE(font->outline(1, path));
+    BLBox box;
+    path.get_bounding_box(&box);
+    EXPECT_NEAR(box.x1, 0.5, 1e-6);
+    EXPECT_NEAR(box.y1, 0.7, 1e-6);   // em units, y up
+    EXPECT_NEAR(box.y0, 0.0, 1e-6);
+}
+
+TEST(FontProgram, ReadsBareCffCharstrings) {
+    const auto font = FontProgram::load(tinyCff());
+    ASSERT_TRUE(font);
+    EXPECT_EQ(font->glyphCount(), 2u);
+    EXPECT_EQ(font->glyphForCid(1), 1u);
+    BLPath path;
+    ASSERT_TRUE(font->outline(1, path));
+    BLBox box;
+    path.get_bounding_box(&box);
+    EXPECT_NEAR(box.x0, 0.1, 1e-6);
+    EXPECT_NEAR(box.x1, 0.6, 1e-6);
+    EXPECT_NEAR(box.y0, 0.1, 1e-6);
+    EXPECT_NEAR(box.y1, 0.7, 1e-6);
+    EXPECT_FALSE(FontProgram::load("not a font at all"));
+}
+
+namespace {
+    std::string hexOf(const std::string& bytes) {
+        static const char* digits = "0123456789abcdef";
+        std::string out;
+        for (unsigned char c : bytes) { out += digits[c >> 4]; out += digits[c & 15]; }
+        return out;
+    }
+    std::string bytesOfHex(const std::string& hex) {
+        std::string out;
+        for (std::size_t i = 0; i + 1 < hex.size(); i += 2) { out += char(std::stoi(hex.substr(i, 2), nullptr, 16)); }
+        return out;
+    }
+
+    // A one-page PDF whose content stream is encrypted with RC4 under the empty user password (revision 3, 128 bit), the way a writer would.
+    std::string rc4EncryptedPdf(const std::string& content, bool breakUserEntry) {
+        const std::string padding = bytesOfHex("28bf4e5e4e758a4164004e56fffa01082e2e00b6d0683e802f0ca9fe6453697a");
+        const std::string owner(32, 'O'), id = "0123456789abcdef", permissions = bytesOfHex("fcffffff");
+        std::string key = md5(padding + owner + permissions + id);
+        for (int i = 0; i < 50; ++i) { key = md5(key); }
+        std::string user = rc4(key, md5(padding + id));
+        for (int i = 1; i <= 19; ++i) {
+            std::string stepped = key;
+            for (char& c : stepped) { c = char(std::uint8_t(c) ^ i); }
+            user = rc4(stepped, user);
+        }
+        user += std::string(16, '\0');
+        if (breakUserEntry) { user[0] = char(user[0] ^ 0x55); }
+        const std::string objectKey = md5(key + std::string("\x04\x00\x00\x00\x00", 5));
+        const std::string cipher = rc4(objectKey, content);
+        return "%PDF-1.4\n"
+               "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+               "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 100 100] >> endobj\n"
+               "3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n"
+               "4 0 obj << /Length " + std::to_string(cipher.size()) + " >>\nstream\n" + cipher + "\nendstream\nendobj\n"
+               "5 0 obj << /Filter /Standard /V 2 /R 3 /Length 128 /P -4 /O <" + hexOf(owner) + "> /U <" + hexOf(user) + "> >> endobj\n"
+               "trailer << /Root 1 0 R /Encrypt 5 0 R /ID [<" + hexOf(id) + "> <" + hexOf(id) + ">] >>\n%%EOF\n";
+    }
+}
+
+TEST(PdfCrypt, MatchesThePublishedTestVectors) {
+    EXPECT_EQ(hexOf(md5("")), "d41d8cd98f00b204e9800998ecf8427e");
+    EXPECT_EQ(hexOf(md5("abc")), "900150983cd24fb0d6963f7d28e17f72");
+    EXPECT_EQ(hexOf(md5(std::string(100, 'a'))), "36a92cc94a9e0fa21f625f8bfb007adf");   // spans two blocks
+    EXPECT_EQ(hexOf(rc4("Key", "Plaintext")), "bbf316e8d940af0ad3");
+
+    std::string plain;   // FIPS 197, appendix C: AES-128 and AES-256 of 00112233445566778899aabbccddeeff
+    ASSERT_TRUE(aesCbcDecrypt(bytesOfHex("000102030405060708090a0b0c0d0e0f"), std::string(16, '\0') + bytesOfHex("69c4e0d86a7b0430d8cdb78070b4c55a"), plain));
+    EXPECT_EQ(hexOf(plain), "00112233445566778899aabbccddeeff");
+    ASSERT_TRUE(aesCbcDecrypt(bytesOfHex("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"), std::string(16, '\0') + bytesOfHex("8ea2b7ca516745bfeafc49904b496089"), plain));
+    EXPECT_EQ(hexOf(plain), "00112233445566778899aabbccddeeff");
+    EXPECT_FALSE(aesCbcDecrypt("short", std::string(32, '\0'), plain));
+}
+
+TEST(SketchPdfImport, EncryptedFilesOpenWithTheEmptyPasswordAndOthersAreRefusedWithAReason) {
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(rc4EncryptedPdf("1 0 0 rg 10 10 30 30 re f", false), doc));
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_EQ(doc.object(0).fill().color().toRgba32().value, 0xFFFF0000u);
+
+    SketchDocument locked;   // the user entry does not come out: the file wants a password
+    std::string problem;
+    EXPECT_FALSE(documentFromPdf(rc4EncryptedPdf("1 0 0 rg 10 10 30 30 re f", true), locked, PdfImportOptions(), &problem));
+    EXPECT_NE(problem.find("password"), std::string::npos);
+    EXPECT_EQ(locked.objectCount(), 0u);
+
+    std::string modern = rc4EncryptedPdf("0 g", false);   // the same file claiming AES-256 (revision 6)
+    modern.replace(modern.find("/V 2 /R 3"), 9, "/V 5 /R 6");
+    EXPECT_FALSE(documentFromPdf(modern, locked, PdfImportOptions(), &problem));
+    EXPECT_NE(problem.find("AES-256"), std::string::npos);
+}
+
+TEST(SketchPdfImport, TextInAnEmbeddedFontBecomesItsOutlinesUnlessLiveTextIsAsked) {
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(embeddedFontPdf(tinyTrueType()), doc));
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_FALSE(doc.object(0).isText());
+    const BLBox box = doc.object(0).geometryBounds();   // 100 pt: the box is 50 x 70, its baseline 10 above the bottom of the page
+    EXPECT_NEAR(box.x0, 10.0, 0.01);
+    EXPECT_NEAR(box.x1, 60.0, 0.01);
+    EXPECT_NEAR(box.y0, 20.0, 0.01);
+    EXPECT_NEAR(box.y1, 90.0, 0.01);
+    EXPECT_EQ(doc.object(0).name(), "A");
+
+    PdfImportOptions live;
+    live.textAsOutlines = false;
+    SketchDocument typed;
+    ASSERT_TRUE(documentFromPdf(embeddedFontPdf(tinyTrueType()), typed, live));
+    ASSERT_EQ(typed.objectCount(), 1u);
+    EXPECT_TRUE(typed.object(0).isText());
+
+    SketchDocument broken;   // a font program that cannot be read falls back to live text
+    ASSERT_TRUE(documentFromPdf(embeddedFontPdf("not a font program"), broken));
+    ASSERT_EQ(broken.objectCount(), 1u);
+    EXPECT_TRUE(broken.object(0).isText());
+}
+
+TEST(SketchPdfImport, TheStandInFontIsTrackedToTheWidthOfTheRun) {
+    const std::string fonts = "/Resources << /Font << /F1 5 0 R >> >>";
+    const std::string font = "5 0 obj << /Type /Font /Subtype /TrueType /BaseFont /Arial /FirstChar 97 /LastChar 98 /Widths [700 700] >> endobj\n";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf(fonts, "BT /F1 10 Tf 5 50 Td (ab) Tj ET", font), doc));
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_GT(doc.object(0).textStyle().tracking, 1.0);   // the file says 14 units for "ab"; Arial's own "ab" is about 11
+}
+
+TEST(SketchPdfImport, EachPageOfAManyPageFileIsCroppedToItsOwnBox) {
+    const std::string pdf =
+        "%PDF-1.4\n"
+        "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+        "2 0 obj << /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 /MediaBox [0 0 100 100] >> endobj\n"
+        "3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n"
+        "4 0 obj << >>\nstream\n0 0 1 rg -50 10 30 30 re f\nendstream\nendobj\n"
+        "5 0 obj << /Type /Page /Parent 2 0 R /Contents 6 0 R >> endobj\n"
+        "6 0 obj << >>\nstream\n1 0 0 rg 10 10 30 30 re f\nendstream\nendobj\n"
+        "trailer << /Root 1 0 R >>\n%%EOF\n";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(pdf, doc));
+    ASSERT_EQ(doc.objectCount(), 4u);   // two squares and a page mask for each page
+    ASSERT_EQ(doc.object(0).groups().size(), 1u);
+    EXPECT_TRUE(doc.groupProps(doc.object(0).groups().front()).clip);
+    const BLBox mask = doc.object(1).geometryBounds();
+    EXPECT_NEAR(mask.x0, 0.0, 0.01);
+    EXPECT_NEAR(mask.x1, 100.0, 0.01);
+}
+
+TEST(SketchPdfImport, MacRomanFontsAndFontsThatAreNotInstalledStillDrawText) {
+    const std::string fonts = "/Resources << /Font << /F1 5 0 R >> >>";
+    const std::string font = "5 0 obj << /Type /Font /Subtype /TrueType /BaseFont /ZZZZZZ+NoSuchFontAnywhere /Encoding /MacRomanEncoding /FontDescriptor 6 0 R /FirstChar 32 /LastChar 32 /Widths [600] >> endobj\n"
+                             "6 0 obj << /Type /FontDescriptor /Flags 33 >> endobj\n";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf(fonts, "BT /F1 12 Tf 5 50 Td (we\\325re) Tj ET", font), doc));
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_EQ(doc.object(0).text(), "we\xE2\x80\x99re");   // 0xD5 is a right single quote in MacRoman
+    EXPECT_GT(doc.object(0).geometry().size(), 0u);          // set in a stand-in font, not an empty outline
+}
+
+TEST(SketchPdfImport, CompositeFontsReadTheirCharactersFromToUnicode) {
+    const std::string fonts = "/Resources << /Font << /F1 5 0 R >> >>";
+    const std::string objects =
+        "5 0 obj << /Type /Font /Subtype /Type0 /BaseFont /Foo-Italic /Encoding /Identity-H /DescendantFonts [6 0 R] /ToUnicode 7 0 R >> endobj\n"
+        "6 0 obj << /Type /Font /Subtype /CIDFontType2 /BaseFont /Foo-Italic /DW 600 /W [1 [500]] >> endobj\n"
+        "7 0 obj << >>\nstream\n/CIDInit /ProcSet findresource begin begincmap 1 begincodespacerange <0000> <FFFF> endcodespacerange\n"
+        "2 beginbfchar <0001> <0058> <0002> <0059> endbfchar endcmap\nendstream\nendobj\n";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf(fonts, "BT /F1 10 Tf 5 5 Td <00010002> Tj ET", objects), doc));
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_EQ(doc.object(0).text(), "XY");
+    EXPECT_TRUE(doc.object(0).textStyle().italic);
+
+    SketchDocument lost;   // without ToUnicode the codes say nothing, so there is no text to make
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf(fonts, "BT /F1 10 Tf 5 5 Td <00010002> Tj ET", "5 0 obj << /Type /Font /Subtype /Type0 /BaseFont /Foo /DescendantFonts [6 0 R] >> endobj\n"), lost));
+    EXPECT_EQ(lost.objectCount(), 0u);
 }
 
 TEST(SketchPdfImport, EvenOddFillsKeepTheirRuleThroughSvgAndPdf) {

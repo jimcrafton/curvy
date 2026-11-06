@@ -29,6 +29,9 @@ namespace curvy {
     // The font a new text uses when none is named (the system's message font).
     std::string defaultTextFontName();
 
+    // True when a font of that name is installed. The functions below fall back to the default font when it is not.
+    bool textFontAvailable(const std::string& fontName);
+
     // Outlines of `text` (UTF-8; '\n' starts a new line) in the named font ("" = the default) at `fontSize` points. The first
     // line's baseline sits on y = 0 and the block starts at x = 0 (lines are shifted right by their alignment); further lines are
     // placed one line height lower (y grows downward). Spaces make no outline, so text of only blanks (or no text) returns an empty path.

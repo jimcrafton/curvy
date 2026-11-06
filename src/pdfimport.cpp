@@ -4,8 +4,15 @@
 #include "curvy/imagedata.h"
 #include "curvy/sketchdocument.h"
 #include "curvy/sketchexport.h"
+#include "curvy/fontprogram.h"
+#include "curvy/pdfcrypt.h"
+#include "curvy/textoutline.h"
 
 #include <algorithm>
+#include <atomic>
+#include <thread>
+#include <vector>
+#include <cstring>
 #include <cmath>
 #include <cctype>
 #include <cstdint>
@@ -342,6 +349,8 @@ namespace curvy {
 
         // ---- the file --------------------------------------------------------------------------------------------------------------------
 
+        using ImageCache = std::map<int, std::shared_ptr<const ImageData>>;
+
         class PdfFile {
         public:
             bool load(const std::string& data);
@@ -364,16 +373,31 @@ namespace curvy {
                 auto raw = streams_.find(int(ref.n));
                 auto dict = objects_.find(int(ref.n));
                 if (raw == streams_.end() || dict == objects_.end()) { return false; }
-                return decodeStream(dict->second, raw->second, out, rest);
+                if (!encrypted_ || !decryptsStream(dict->second)) { return decodeStream(dict->second, raw->second, out, rest); }
+                return decodeStream(dict->second, decrypt(raw->second, int(ref.n), streamMethod_), out, rest);
             }
             const PObj& root() const { return null_; }
             const std::map<int, PObj>& objects() const { return objects_; }
             const PObj null_;
+            // Why load() said no, when it was for a reason the user could act on.
+            const std::string& problem() const { return problem_; }
 
         private:
+            enum Method { Plain = 0, Rc4 = 1, Aes = 2 };
+
             void addObjectStream(int number, const PObj& dict, const std::string& raw);
+            bool setUpEncryption(const std::string& data);
+            bool decryptsStream(const PObj& dict) const;
+            std::string decrypt(const std::string& bytes, int number, int method) const;
+            void decryptStrings(PObj& object, int number);
             std::map<int, PObj> objects_;
             std::map<int, std::string> streams_;
+            std::map<int, int> generations_;
+
+            // The standard security handler, opened with the empty user password.
+            bool encrypted_ = false, encryptMetadata_ = true;
+            std::string key_, problem_;
+            int streamMethod_ = Plain, stringMethod_ = Plain, encryptObject_ = 0;
         };
 
         bool PdfFile::load(const std::string& data) {
@@ -390,6 +414,7 @@ namespace curvy {
                 std::size_t genEnd = p;
                 while (p > 0 && std::isdigit((unsigned char)data[p - 1])) { --p; }
                 if (p == genEnd) { continue; }
+                const int generation = std::atoi(data.substr(p, genEnd - p).c_str());
                 while (p > 0 && isSpace(data[p - 1])) { --p; }
                 std::size_t numEnd = p;
                 while (p > 0 && std::isdigit((unsigned char)data[p - 1])) { --p; }
@@ -426,7 +451,9 @@ namespace curvy {
                     at = next;
                 }
                 objects_[number] = std::move(obj);
+                generations_[number] = generation;
             }
+            if (!setUpEncryption(data)) { return false; }
             // Objects packed into object streams (PDF 1.5).
             std::vector<int> packs;
             for (const auto& entry : objects_) {
@@ -434,9 +461,121 @@ namespace curvy {
                 if (type != nullptr && type->isName("ObjStm") && streams_.count(entry.first)) { packs.push_back(entry.first); }
             }
             for (int number : packs) {
-                addObjectStream(number, objects_[number], streams_[number]);
+                const PObj& pack = objects_[number];
+                addObjectStream(number, pack, encrypted_ ? decrypt(streams_[number], number, streamMethod_) : streams_[number]);
             }
             return !objects_.empty();
+        }
+
+        const char kPasswordPadding[33] = "\x28\xBF\x4E\x5E\x4E\x75\x8A\x41\x64\x00\x4E\x56\xFF\xFA\x01\x08\x2E\x2E\x00\xB6\xD0\x68\x3E\x80\x2F\x0C\xA9\xFE\x64\x53\x69\x7A";
+
+        // Algorithm 2 of the PDF reference: the file key from the (empty) user password, the owner entry, the permissions and the file ID.
+        bool PdfFile::setUpEncryption(const std::string& data) {
+            std::vector<PObj> trailers;
+            for (std::size_t at = data.find("trailer"); at != std::string::npos; at = data.find("trailer", at + 7)) {
+                Lexer lexer(data, at + 7);
+                PObj dict = lexer.parse(true);
+                if (dict.type == PObj::Dict) { trailers.push_back(std::move(dict)); }
+            }
+            for (const auto& entry : objects_) {   // the dictionary of a cross-reference stream is a trailer too
+                const PObj* type = entry.second.find("Type");
+                if (type != nullptr && type->isName("XRef")) { trailers.push_back(entry.second); }
+            }
+            const PObj* trailer = nullptr;
+            for (const PObj& t : trailers) { if (t.find("Encrypt") != nullptr) { trailer = &t; } }
+            if (trailer == nullptr) { return true; }
+
+            const PObj& encrypt = resolve(*trailer->find("Encrypt"));
+            if (trailer->find("Encrypt")->type == PObj::Ref) { encryptObject_ = int(trailer->find("Encrypt")->n); }
+            if (encrypt.type != PObj::Dict || !get(encrypt, "Filter").isName("Standard")) { problem_ = "uses a security handler other than the standard one"; return false; }
+            const int version = int(numberOf(encrypt.find("V"), 0)), revision = int(numberOf(encrypt.find("R"), 2));
+            if (version >= 5 || revision >= 5) { problem_ = "is encrypted with AES-256, which is not supported"; return false; }
+            const PObj& owner = get(encrypt, "O");
+            const PObj& user = get(encrypt, "U");
+            if (owner.type != PObj::Str || user.type != PObj::Str || owner.s.size() < 32 || user.s.size() < 16) { problem_ = "has damaged encryption data"; return false; }
+
+            if (version == 4) {
+                auto methodOf = [&](const char* which) {
+                    const PObj& name = get(encrypt, which);
+                    if (name.type != PObj::Name || name.s == "Identity") { return int(Plain); }
+                    const PObj& cfm = get(get(get(encrypt, "CF"), name.s.c_str()), "CFM");
+                    return cfm.isName("V2") ? int(Rc4) : (cfm.isName("AESV2") ? int(Aes) : int(Plain));
+                };
+                streamMethod_ = methodOf("StmF");
+                stringMethod_ = methodOf("StrF");
+            } else {
+                streamMethod_ = stringMethod_ = Rc4;
+            }
+            const std::size_t keyLength = version == 4 ? 16 : (revision == 2 ? 5 : std::size_t(std::min(16, std::max(5, int(numberOf(encrypt.find("Length"), 40)) / 8))));
+            const PObj& metadata = get(encrypt, "EncryptMetadata");
+            encryptMetadata_ = !(metadata.type == PObj::Bool && metadata.n == 0.0);
+
+            std::string id;
+            const PObj& ids = get(*trailer, "ID");
+            if (ids.type == PObj::Arr && !ids.a.empty() && resolve(ids.a[0]).type == PObj::Str) { id = resolve(ids.a[0]).s; }
+            const std::uint32_t permissions = std::uint32_t(std::int64_t(numberOf(encrypt.find("P"), 0)));
+            std::string input(kPasswordPadding, 32);
+            input += owner.s.substr(0, 32);
+            for (int i = 0; i < 4; ++i) { input += char((permissions >> (8 * i)) & 255); }
+            input += id;
+            if (revision >= 4 && !encryptMetadata_) { input += std::string("\xFF\xFF\xFF\xFF", 4); }
+            std::string hash = md5(input);
+            if (revision >= 3) { for (int i = 0; i < 50; ++i) { hash = md5(hash.substr(0, keyLength)); } }
+            key_ = hash.substr(0, keyLength);
+
+            bool ok;   // the key must make the user entry come out: otherwise the file wants a real password
+            if (revision == 2) {
+                ok = rc4(key_, std::string(kPasswordPadding, 32)) == user.s.substr(0, 32);
+            } else {
+                std::string check = rc4(key_, md5(std::string(kPasswordPadding, 32) + id));
+                for (int i = 1; i <= 19; ++i) {
+                    std::string stepped = key_;
+                    for (char& c : stepped) { c = char(std::uint8_t(c) ^ i); }
+                    check = rc4(stepped, check);
+                }
+                ok = check.substr(0, 16) == user.s.substr(0, 16);
+            }
+            if (!ok) { problem_ = "needs a password to open"; return false; }
+            encrypted_ = true;
+            for (auto& entry : objects_) {
+                const PObj* type = entry.second.find("Type");
+                if (entry.first == encryptObject_ || (type != nullptr && type->isName("XRef"))) { continue; }
+                decryptStrings(entry.second, entry.first);
+            }
+            return true;
+        }
+
+        bool PdfFile::decryptsStream(const PObj& dict) const {
+            const PObj* type = dict.find("Type");
+            if (type != nullptr && (type->isName("XRef") || (type->isName("Metadata") && !encryptMetadata_))) { return false; }
+            const PObj* filter = dict.find("Filter");
+            if (filter != nullptr && (filter->isName("Crypt") || (filter->type == PObj::Arr && !filter->a.empty() && filter->a[0].isName("Crypt")))) { return false; }
+            return streamMethod_ != Plain;
+        }
+
+        // The bytes of an object's string or stream: the object key is the file key with the object and generation numbers mixed in.
+        std::string PdfFile::decrypt(const std::string& bytes, int number, int method) const {
+            if (method == Plain) { return bytes; }
+            auto generation = generations_.find(number);
+            const int gen = generation == generations_.end() ? 0 : generation->second;
+            std::string seed = key_;
+            for (int i = 0; i < 3; ++i) { seed += char((number >> (8 * i)) & 255); }
+            for (int i = 0; i < 2; ++i) { seed += char((gen >> (8 * i)) & 255); }
+            if (method == Aes) { seed += "sAlT"; }
+            const std::string key = md5(seed).substr(0, std::min<std::size_t>(key_.size() + 5, 16));
+            if (method == Rc4) { return rc4(key, bytes); }
+            std::string out;
+            return aesCbcDecrypt(key, bytes, out) ? out : bytes;
+        }
+
+        void PdfFile::decryptStrings(PObj& object, int number) {
+            if (object.type == PObj::Str) {
+                object.s = decrypt(object.s, number, stringMethod_);
+            } else if (object.type == PObj::Arr) {
+                for (PObj& item : object.a) { decryptStrings(item, number); }
+            } else if (object.type == PObj::Dict) {
+                for (auto& entry : object.d) { decryptStrings(entry.second, number); }
+            }
         }
 
         void PdfFile::addObjectStream(int, const PObj& dict, const std::string& raw) {
@@ -456,6 +595,155 @@ namespace curvy {
                 objects_[entry.first] = lexer.parse(true);
             }
         }
+
+        // An operator name (at most four characters) as one integer, so execute() can switch on it.
+        constexpr std::uint32_t opcode(const char* name, std::size_t size) {
+            std::uint32_t code = 0;
+            for (std::size_t i = 0; i < size; ++i) { code = (code << 8) | std::uint8_t(name[i]); }
+            return code;
+        }
+
+        template <std::size_t N>
+        constexpr std::uint32_t opcode(const char (&name)[N]) {
+            static_assert(N >= 2 && N <= 5, "an operator name has one to four characters");
+            return opcode(name, N - 1);
+        }
+
+        // Longer than four characters cannot be an operator that execute() knows.
+        std::uint32_t opcode(const std::string& name) { return name.empty() || name.size() > 4 ? 0u : opcode(name.data(), name.size()); }
+
+        // ---- fonts and text --------------------------------------------------------------------------------------------------------------
+
+        void appendUtf8(std::string& out, unsigned cp) {
+            if (cp < 0x80) { out += char(cp); }
+            else if (cp < 0x800) { out += char(0xC0 | (cp >> 6)); out += char(0x80 | (cp & 63)); }
+            else if (cp < 0x10000) { out += char(0xE0 | (cp >> 12)); out += char(0x80 | ((cp >> 6) & 63)); out += char(0x80 | (cp & 63)); }
+            else { out += char(0xF0 | (cp >> 18)); out += char(0x80 | ((cp >> 12) & 63)); out += char(0x80 | ((cp >> 6) & 63)); out += char(0x80 | (cp & 63)); }
+        }
+
+        // UTF-16BE bytes (the destination of a ToUnicode entry) as UTF-8; `add` steps the last code unit (bfrange).
+        std::string utf16beToUtf8(const std::string& bytes, unsigned add) {
+            std::vector<unsigned> units;
+            if (bytes.size() == 1) {
+                units.push_back((unsigned char)bytes[0]);
+            }
+            for (std::size_t i = 0; i + 1 < bytes.size(); i += 2) {
+                units.push_back(((unsigned char)bytes[i] << 8) | (unsigned char)bytes[i + 1]);
+            }
+            if (!units.empty()) { units.back() += add; }
+            std::string out;
+            for (std::size_t i = 0; i < units.size(); ++i) {
+                unsigned cp = units[i];
+                if (cp >= 0xD800 && cp < 0xDC00 && i + 1 < units.size() && units[i + 1] >= 0xDC00 && units[i + 1] < 0xE000) {
+                    cp = 0x10000 + ((cp - 0xD800) << 10) + (units[i + 1] - 0xDC00);
+                    ++i;
+                }
+                appendUtf8(out, cp);
+            }
+            return out;
+        }
+
+        unsigned codeOf(const std::string& bytes) {
+            unsigned v = 0;
+            for (unsigned char c : bytes) { v = v * 256 + c; }
+            return v;
+        }
+
+        void parseToUnicode(const std::string& cmap, std::map<unsigned, std::string>& out) {
+            Lexer lexer(cmap);
+            while (!lexer.atEnd()) {
+                const PObj word = lexer.parse(false);
+                if (word.type != PObj::Op) { continue; }
+                if (word.s == "beginbfchar") {
+                    while (!lexer.atEnd()) {
+                        const PObj src = lexer.parse(false);
+                        if (src.type != PObj::Str) { break; }
+                        const PObj dst = lexer.parse(false);
+                        if (dst.type != PObj::Str) { break; }
+                        out[codeOf(src.s)] = utf16beToUtf8(dst.s, 0);
+                    }
+                } else if (word.s == "beginbfrange") {
+                    while (!lexer.atEnd()) {
+                        const PObj lo = lexer.parse(false);
+                        if (lo.type != PObj::Str) { break; }
+                        const PObj hi = lexer.parse(false), dst = lexer.parse(false);
+                        if (hi.type != PObj::Str) { break; }
+                        const unsigned a = codeOf(lo.s), b = std::min(codeOf(hi.s), a + 65535u);
+                        if (dst.type == PObj::Str) {
+                            for (unsigned c = a; c <= b; ++c) { out[c] = utf16beToUtf8(dst.s, c - a); }
+                        } else if (dst.type == PObj::Arr) {
+                            for (unsigned c = a; c <= b && c - a < dst.a.size(); ++c) { out[c] = utf16beToUtf8(dst.a[c - a].s, 0); }
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        unsigned windowsAnsi(unsigned code) {
+            static const unsigned high[32] = {0x20AC, 0x20, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, 0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x20, 0x017D, 0x20,
+                                              0x20, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014, 0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x20, 0x017E, 0x0178};
+            return code >= 0x80 && code < 0xA0 ? high[code - 0x80] : code;
+        }
+
+        unsigned macRoman(unsigned code) {
+            static const unsigned high[128] = {
+                0xC4, 0xC5, 0xC7, 0xC9, 0xD1, 0xD6, 0xDC, 0xE1, 0xE0, 0xE2, 0xE4, 0xE3, 0xE5, 0xE7, 0xE9, 0xE8,
+                0xEA, 0xEB, 0xED, 0xEC, 0xEE, 0xEF, 0xF1, 0xF3, 0xF2, 0xF4, 0xF6, 0xF5, 0xFA, 0xF9, 0xFB, 0xFC,
+                0x2020, 0xB0, 0xA2, 0xA3, 0xA7, 0x2022, 0xB6, 0xDF, 0xAE, 0xA9, 0x2122, 0xB4, 0xA8, 0x2260, 0xC6, 0xD8,
+                0x221E, 0xB1, 0x2264, 0x2265, 0xA5, 0xB5, 0x2202, 0x2211, 0x220F, 0x3C0, 0x222B, 0xAA, 0xBA, 0x3A9, 0xE6, 0xF8,
+                0xBF, 0xA1, 0xAC, 0x221A, 0x192, 0x2248, 0x2206, 0xAB, 0xBB, 0x2026, 0xA0, 0xC0, 0xC3, 0xD5, 0x152, 0x153,
+                0x2013, 0x2014, 0x201C, 0x201D, 0x2018, 0x2019, 0xF7, 0x25CA, 0xFF, 0x178, 0x2044, 0x20AC, 0x2039, 0x203A, 0xFB01, 0xFB02,
+                0x2021, 0xB7, 0x201A, 0x201E, 0x2030, 0xC2, 0xCA, 0xC1, 0xCB, 0xC8, 0xCD, 0xCE, 0xCF, 0xCC, 0xD3, 0xD4,
+                0xF8FF, 0xD2, 0xDA, 0xDB, 0xD9, 0x131, 0x2C6, 0x2DC, 0xAF, 0x2D8, 0x2D9, 0x2DA, 0xB8, 0x2DD, 0x2DB, 0x2C7};
+            return code >= 0x80 && code < 0x100 ? high[code - 0x80] : code;
+        }
+
+        // "ABCDEF+Arial-BoldMT" -> family "Arial", bold. The installed font of that family is what the text is set in.
+        std::string fontFamily(std::string name, bool& bold, bool& italic) {
+            if (name.size() > 7 && name[6] == '+') { name.erase(0, 7); }
+            std::string lower;
+            for (char c : name) { lower += char(std::tolower((unsigned char)c)); }
+            bold = bold || lower.find("bold") != std::string::npos || lower.find("black") != std::string::npos || lower.find("heavy") != std::string::npos;
+            italic = italic || lower.find("italic") != std::string::npos || lower.find("oblique") != std::string::npos;
+            std::string family = name.substr(0, name.find_first_of("-,"));
+            for (const char* tail : {"PSMT", "MT", "PS"}) {
+                const std::size_t n = std::strlen(tail);
+                if (family.size() > n + 2 && family.compare(family.size() - n, n, tail) == 0) { family.erase(family.size() - n); break; }
+            }
+            if (family == "Helvetica") { return "Arial"; }
+            if (family == "Times" || family == "TimesRoman") { return "Times New Roman"; }
+            if (family == "Courier") { return "Courier New"; }
+            std::string spaced;
+            for (std::size_t i = 0; i < family.size(); ++i) {
+                if (i > 0 && std::isupper((unsigned char)family[i]) && std::islower((unsigned char)family[i - 1])) { spaced += ' '; }
+                spaced += family[i];
+            }
+            return spaced;
+        }
+
+        struct FontInfo {
+            std::string family;
+            bool bold = false, italic = false;
+            bool wide = false;                    // Type0: two-byte codes
+            bool macRoman = false;                // the simple font's base encoding
+            bool unicodeKnown = true;             // false: the codes of a composite font without ToUnicode say nothing about the characters
+            std::map<unsigned, std::string> unicode;
+            std::map<unsigned, double> widths;    // thousandths of an em
+            double missingWidth = -1.0;           // -1: measure the installed font
+            std::map<unsigned, double> measured;
+
+            std::shared_ptr<FontProgram> program;   // the embedded font, when it can be read
+            std::string cidToGid;                   // a CIDFontType2 CIDToGIDMap stream (empty: identity)
+            std::map<unsigned, unsigned> encoded;   // code -> Unicode from /Differences
+            std::map<unsigned, std::string> glyphNames;   // code -> glyph name from /Differences
+            struct Glyph {
+                bool found = false;
+                BLPath path;
+            };
+            std::map<unsigned, Glyph> glyphs;       // by code
+        };
 
         // ---- the interpreter -------------------------------------------------------------------------------------------------------------
 
@@ -495,6 +783,9 @@ namespace curvy {
             BLPath path;
             int members = 0;
             bool evenOdd = false;
+            bool transparency = false;   // a transparency group: opacity and blend mode for the members, no mask
+            double opacity = 1.0;
+            BlendMode blend = BlendMode::Normal;
         };
 
         // A soft mask from an ExtGState, rendered once over the page: one coverage byte per pixel, `scale` pixels per document unit.
@@ -515,13 +806,27 @@ namespace curvy {
             double miter = 10.0;
             std::vector<double> dash;
             double fillAlpha = 1.0, strokeAlpha = 1.0;
+            BlendMode blend = BlendMode::Normal;
+            FontInfo* font = nullptr;
+            double fontSize = 0.0, charSpace = 0.0, wordSpace = 0.0, hScale = 1.0, leading = 0.0, rise = 0.0;
+            int render = 0;
         };
 
         class Interpreter {
         public:
-            Interpreter(const PdfFile& file, SketchDocument& document, const BLMatrix2D& base, const BLBox& pageBox) : file_(file), document_(document), base_(base), pageBox_(pageBox) { state_.ctm = base; resources_ = &file.null_; }
+            using FontCache = std::map<const PObj*, FontInfo>;
+
+            void setImages(ImageCache* images) { images_ = images; }
+            Interpreter(const PdfFile& file, SketchDocument& document, const BLMatrix2D& base, const BLBox& pageBox, FontCache& fonts, bool outlines) : file_(file), document_(document), base_(base), pageBox_(pageBox), fonts_(fonts), outlines_(outlines) { state_.ctm = base; resources_ = &file.null_; }
             void run(const std::string& content, const PObj& resources);
             void finish() { flushClips(0); }
+            // With neighbors on the canvas, what a page paints outside its own box (a viewer crops it) must not show on them.
+            void clipToPage() {
+                auto level = std::make_shared<ClipLevel>();
+                level->group = document_.newGroupId();
+                level->path.add_box(pageBox_);
+                state_.clips.push_back(level);
+            }
 
         private:
             void addObject(SketchObject* object);
@@ -545,6 +850,11 @@ namespace curvy {
             void doXObject(const std::string& name, const PObj& resources);
             void doImage(const PObj& image, const PObj& ref);
             void applyGState(const PObj& dict);
+            FontInfo* loadFont(const PObj& dict);
+            void showText(const std::vector<PObj>& items);
+            void moveText(double tx, double ty);
+            double glyphWidth(FontInfo& font, unsigned code, const std::string& character) const;
+            const BLPath* glyphPath(FontInfo& font, unsigned code) const;
             double scale() const { return std::sqrt(std::fabs(state_.ctm.m00 * state_.ctm.m11 - state_.ctm.m01 * state_.ctm.m10)); }
 
             const PdfFile& file_;
@@ -560,6 +870,11 @@ namespace curvy {
             int depth_ = 0;
             std::size_t operations_ = 0;
             const PObj* resources_ = nullptr;   // the resources of the content being run
+            BLMatrix2D textMatrix_ = BLMatrix2D::make_identity();
+            BLMatrix2D lineMatrix_ = BLMatrix2D::make_identity();
+            FontCache& fonts_;   // shared by every page, so a font is read once
+            ImageCache* images_ = nullptr;
+            bool outlines_ = true;
         };
 
         SketchColor Interpreter::initialColor(const Space& space) {
@@ -823,7 +1138,7 @@ namespace curvy {
             scratch.setPageSize(float(w), float(h));
             scratch.setArtboards({Artboard{"mask", pageBox_.x0, pageBox_.y0, w, h}}, 0);
             scratch.setPageBackground(std::nullopt);
-            Interpreter inner(file_, scratch, base_, pageBox_);
+            Interpreter inner(file_, scratch, base_, pageBox_, fonts_, outlines_);
             inner.state_.ctm = state_.ctm;
             inner.depth_ = depth_ + 1;
             inner.drawForm(*g, file_.resolve(*g), *resources_);
@@ -899,6 +1214,7 @@ namespace curvy {
         }
 
         void Interpreter::addObject(SketchObject* object) {
+            object->setBlendMode(state_.blend);
             if (state_.softMask) { object = masked(object); }
             std::vector<std::size_t> groups;
             for (const auto& level : state_.clips) {
@@ -913,7 +1229,12 @@ namespace curvy {
         void Interpreter::flushClips(std::size_t keep) {
             while (state_.clips.size() > keep) {
                 const std::shared_ptr<ClipLevel> level = state_.clips.back();
-                if (level->members > 0) {
+                if (level->members > 0 && level->transparency) {
+                    GroupProps props;
+                    props.opacity = level->opacity;
+                    props.blendMode = level->blend;
+                    document_.setGroupProps(level->group, props);
+                } else if (level->members > 0) {
                     std::vector<std::size_t> groups;
                     for (const auto& l : state_.clips) { groups.push_back(l->group); }
                     SketchObject* mask = SketchObject::makePath(level->path);
@@ -978,6 +1299,19 @@ namespace curvy {
             if (const PObj* v = dict.find("ML")) { state_.miter = numberOf(&file_.resolve(*v), 10); }
             if (const PObj* v = dict.find("ca")) { state_.fillAlpha = std::min(1.0, std::max(0.0, numberOf(&file_.resolve(*v), 1.0))); }
             if (const PObj* v = dict.find("CA")) { state_.strokeAlpha = std::min(1.0, std::max(0.0, numberOf(&file_.resolve(*v), 1.0))); }
+            if (const PObj* v = dict.find("BM")) {
+                const PObj& bm = file_.resolve(*v);
+                const PObj& mode = bm.type == PObj::Arr && !bm.a.empty() ? file_.resolve(bm.a[0]) : bm;
+                static const std::pair<const char*, BlendMode> modes[] = {
+                    {"Multiply", BlendMode::Multiply}, {"Screen", BlendMode::Screen}, {"Overlay", BlendMode::Overlay}, {"Darken", BlendMode::Darken},
+                    {"Lighten", BlendMode::Lighten}, {"ColorDodge", BlendMode::ColorDodge}, {"ColorBurn", BlendMode::ColorBurn},
+                    {"HardLight", BlendMode::HardLight}, {"SoftLight", BlendMode::SoftLight}, {"Difference", BlendMode::Difference},
+                    {"Exclusion", BlendMode::Exclusion}};
+                state_.blend = BlendMode::Normal;
+                for (const auto& entry : modes) {
+                    if (mode.isName(entry.first)) { state_.blend = entry.second; }
+                }
+            }
             if (const PObj* v = dict.find("SMask")) {
                 const PObj& sm = file_.resolve(*v);
                 if (sm.type == PObj::Dict) { setSoftMask(sm); } else { state_.softMask.reset(); }
@@ -991,13 +1325,21 @@ namespace curvy {
             }
         }
 
-        void Interpreter::doImage(const PObj& image, const PObj& ref) {
-            const int width = int(numberOf(image.find("Width"), numberOf(image.find("W"), 0))), height = int(numberOf(image.find("Height"), numberOf(image.find("H"), 0)));
+        void Interpreter::doImage(const PObj& image, const PObj& ref) {            const int width = int(numberOf(image.find("Width"), numberOf(image.find("W"), 0))), height = int(numberOf(image.find("Height"), numberOf(image.find("H"), 0)));
             if (width <= 0 || height <= 0 || std::int64_t(width) * height > 64 * 1024 * 1024) { return; }
-            std::string pixels, rest;
-            if (!file_.streamOf(ref, pixels, rest)) { return; }
             std::shared_ptr<const ImageData> data;
-            if (rest == "DCTDecode" || rest == "DCT") {
+            if (images_ != nullptr && ref.type == PObj::Ref) {
+                auto it = images_->find(int(ref.n));
+                if (it != images_->end()) {
+                    data = it->second;
+                    if (!data) { return; }
+                }
+            }
+            std::string pixels, rest;
+            if (data) {
+            } else if (!file_.streamOf(ref, pixels, rest)) {
+                return;
+            } else if (rest == "DCTDecode" || rest == "DCT") {
                 data = decodeImage(pixels, "PDF image");
             } else if (rest.empty()) {
                 const Space space = spaceOf(image.find("ColorSpace") != nullptr ? *image.find("ColorSpace") : PObj(), *resources_);
@@ -1052,7 +1394,9 @@ namespace curvy {
             // The image's unit square has its top at y = 1; the picture's pixels are y-down.
             BLMatrix2D placement(1.0 / double(data->width), 0.0, 0.0, -1.0 / double(data->height), 0.0, 1.0);
             placement.post_transform(state_.ctm);
-            addObject(SketchObject::makeImageObject(data, placement));
+            SketchObject* object = SketchObject::makeImageObject(data, placement);
+            object->setOpacity(state_.fillAlpha);
+            addObject(object);
         }
 
         void Interpreter::doXObject(const std::string& name, const PObj& resources) {
@@ -1079,6 +1423,18 @@ namespace curvy {
                 m.post_transform(state_.ctm);
                 state_.ctm = m;
             }
+            // Opacity and blend mode in force where a transparency group is drawn belong to the group as a whole; inside it they start over.
+            const PObj& group = file_.get(xobject, "Group");
+            if (group.type == PObj::Dict && file_.get(group, "S").isName("Transparency") && (state_.fillAlpha < 1.0 || state_.blend != BlendMode::Normal)) {
+                auto level = std::make_shared<ClipLevel>();
+                level->group = document_.newGroupId();
+                level->transparency = true;
+                level->opacity = state_.fillAlpha;
+                level->blend = state_.blend;
+                state_.clips.push_back(level);
+                state_.fillAlpha = state_.strokeAlpha = 1.0;
+                state_.blend = BlendMode::Normal;
+            }
             const PObj& own = file_.get(xobject, "Resources");
             ++depth_;
             const PObj* savedResources = resources_;
@@ -1091,82 +1447,388 @@ namespace curvy {
             state_ = saved;
         }
 
+        // Text becomes live Text objects set in the installed font of the same family: the file holds glyphs by font, not characters, so
+        // the characters come from ToUnicode or the encoding, the widths from the font, and the look from the font's name.
+        FontInfo* Interpreter::loadFont(const PObj& dict) {
+            auto found = fonts_.find(&dict);
+            if (found != fonts_.end()) { return &found->second; }
+            FontInfo& font = fonts_[&dict];
+            if (dict.type != PObj::Dict) {
+                font.unicodeKnown = false;
+                return &font;
+            }
+            const PObj& subtype = file_.get(dict, "Subtype");
+            font.wide = subtype.isName("Type0");
+            const PObj* source = &dict;
+            if (font.wide) {
+                const PObj& descendants = file_.get(dict, "DescendantFonts");
+                if (descendants.type == PObj::Arr && !descendants.a.empty()) { source = &file_.resolve(descendants.a[0]); }
+            }
+            std::string base = file_.get(dict, "BaseFont").s;
+            if (base.empty()) { base = file_.get(*source, "BaseFont").s; }
+            const PObj& descriptor = file_.get(*source, "FontDescriptor");
+            if (descriptor.type == PObj::Dict) {
+                const int flags = int(numberOf(descriptor.find("Flags"), 0));
+                font.italic = (flags & 64) != 0 || numberOf(descriptor.find("ItalicAngle"), 0.0) != 0.0;
+                font.bold = (flags & 0x40000) != 0 || numberOf(descriptor.find("FontWeight"), 400.0) >= 700.0;
+                const double missing = numberOf(descriptor.find("MissingWidth"), 0.0);
+                if (missing > 0.0) { font.missingWidth = missing; }
+            }
+            font.family = fontFamily(base, font.bold, font.italic);
+            if (!font.family.empty() && !textFontAvailable(font.family)) {   // not installed: a stand-in of the same kind
+                const int flags = int(numberOf(descriptor.find("Flags"), 0));
+                const std::string stand = (flags & 1) ? "Courier New" : ((flags & 2) ? "Times New Roman" : "Arial");
+                font.family = textFontAvailable(stand) ? stand : std::string();
+            }
+            for (const char* key : {"FontFile2", "FontFile3"}) {
+                const PObj* ref = descriptor.find(key);
+                std::string bytes, rest;
+                if (ref != nullptr && file_.streamOf(*ref, bytes, rest) && rest.empty()) { font.program = FontProgram::load(bytes); }
+                if (font.program) { break; }
+            }
+            if (font.wide) {
+                const PObj* map = source->find("CIDToGIDMap");
+                std::string rest;
+                if (map != nullptr && map->type == PObj::Ref && !file_.streamOf(*map, font.cidToGid, rest)) { font.cidToGid.clear(); }
+            }
+            const PObj& baseEncoding = file_.get(dict, "Encoding");
+            font.macRoman = baseEncoding.isName("MacRomanEncoding") || file_.get(baseEncoding, "BaseEncoding").isName("MacRomanEncoding");
+
+            if (const PObj* toUnicode = dict.find("ToUnicode")) {
+                std::string cmap, rest;
+                if (file_.streamOf(*toUnicode, cmap, rest) && rest.empty()) { parseToUnicode(cmap, font.unicode); }
+            }
+            double unit = 1.0;   // widths in thousandths of an em (a Type 3 font has its own glyph space)
+            if (subtype.isName("Type3")) {
+                const PObj& matrix = file_.get(dict, "FontMatrix");
+                if (matrix.type == PObj::Arr && !matrix.a.empty()) { unit = numberOf(&matrix.a[0], 0.001) * 1000.0; }
+            }
+            if (font.wide) {
+                font.unicodeKnown = !font.unicode.empty();
+                font.missingWidth = numberOf(source->find("DW"), 1000.0);
+                const PObj& w = file_.get(*source, "W");
+                for (std::size_t i = 0; i + 1 < w.a.size();) {
+                    const unsigned first = unsigned(numberOf(&file_.resolve(w.a[i]), 0));
+                    const PObj& second = file_.resolve(w.a[i + 1]);
+                    if (second.type == PObj::Arr) {
+                        for (std::size_t j = 0; j < second.a.size(); ++j) { font.widths[first + unsigned(j)] = numberOf(&file_.resolve(second.a[j]), 0.0); }
+                        i += 2;
+                    } else if (i + 2 < w.a.size()) {
+                        const unsigned last = std::min(unsigned(numberOf(&second, 0)), first + 65535u);
+                        const double width = numberOf(&file_.resolve(w.a[i + 2]), 0.0);
+                        for (unsigned c = first; c <= last; ++c) { font.widths[c] = width; }
+                        i += 3;
+                    } else {
+                        break;
+                    }
+                }
+            } else {
+                const PObj& encoding = file_.get(dict, "Encoding");
+                if (encoding.type == PObj::Dict) {
+                    unsigned code = 0;
+                    for (const PObj& item : file_.get(encoding, "Differences").a) {
+                        const PObj& entry = file_.resolve(item);
+                        if (entry.isNum()) {
+                            code = unsigned(entry.n);
+                        } else if (entry.type == PObj::Name) {
+                            font.glyphNames[code] = entry.s;
+                            if (const unsigned u = glyphNameToUnicode(entry.s)) {
+                                font.encoded[code] = u;
+                                std::string character;
+                                appendUtf8(character, u);
+                                font.unicode.emplace(code, character);
+                            }
+                            ++code;
+                        }
+                    }
+                }
+                if (subtype.isName("Type3") && font.unicode.empty()) { font.unicodeKnown = false; }
+                const unsigned first = unsigned(numberOf(dict.find("FirstChar"), 0));
+                const PObj& widths = file_.get(dict, "Widths");
+                for (std::size_t i = 0; i < widths.a.size(); ++i) { font.widths[first + unsigned(i)] = numberOf(&file_.resolve(widths.a[i]), 0.0) * unit; }
+            }
+            return &font;
+        }
+
+        double Interpreter::glyphWidth(FontInfo& font, unsigned code, const std::string& character) const {
+            auto known = font.widths.find(code);
+            if (known != font.widths.end()) { return known->second; }
+            if (font.missingWidth >= 0.0) { return font.missingWidth; }
+            auto cached = font.measured.find(code);
+            if (cached != font.measured.end()) { return cached->second; }
+            TextStyle style;
+            style.bold = font.bold;
+            style.italic = font.italic;
+            const double width = character.empty() ? 500.0 : textAdvance(character, font.family, 1000.0, style);
+            font.measured[code] = width;
+            return width;
+        }
+
+        // The outline of the glyph a code shows, in em units; null when the font program has none for it.
+        const BLPath* Interpreter::glyphPath(FontInfo& font, unsigned code) const {
+            auto known = font.glyphs.find(code);
+            if (known != font.glyphs.end()) { return known->second.found ? &known->second.path : nullptr; }
+            FontInfo::Glyph& glyph = font.glyphs[code];
+            const FontProgram& program = *font.program;
+            unsigned id = 0;
+            if (font.wide) {
+                if (font.cidToGid.empty()) {
+                    id = program.glyphForCid(code);
+                } else if (2 * std::size_t(code) + 1 < font.cidToGid.size()) {
+                    id = ((unsigned char)font.cidToGid[2 * std::size_t(code)] << 8) | (unsigned char)font.cidToGid[2 * std::size_t(code) + 1];
+                }
+            } else {
+                auto glyphName = font.glyphNames.find(code);
+                if (glyphName != font.glyphNames.end()) { id = program.glyphForName(glyphName->second); }
+                auto named = font.encoded.find(code);
+                const unsigned unicode = named != font.encoded.end() ? named->second : (font.macRoman ? macRoman(code) : windowsAnsi(code));
+                if (id == 0 && unicode >= 32) { id = program.glyphForUnicode(unicode); }
+                if (id == 0) { id = program.glyphForCode(code); }
+            }
+            if (id != 0 && program.outline(id, glyph.path)) { glyph.found = true; }
+            return glyph.found ? &glyph.path : nullptr;
+        }
+
+        void Interpreter::moveText(double tx, double ty) {
+            BLMatrix2D line = BLMatrix2D::make_translation(tx, ty);
+            line.post_transform(lineMatrix_);
+            lineMatrix_ = line;
+            textMatrix_ = line;
+        }
+
+        void Interpreter::showText(const std::vector<PObj>& items) {
+            FontInfo* font = state_.font;
+            if (font == nullptr) { return; }
+            const double size = state_.fontSize;
+            const BLMatrix2D start = textMatrix_;
+            const bool useProgram = outlines_ && font->program != nullptr;
+            const BLMatrix2D head(size * state_.hScale, 0.0, 0.0, size, 0.0, state_.rise);
+            BLPath runPath;
+            std::string text;
+            double total = 0.0, visible = 0.0;   // the run's advance in text space, and up to its last non-blank character
+            auto advance = [&](double tx) {
+                BLMatrix2D step = BLMatrix2D::make_translation(tx, 0.0);
+                step.post_transform(textMatrix_);
+                textMatrix_ = step;
+                total += tx;
+            };
+            for (const PObj& item : items) {
+                if (item.isNum()) {
+                    const double gap = -item.n / 1000.0;
+                    if (gap > 0.25 && !text.empty() && text.back() != ' ') { text += ' ';   }   // a kern this wide is a space
+                    advance(gap * size * state_.hScale);
+                    continue;
+                }
+                if (item.type != PObj::Str) { continue; }
+                const std::size_t step = font->wide ? 2 : 1;
+                for (std::size_t i = 0; i + step <= item.s.size(); i += step) {
+                    const unsigned code = step == 2 ? (((unsigned char)item.s[i] << 8) | (unsigned char)item.s[i + 1]) : (unsigned char)item.s[i];
+                    std::string character;
+                    auto mapped = font->unicode.find(code);
+                    if (mapped != font->unicode.end()) {
+                        character = mapped->second;
+                    } else if (font->unicodeKnown && !font->wide) {
+                        appendUtf8(character, font->macRoman ? macRoman(code) : windowsAnsi(code));
+                    }
+                    if (!character.empty() && (unsigned char)character[0] < 32) { character.clear(); }
+                    text += character;
+                    if (useProgram) {
+                        if (const BLPath* glyph = glyphPath(*font, code)) {
+                            BLMatrix2D m = head;
+                            m.post_transform(textMatrix_);
+                            m.post_transform(state_.ctm);
+                            runPath.add_path(*glyph, m);
+                        }
+                    }
+                    const double width = glyphWidth(*font, code, character);
+                    advance((width / 1000.0 * size + state_.charSpace + (step == 1 && code == 32 ? state_.wordSpace : 0.0)) * state_.hScale);
+                    if (character.find_first_not_of(' ') != std::string::npos) { visible = total; }
+                }
+            }
+            while (!text.empty() && text.back() == ' ') { text.pop_back(); }
+            if ((state_.render & 3) == 3) { return; }
+            const bool fill = (state_.render & 3) == 0 || (state_.render & 3) == 2, stroke = (state_.render & 3) >= 1 && (state_.render & 3) <= 2;
+            auto finishObject = [&](SketchObject* object) {
+                const BLPath outline = object->geometry();
+                object->setFill(fill ? paintFor(state_.fill, state_.fillAlpha, *resources_, outline) : SketchPaint::none());
+                if (stroke) {
+                    object->setStroke(paintFor(state_.stroke, state_.strokeAlpha, *resources_, outline));
+                    object->setStrokeWidth(std::max(0.05, state_.lineWidth * scale()));
+                } else {
+                    object->setStroke(SketchPaint::none());
+                }
+                addObject(object);
+            };
+            if (useProgram && runPath.size() > 0) {
+                SketchObject* object = SketchObject::makePath(runPath);
+                if (font->unicodeKnown && !text.empty()) { object->setName(text); }
+                finishObject(object);
+                return;
+            }
+            if (!font->unicodeKnown || text.find_first_not_of(' ') == std::string::npos) { return; }
+
+            BLMatrix2D onPage = start;
+            onPage.post_transform(state_.ctm);
+            const double determinant = std::fabs(onPage.m00 * onPage.m11 - onPage.m01 * onPage.m10);
+            const double fontSize = std::fabs(size) * std::sqrt(determinant);
+            if (!(fontSize > 1e-3)) { return; }
+            // The outline is made at `fontSize` with y down from the baseline; this carries it onto the page.
+            BLMatrix2D placement(size * state_.hScale / fontSize, 0.0, 0.0, -size / fontSize, 0.0, state_.rise);
+            placement.post_transform(start);
+            placement.post_transform(state_.ctm);
+            TextStyle style;
+            style.bold = font->bold;
+            style.italic = font->italic;
+            // The stand-in font has other widths than the file's: spread the difference over the characters so the run keeps its length.
+            const double wanted = std::fabs(visible / (size * state_.hScale)) * fontSize;
+            if (std::fabs(size * state_.hScale) > 1e-6 && wanted > 0.0) {
+                std::size_t count = 0;
+                for (char c : text) { count += ((unsigned char)c & 0xC0) != 0x80 ? 1 : 0; }
+                const double tracking = (wanted - textAdvance(text, font->family, fontSize, style)) / double(std::max<std::size_t>(1, count));
+                if (std::fabs(tracking) > 0.005 * fontSize && std::fabs(tracking) < 0.3 * fontSize) { style.tracking = tracking; }
+            }
+            std::unique_ptr<SketchObject> object(SketchObject::makeText(text, font->family, fontSize, BLPoint(0, 0)));
+            SketchObject::Prototype::setTextAll(*object, text, font->family, fontSize, style);
+            SketchObject::Prototype::setTextState(*object, text, font->family, fontSize, placement);
+            finishObject(object.release());
+        }
+
         void Interpreter::execute(const std::string& op, std::vector<PObj>& args, const PObj& resources) {
             auto num = [&](std::size_t i) { return i < args.size() ? numberOf(&args[i], 0.0) : 0.0; };
             const std::size_t n = args.size();
-            if (op == "q") {
-                if (stack_.size() < 256) { stack_.push_back(state_); }
-            } else if (op == "Q") {
-                if (!stack_.empty()) {
-                    flushClips(stack_.back().clips.size());
-                    state_ = stack_.back();
-                    stack_.pop_back();
-                }
-            } else if (op == "cm" && n >= 6) {
-                BLMatrix2D m(num(n - 6), num(n - 5), num(n - 4), num(n - 3), num(n - 2), num(n - 1));
-                m.post_transform(state_.ctm);
-                state_.ctm = m;
-            } else if (op == "w") { state_.lineWidth = num(n - 1 < n ? n - 1 : 0);
-            } else if (op == "J") { state_.cap = int(num(n - 1 < n ? n - 1 : 0));
-            } else if (op == "j") { state_.join = int(num(n - 1 < n ? n - 1 : 0));
-            } else if (op == "M") { state_.miter = num(n - 1 < n ? n - 1 : 0);
-            } else if (op == "d" && n >= 1) {
-                state_.dash.clear();
-                if (args[0].type == PObj::Arr) { for (const PObj& x : args[0].a) { state_.dash.push_back(numberOf(&x, 0.0)); } }
-            } else if (op == "gs" && n >= 1) {
-                applyGState(file_.get(file_.get(resources, "ExtGState"), args[0].s.c_str()));
-            } else if (op == "m" && n >= 2) {
-                BLPoint p; point(num(n - 2), num(n - 1), p);
-                path_.move_to(p);
-                open_ = true;
-            } else if (op == "l" && n >= 2) {
-                BLPoint p; point(num(n - 2), num(n - 1), p);
-                if (path_.size() == 0) { path_.move_to(p); } else { path_.line_to(p); }
-            } else if (op == "c" && n >= 6) {
-                BLPoint a, b, c; point(num(n - 6), num(n - 5), a); point(num(n - 4), num(n - 3), b); point(num(n - 2), num(n - 1), c);
-                if (path_.size() == 0) { path_.move_to(a); }
-                path_.cubic_to(a, b, c);
-            } else if ((op == "v" || op == "y") && n >= 4) {
-                BLPoint cur(0, 0), a, b;
-                if (path_.size() > 0) { path_.get_last_vertex(&cur); }
-                point(num(n - 4), num(n - 3), a); point(num(n - 2), num(n - 1), b);
-                if (path_.size() == 0) { path_.move_to(a); cur = a; }
-                if (op == "v") { path_.cubic_to(cur, a, b); } else { path_.cubic_to(a, b, b); }
-            } else if (op == "h") {
-                if (path_.size() > 0) { path_.close(); }
-            } else if (op == "re" && n >= 4) {
-                rect(num(n - 4), num(n - 3), num(n - 2), num(n - 1));
-            } else if (op == "S") { paint(false, true, false);
-            } else if (op == "s") { paint(false, true, true);
-            } else if (op == "f" || op == "F") { paint(true, false, false, false);
-            } else if (op == "f*") { paint(true, false, false, true);
-            } else if (op == "B") { paint(true, true, false, false);
-            } else if (op == "B*") { paint(true, true, false, true);
-            } else if (op == "b") { paint(true, true, true, false);
-            } else if (op == "b*") { paint(true, true, true, true);
-            } else if (op == "n") { paint(false, false, false);
-            } else if (op == "W" || op == "W*") { pendingClip_ = true; pendingClipEvenOdd_ = op == "W*";
-            } else if (op == "sh" && n >= 1) { shadingFill(args[0].s, resources);
-            } else if (op == "g" || op == "rg" || op == "k") {
-                state_.fill.space.kind = op == "g" ? Space::Gray : (op == "rg" ? Space::RGB : Space::CMYK);
-                state_.fill.space.n = op == "g" ? 1 : (op == "rg" ? 3 : 4);
-                setColorOperands(state_.fill, args);
-            } else if (op == "G" || op == "RG" || op == "K") {
-                state_.stroke.space.kind = op == "G" ? Space::Gray : (op == "RG" ? Space::RGB : Space::CMYK);
-                state_.stroke.space.n = op == "G" ? 1 : (op == "RG" ? 3 : 4);
-                setColorOperands(state_.stroke, args);
-            } else if (op == "cs" && n >= 1) {
-                state_.fill.space = spaceOf(args[0], resources);
-                state_.fill.color = initialColor(state_.fill.space);
-            } else if (op == "CS" && n >= 1) {
-                state_.stroke.space = spaceOf(args[0], resources);
-                state_.stroke.color = initialColor(state_.stroke.space);
-            } else if (op == "sc" || op == "scn") { setColorOperands(state_.fill, args);
-            } else if (op == "SC" || op == "SCN") { setColorOperands(state_.stroke, args);
-            } else if (op == "Do" && n >= 1) {
-                doXObject(args[0].s, resources);
+            switch (opcode(op)) {
+                case opcode("q"):
+                    if (stack_.size() < 256) { stack_.push_back(state_); }
+                    break;
+                case opcode("Q"):
+                    if (!stack_.empty()) {
+                        flushClips(stack_.back().clips.size());
+                        state_ = stack_.back();
+                        stack_.pop_back();
+                    }
+                    break;
+                case opcode("cm"):
+                    if (n >= 6) {
+                        BLMatrix2D m(num(n - 6), num(n - 5), num(n - 4), num(n - 3), num(n - 2), num(n - 1));
+                        m.post_transform(state_.ctm);
+                        state_.ctm = m;
+                    }
+                    break;
+                case opcode("w"): state_.lineWidth = num(n - 1); break;
+                case opcode("J"): state_.cap = int(num(n - 1)); break;
+                case opcode("j"): state_.join = int(num(n - 1)); break;
+                case opcode("M"): state_.miter = num(n - 1); break;
+                case opcode("d"):
+                    if (n >= 1) {
+                        state_.dash.clear();
+                        if (args[0].type == PObj::Arr) { for (const PObj& x : args[0].a) { state_.dash.push_back(numberOf(&x, 0.0)); } }
+                    }
+                    break;
+                case opcode("gs"):
+                    if (n >= 1) { applyGState(file_.get(file_.get(resources, "ExtGState"), args[0].s.c_str())); }
+                    break;
+                case opcode("m"):
+                    if (n >= 2) {
+                        BLPoint p; point(num(n - 2), num(n - 1), p);
+                        path_.move_to(p);
+                        open_ = true;
+                    }
+                    break;
+                case opcode("l"):
+                    if (n >= 2) {
+                        BLPoint p; point(num(n - 2), num(n - 1), p);
+                        if (path_.size() == 0) { path_.move_to(p); } else { path_.line_to(p); }
+                    }
+                    break;
+                case opcode("c"):
+                    if (n >= 6) {
+                        BLPoint a, b, c; point(num(n - 6), num(n - 5), a); point(num(n - 4), num(n - 3), b); point(num(n - 2), num(n - 1), c);
+                        if (path_.size() == 0) { path_.move_to(a); }
+                        path_.cubic_to(a, b, c);
+                    }
+                    break;
+                case opcode("v"):
+                case opcode("y"):
+                    if (n >= 4) {
+                        BLPoint cur(0, 0), a, b;
+                        if (path_.size() > 0) { path_.get_last_vertex(&cur); }
+                        point(num(n - 4), num(n - 3), a); point(num(n - 2), num(n - 1), b);
+                        if (path_.size() == 0) { path_.move_to(a); cur = a; }
+                        if (op == "v") { path_.cubic_to(cur, a, b); } else { path_.cubic_to(a, b, b); }
+                    }
+                    break;
+                case opcode("h"): if (path_.size() > 0) { path_.close(); } break;
+                case opcode("re"): if (n >= 4) { rect(num(n - 4), num(n - 3), num(n - 2), num(n - 1)); } break;
+                case opcode("S"): paint(false, true, false); break;
+                case opcode("s"): paint(false, true, true); break;
+                case opcode("f"):
+                case opcode("F"): paint(true, false, false, false); break;
+                case opcode("f*"): paint(true, false, false, true); break;
+                case opcode("B"): paint(true, true, false, false); break;
+                case opcode("B*"): paint(true, true, false, true); break;
+                case opcode("b"): paint(true, true, true, false); break;
+                case opcode("b*"): paint(true, true, true, true); break;
+                case opcode("n"): paint(false, false, false); break;
+                case opcode("W"): pendingClip_ = true; pendingClipEvenOdd_ = false; break;
+                case opcode("W*"): pendingClip_ = true; pendingClipEvenOdd_ = true; break;
+                case opcode("sh"): if (n >= 1) { shadingFill(args[0].s, resources); } break;
+                case opcode("g"): case opcode("rg"): case opcode("k"):
+                    state_.fill.space.kind = op == "g" ? Space::Gray : (op == "rg" ? Space::RGB : Space::CMYK);
+                    state_.fill.space.n = op == "g" ? 1 : (op == "rg" ? 3 : 4);
+                    setColorOperands(state_.fill, args);
+                    break;
+                case opcode("G"): case opcode("RG"): case opcode("K"):
+                    state_.stroke.space.kind = op == "G" ? Space::Gray : (op == "RG" ? Space::RGB : Space::CMYK);
+                    state_.stroke.space.n = op == "G" ? 1 : (op == "RG" ? 3 : 4);
+                    setColorOperands(state_.stroke, args);
+                    break;
+                case opcode("cs"):
+                    if (n >= 1) {
+                        state_.fill.space = spaceOf(args[0], resources);
+                        state_.fill.color = initialColor(state_.fill.space);
+                    }
+                    break;
+                case opcode("CS"):
+                    if (n >= 1) {
+                        state_.stroke.space = spaceOf(args[0], resources);
+                        state_.stroke.color = initialColor(state_.stroke.space);
+                    }
+                    break;
+                case opcode("sc"): case opcode("scn"): setColorOperands(state_.fill, args); break;
+                case opcode("SC"): case opcode("SCN"): setColorOperands(state_.stroke, args); break;
+                case opcode("Do"): if (n >= 1) { doXObject(args[0].s, resources); } break;
+                case opcode("BT"): textMatrix_ = lineMatrix_ = BLMatrix2D::make_identity(); break;
+                case opcode("Tf"):
+                    if (n >= 2) {
+                        state_.font = loadFont(file_.get(file_.get(resources, "Font"), args[n - 2].s.c_str()));
+                        state_.fontSize = num(n - 1);
+                    }
+                    break;
+                case opcode("Tc"): state_.charSpace = num(n - 1); break;
+                case opcode("Tw"): state_.wordSpace = num(n - 1); break;
+                case opcode("Tz"): state_.hScale = num(n - 1) / 100.0; break;
+                case opcode("TL"): state_.leading = num(n - 1); break;
+                case opcode("Ts"): state_.rise = num(n - 1); break;
+                case opcode("Tr"): state_.render = int(num(n - 1)); break;
+                case opcode("Td"): if (n >= 2) { moveText(num(n - 2), num(n - 1)); } break;
+                case opcode("TD"): if (n >= 2) { state_.leading = -num(n - 1); moveText(num(n - 2), num(n - 1)); } break;
+                case opcode("T*"): moveText(0.0, -state_.leading); break;
+                case opcode("Tm"):
+                    if (n >= 6) { textMatrix_ = lineMatrix_ = BLMatrix2D(num(n - 6), num(n - 5), num(n - 4), num(n - 3), num(n - 2), num(n - 1)); }
+                    break;
+                case opcode("Tj"): if (n >= 1) { showText({args[n - 1]}); } break;
+                case opcode("TJ"): if (n >= 1 && args[n - 1].type == PObj::Arr) { showText(args[n - 1].a); } break;
+                case opcode("'"): if (n >= 1) { moveText(0.0, -state_.leading); showText({args[n - 1]}); } break;
+                case opcode("\""):
+                    if (n >= 3) {
+                        state_.wordSpace = num(n - 3);
+                        state_.charSpace = num(n - 2);
+                        moveText(0.0, -state_.leading);
+                        showText({args[n - 1]});
+                    }
+                    break;
+                default: break;   // marked content and the rest are skipped
             }
-            // Everything else (text, marked content, ...) is skipped.
         }
 
         void Interpreter::run(const std::string& content, const PObj& resources) {
@@ -1263,20 +1925,66 @@ namespace curvy {
             return !pages.empty();
         }
 
+        bool isJpegFiltered(const PdfFile& file, const PObj& dict) {
+            if (dict.type != PObj::Dict || !file.get(dict, "Subtype").isName("Image")) { return false; }
+            const PObj& filter = file.get(dict, "Filter");
+            const PObj& last = filter.type == PObj::Arr ? (filter.a.empty() ? file.null_ : file.resolve(filter.a.back())) : filter;
+            return last.isName("DCTDecode") || last.isName("DCT");
+        }
+
+        // JPEG decoding dominates the import of a photo-heavy PDF and the pictures are independent, so they are decoded together up front.
+        ImageCache decodeJpegsInParallel(const PdfFile& file) {
+            std::vector<int> numbers;
+            for (const auto& entry : file.objects()) {
+                if (isJpegFiltered(file, entry.second)) { numbers.push_back(entry.first); }
+            }
+            ImageCache cache;
+            for (int number : numbers) { cache[number] = nullptr; }
+            if (numbers.size() < 2) { return ImageCache(); }
+            std::vector<std::shared_ptr<const ImageData>> decoded(numbers.size());
+            std::atomic<std::size_t> next{0};
+            auto work = [&]() {
+                for (std::size_t i = next++; i < numbers.size(); i = next++) {
+                    try {
+                        PObj ref;
+                        ref.type = PObj::Ref;
+                        ref.n = numbers[i];
+                        std::string bytes, rest;
+                        if (file.streamOf(ref, bytes, rest) && (rest == "DCTDecode" || rest == "DCT")) { decoded[i] = decodeImage(bytes, "PDF image"); }
+                    } catch (...) {
+                    }
+                }
+            };
+            const unsigned count = std::min<unsigned>(std::max(1u, std::thread::hardware_concurrency()), unsigned(numbers.size()));
+            std::vector<std::thread> threads;
+            try {
+                for (unsigned t = 1; t < count; ++t) { threads.emplace_back(work); }
+            } catch (...) {
+            }
+            work();
+            for (std::thread& t : threads) { t.join(); }
+            for (std::size_t i = 0; i < numbers.size(); ++i) { cache[numbers[i]] = std::move(decoded[i]); }
+            return cache;
+        }
+
     }
 
     bool isPdfDocument(const std::string& data) {
         return data.compare(0, 5, "%PDF-") == 0 || data.substr(0, 1024).find("%PDF-") != std::string::npos;
     }
 
-    bool documentFromPdf(const std::string& data, SketchDocument& document) {
+    bool documentFromPdf(const std::string& data, SketchDocument& document, const PdfImportOptions& options, std::string* problem) {
         try {
-            if (!isPdfDocument(data) || data.find("/Encrypt") != std::string::npos) {
+            if (!isPdfDocument(data)) {
                 return false;
             }
             PdfFile file;
             std::vector<Page> pages;
-            if (!file.load(data) || !locatePages(file, pages)) {
+            if (!file.load(data)) {
+                if (problem != nullptr) { *problem = file.problem(); }
+                return false;
+            }
+            if (!locatePages(file, pages)) {
                 return false;
             }
             if (pages.size() > 500) { pages.resize(500); }
@@ -1303,6 +2011,8 @@ namespace curvy {
             document.setPageBackground(SketchColor::rgb(1.0f, 1.0f, 1.0f));
             document.setColorMode(ColorSpace::RGB);
 
+            Interpreter::FontCache fonts;
+            ImageCache images = decodeJpegsInParallel(file);
             for (std::size_t i = 0; i < pages.size(); ++i) {
                 const Page& page = pages[i];
                 const double w = page.x1 - page.x0, h = page.y1 - page.y0;
@@ -1322,7 +2032,9 @@ namespace curvy {
                         content += '\n';
                     }
                 }
-                Interpreter interpreter(file, document, base, boards[i].box());
+                Interpreter interpreter(file, document, base, boards[i].box(), fonts, options.textAsOutlines);
+                interpreter.setImages(&images);
+                if (pages.size() > 1) { interpreter.clipToPage(); }
                 interpreter.run(content, page.resources);
                 interpreter.finish();
             }
