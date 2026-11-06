@@ -53,7 +53,7 @@ namespace curvy {
         RadialRing newRing() {
             return {"New", "Create...", "dialog.new", {
                 {"Letter", "1", "new.letter"}, {"A4", "2", "new.a4"}, {"Full HD", "3", "new.fullhd"}, {"Square", "4", "new.square"},
-                {"Custom", "C", "dialog.new"}, {"Open", "O", "file.open"}, {"Import", "I", "file.importPdf"}, {"Settings", "S", "dialog.settings"}}};
+                {"Open", "O", "file.open"}, {"Import", "I", "file.importPdf"}, {"Settings", "S", "dialog.settings"}}, 3};
         }
         RadialRing createRing() {
             return {"Create", "Shape options...", "dialog.shape", {

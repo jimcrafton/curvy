@@ -18,13 +18,13 @@ namespace curvy {
         BLRgba32 rgb(std::uint32_t value) { return BLRgba32(Theme::argb(value)); }
     }
 
-    Point RadialLayout::slotCenter(int index, int count) {
-        const double angle = -kPi / 2.0 + 2.0 * kPi * double(index) / double(std::max(count, 1));
+    Point RadialLayout::slotCenter(int index, int count, double phase) {
+        const double angle = -kPi / 2.0 + 2.0 * kPi * (double(index) / double(std::max(count, 1)) + phase);
         return Point(float(ringRadius * std::cos(angle)), float(ringRadius * std::sin(angle)));
     }
 
-    Point RadialLayout::optionBoxCenter(int index, int count) {
-        const Point at = slotCenter(index, count);
+    Point RadialLayout::optionBoxCenter(int index, int count, double phase) {
+        const Point at = slotCenter(index, count, phase);
         const double length = std::hypot(double(at.x), double(at.y));
         const double ux = length > 0.0 ? double(at.x) / length : 0.0, uy = length > 0.0 ? double(at.y) / length : -1.0;
         const double toSide = std::fabs(ux) > 1e-6 ? slotWidth * 0.5 / std::fabs(ux) : 1e9;
@@ -33,7 +33,7 @@ namespace curvy {
         return Point(float(double(at.x) + ux * out), float(double(at.y) + uy * out));
     }
 
-    int RadialLayout::slotAt(double dx, double dy, int count) {
+    int RadialLayout::slotAt(double dx, double dy, int count, double phase) {
         const double distance = std::hypot(dx, dy);
         if (distance < hubRadius) {
             return hub;
@@ -41,7 +41,7 @@ namespace curvy {
         if (distance > reach || count <= 0) {
             return outside;
         }
-        double turns = (std::atan2(dy, dx) + kPi / 2.0) / (2.0 * kPi);
+        double turns = (std::atan2(dy, dx) + kPi / 2.0) / (2.0 * kPi) - phase;
         turns -= std::floor(turns);
         return int(std::lround(turns * count)) % count;
     }
@@ -77,7 +77,7 @@ namespace curvy {
     }
 
     int RadialMenu::hitAt(const Point& pt) const {
-        return RadialLayout::slotAt(double(pt.x) - double(center_.x), double(pt.y) - double(center_.y), int(ring_.slots.size()));
+        return RadialLayout::slotAt(double(pt.x) - double(center_.x), double(pt.y) - double(center_.y), int(ring_.slots.size()), ring_.phase());
     }
 
     int RadialMenu::optionBoxAt(const Point& pt) const {
@@ -86,7 +86,7 @@ namespace curvy {
             if (ring_.slots[std::size_t(i)].optionsCommand.empty()) {
                 continue;
             }
-            const Point box = RadialLayout::optionBoxCenter(i, count);
+            const Point box = RadialLayout::optionBoxCenter(i, count, ring_.phase());
             if (std::hypot(double(pt.x) - double(center_.x) - double(box.x), double(pt.y) - double(center_.y) - double(box.y)) <= RadialLayout::optionBoxReach) {
                 return i;
             }
@@ -191,7 +191,7 @@ namespace curvy {
 
         for (int i = 0; i < count; ++i) {
             const RadialSlot& slot = ring_.slots[std::size_t(i)];
-            const Point at = RadialLayout::slotCenter(i, count);
+            const Point at = RadialLayout::slotCenter(i, count, ring_.phase());
             const double w = RadialLayout::slotWidth, h = RadialLayout::slotHeight;
             const double x = cx + double(at.x) - w * 0.5, y = cy + double(at.y) - h * 0.5;
             const bool hot = i == hot_;
@@ -218,7 +218,7 @@ namespace curvy {
             if (ring_.slots[std::size_t(i)].optionsCommand.empty()) {
                 continue;
             }
-            const Point box = RadialLayout::optionBoxCenter(i, count);
+            const Point box = RadialLayout::optionBoxCenter(i, count, ring_.phase());
             const double bx = cx + double(box.x) - 8.0, by = cy + double(box.y) - 6.75;
             ctx.set_fill_style(rgb(theme.bgSurface));
             ctx.fill_round_rect(BLRoundRect(bx, by, 16.0, 13.5, 2.7));

@@ -8665,6 +8665,22 @@ TEST(RadialLayout, PointerFindsSlotHubOrOutside) {
     EXPECT_EQ(RadialLayout::slotAt(0, 100, 6), 3);
 }
 
+TEST(RadialLayout, ARingCanBeTurnedToPutASlotAtTheBottom) {
+    RadialRing ring;
+    ring.slots.resize(7);
+    ring.bottomSlot = 3;
+    const newui::Point bottom = RadialLayout::slotCenter(3, 7, ring.phase());
+    EXPECT_NEAR(bottom.x, 0.0, 0.01);
+    EXPECT_GT(bottom.y, 0.0f);
+    EXPECT_EQ(RadialLayout::slotAt(0, 100, 7, ring.phase()), 3);
+    for (int i = 0; i < 7; ++i) {
+        const newui::Point at = RadialLayout::slotCenter(i, 7, ring.phase());
+        EXPECT_EQ(RadialLayout::slotAt(double(at.x), double(at.y), 7, ring.phase()), i);
+    }
+    ring.bottomSlot = -1;
+    EXPECT_EQ(ring.phase(), 0.0);
+}
+
 
 // ---- Hold-key scrubbing and the workspace model ----
 
