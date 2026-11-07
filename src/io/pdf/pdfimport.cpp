@@ -1,11 +1,11 @@
-#include "curvy/pdfimport.h"
+#include "curvy/io/pdf/pdfimport.h"
 
 #include "curvy/gzip.h"
 #include "curvy/imagedata.h"
 #include "curvy/sketchdocument.h"
 #include "curvy/sketchexport.h"
-#include "curvy/fontprogram.h"
-#include "curvy/pdfcrypt.h"
+#include "curvy/io/pdf/fontprogram.h"
+#include "curvy/io/pdf/pdfcrypt.h"
 #include "curvy/textoutline.h"
 
 #include <algorithm>
@@ -1480,7 +1480,7 @@ namespace curvy {
                 const std::string stand = (flags & 1) ? "Courier New" : ((flags & 2) ? "Times New Roman" : "Arial");
                 font.family = textFontAvailable(stand) ? stand : std::string();
             }
-            for (const char* key : {"FontFile2", "FontFile3"}) {
+            for (const char* key : {"FontFile2", "FontFile3", "FontFile"}) {
                 const PObj* ref = descriptor.find(key);
                 std::string bytes, rest;
                 if (ref != nullptr && file_.streamOf(*ref, bytes, rest) && rest.empty()) { font.program = FontProgram::load(bytes); }

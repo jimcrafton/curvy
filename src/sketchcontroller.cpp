@@ -1,8 +1,8 @@
 #include "curvy/sketchcontroller.h"
 
-#include "curvy/pdfexport.h"
-#include "curvy/epsexport.h"
-#include "curvy/pdfimport.h"
+#include "curvy/io/pdf/pdfexport.h"
+#include "curvy/io/eps/epsexport.h"
+#include "curvy/io/pdf/pdfimport.h"
 #include "curvy/tracedialog.h"
 
 #include "curvy/imagetrace.h"
@@ -473,6 +473,30 @@ namespace curvy {
         return true;
     }
 
+    bool SketchDocumentController::startExport(const std::string& label, std::function<bool()> work, const std::string& doneStatus,
+                                               const std::string& failMessage, std::shared_ptr<std::string> failedFile) {
+        if (!background_) {
+            if (!work()) {
+                reportError(failedFile && !failedFile->empty() ? "Could not export the image to " + *failedFile : failMessage);
+                return false;
+            }
+            onStatus(*this, doneStatus);
+            return true;
+        }
+        return startBusy(label, SketchDocument::Busy::Saving, std::move(work),
+            [this, doneStatus, failMessage, failedFile](Outcome outcome) {
+                if (outcome == Outcome::Ok) {
+                    onStatus(*this, doneStatus);
+                } else if (outcome == Outcome::Cancelled) {
+                    onStatus(*this, "Export cancelled");
+                } else if (outcome == Outcome::TimedOut) {
+                    reportError("The export took longer than " + std::to_string(timeout_.count() / 60) + " minutes and was stopped.");
+                } else {
+                    reportError(failedFile && !failedFile->empty() ? "Could not export the image to " + *failedFile : failMessage);
+                }
+            });
+    }
+
     bool SketchDocumentController::exportImage() {
         if (refuseWhileBusy()) {
             return false;
@@ -490,12 +514,9 @@ namespace curvy {
         if (path.empty()) {
             return false;
         }
-        if (!exportPageImage(document_, path, exportScaleFor(document_))) {
-            reportError("Could not export the image to " + path);
-            return false;
-        }
-        onStatus(*this, "Exported " + path);
-        return true;
+        const double scale = exportScaleFor(document_);
+        return startExport("Exporting " + fileNameOf(path), [this, path, scale]() { return exportPageImage(document_, path, scale); },
+            "Exported " + path, "Could not export the image to " + path);
     }
 
     bool SketchDocumentController::exportPdf() {
@@ -514,12 +535,8 @@ namespace curvy {
         if (path.empty()) {
             return false;
         }
-        if (!writePdf(document_, path)) {
-            reportError("Could not export the PDF to " + path);
-            return false;
-        }
-        onStatus(*this, "Exported " + path);
-        return true;
+        return startExport("Exporting " + fileNameOf(path), [this, path]() { return writePdf(document_, path); },
+            "Exported " + path, "Could not export the PDF to " + path);
     }
 
     bool SketchDocumentController::exportEps() {
@@ -538,12 +555,8 @@ namespace curvy {
         if (path.empty()) {
             return false;
         }
-        if (!writeEps(document_, path)) {
-            reportError("Could not export the EPS to " + path);
-            return false;
-        }
-        onStatus(*this, "Exported " + path);
-        return true;
+        return startExport("Exporting " + fileNameOf(path), [this, path]() { return writeEps(document_, path); },
+            "Exported " + path, "Could not export the EPS to " + path);
     }
 
     bool SketchDocumentController::exportArtboards() {
@@ -563,15 +576,24 @@ namespace curvy {
         if (path.empty()) {
             return false;
         }
-        for (std::size_t i = 0; i < document_.artboards().size(); ++i) {
-            std::string file = artboardFilePath(path, document_.artboards()[i].name, i + 1);
-            if (!exportArtboardImage(document_, i, file, exportScaleFor(document_))) {
-                reportError("Could not export the image to " + file);
-                return false;
-            }
-        }
-        onStatus(*this, "Exported " + std::to_string(document_.artboards().size()) + " artboards");
-        return true;
+        const double scale = exportScaleFor(document_);
+        const std::size_t count = document_.artboards().size();
+        auto failedFile = std::make_shared<std::string>();   // written by the worker, read by finish after the worker has ended
+        return startExport("Exporting " + std::to_string(count) + " artboards",
+            [this, path, scale, count, failedFile]() {
+                for (std::size_t i = 0; i < count; ++i) {
+                    if (task_.progress().cancelled()) {
+                        return false;
+                    }
+                    std::string file = artboardFilePath(path, document_.artboards()[i].name, i + 1);
+                    if (!exportArtboardImage(document_, i, file, scale)) {
+                        *failedFile = file;
+                        return false;
+                    }
+                }
+                return true;
+            },
+            "Exported " + std::to_string(count) + " artboards", "", failedFile);
     }
 
     bool SketchDocumentController::traceImage() {

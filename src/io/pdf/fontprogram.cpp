@@ -1,4 +1,4 @@
-#include "curvy/fontprogram.h"
+#include "curvy/io/pdf/fontprogram.h"
 
 #include <algorithm>
 #include <cctype>
@@ -773,6 +773,381 @@ namespace curvy {
             mutable std::map<std::string, unsigned> byName_;
         };
 
+        // ---- Type 1 (PostScript) outlines ------------------------------------------------------------------------------------------------
+
+        const std::vector<std::string>& standardEncodingNames() {
+            static const std::vector<std::string> names = [] {
+                std::vector<std::string> out(256);
+                const auto& sid = standardStrings();
+                for (unsigned c = 32; c <= 126; ++c) { out[c] = sid[c - 31]; }
+                struct Run { unsigned code; const char* names; };
+                const Run runs[] = {
+                    {161, "exclamdown cent sterling fraction yen florin section currency quotesingle quotedblleft guillemotleft guilsinglleft guilsinglright fi fl"},
+                    {177, "endash dagger daggerdbl periodcentered"},
+                    {182, "paragraph bullet quotesinglbase quotedblbase quotedblright guillemotright ellipsis perthousand"},
+                    {191, "questiondown"},
+                    {193, "grave acute circumflex tilde macron breve dotaccent dieresis"},
+                    {202, "ring cedilla"},
+                    {205, "hungarumlaut ogonek caron emdash"},
+                    {225, "AE"}, {227, "ordfeminine"}, {232, "Lslash Oslash OE ordmasculine"}, {241, "ae"}, {245, "dotlessi"}, {248, "lslash oslash oe germandbls"}};
+                for (const Run& run : runs) {
+                    std::istringstream in(run.names);
+                    unsigned code = run.code;
+                    for (std::string word; in >> word;) { out[code++] = word; }
+                }
+                return out;
+            }();
+            return names;
+        }
+
+        class Type1Program : public FontProgram {
+        public:
+            explicit Type1Program(const std::string& file) { valid_ = parse(file); }
+
+            bool valid() const { return valid_; }
+            unsigned glyphCount() const override { return unsigned(names_.size()); }
+
+            bool outline(unsigned glyph, BLPath& out) const override {
+                if (!valid_ || glyph >= names_.size()) { return false; }
+                Machine m(*this);
+                m.run(charStrings_.at(names_[glyph]), 0);
+                m.finish();
+                out.add_path(m.path, BLMatrix2D(scale_, 0.0, 0.0, scale_, 0.0, 0.0));
+                return true;
+            }
+
+            unsigned glyphForUnicode(unsigned cp) const override {
+                if (byUnicode_.empty()) {
+                    for (std::size_t g = 1; g < names_.size(); ++g) {
+                        const unsigned u = glyphNameToUnicode(names_[g]);
+                        if (u != 0) { byUnicode_.emplace(u, unsigned(g)); }
+                    }
+                    if (byUnicode_.empty()) { byUnicode_.emplace(0u, 0u); }
+                }
+                auto it = byUnicode_.find(cp);
+                return it == byUnicode_.end() ? 0u : it->second;
+            }
+
+            unsigned glyphForCode(unsigned code) const override {
+                const auto& names = encoding_.empty() ? standardEncodingNames() : encoding_;
+                return code < names.size() ? glyphForName(names[code]) : 0u;
+            }
+
+            unsigned glyphForCid(unsigned cid) const override { return cid < names_.size() ? cid : 0u; }
+
+            unsigned glyphForName(const std::string& name) const override {
+                auto it = index_.find(name);
+                return it == index_.end() ? 0u : it->second;
+            }
+
+        private:
+            static std::string decrypt(const std::string& in, unsigned r, std::size_t skip) {
+                std::string out;
+                out.reserve(in.size());
+                for (unsigned char c : in) {
+                    out += char(c ^ (r >> 8));
+                    r = ((c + r) * 52845u + 22719u) & 0xFFFFu;
+                }
+                return skip >= out.size() ? std::string() : out.substr(skip);
+            }
+
+            // A .pfb file wraps its parts in 0x80 segments; PDF streams usually hold the bare parts.
+            static std::string unwrapPfb(const std::string& data) {
+                if (data.empty() || (unsigned char)data[0] != 0x80) { return data; }
+                std::string out;
+                for (std::size_t p = 0; p + 6 <= data.size() && (unsigned char)data[p] == 0x80;) {
+                    const unsigned type = (unsigned char)data[p + 1];
+                    if (type == 3) { break; }
+                    const std::size_t length = (unsigned char)data[p + 2] | ((unsigned char)data[p + 3] << 8) | ((unsigned char)data[p + 4] << 16) | (std::size_t((unsigned char)data[p + 5]) << 24);
+                    out.append(data, p + 6, length);
+                    p += 6 + length;
+                }
+                return out;
+            }
+
+            static bool isSpace(char c) { return c == ' ' || c == '\n' || c == '\r' || c == '\t' || c == '\f' || c == '\0'; }
+
+            static void skipSpace(const std::string& s, std::size_t& p) { while (p < s.size() && isSpace(s[p])) { ++p; } }
+
+            static std::string token(const std::string& s, std::size_t& p) {
+                skipSpace(s, p);
+                const std::size_t begin = p;
+                if (p < s.size() && (s[p] == '/' )) { ++p; }
+                while (p < s.size() && !isSpace(s[p]) && s[p] != '/' && s[p] != '{' && s[p] != '[' && s[p] != ']' && s[p] != '}') { ++p; }
+                if (p == begin && p < s.size()) { ++p; }
+                return s.substr(begin, p - begin);
+            }
+
+            static bool readNumber(const std::string& s, std::size_t& p, long& value) {
+                const std::string t = token(s, p);
+                char* end = nullptr;
+                value = std::strtol(t.c_str(), &end, 10);
+                return !t.empty() && end != t.c_str();
+            }
+
+            bool parse(const std::string& raw) {
+                const std::string file = unwrapPfb(raw);
+                const std::size_t exec = file.find("eexec");
+                if (exec == std::string::npos) { return false; }
+                const std::string clear = file.substr(0, exec);
+
+                const std::size_t matrix = clear.find("/FontMatrix");
+                if (matrix != std::string::npos) {
+                    std::size_t p = clear.find('[', matrix);
+                    if (p != std::string::npos) {
+                        const double a = std::atof(clear.c_str() + p + 1);
+                        if (a > 0.0) { scale_ = a; }
+                    }
+                }
+                readEncoding(clear);
+
+                std::size_t p = exec + 5;
+                while (p < file.size() && (file[p] == ' ' || file[p] == '\t' || file[p] == '\r' || file[p] == '\n')) { ++p; }
+                std::string cipher;
+                bool hex = p + 4 <= file.size();
+                for (std::size_t i = 0; i < 4 && hex; ++i) { hex = std::isxdigit((unsigned char)file[p + i]) != 0; }
+                if (hex) {
+                    int high = -1;
+                    for (; p < file.size(); ++p) {
+                        const unsigned char c = (unsigned char)file[p];
+                        if (isSpace(char(c))) { continue; }
+                        if (!std::isxdigit(c)) { break; }
+                        const int v = std::isdigit(c) ? c - '0' : (std::tolower(c) - 'a' + 10);
+                        if (high < 0) { high = v; } else { cipher += char(high * 16 + v); high = -1; }
+                    }
+                } else {
+                    cipher = file.substr(p);
+                }
+                const std::string priv = decrypt(cipher, 55665u, 4);
+                return readPrivate(priv);
+            }
+
+            void readEncoding(const std::string& clear) {
+                std::size_t p = clear.find("/Encoding");
+                if (p == std::string::npos) { return; }
+                p += 9;
+                std::vector<std::string> names(256);
+                bool any = false;
+                while (p < clear.size()) {
+                    const std::string t = token(clear, p);
+                    if (t == "StandardEncoding") { return; }
+                    if (t == "def" || t == "readonly" || t.empty()) { break; }
+                    if (t == "dup") {
+                        long code = 0;
+                        if (!readNumber(clear, p, code)) { continue; }
+                        const std::string name = token(clear, p);
+                        if (code >= 0 && code < 256 && name.size() > 1 && name[0] == '/') { names[std::size_t(code)] = name.substr(1); any = true; }
+                    }
+                }
+                if (any) { encoding_ = std::move(names); }
+            }
+
+            bool readPrivate(const std::string& priv) {
+                long lenIV = 4;
+                const std::size_t iv = priv.find("/lenIV");
+                if (iv != std::string::npos) { std::size_t p = iv + 6; readNumber(priv, p, lenIV); }
+                const std::size_t skip = lenIV < 0 ? 0 : std::size_t(lenIV);
+                auto open = [&](const std::string& bytes) { return lenIV < 0 ? bytes : decrypt(bytes, 4330u, skip); };
+
+                const std::size_t charStringsAt = priv.find("/CharStrings");
+                if (charStringsAt == std::string::npos) { return false; }
+                const std::size_t subrsAt = priv.find("/Subrs");
+                if (subrsAt != std::string::npos && subrsAt < charStringsAt) {
+                    std::size_t p = subrsAt + 6;
+                    long count = 0;
+                    readNumber(priv, p, count);
+                    while (p < charStringsAt) {
+                        const std::string t = token(priv, p);
+                        if (t.empty() || t == "/CharStrings") { break; }
+                        if (t != "dup") { continue; }
+                        long index = 0, length = 0;
+                        if (!readNumber(priv, p, index) || !readNumber(priv, p, length)) { break; }
+                        token(priv, p);   // RD or -|
+                        ++p;
+                        if (length < 0 || p + std::size_t(length) > priv.size()) { break; }
+                        if (index >= 0 && index < 65536) {
+                            if (subrs_.size() <= std::size_t(index)) { subrs_.resize(std::size_t(index) + 1); }
+                            subrs_[std::size_t(index)] = open(priv.substr(p, std::size_t(length)));
+                        }
+                        p += std::size_t(length);
+                    }
+                }
+
+                std::size_t p = charStringsAt + 12;
+                names_.push_back(".notdef");
+                charStrings_[".notdef"] = std::string("\x8b\x8b\x0d\x0e", 4);   // 0 0 hsbw endchar
+                while (p < priv.size()) {
+                    skipSpace(priv, p);
+                    if (p >= priv.size()) { break; }
+                    if (priv[p] != '/') {
+                        const std::string t = token(priv, p);
+                        if (t == "end") { break; }
+                        continue;
+                    }
+                    const std::string name = token(priv, p).substr(1);
+                    long length = 0;
+                    if (!readNumber(priv, p, length)) { continue; }
+                    token(priv, p);   // RD or -|
+                    ++p;
+                    if (length < 0 || p + std::size_t(length) > priv.size()) { break; }
+                    const std::string code = open(priv.substr(p, std::size_t(length)));
+                    p += std::size_t(length);
+                    if (charStrings_.count(name) == 0) { names_.push_back(name); }
+                    charStrings_[name] = code;
+                }
+                for (std::size_t g = 0; g < names_.size(); ++g) { index_.emplace(names_[g], unsigned(g)); }
+                return names_.size() > 1;
+            }
+
+            // The Type 1 charstring interpreter.
+            struct Machine {
+                explicit Machine(const Type1Program& font) : f(font) {}
+
+                const Type1Program& f;
+                BLPath path;
+                std::vector<double> st, ps, flexPoints;
+                double x = 0.0, y = 0.0, sbx = 0.0;
+                bool open = false, done = false, flex = false;
+
+                void finish() { if (open) { path.close(); open = false; } }
+
+                void moveTo(double dx, double dy) {
+                    x += dx;
+                    y += dy;
+                    if (flex) {
+                        flexPoints.push_back(x);
+                        flexPoints.push_back(y);
+                        return;
+                    }
+                    if (open) { path.close(); }
+                    path.move_to(x, y);
+                    open = true;
+                }
+                void begin() { if (!open) { path.move_to(x, y); open = true; } }
+                void lineTo(double dx, double dy) { begin(); x += dx; y += dy; path.line_to(x, y); }
+                void curveTo(double a, double b, double c, double d, double e, double g) {
+                    begin();
+                    const double x1 = x + a, y1 = y + b, x2 = x1 + c, y2 = y1 + d;
+                    x = x2 + e;
+                    y = y2 + g;
+                    path.cubic_to(x1, y1, x2, y2, x, y);
+                }
+
+                double pop() { if (st.empty()) { return 0.0; } const double v = st.back(); st.pop_back(); return v; }
+
+                void seac(double asb, double adx, double ady, unsigned bchar, unsigned achar, int depth) {
+                    const auto& names = standardEncodingNames();
+                    if (bchar > 255 || achar > 255 || depth > 0) { return; }
+                    finish();
+                    const double offsetX = sbx + adx - asb;
+                    const std::string* parts[2] = {nullptr, nullptr};
+                    for (int i = 0; i < 2; ++i) {
+                        auto it = f.charStrings_.find(names[i == 0 ? bchar : achar]);
+                        if (it != f.charStrings_.end()) { parts[i] = &it->second; }
+                    }
+                    for (int i = 0; i < 2; ++i) {
+                        if (parts[i] == nullptr) { continue; }
+                        Machine sub(f);
+                        sub.run(*parts[i], depth + 1);
+                        sub.finish();
+                        path.add_path(sub.path, i == 0 ? BLMatrix2D::make_identity() : BLMatrix2D::make_translation(offsetX, ady));
+                    }
+                    done = true;
+                }
+
+                void run(const std::string& code, int depth) {
+                    if (depth > 12) { return; }
+                    std::size_t i = 0;
+                    while (i < code.size() && !done) {
+                        const unsigned b = (unsigned char)code[i++];
+                        if (b >= 32) {
+                            double v;
+                            if (b <= 246) { v = double(int(b) - 139); }
+                            else if (b <= 250) { v = i < code.size() ? double((int(b) - 247) * 256 + int((unsigned char)code[i++]) + 108) : 0.0; }
+                            else if (b <= 254) { v = i < code.size() ? double(-(int(b) - 251) * 256 - int((unsigned char)code[i++]) - 108) : 0.0; }
+                            else {
+                                std::uint32_t u = 0;
+                                for (int k = 0; k < 4 && i < code.size(); ++k) { u = (u << 8) | (unsigned char)code[i++]; }
+                                v = double(std::int32_t(u));
+                            }
+                            if (st.size() < 64) { st.push_back(v); }
+                            continue;
+                        }
+                        const std::size_t n = st.size();
+                        switch (b) {
+                            case 1: case 3: st.clear(); break;
+                            case 4: if (n >= 1) { moveTo(0.0, st[n - 1]); } st.clear(); break;
+                            case 5: if (n >= 2) { lineTo(st[0], st[1]); } st.clear(); break;
+                            case 6: if (n >= 1) { lineTo(st[0], 0.0); } st.clear(); break;
+                            case 7: if (n >= 1) { lineTo(0.0, st[0]); } st.clear(); break;
+                            case 8: if (n >= 6) { curveTo(st[0], st[1], st[2], st[3], st[4], st[5]); } st.clear(); break;
+                            case 9: finish(); st.clear(); break;
+                            case 10: {
+                                const double number = pop();
+                                if (number >= 0 && std::size_t(number) < f.subrs_.size()) { run(f.subrs_[std::size_t(number)], depth + 1); }
+                                break;
+                            }
+                            case 11: return;
+                            case 13: if (n >= 2) { sbx = st[0]; x = sbx; y = 0.0; } st.clear(); break;
+                            case 14: finish(); done = true; break;
+                            case 21: if (n >= 2) { moveTo(st[n - 2], st[n - 1]); } st.clear(); break;
+                            case 22: if (n >= 1) { moveTo(st[n - 1], 0.0); } st.clear(); break;
+                            case 30: if (n >= 4) { curveTo(0.0, st[0], st[1], st[2], st[3], 0.0); } st.clear(); break;
+                            case 31: if (n >= 4) { curveTo(st[0], 0.0, st[1], st[2], 0.0, st[3]); } st.clear(); break;
+                            case 12: {
+                                const unsigned b1 = i < code.size() ? (unsigned char)code[i++] : 0u;
+                                switch (b1) {
+                                    case 6:
+                                        if (n >= 5) { seac(st[0], st[1], st[2], unsigned(st[3]), unsigned(st[4]), depth); }
+                                        st.clear();
+                                        break;
+                                    case 7: if (n >= 4) { sbx = st[0]; x = st[0]; y = st[1]; } st.clear(); break;
+                                    case 12: { const double d = pop(), a = pop(); st.push_back(d != 0.0 ? a / d : 0.0); break; }
+                                    case 16: {
+                                        const int which = int(pop());
+                                        const int count = int(pop());
+                                        std::vector<double> args;
+                                        for (int k = 0; k < count && !st.empty(); ++k) { args.push_back(pop()); }   // last argument first
+                                        if (which == 1) {
+                                            begin();
+                                            flex = true;
+                                            flexPoints.clear();
+                                        } else if (which == 0) {
+                                            flex = false;
+                                            if (flexPoints.size() >= 14) {
+                                                const std::vector<double>& q = flexPoints;
+                                                path.cubic_to(q[2], q[3], q[4], q[5], q[6], q[7]);
+                                                path.cubic_to(q[8], q[9], q[10], q[11], q[12], q[13]);
+                                                x = q[12];
+                                                y = q[13];
+                                            }
+                                            ps.push_back(args.size() >= 1 ? args[0] : y);   // y, then x: two pops give x y for setcurrentpoint
+                                            ps.push_back(args.size() >= 2 ? args[1] : x);
+                                        } else if (which != 2) {
+                                            for (double a : args) { ps.push_back(a); }
+                                        }
+                                        break;
+                                    }
+                                    case 17: if (!ps.empty()) { st.push_back(ps.back()); ps.pop_back(); } break;
+                                    case 33: if (n >= 2) { x = st[0]; y = st[1]; } st.clear(); break;
+                                    default: st.clear(); break;
+                                }
+                                break;
+                            }
+                            default: st.clear(); break;
+                        }
+                    }
+                }
+            };
+
+            std::map<std::string, std::string> charStrings_;
+            std::vector<std::string> names_, subrs_, encoding_;
+            std::map<std::string, unsigned> index_;
+            double scale_ = 0.001;
+            bool valid_ = false;
+            mutable std::map<unsigned, unsigned> byUnicode_;
+        };
+
     }
 
     std::shared_ptr<FontProgram> FontProgram::load(const std::string& data) {
@@ -790,6 +1165,10 @@ namespace curvy {
                     return font->valid() ? font : nullptr;
                 }
                 return nullptr;
+            }
+            if (r.u8(0) == 0x80 || (r.u8(0) == '%' && r.u8(1) == '!')) {   // Type 1: PFB segments or the PostScript text
+                auto font = std::make_shared<Type1Program>(data);
+                return font->valid() ? font : nullptr;
             }
             if (r.u8(0) == 1 && r.u8(2) >= 4) {   // bare CFF: major version 1, header size
                 auto font = std::make_shared<CffProgram>(data, Span{0, data.size()}, nullptr);

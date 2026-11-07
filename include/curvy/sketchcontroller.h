@@ -140,6 +140,9 @@ namespace curvy {
         bool startOpen(const std::string& path);
         bool startImport(const std::string& file);
         bool startSave(const std::string& path);
+        // Runs an export on the worker in the app, inline otherwise. failedFile, when set by `work`, names the file the message reports.
+        bool startExport(const std::string& label, std::function<bool()> work, const std::string& doneStatus, const std::string& failMessage,
+                         std::shared_ptr<std::string> failedFile = nullptr);
 
         bool background_ = false;
         BackgroundTask task_;

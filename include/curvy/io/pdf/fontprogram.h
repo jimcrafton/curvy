@@ -8,8 +8,8 @@
 namespace curvy {
 
     // The glyph outlines of an embedded font program, read from the bytes of a font file: TrueType (glyf, composites included), OpenType
-    // with CFF outlines, and bare CFF (what PDF calls Type1C and CIDFontType0C). Outlines are in em units (1 = the font size), y up.
-    // Hints, kerning and substitution tables are not read; Type 1 (PostScript) programs are not supported.
+    // with CFF outlines, bare CFF (what PDF calls Type1C and CIDFontType0C), and Type 1 (PostScript, eexec-encrypted, seac and flex
+    // included). Outlines are in em units (1 = the font size), y up. Hints, kerning and substitution tables are not read.
     class FontProgram {
     public:
         virtual ~FontProgram() = default;

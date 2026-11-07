@@ -51,11 +51,11 @@ add_executable(curvy
     src/documenttextpath.cpp
     src/documentimages.cpp
     src/documentexpand.cpp
-    src/pdfexport.cpp
-    src/epsexport.cpp
-    src/pdfimport.cpp
-    src/fontprogram.cpp
-    src/pdfcrypt.cpp
+    src/io/pdf/pdfexport.cpp
+    src/io/eps/epsexport.cpp
+    src/io/pdf/pdfimport.cpp
+    src/io/pdf/fontprogram.cpp
+    src/io/pdf/pdfcrypt.cpp
     src/documentbrushes.cpp
     src/textpanel.cpp
     src/liveshape.cpp
@@ -95,7 +95,7 @@ add_executable(curvy
     src/documentartboards.cpp
     src/documenttrace.cpp
     src/imagetrace.cpp
-    src/sketchsvg.cpp
+    src/io/svg/sketchsvg.cpp
     src/sketchexport.cpp
     src/sketchcontroller.cpp
     src/sketchcommands.cpp
@@ -139,8 +139,8 @@ newui_add_resources(curvy "${CMAKE_CURRENT_SOURCE_DIR}/Resources")
 set(CURVY_MODEL_SOURCES
     sketchcolor sketchobject sketchdocument documentcutting documentpaths documenttransform documentguides
     documentlayers documentswatches documentselect documentclip documentsymbols documentbrushes brush
-    pathflatten textwarp imagedata documenttextpath documentimages documentexpand pdfexport epsexport pdfimport fontprogram pdfcrypt documentartboards
-    documenttrace imagetrace sketchsvg sketchexport shapetools pathops textoutline gzip numberscrubber expressionfield
+    pathflatten textwarp imagedata documenttextpath documentimages documentexpand io/pdf/pdfexport io/eps/epsexport io/pdf/pdfimport io/pdf/fontprogram io/pdf/pdfcrypt documentartboards
+    documenttrace imagetrace io/svg/sketchsvg sketchexport shapetools pathops textoutline gzip numberscrubber expressionfield
     backgroundtask sketchbin cursorset newdocumentmodel graphdocument graphtree pathnode shapenode appearancenode documentlive radialmenu holdscrub workspacemodel dockcontext liveshape settings)
 list(TRANSFORM CURVY_MODEL_SOURCES PREPEND src/)
 list(TRANSFORM CURVY_MODEL_SOURCES APPEND .cpp)

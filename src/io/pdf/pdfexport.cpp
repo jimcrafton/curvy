@@ -1,4 +1,4 @@
-#include "curvy/pdfexport.h"
+#include "curvy/io/pdf/pdfexport.h"
 
 #include "curvy/gzip.h"
 #include "curvy/sketchdocument.h"

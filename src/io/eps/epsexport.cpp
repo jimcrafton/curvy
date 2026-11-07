@@ -1,4 +1,4 @@
-#include "curvy/epsexport.h"
+#include "curvy/io/eps/epsexport.h"
 
 #include "curvy/sketchdocument.h"
 

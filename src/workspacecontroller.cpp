@@ -2,7 +2,7 @@
 #include "curvy/theme.h"
 #include "curvy/dockcontroller.h"
 #include "curvy/settingsdialog.h"
-#include "curvy/sketchsvg.h"
+#include "curvy/io/svg/sketchsvg.h"
 #include "curvy/welcomeoverlay.h"
 #include "curvy/loadingoverlay.h"
 
@@ -72,7 +72,7 @@ namespace curvy {
         }
         RadialRing importRing() {
             return {"Import", "Back", "ring.document", {
-                {"Picture", "P", "file.placeImage"}, {"PDF / AI", "F", "file.importPdf"}, {"Trace", "T", "file.traceImage"}}};
+                {"Picture", "P", "file.placeImage"}, {"Trace", "T", "file.traceImage"}, {"PDF / AI", "F", "file.importPdf"}}};
         }
         RadialRing viewRing() {
             return {"View", "Back", "ring.document", {

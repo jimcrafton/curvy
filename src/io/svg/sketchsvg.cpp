@@ -1,4 +1,4 @@
-#include "curvy/sketchsvg.h"
+#include "curvy/io/svg/sketchsvg.h"
 
 #include "curvy/imagedata.h"
 

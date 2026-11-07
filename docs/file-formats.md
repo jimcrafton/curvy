@@ -21,7 +21,7 @@ Formats are told apart by their first bytes, not the file name (`.skb`, gzip, `%
 
 ## SVG (`.svg`, `.svgz`) - the native document format
 
-Source: `sketchsvg.h`, `sketchsvg.cpp`. Curvy files are ordinary SVG plus `data-*` attributes carrying what SVG cannot (object type and name, frame angle, original color space, ppi, artboards, layers, guides, swatches, symbols, patterns, brushes, graphic styles, node graph).
+Source: `include/curvy/io/svg/sketchsvg.h`, `src/io/svg/sketchsvg.cpp`. Curvy files are ordinary SVG plus `data-*` attributes carrying what SVG cannot (object type and name, frame angle, original color space, ppi, artboards, layers, guides, swatches, symbols, patterns, brushes, graphic styles, node graph).
 
 - **Own files:** Full. Everything in the document model round-trips.
 - **Other SVG files, supported:** `path` (all commands, arcs), `rect`, `circle`, `ellipse`, `line`, `polyline`, `polygon`, `g`, `transform`, fill/stroke/opacity as attributes or `style=""`, named / `#rgb` / `#rrggbb` / `rgb()` colors, linear and radial gradients (objectBoundingBox or userSpaceOnUse, `href` stops).
@@ -53,7 +53,7 @@ Source: `sketchbin.h`, `sketchbin.cpp`. Chunked little-endian binary (`SKB1`), g
 
 ## PDF export (`.pdf`)
 
-Source: `pdfexport.h`, `pdfexport.cpp`. PDF 1.4, one page per artboard.
+Source: `include/curvy/io/pdf/pdfexport.h`, `src/io/pdf/pdfexport.cpp`. PDF 1.4, one page per artboard.
 
 - **Supported:** vector paths; RGB, CMYK and gray color; axial and radial gradients (with stitched stops); tiling pattern fills; dashes, caps, joins, miter limit; clipping masks; group and object opacity and blend modes; symbols; pictures (with soft mask); text as outlines; brush strokes and variable-width strokes as outlines.
 - **Rasterised:** shadows, glows and blurs become a 2x picture placed in position.
@@ -62,7 +62,7 @@ Source: `pdfexport.h`, `pdfexport.cpp`. PDF 1.4, one page per artboard.
 
 ## PDF and Illustrator import (`.pdf`, `.ai`)
 
-Source: `pdfimport.h`, `pdfimport.cpp`. File > Import PDF / Illustrator. One artboard per page, laid out left to right with a 40 pt gap. The result is an untitled, modified document.
+Source: `include/curvy/io/pdf/pdfimport.h`, `src/io/pdf/pdfimport.cpp`. File > Import PDF / Illustrator. One artboard per page, laid out left to right with a 40 pt gap. The result is an untitled, modified document.
 
 - **Supported:**
   - File structure: objects found by scanning (works without a cross-reference table, after incremental updates, and on slightly damaged files); object streams; page tree with inherited media box, resources and `/Rotate`.
@@ -76,7 +76,7 @@ Source: `pdfimport.h`, `pdfimport.cpp`. File > Import PDF / Illustrator. One art
   - Pages: a file of several pages is laid out side by side, so each page's content is wrapped in one clipping group of its page box (what a viewer crops would otherwise show on the neighboring page). A one-page file gets no such group.
   - Even-odd fills: `f*`, `B*` and `b*` set the object's fill rule, which is kept in SVG as `fill-rule="evenodd"`, written back as `f*` in PDF and `eofill` in EPS, and used by hit testing.
   - Soft masks: an ExtGState `/SMask` (luminosity or alpha, with `/BC`) is rendered over the page; every object painted while it is active is drawn through it and kept as a picture, because the document has no opacity masks. Such objects stop being editable vectors.
-  - Embedded fonts (`src/fontprogram.cpp`, `FontProgram`): TrueType (`glyf`, composites included), OpenType with CFF outlines, and bare CFF (`Type1C`, `CIDFontType0C`, with local and global subroutines, flex operators, CID charsets and FDSelect). A run of text in such a font becomes one path made of the font's own glyph outlines (named after its text), so the letterforms are exact whatever is installed; `PdfImportOptions::textAsOutlines = false` asks for live text instead. Glyphs are found by `/Differences` glyph name, then by Unicode through the font's cmap or glyph names, then by the font's own encoding; composite fonts go by CID (or `CIDToGIDMap`). Fonts are read once per file and their glyph paths cached. Not read: Type 1 (PostScript, `FontFile`) programs, hinting, `seac`-style accented endchar, Type 3 glyph procedures. The words are no longer editable text; where the characters are known the path's name keeps them.
+  - Embedded fonts (`src/io/pdf/fontprogram.cpp`, `FontProgram`): TrueType (`glyf`, composites included), OpenType with CFF outlines, Type 1 (`FontFile`: PFB or bare, eexec binary or hex, charstring and `Subrs` decryption, flex, hint replacement, `seac` accents, the font's own `/Encoding`), and bare CFF (`Type1C`, `CIDFontType0C`, with local and global subroutines, flex operators, CID charsets and FDSelect). A run of text in such a font becomes one path made of the font's own glyph outlines (named after its text), so the letterforms are exact whatever is installed; `PdfImportOptions::textAsOutlines = false` asks for live text instead. Glyphs are found by `/Differences` glyph name, then by Unicode through the font's cmap or glyph names, then by the font's own encoding; composite fonts go by CID (or `CIDToGIDMap`). Fonts are read once per file and their glyph paths cached. Not read: hinting, CFF `seac`-style accented endchar, Type 3 glyph procedures. The words are no longer editable text; where the characters are known the path's name keeps them.
   - Live text: each show operation (`Tj TJ ' "`) of a font whose program is missing or unreadable becomes a live Text object, with `BT Tf Td TD Tm T* Tc Tw Tz TL Ts Tr` honored (render modes fill, stroke, both; invisible is skipped). Characters come from the font's `ToUnicode` map, else its encoding (WinAnsi or MacRoman, plus `/Differences` glyph names); advances come from `/Widths` (`/W`, `/DW` for composite fonts), or from the installed font when the file gives none. The font is the installed one of the family in `BaseFont` (subset prefix and `MT`/`PS` suffixes dropped; Helvetica, Times and Courier map to Arial, Times New Roman and Courier New), bold and italic from the name and the descriptor. A `TJ` kern wider than a quarter em becomes a space. The run's length in the file is kept: the object's tracking is set so the stand-in font fills the same width (within 0.3 em per character). A font that is not installed (and has no readable program) is replaced by Courier New (fixed-pitch descriptor), Times New Roman (serif) or Arial, and widths can drift where the file gives none (checked against PyMuPDF's render on a 115-page Courier screenplay and a 103-page magazine with Type1 and Type0 fonts, 90 MB, imported in about 4 s); that magazine is encrypted and opens as it is; composite fonts without `ToUnicode` and Type 3 fonts are skipped.
 - **Not supported (skipped, not an error):** mesh shadings (types 4-7), function types 0 and 4, tiling patterns, non-separable blend modes (Luminosity ...), soft-mask transfer functions, optional content (layers), inline images, 1/2/4/16-bit images, JPEG 2000 / CCITT / JBIG2 / LZW filters, AES-256 encryption (revision 5 / 6) and files that need a password (both refused).
   - Encryption: the standard security handler with an empty user password opens as is: RC4 40 / 128 bit and AES-128 (`/V` 1 to 4, `/R` 2 to 4), with crypt filters (`StmF`, `StrF`, `Identity`), per-object keys, `EncryptMetadata`, and the file key checked against the user entry (so a file that really wants a password is refused, not shown as garbage). Strings are decrypted when the file is read, streams when they are used. `src/pdfcrypt.cpp` holds MD5, RC4 and AES (checked against the published test vectors); decrypting the 90 MB magazine adds about 0.8 s. The Open dialog only says "Could not open" for a refused file; `documentFromPdf` can return the reason.
@@ -85,7 +85,7 @@ Source: `pdfimport.h`, `pdfimport.cpp`. File > Import PDF / Illustrator. One art
 
 ## EPS export (`.eps`)
 
-Source: `epsexport.h`, `epsexport.cpp`. Encapsulated PostScript level 2 for the **active artboard** only.
+Source: `include/curvy/io/eps/epsexport.h`, `src/io/eps/epsexport.cpp`. Encapsulated PostScript level 2 for the **active artboard** only.
 
 - **Supported:** vector paths; RGB, CMYK and gray color; dashes, caps, joins; clipping groups; symbols; text as outlines; brush strokes as outlines; gradients as 96 vector bands; pictures as ASCIIHex RGB.
 - **Approximated:** colors with opacity are mixed with the page color (white if the page is transparent). Gradient and picture transparency is flattened onto the page color. Objects with shadows, glows, blurs or pattern fills become opaque pictures.

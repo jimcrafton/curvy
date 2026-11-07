@@ -1,4 +1,4 @@
-#include "curvy/pdfcrypt.h"
+#include "curvy/io/pdf/pdfcrypt.h"
 
 #include <cmath>
 #include <cstdint>

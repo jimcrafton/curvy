@@ -2,8 +2,8 @@
 #include "curvy/gzip.h"
 #include "curvy/pathnode.h"
 #include "curvy/sketchbin.h"
-#include "curvy/pdfimport.h"
-#include "curvy/sketchsvg.h"
+#include "curvy/io/pdf/pdfimport.h"
+#include "curvy/io/svg/sketchsvg.h"
 
 #include <algorithm>
 #include <cctype>

@@ -6,13 +6,13 @@
 #include "curvy/pathops.h"
 #include "curvy/imagetrace.h"
 #include "curvy/imagedata.h"
-#include "curvy/pdfexport.h"
-#include "curvy/epsexport.h"
-#include "curvy/pdfimport.h"
-#include "curvy/fontprogram.h"
-#include "curvy/pdfcrypt.h"
+#include "curvy/io/pdf/pdfexport.h"
+#include "curvy/io/eps/epsexport.h"
+#include "curvy/io/pdf/pdfimport.h"
+#include "curvy/io/pdf/fontprogram.h"
+#include "curvy/io/pdf/pdfcrypt.h"
 #include "curvy/gzip.h"
-#include "curvy/sketchsvg.h"
+#include "curvy/io/svg/sketchsvg.h"
 #include "curvy/gzip.h"
 #include "curvy/sketchexport.h"
 #include "curvy/numberscrubber.h"
@@ -9967,6 +9967,37 @@ namespace {
         return std::string("\x01\x00\x04\x01", 4) + name + top + strings + charStrings;
     }
 
+    std::string t1Encrypt(const std::string& plain, unsigned r) {
+        std::string out;
+        for (unsigned char p : std::string(4, '\0') + plain) {
+            const unsigned char c = (unsigned char)(p ^ (r >> 8));
+            out += char(c);
+            r = ((c + r) * 52845u + 22719u) & 0xFFFFu;
+        }
+        return out;
+    }
+
+    // A Type 1 font of .notdef, a box glyph "A" from (100,100) to (600,700), and "Aacute", a seac of A with a copy of A moved by (100,50).
+    std::string tinyType1() {
+        // 100 600 hsbw; 0 100 rmoveto; 500 hlineto; 600 vlineto; -500 hlineto; closepath; endchar
+        const std::string box("\xEF\xF8\xEC\x0D\x8B\xEF\x15\xF8\x88\x06\xF8\xEC\x07\xFC\x88\x06\x09\x0E", 18);
+        // 100 600 hsbw; 100 100 50 65 65 seac
+        const std::string accented("\xEF\xF8\xEC\x0D\xEF\xEF\xBD\xCC\xCC\x0C\x06\x0E", 12);
+        std::string priv = "dup /Private 8 dict dup begin /RD {string currentfile exch readstring pop} executeonly def /ND {noaccess def} executeonly def "
+                           "/lenIV 4 def /CharStrings 3 dict dup begin ";
+        auto glyph = [&](const std::string& name, const std::string& code) {
+            const std::string sealed = t1Encrypt(code, 4330u);
+            priv += "/" + name + " " + std::to_string(sealed.size()) + " RD " + sealed + " ND ";
+        };
+        glyph(".notdef", std::string("\x8B\xF7\x6C\x0D\x0E", 5));
+        glyph("A", box);
+        glyph("Aacute", accented);
+        priv += "end end readonly put";
+        const std::string head = "%!PS-AdobeFont-1.0: Tiny\n/FontMatrix [0.001 0 0 0.001 0 0] readonly def\n/Encoding 256 array\n0 1 255 {1 index exch /.notdef put} for\n"
+                                 "dup 65 /A put\nreadonly def\ncurrentfile eexec\n";
+        return head + t1Encrypt(priv, 55665u);
+    }
+
     std::string embeddedFontPdf(const std::string& font) {
         const std::string objects =
             "5 0 obj << /Type /Font /Subtype /TrueType /BaseFont /TinyBox /FirstChar 65 /LastChar 65 /Widths [600] /FontDescriptor 6 0 R >> endobj\n"
@@ -10005,6 +10036,29 @@ TEST(FontProgram, ReadsBareCffCharstrings) {
     EXPECT_NEAR(box.y0, 0.1, 1e-6);
     EXPECT_NEAR(box.y1, 0.7, 1e-6);
     EXPECT_FALSE(FontProgram::load("not a font at all"));
+}
+
+TEST(FontProgram, ReadsType1CharstringsAndSeac) {
+    const auto font = FontProgram::load(tinyType1());
+    ASSERT_TRUE(font);
+    EXPECT_EQ(font->glyphCount(), 3u);
+    EXPECT_EQ(font->glyphForCode('A'), 1u);
+    EXPECT_EQ(font->glyphForUnicode('A'), 1u);
+    EXPECT_EQ(font->glyphForName("Aacute"), 2u);
+    BLPath path;
+    BLBox box;
+    ASSERT_TRUE(font->outline(1, path));
+    path.get_bounding_box(&box);
+    EXPECT_NEAR(box.x0, 0.1, 1e-6);
+    EXPECT_NEAR(box.x1, 0.6, 1e-6);
+    EXPECT_NEAR(box.y0, 0.1, 1e-6);
+    EXPECT_NEAR(box.y1, 0.7, 1e-6);
+    BLPath accented;
+    ASSERT_TRUE(font->outline(2, accented));
+    accented.get_bounding_box(&box);
+    EXPECT_NEAR(box.x0, 0.1, 1e-6);
+    EXPECT_NEAR(box.x1, 0.7, 1e-6);
+    EXPECT_NEAR(box.y1, 0.75, 1e-6);
 }
 
 namespace {
