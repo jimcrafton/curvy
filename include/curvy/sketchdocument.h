@@ -1028,11 +1028,14 @@ namespace curvy {
         // the graph (a thousand-object document syncs on every edit). A graph change throws it away.
         struct AppearanceChain {
             std::vector<std::uint32_t> nodes;
-            std::vector<AppearanceItem> items;
+            std::uint64_t revision = 0;
         };
         std::map<NodeRef, AppearanceChain> appearanceChains_;
         std::size_t appearanceObjectCount_ = 0;
         std::unordered_map<std::uint32_t, jitnodes::NodeId> paintNodes_;
+        std::uint64_t paintSignature() const;
+        void syncPaintOrderNow();
+        std::uint64_t paintSignature_ = 0;   // objects, their nodes and every network's wiring as syncPaintOrder last left them; 0 = unknown
         std::map<NodeRef, std::size_t> paintOwners_;   // the node a scope's paint merge takes for an object -> the object's id
         std::string activeTag_ = "tag1";
         std::shared_ptr<jitnodes::GraphSnapshot> pivotBefore_;   // the graph when a live pivot drag started

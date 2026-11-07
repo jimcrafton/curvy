@@ -1267,10 +1267,16 @@ namespace curvy {
         return activeIndexOf(items_, kind, storedActive(kind));
     }
 
+    std::uint64_t SketchObject::freshAppearanceRevision() {
+        static std::uint64_t counter = 0;
+        return ++counter;
+    }
+
     AppearanceItem* SketchObject::activeItemPtr(AppearanceKind kind) {
         if (kind != AppearanceKind::Effect) {
             return &primary(kind);
         }
+        appearanceRevision_ = freshAppearanceRevision();
         std::size_t index = activeIndex(kind);
         return index < items_.size() ? &items_[index] : nullptr;
     }
@@ -1284,6 +1290,7 @@ namespace curvy {
     }
 
     AppearanceItem& SketchObject::primary(AppearanceKind kind) {
+        appearanceRevision_ = freshAppearanceRevision();
         std::size_t index = activeIndex(kind);
         if (index < items_.size()) {
             return items_[index];
@@ -1304,6 +1311,7 @@ namespace curvy {
 
     void SketchObject::setAppearance(const std::vector<AppearanceItem>& items) {
         items_ = items;
+        appearanceRevision_ = freshAppearanceRevision();
         primary(AppearanceKind::Fill);
         primary(AppearanceKind::Stroke);
     }

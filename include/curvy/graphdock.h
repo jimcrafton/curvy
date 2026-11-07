@@ -139,6 +139,12 @@ namespace curvy {
         void clearDetail();
         // Puts a transform node back to doing nothing, its pivot in the middle of its shape.
         void resetTransform(const NodeRef& id);
+        // Bypass skips the node (its first input passes through); freeze keeps what it produces now and stops cooking what feeds it.
+        // Each is one undo step.
+        // A clicked button keeps the keyboard focus, which would swallow Ctrl+Z.
+        void returnFocusToCanvas();
+        void toggleBypass(const NodeRef& id);
+        void toggleFreeze(const NodeRef& id);
         // The numbers of the shown node change while the shape is dragged on the canvas; the rows follow without rebuilding the tree.
         void refreshDetailValues();
         std::vector<GraphRow> buildRows() const;
@@ -176,6 +182,8 @@ namespace curvy {
         std::vector<newui::Button*> pathButtons_;
         newui::Button* resetButton_ = nullptr;
         newui::Button* enterButton_ = nullptr;
+        newui::Button* bypassButton_ = nullptr;
+        newui::Button* freezeButton_ = nullptr;
         std::uint32_t viewScope_ = 0;             // the network the Flow view lists
         std::vector<LinkRow> inputRows_, userRows_;
         std::shared_ptr<jitnodes::GraphSnapshot> scrubBefore_;   // the graph when the drag started
