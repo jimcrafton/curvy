@@ -834,6 +834,7 @@ namespace curvy {
             void applyClip(const BLPath& path, bool evenOdd);
             void shadingFill(const std::string& name, const PObj& resources);
             void setSoftMask(const PObj& dict);
+            static const std::pair<const char*, BlendMode> kBlendModes[15];
             SketchObject* masked(SketchObject* object);
             void drawForm(const PObj& entry, const PObj& xobject, const PObj& resources);
             void execute(const std::string& op, std::vector<PObj>& args, const PObj& resources);
@@ -1127,6 +1128,13 @@ namespace curvy {
             }
         }
 
+        const std::pair<const char*, BlendMode> Interpreter::kBlendModes[15] = {
+            {"Multiply", BlendMode::Multiply}, {"Screen", BlendMode::Screen}, {"Overlay", BlendMode::Overlay}, {"Darken", BlendMode::Darken},
+            {"Lighten", BlendMode::Lighten}, {"ColorDodge", BlendMode::ColorDodge}, {"ColorBurn", BlendMode::ColorBurn},
+            {"HardLight", BlendMode::HardLight}, {"SoftLight", BlendMode::SoftLight}, {"Difference", BlendMode::Difference},
+            {"Exclusion", BlendMode::Exclusion}, {"Hue", BlendMode::Hue}, {"Saturation", BlendMode::Saturation},
+            {"Color", BlendMode::Color}, {"Luminosity", BlendMode::Luminosity}};
+
         void Interpreter::setSoftMask(const PObj& dict) {
             state_.softMask.reset();
             const PObj* g = dict.find("G");
@@ -1302,13 +1310,8 @@ namespace curvy {
             if (const PObj* v = dict.find("BM")) {
                 const PObj& bm = file_.resolve(*v);
                 const PObj& mode = bm.type == PObj::Arr && !bm.a.empty() ? file_.resolve(bm.a[0]) : bm;
-                static const std::pair<const char*, BlendMode> modes[] = {
-                    {"Multiply", BlendMode::Multiply}, {"Screen", BlendMode::Screen}, {"Overlay", BlendMode::Overlay}, {"Darken", BlendMode::Darken},
-                    {"Lighten", BlendMode::Lighten}, {"ColorDodge", BlendMode::ColorDodge}, {"ColorBurn", BlendMode::ColorBurn},
-                    {"HardLight", BlendMode::HardLight}, {"SoftLight", BlendMode::SoftLight}, {"Difference", BlendMode::Difference},
-                    {"Exclusion", BlendMode::Exclusion}};
                 state_.blend = BlendMode::Normal;
-                for (const auto& entry : modes) {
+                for (const auto& entry : kBlendModes) {
                     if (mode.isName(entry.first)) { state_.blend = entry.second; }
                 }
             }
@@ -1391,6 +1394,36 @@ namespace curvy {
                 data = decodeImage(std::string(reinterpret_cast<const char*>(buffer.data()), buffer.size()), "PDF image");
             }
             if (!data) { return; }
+            if (data->mime == "image/jpeg") {   // a JPEG carries no alpha of its own: the soft mask, whatever its size, becomes one
+                if (const PObj* sm = image.find("SMask")) {
+                    const PObj& smDict = file_.resolve(*sm);
+                    const int mw = int(numberOf(smDict.find("Width"), 0)), mh = int(numberOf(smDict.find("Height"), 0));
+                    std::string alpha, alphaRest;
+                    if (smDict.type == PObj::Dict && mw > 0 && mh > 0 && int(numberOf(smDict.find("BitsPerComponent"), 8)) == 8 && file_.streamOf(*sm, alpha, alphaRest) &&
+                        alphaRest.empty() && alpha.size() >= std::size_t(mw) * std::size_t(mh)) {
+                        BLImage out;
+                        BLImageData source, target;
+                        if (out.create(data->width, data->height, BL_FORMAT_PRGB32) == BL_SUCCESS && data->image.get_data(&source) == BL_SUCCESS && out.get_data(&target) == BL_SUCCESS) {
+                            for (int y = 0; y < data->height; ++y) {
+                                const std::uint32_t* from = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(source.pixel_data) + std::ptrdiff_t(y) * source.stride);
+                                std::uint32_t* to = reinterpret_cast<std::uint32_t*>(static_cast<std::uint8_t*>(target.pixel_data) + std::ptrdiff_t(y) * target.stride);
+                                const std::size_t row = std::size_t(std::min(mh - 1, int(std::int64_t(y) * mh / data->height))) * std::size_t(mw);
+                                for (int x = 0; x < data->width; ++x) {
+                                    const unsigned a = (unsigned char)alpha[row + std::size_t(std::min(mw - 1, int(std::int64_t(x) * mw / data->width)))];
+                                    const std::uint32_t p = from[x];
+                                    to[x] = (a << 24) | ((((p >> 16) & 255u) * a / 255u) << 16) | ((((p >> 8) & 255u) * a / 255u) << 8) | ((p & 255u) * a / 255u);
+                                }
+                            }
+                            BLImageCodec codec;
+                            codec.find_by_name("PNG");
+                            BLArray<uint8_t> buffer;
+                            if (out.write_to_data(buffer, codec) == BL_SUCCESS) {
+                                if (auto masked = decodeImage(std::string(reinterpret_cast<const char*>(buffer.data()), buffer.size()), "PDF image")) { data = masked; }
+                            }
+                        }
+                    }
+                }
+            }
             // The image's unit square has its top at y = 1; the picture's pixels are y-down.
             BLMatrix2D placement(1.0 / double(data->width), 0.0, 0.0, -1.0 / double(data->height), 0.0, 1.0);
             placement.post_transform(state_.ctm);
@@ -1973,6 +2006,63 @@ namespace curvy {
         return data.compare(0, 5, "%PDF-") == 0 || data.substr(0, 1024).find("%PDF-") != std::string::npos;
     }
 
+    std::size_t pdfPageCount(const std::string& data, std::string* problem) {
+        try {
+            if (!isPdfDocument(data)) {
+                return 0;
+            }
+            PdfFile file;
+            std::vector<Page> pages;
+            if (!file.load(data)) {
+                if (problem != nullptr) { *problem = file.problem(); }
+                return 0;
+            }
+            return locatePages(file, pages) ? std::min<std::size_t>(pages.size(), 500) : 0;
+        } catch (...) {
+            return 0;
+        }
+    }
+
+    bool parsePageList(const std::string& text, std::size_t pageCount, std::vector<int>& pages, std::string* problem) {
+        std::vector<int> found;
+        auto fail = [&](const std::string& why) {
+            if (problem != nullptr) { *problem = why; }
+            return false;
+        };
+        std::size_t i = 0;
+        auto skipSeparators = [&]() { while (i < text.size() && (text[i] == ',' || text[i] == ';' || std::isspace((unsigned char)text[i]))) { ++i; } };
+        auto number = [&](long& out) {
+            if (i >= text.size() || !std::isdigit((unsigned char)text[i])) { return false; }
+            out = 0;
+            while (i < text.size() && std::isdigit((unsigned char)text[i])) {
+                out = std::min(out * 10 + (text[i] - '0'), 1000000L);
+                ++i;
+            }
+            return true;
+        };
+        for (skipSeparators(); i < text.size(); skipSeparators()) {
+            long first = 0, last = 0;
+            if (!number(first)) { return fail("\"" + text.substr(i, 1) + "\" is not a page number"); }
+            last = first;
+            while (i < text.size() && text[i] == ' ') { ++i; }
+            if (i < text.size() && (text[i] == '-' || text[i] == ':')) {
+                ++i;
+                while (i < text.size() && text[i] == ' ') { ++i; }
+                if (!number(last)) { return fail("a page range needs an end page"); }
+            }
+            if (first > last) { std::swap(first, last); }
+            if (first < 1 || std::size_t(last) > pageCount) {
+                return fail("page " + std::to_string(first < 1 ? first : last) + " is not in the file's " + std::to_string(pageCount) + " pages");
+            }
+            for (long n = first; n <= last; ++n) { found.push_back(int(n)); }
+        }
+        if (found.empty()) { return fail("no pages were listed"); }
+        std::sort(found.begin(), found.end());
+        found.erase(std::unique(found.begin(), found.end()), found.end());
+        pages = std::move(found);
+        return true;
+    }
+
     bool documentFromPdf(const std::string& data, SketchDocument& document, const PdfImportOptions& options, std::string* problem) {
         try {
             if (!isPdfDocument(data)) {
@@ -1988,6 +2078,25 @@ namespace curvy {
                 return false;
             }
             if (pages.size() > 500) { pages.resize(500); }
+            std::vector<std::size_t> numbers(pages.size());   // each page's number in the file
+            for (std::size_t i = 0; i < numbers.size(); ++i) { numbers[i] = i + 1; }
+            const bool subset = !options.pages.empty();
+            if (subset) {
+                std::vector<Page> kept;
+                std::vector<std::size_t> keptNumbers;
+                for (int number : options.pages) {
+                    if (number >= 1 && std::size_t(number) <= pages.size() && (keptNumbers.empty() || keptNumbers.back() < std::size_t(number))) {
+                        kept.push_back(pages[std::size_t(number) - 1]);
+                        keptNumbers.push_back(std::size_t(number));
+                    }
+                }
+                if (kept.empty()) {
+                    if (problem != nullptr) { *problem = "has none of the requested pages"; }
+                    return false;
+                }
+                pages = std::move(kept);
+                numbers = std::move(keptNumbers);
+            }
 
             SketchDocument::Batch batch(document);
             document.clearObjects();
@@ -1998,7 +2107,7 @@ namespace curvy {
                 const double w = page.x1 - page.x0, h = page.y1 - page.y0;
                 const bool turned = page.rotate == 90 || page.rotate == 270;
                 Artboard board;
-                board.name = "Page " + std::to_string(i + 1);
+                board.name = "Page " + std::to_string(numbers[i]);
                 board.x = offset;
                 board.y = 0.0;
                 board.width = std::max(1.0, turned ? h : w);
@@ -2013,7 +2122,8 @@ namespace curvy {
 
             Interpreter::FontCache fonts;
             if (options.progress != nullptr) { options.progress->set(0.02f); }
-            ImageCache images = decodeJpegsInParallel(file);
+            ImageCache images;   // a few chosen pages decode the pictures they draw as they come, not every picture in the file up front
+            if (!subset) { images = decodeJpegsInParallel(file); }
             for (std::size_t i = 0; i < pages.size(); ++i) {
                 if (options.progress != nullptr) {
                     options.progress->check();

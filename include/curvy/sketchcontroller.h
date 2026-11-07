@@ -39,6 +39,8 @@ namespace curvy {
         // path does (recent files, status text, onDocumentReplaced...). While it runs, onBusyProgress fires about 30 times a second.
         void setBackgroundIo(bool on) { background_ = on; }
         bool backgroundIo() const { return background_; }
+        // App only: a PDF with several pages first asks which of them to import (PdfPagesDialog). Off, every page is imported.
+        void setAskPdfPages(bool on) { askPdfPages_ = on; }
         bool busy() const { return document_.isBusy(); }
         // 0..1, or negative when the work cannot say how far it is.
         float busyFraction() const { return task_.progress().fraction(); }
@@ -144,7 +146,11 @@ namespace curvy {
         bool startExport(const std::string& label, std::function<bool()> work, const std::string& doneStatus, const std::string& failMessage,
                          std::shared_ptr<std::string> failedFile = nullptr);
 
+        // Asks which pages of a multi-page PDF to import and hands the answer to the document; false when the user cancelled.
+        bool choosePdfPages(const std::string& file);
+
         bool background_ = false;
+        bool askPdfPages_ = false;
         BackgroundTask task_;
         newui::RunLoop* uiLoop_ = nullptr;
         std::thread::id uiThread_;

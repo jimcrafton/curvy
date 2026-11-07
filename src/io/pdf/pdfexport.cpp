@@ -34,7 +34,7 @@ namespace curvy {
         }
 
         const char* blendName(BlendMode mode) {
-            static const char* kNames[] = {"Normal", "Multiply", "Screen", "Overlay", "Darken", "Lighten", "ColorDodge", "ColorBurn", "HardLight", "SoftLight", "Difference", "Exclusion"};
+            static const char* kNames[] = {"Normal", "Multiply", "Screen", "Overlay", "Darken", "Lighten", "ColorDodge", "ColorBurn", "HardLight", "SoftLight", "Difference", "Exclusion", "Hue", "Saturation", "Color", "Luminosity"};
             return kNames[std::size_t(mode)];
         }
 
@@ -46,6 +46,28 @@ namespace curvy {
 
         bool intersects(const BLBox& a, const BLBox& b) {
             return a.x0 <= b.x1 && a.x1 >= b.x0 && a.y0 <= b.y1 && a.y1 >= b.y0;
+        }
+
+        // The number of color components of a baseline / progressive JPEG (1 gray, 3 color, 4 CMYK), read from its frame header; 0 when
+        // the bytes are not a JPEG this reader understands.
+        int jpegComponents(const std::string& bytes) {
+            if (bytes.size() < 4 || (unsigned char)bytes[0] != 0xFF || (unsigned char)bytes[1] != 0xD8) {
+                return 0;
+            }
+            std::size_t at = 2;
+            while (at + 4 <= bytes.size()) {
+                if ((unsigned char)bytes[at] != 0xFF) { return 0; }
+                const unsigned char marker = (unsigned char)bytes[at + 1];
+                if (marker == 0xFF) { ++at; continue; }
+                if (marker == 0xD8 || (marker >= 0xD0 && marker <= 0xD7) || marker == 0x01) { at += 2; continue; }
+                const std::size_t length = (std::size_t((unsigned char)bytes[at + 2]) << 8) | (unsigned char)bytes[at + 3];
+                if (marker == 0xC0 || marker == 0xC1 || marker == 0xC2) {
+                    return at + 10 < bytes.size() ? int((unsigned char)bytes[at + 9]) : 0;
+                }
+                if (marker == 0xDA || length < 2) { return 0; }
+                at += 2 + length;
+            }
+            return 0;
         }
 
         class Writer {
@@ -63,14 +85,16 @@ namespace curvy {
                 return int(objects_.size());
             }
             void set(int id, const std::string& body) { objects_[std::size_t(id) - 1] = body; }
-            int addStream(const std::string& dict, const std::string& data, bool compress = true) {
-                const std::string packed = compress ? zlibCompress(data) : data;
+            int addStream(const std::string& dict, const std::string& data, bool compress = true, int level = 6) {
+                const std::string packed = compress ? zlibCompress(data, level) : data;
                 return add("<< " + dict + (compress ? " /Filter /FlateDecode" : "") + " /Length " + std::to_string(packed.size()) + " >>\nstream\n" + packed + "\nendstream");
             }
 
             // ---- resources ----
             std::string graphicsState(double fillAlpha, double strokeAlpha, BlendMode blend);
-            std::string imageObject(const BLImage& image);   // the XObject's name; the picture is premultiplied RGB32
+            // The XObject's name; the picture is premultiplied RGB32. `source`, when it is a picture of the document, is kept once however often
+            // it is drawn, and a JPEG one goes in as its own bytes (no decoding, no recompression).
+            std::string imageObject(const BLImage& image, const ImageData* source = nullptr);
             std::string addForm(const std::string& content, const BLBox& box);
             std::string shadingPattern(const SketchGradient& gradient, bool radial, const BLBox& box, const BLMatrix2D& toPage);
             std::string tilingPattern(const SketchPaint& paint);
@@ -89,8 +113,9 @@ namespace curvy {
             std::string drawParts(const std::vector<BrushPart>& parts, double opacity);
             std::string drawObject(const SketchObject& object);
             std::string drawObjectBody(const SketchObject& object);
-            std::string drawPicture(const BLImage& image, const BLMatrix2D& placement);
-            std::string drawRange(const SketchDocument& document, std::size_t begin, std::size_t end, std::size_t depth);
+            std::string drawPicture(const BLImage& image, const BLMatrix2D& placement, const ImageData* source = nullptr);
+            std::string drawRange(const SketchDocument& document, std::size_t begin, std::size_t end, std::size_t depth, bool cull = false);
+            std::vector<BLBox> paintBoxes_;   // every object's paintBounds, measured once for the pages' culling
             std::string wrapped(double opacity, BlendMode blend, const BLBox& box, const std::function<std::string()>& content);
 
             std::vector<std::string> objects_;
@@ -117,7 +142,27 @@ namespace curvy {
             return name;
         }
 
-        std::string Writer::imageObject(const BLImage& image) {
+        std::string Writer::imageObject(const BLImage& image, const ImageData* source) {
+            if (source != nullptr) {
+                const auto known = pictureNames_.find(source);
+                if (known != pictureNames_.end()) {
+                    return known->second;
+                }
+            }
+            auto remember = [&](const std::string& name) {
+                if (source != nullptr) { pictureNames_[source] = name; }
+                return name;
+            };
+            if (source != nullptr && source->mime == "image/jpeg" && source->width == image.width() && source->height == image.height()) {
+                const int components = jpegComponents(source->bytes);
+                if (components == 1 || components == 3) {
+                    const int id = addStream("/Type /XObject /Subtype /Image /Width " + std::to_string(source->width) + " /Height " + std::to_string(source->height) +
+                        " /ColorSpace " + (components == 1 ? "/DeviceGray" : "/DeviceRGB") + " /BitsPerComponent 8 /Filter /DCTDecode", source->bytes, false);
+                    const std::string name = "Im" + std::to_string(xobjects_.size() + 1);
+                    xobjects_.push_back({name, id});
+                    return remember(name);
+                }
+            }
             BLImageData data;
             if (image.is_empty() || const_cast<BLImage&>(image).get_data(&data) != BL_SUCCESS || data.size.w <= 0 || data.size.h <= 0) {
                 return std::string();
@@ -146,13 +191,13 @@ namespace curvy {
             }
             std::string dict = "/Type /XObject /Subtype /Image /Width " + std::to_string(w) + " /Height " + std::to_string(h) + " /ColorSpace /DeviceRGB /BitsPerComponent 8";
             if (translucent) {
-                const int mask = addStream("/Type /XObject /Subtype /Image /Width " + std::to_string(w) + " /Height " + std::to_string(h) + " /ColorSpace /DeviceGray /BitsPerComponent 8", alpha);
+                const int mask = addStream("/Type /XObject /Subtype /Image /Width " + std::to_string(w) + " /Height " + std::to_string(h) + " /ColorSpace /DeviceGray /BitsPerComponent 8", alpha, true, 1);
                 dict += " /SMask " + std::to_string(mask) + " 0 R";
             }
-            const int id = addStream(dict, rgb);
+            const int id = addStream(dict, rgb, true, 1);   // level 1: pixels of a photo hardly shrink more, and it is several times faster
             const std::string name = "Im" + std::to_string(xobjects_.size() + 1);
             xobjects_.push_back({name, id});
-            return name;
+            return remember(name);
         }
 
         std::string Writer::addForm(const std::string& content, const BLBox& box) {
@@ -442,8 +487,8 @@ namespace curvy {
             return out + "S\nQ\n";
         }
 
-        std::string Writer::drawPicture(const BLImage& image, const BLMatrix2D& placement) {
-            const std::string name = imageObject(image);
+        std::string Writer::drawPicture(const BLImage& image, const BLMatrix2D& placement, const ImageData* source) {
+            const std::string name = imageObject(image, source);
             if (name.empty()) {
                 return std::string();
             }
@@ -472,7 +517,7 @@ namespace curvy {
 
         std::string Writer::drawObjectBody(const SketchObject& object) {
             if (object.isImage()) {
-                return object.image() ? drawPicture(object.image()->image, object.imageMatrix()) : std::string();
+                return object.image() ? drawPicture(object.image()->image, object.imageMatrix(), object.image().get()) : std::string();
             }
             if (object.isSymbol()) {
                 const std::shared_ptr<const SymbolDef>& def = object.symbol();
@@ -528,13 +573,15 @@ namespace curvy {
         }
 
         // The objects begin..end of `document` in stacking order, groups and all (the same walk as SketchDocument::paintRange).
-        std::string Writer::drawRange(const SketchDocument& document, std::size_t begin, std::size_t end, std::size_t depth) {
+        std::string Writer::drawRange(const SketchDocument& document, std::size_t begin, std::size_t end, std::size_t depth, bool cull) {
             std::string out;
             std::size_t i = begin;
+            // With `cull` (the page's own objects, whose bounds were measured once) what lies off the page is left out of its content.
+            auto offPage = [&](const BLBox& b) { return cull && b.x1 >= b.x0 && b.y1 >= b.y0 && !intersects(b, pageBox_); };
             while (i < end) {
                 const SketchObject& object = document.object(i);
                 if (document.groupsOf(object).size() <= depth) {
-                    if (intersects(object.paintBounds(), pageBox_) || true) {
+                    if (!offPage(cull ? paintBoxes_[i] : BLBox(0, 0, 0, 0))) {
                         out += drawObject(object);
                     }
                     ++i;
@@ -549,18 +596,22 @@ namespace curvy {
                 const bool clipped = props.clip && j - i >= 2;
                 BLBox box(1e30, 1e30, -1e30, -1e30);
                 for (std::size_t k = i; k < j; ++k) {
-                    const BLBox b = document.object(k).paintBounds();
+                    const BLBox b = cull ? paintBoxes_[k] : document.object(k).paintBounds();
                     box = BLBox(std::min(box.x0, b.x0), std::min(box.y0, b.y0), std::max(box.x1, b.x1), std::max(box.y1, b.y1));
+                }
+                if (offPage(box)) {
+                    i = j;
+                    continue;
                 }
                 out += wrapped(props.opacity, props.blendMode, box, [&]() {
                     if (!clipped) {
-                        return drawRange(document, i, j, depth + 1);
+                        return drawRange(document, i, j, depth + 1, cull);
                     }
                     // The mask is the topmost member: the others are drawn inside its outline.
                     std::string clip = "q\n";
                     pathOps(clip, document.object(j - 1).geometry());
                     clip += "W n\n";
-                    clip += drawRange(document, i, j - 1, depth + 1);
+                    clip += drawRange(document, i, j - 1, depth + 1, cull);
                     return clip + "Q\n";
                 });
                 i = j;
@@ -572,6 +623,8 @@ namespace curvy {
             const int catalog = reserve(), pages = reserve();
             resourcesId_ = reserve();
             std::vector<int> pageIds;
+            paintBoxes_.clear();
+            for (std::size_t i = 0; i < document.objectCount(); ++i) { paintBoxes_.push_back(document.object(i).paintBounds()); }
             for (std::size_t a = 0; a < document.artboards().size(); ++a) {
                 const Artboard& board = document.artboards()[a];
                 pageBox_ = board.box();
@@ -581,7 +634,7 @@ namespace curvy {
                     setColor(content, *document.pageBackground(), false);
                     content += "0 0 " + num(board.width) + " " + num(board.height) + " re f\n";
                 }
-                content += "q\n" + matrixText(patternBase_) + " cm\n" + drawRange(document, 0, document.objectCount(), 0) + "Q\n";
+                content += "q\n" + matrixText(patternBase_) + " cm\n" + drawRange(document, 0, document.objectCount(), 0, true) + "Q\n";
                 const int stream = addStream("", content);
                 pageIds.push_back(add("<< /Type /Page /Parent " + std::to_string(pages) + " 0 R /MediaBox [0 0 " + num(board.width) + " " + num(board.height) +
                     "] /Resources " + std::to_string(resourcesId_) + " 0 R /Contents " + std::to_string(stream) + " 0 R /Group << /S /Transparency /CS /DeviceRGB >> >>"));

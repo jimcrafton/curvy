@@ -205,6 +205,7 @@ namespace curvy {
         restyle();
         files_ = std::make_unique<SketchDocumentController>(document_, frame_);
         files_->setBackgroundIo(true);
+        files_->setAskPdfPages(true);
         files_->onBusyStarted += [this](SketchDocumentController&) { showLoading(); return SyncReturn::Handled; };
         files_->onBusyProgress += [this](SketchDocumentController&) { updateLoading(); return SyncReturn::Handled; };
         files_->onBusyFinished += [this](SketchDocumentController&) { hideLoading(); return SyncReturn::Handled; };

@@ -10169,6 +10169,93 @@ TEST(SketchPdfImport, EncryptedFilesOpenWithTheEmptyPasswordAndOthersAreRefusedW
     EXPECT_NE(problem.find("AES-256"), std::string::npos);
 }
 
+namespace {
+    std::string threePagePdf() {
+        std::string pdf = "%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+                          "2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 /MediaBox [0 0 100 100] >> endobj\n";
+        for (int i = 0; i < 3; ++i) {
+            const std::string content = std::to_string(10 * (i + 1)) + " 0 20 20 re f";
+            pdf += std::to_string(3 + i) + " 0 obj << /Type /Page /Parent 2 0 R /Contents " + std::to_string(6 + i) + " 0 R >> endobj\n";
+            pdf += std::to_string(6 + i) + " 0 obj << /Length " + std::to_string(content.size()) + " >>\nstream\n" + content + "\nendstream\nendobj\n";
+        }
+        return pdf + "trailer << /Root 1 0 R >>\n%%EOF\n";
+    }
+}
+
+TEST(SketchPdfImport, OnlyTheChosenPagesAreImportedAndKeepTheirNumbers) {
+    const std::string pdf = threePagePdf();
+    EXPECT_EQ(pdfPageCount(pdf), 3u);
+    EXPECT_EQ(pdfPageCount("not a pdf"), 0u);
+    SketchDocument all;
+    ASSERT_TRUE(documentFromPdf(pdf, all));
+    EXPECT_EQ(all.artboards().size(), 3u);
+    PdfImportOptions options;
+    options.pages = {1, 3};
+    SketchDocument some;
+    ASSERT_TRUE(documentFromPdf(pdf, some, options));
+    ASSERT_EQ(some.artboards().size(), 2u);
+    EXPECT_EQ(some.artboards()[0].name, "Page 1");
+    EXPECT_EQ(some.artboards()[1].name, "Page 3");
+    options.pages = {7};
+    std::string problem;
+    SketchDocument none;
+    EXPECT_FALSE(documentFromPdf(pdf, none, options, &problem));
+    EXPECT_FALSE(problem.empty());
+}
+
+TEST(SketchPdfImport, APageListReadsNumbersAndRanges) {
+    std::vector<int> pages;
+    std::string problem;
+    EXPECT_TRUE(parsePageList("1,5,10", 20, pages, &problem));
+    EXPECT_EQ(pages, (std::vector<int>{1, 5, 10}));
+    EXPECT_TRUE(parsePageList(" 9 ; 2 - 4, 3 ", 20, pages, &problem));
+    EXPECT_EQ(pages, (std::vector<int>{2, 3, 4, 9}));
+    EXPECT_FALSE(parsePageList("", 20, pages, &problem));
+    EXPECT_FALSE(parsePageList("21", 20, pages, &problem));
+    EXPECT_FALSE(parsePageList("0", 20, pages, &problem));
+    EXPECT_FALSE(parsePageList("3-", 20, pages, &problem));
+    EXPECT_FALSE(parsePageList("a", 20, pages, &problem));
+    EXPECT_TRUE(parsePageList("4-2", 20, pages, &problem));
+    EXPECT_EQ(pages, (std::vector<int>{2, 3, 4}));
+}
+
+TEST(SketchPdfImport, AFileThatCannotBeOpenedSaysWhy) {
+    const std::filesystem::path file = std::filesystem::temp_directory_path() / "curvy_locked_test.pdf";
+    {
+        std::ofstream out(file, std::ios::binary);
+        out << rc4EncryptedPdf("0 g", true);
+    }
+    SketchDocument doc;
+    EXPECT_FALSE(doc.load(file.string()));
+    EXPECT_NE(doc.lastError().find("password"), std::string::npos);
+    std::filesystem::remove(file);
+}
+
+TEST(SketchBlend, LuminosityKeepsTheHueOfWhatIsBelow) {
+    SketchDocument doc;
+    doc.setPageSize(40, 40);
+    doc.setPageBackground(SketchColor::rgb(1.0f, 1.0f, 1.0f));
+    SketchObject& blue = doc.add(SketchObject::makeRect(0, 0, 40, 40));
+    blue.setFill(SketchPaint::solid(SketchColor::fromHex("#0000ff")));
+    blue.setStroke(SketchPaint::none());
+    SketchObject& gray = doc.add(SketchObject::makeRect(0, 0, 40, 40));
+    gray.setFill(SketchPaint::solid(SketchColor::fromHex("#ffffff")));
+    gray.setStroke(SketchPaint::none());
+    gray.setBlendMode(BlendMode::Luminosity);
+    BLImage image;
+    ASSERT_TRUE(renderPageImage(doc, 1.0, image));
+    BLImageData data;
+    image.get_data(&data);
+    const std::uint32_t p = reinterpret_cast<const std::uint32_t*>(data.pixel_data)[20 * (data.stride / 4) + 20];
+    EXPECT_EQ(p & 0xFFFFFFu, 0xFFFFFFu) << "white luminosity over blue is white";
+    gray.setFill(SketchPaint::solid(SketchColor::fromHex("#808080")));
+    ASSERT_TRUE(renderPageImage(doc, 1.0, image));
+    image.get_data(&data);
+    const std::uint32_t q = reinterpret_cast<const std::uint32_t*>(data.pixel_data)[20 * (data.stride / 4) + 20];
+    EXPECT_GT(q & 255u, (q >> 16) & 255u) << "mid gray luminosity over blue stays bluish";
+    EXPECT_EQ(blendModeFromCss("luminosity"), BlendMode::Luminosity);
+}
+
 TEST(SketchPdfImport, TextInAnEmbeddedFontBecomesItsOutlinesUnlessLiveTextIsAsked) {
     SketchDocument doc;
     ASSERT_TRUE(documentFromPdf(embeddedFontPdf(tinyTrueType()), doc));
@@ -10341,4 +10428,18 @@ TEST(SketchPdfImport, NotAPdfLeavesTheDocumentAlone) {
         SketchDocument scratch;
         documentFromPdf(pdf.substr(0, length), scratch);
     }
+}
+
+TEST(SketchPdfExport, EachPageHoldsOnlyTheObjectsThatTouchIt) {
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(threePagePdf(), doc));
+    ASSERT_EQ(doc.artboards().size(), 3u);
+    const PdfView pdf = inspectPdf(pdfFromDocument(doc));
+    ASSERT_TRUE(pdf.structureOk);
+    ASSERT_EQ(pdf.pages, 3);
+    std::size_t moves = 0;
+    for (const std::string& stream : pdf.streams) {
+        for (std::size_t at = stream.find(" m\n"); at != std::string::npos; at = stream.find(" m\n", at + 1)) { ++moves; }
+    }
+    EXPECT_EQ(moves, 6u) << "a rectangle and the page's clip path per page, not every page's content on every page (that was 18)";
 }

@@ -106,6 +106,7 @@ add_executable(curvy
     src/settings.cpp
     src/settingsdialog.cpp
     src/tracedialog.cpp
+    src/pdfpagesdialog.cpp
 )
 
 target_include_directories(curvy PRIVATE include)

@@ -940,6 +940,11 @@ namespace curvy {
         void setBusy(Busy busy) { busyFlag_.value.store(busy); }
         // Where readFromFile / writeToFile report how far they are and look for a cancel; null (the default) means neither.
         void setTaskProgress(TaskProgress* progress) { taskProgress_ = progress; }
+        // Why the last readFromFile refused its file (empty when it gave no reason); read after the load has finished.
+        // The pages of a PDF the next load() reads (1-based; empty for all). Used by that one load and then cleared.
+        void setPdfPages(std::vector<int> pages) { pdfPages_ = std::move(pages); }
+        const std::string& lastError() const { return lastError_; }
+        void clearLastError() { lastError_.clear(); }
 
     protected:
         bool readFromFile(const std::string& path) override;
@@ -1138,6 +1143,8 @@ namespace curvy {
         };
         BusyFlag busyFlag_;
         TaskProgress* taskProgress_ = nullptr;
+        std::string lastError_;
+        std::vector<int> pdfPages_;
         std::vector<std::shared_ptr<const BrushDef>> brushes_;
         std::size_t activeBrush_ = 0;
         std::size_t nextBrushId_ = 1;

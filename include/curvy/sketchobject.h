@@ -260,7 +260,7 @@ namespace curvy {
 
     // How an object's paint combines with what is under it (the Appearance panel's Blend list; the order is the
     // list's order). Normal is plain source-over.
-    enum class BlendMode { Normal, Multiply, Screen, Overlay, Darken, Lighten, ColorDodge, ColorBurn, HardLight, SoftLight, Difference, Exclusion };
+    enum class BlendMode { Normal, Multiply, Screen, Overlay, Darken, Lighten, ColorDodge, ColorBurn, HardLight, SoftLight, Difference, Exclusion, Hue, Saturation, Color, Luminosity };
     // The mode's name as the panel shows it ("Color Dodge") and as CSS mix-blend-mode spells it ("color-dodge").
     const char* blendModeName(BlendMode mode);
     const char* blendModeCss(BlendMode mode);

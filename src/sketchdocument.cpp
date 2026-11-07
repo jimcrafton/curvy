@@ -1398,6 +1398,7 @@ namespace curvy {
         std::ostringstream buffer;
         buffer << in.rdbuf();
         std::string text = buffer.str();
+        lastError_.clear();
         // The readers build into this document, so a read that fails or is cancelled halfway has already replaced what was open: the
         // document is written out first and put back then (inside load(), so the modified flag and the path stay as they were).
         const std::string before = svgFromDocument(*this);
@@ -1415,7 +1416,9 @@ namespace curvy {
             if (isPdfDocument(text)) {   // PDF / Illustrator: told by its first bytes, not its name (the controller makes it an untitled import)
                 PdfImportOptions options;
                 options.progress = taskProgress_;
-                return documentFromPdf(text, *this, options);
+                options.pages = std::move(pdfPages_);
+                pdfPages_.clear();
+                return documentFromPdf(text, *this, options, &lastError_);
             }
             return documentFromSvg(text, *this, taskProgress_);
         }();

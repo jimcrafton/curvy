@@ -24,6 +24,7 @@ namespace curvy {
 
     private:
         void layout();
+        std::string fittedTitle(float room) const;
 
         newui::shapes::RoundRect* card_ = nullptr;
         newui::shapes::Circle* track_ = nullptr;
@@ -31,6 +32,7 @@ namespace curvy {
         newui::shapes::Text* title_ = nullptr;
         newui::shapes::Text* percent_ = nullptr;
         newui::shapes::Text* hint_ = nullptr;
+        std::string title_text_;   // as given; the shape shows it shortened when the window is narrower than it
         newui::Rect bounds_;
         float turn_ = 0.0f;   // radians the indeterminate arc has turned
         float fraction_ = -1.0f;

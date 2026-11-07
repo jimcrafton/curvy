@@ -3,6 +3,7 @@
 #include "curvy/backgroundtask.h"
 
 #include <string>
+#include <vector>
 
 namespace curvy {
 
@@ -38,7 +39,16 @@ namespace curvy {
         bool textAsOutlines = true;
         // Told how many pages are done and checked for a cancel between pages (the import then returns false); null means neither.
         TaskProgress* progress = nullptr;
+        // The pages to import, as 1-based page numbers (out of range ones are ignored); empty means every page. Each becomes an artboard
+        // named after its number in the file.
+        std::vector<int> pages;
     };
+    // How many pages the file has (at most 500, the most an import reads); 0 when it is not a PDF or cannot be read, with `problem` as for
+    // documentFromPdf.
+    std::size_t pdfPageCount(const std::string& data, std::string* problem = nullptr);
+    // Reads a list of page numbers and ranges such as "1,5,10" or "2-4, 9" (separators: comma, semicolon, space) into sorted, unique page
+    // numbers. False when it is empty, malformed or names a page beyond `pageCount`; `problem` then says what is wrong.
+    bool parsePageList(const std::string& text, std::size_t pageCount, std::vector<int>& pages, std::string* problem = nullptr);
     // `problem`, when given, receives a reason the user could act on ("needs a password to open"); it is left alone for other failures.
     bool documentFromPdf(const std::string& data, SketchDocument& document, const PdfImportOptions& options = PdfImportOptions(), std::string* problem = nullptr);
 

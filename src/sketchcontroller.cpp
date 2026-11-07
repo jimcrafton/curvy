@@ -3,6 +3,7 @@
 #include "curvy/io/pdf/pdfexport.h"
 #include "curvy/io/eps/epsexport.h"
 #include "curvy/io/pdf/pdfimport.h"
+#include "curvy/pdfpagesdialog.h"
 #include "curvy/tracedialog.h"
 
 #include "curvy/imagetrace.h"
@@ -19,6 +20,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <sstream>
 
 namespace curvy {
 
@@ -288,7 +290,8 @@ namespace curvy {
         document_.reset();   // untitled, unmodified ...
         document_.markModified();   // ... but not saved
         untitledName_ = std::filesystem::path(std::filesystem::u8path(file)).stem().string();
-        onStatus(*this, "Imported " + file);
+        const std::size_t boards = document_.artboards().size();
+        onStatus(*this, "Imported " + file + " (" + std::to_string(boards) + (boards == 1 ? " artboard)" : " artboards)"));
         onDocumentReplaced(*this);
         onStateChanged(*this);
     }
@@ -308,6 +311,30 @@ namespace curvy {
                     reportError("The file can't be read as a PDF or Illustrator file: " + file);
                 }
             });
+    }
+
+    bool SketchDocumentController::choosePdfPages(const std::string& file) {
+        std::string data;
+        try {
+            std::ifstream in(std::filesystem::u8path(file), std::ios::binary);
+            std::ostringstream buffer;
+            buffer << in.rdbuf();
+            data = buffer.str();
+        } catch (...) {
+            return true;   // the import itself reports what is wrong with the file
+        }
+        const std::size_t count = pdfPageCount(data);
+        if (count < 2) {
+            document_.setPdfPages({});
+            return true;
+        }
+        std::vector<int> pages;
+        if (!PdfPagesDialog::run(frame_, fileNameOf(file), count, pages)) {
+            onStatus(*this, "Import of " + fileNameOf(file) + " cancelled");
+            return false;
+        }
+        document_.setPdfPages(std::move(pages));
+        return true;
     }
 
     bool SketchDocumentController::importPdf(const std::string& path) {
@@ -333,6 +360,9 @@ namespace curvy {
             pdf = in.gcount() > 0 && isPdfDocument(std::string(head, std::size_t(in.gcount())));
         } catch (...) {
             pdf = false;
+        }
+        if (pdf && askPdfPages_ && !choosePdfPages(file)) {
+            return false;
         }
         if (pdf && background_) {
             return startImport(file);
@@ -751,11 +781,17 @@ namespace curvy {
     }
 
     void SketchDocumentController::reportError(const std::string& message) {
+        std::string text = message;
+        const bool openFailure = message.rfind("Could not open ", 0) == 0 || message.rfind("The file can't be read", 0) == 0;
+        if (openFailure && !document_.lastError().empty()) {
+            text += "\n\nThe file " + document_.lastError() + ".";
+            document_.clearLastError();
+        }
         if (errorReporter_) {
-            errorReporter_(message);
+            errorReporter_(text);
             return;
         }
-        newui::Dialog::showMessageBox(frame_.frameHandle(), message, "sketch", newui::MessageBoxButtons::Ok, newui::MessageBoxIcon::Error);
+        newui::Dialog::showMessageBox(frame_.frameHandle(), text, "sketch", newui::MessageBoxButtons::Ok, newui::MessageBoxIcon::Error);
     }
 
 }

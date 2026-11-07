@@ -75,7 +75,7 @@ namespace curvy {
     }
 
     void LoadingOverlay::setTitle(const std::string& title) {
-        title_->setText(title);
+        title_text_ = title;
         layout();
     }
 
@@ -106,12 +106,37 @@ namespace curvy {
         layout();
     }
 
+    // The title as it fits in `room` pixels: the middle goes first, so the end of a file name (its extension) stays.
+    std::string LoadingOverlay::fittedTitle(float room) const {
+        const Font& font = title_->font();
+        if (font.measureText(title_text_).width <= room) {
+            return title_text_;
+        }
+        std::string head = title_text_.substr(0, title_text_.size() / 2), tail = title_text_.substr(title_text_.size() / 2);
+        while ((!head.empty() || tail.size() > 1) && font.measureText(head + "..." + tail).width > room) {
+            if (head.size() >= tail.size() && !head.empty()) {
+                head.pop_back();
+            } else if (tail.size() > 1) {
+                tail.erase(0, 1);
+            } else {
+                head.pop_back();
+            }
+        }
+        return head + "..." + tail;
+    }
+
     void LoadingOverlay::layout() {
-        const float left = (bounds_.size().width - kCardWidth) * 0.5f;
+        constexpr float kTextOffset = kPadding + 2.0f * (kRingRadius + kRingWidth) + 22.0f;   // from the card's left edge to the text
+        const float widest = std::max(bounds_.size().width - 40.0f, kCardWidth);
+        float textWidth = std::max({title_->font().measureText(title_text_).width, percent_->font().measureText(percent_->text()).width,
+            hint_->font().measureText(hint_->text()).width});
+        const float cardWidth = std::min(widest, std::max(kCardWidth, kTextOffset + textWidth + kPadding));
+        title_->setText(fittedTitle(cardWidth - kTextOffset - kPadding));
+        const float left = (bounds_.size().width - cardWidth) * 0.5f;
         const float top = (bounds_.size().height - kCardHeight) * 0.5f;
         card_->setX(left);
         card_->setY(top);
-        card_->setWidth(kCardWidth);
+        card_->setWidth(cardWidth);
         card_->setHeight(kCardHeight);
 
         const float cx = left + kPadding + kRingRadius + kRingWidth, cy = top + kCardHeight * 0.5f;

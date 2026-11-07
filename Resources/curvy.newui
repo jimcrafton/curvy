@@ -2658,7 +2658,7 @@
                                     layoutParams: { type: "FlexLayoutParams", weight: 1 },
                                     model: {
                                       type: "StringListModel",
-                                      items: ["Normal", "Multiply", "Screen", "Overlay", "Darken", "Lighten", "Color Dodge", "Color Burn", "Hard Light", "Soft Light", "Difference", "Exclusion"]
+                                      items: ["Normal", "Multiply", "Screen", "Overlay", "Darken", "Lighten", "Color Dodge", "Color Burn", "Hard Light", "Soft Light", "Difference", "Exclusion", "Hue", "Saturation", "Color", "Luminosity"]
                                     },
                                     selectedIndex: 1
                                   }

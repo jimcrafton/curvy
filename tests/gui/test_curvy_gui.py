@@ -24,6 +24,7 @@ class CurvyCase(AppTestCase):
     """The workspace's vocabulary, shared by the tests below."""
 
     first_run = False                                              # True: no settings file, so the welcome card shows
+    extra_settings = ""
 
     def setUp(self):
         # A settings folder of its own per test, so saving settings in one test (or a leftover autosave) never reaches another or the user's own.
@@ -34,7 +35,7 @@ class CurvyCase(AppTestCase):
         if not self.first_run:
             os.makedirs(os.path.join(self._appdata.name, "curvy"))
             with open(os.path.join(self._appdata.name, "curvy", "settings.ini"), "w") as f:
-                f.write("welcomeShown=1\n")
+                f.write("welcomeShown=1\n" + self.extra_settings)
         self.addCleanup(lambda: os.environ.__setitem__("APPDATA", previous) if previous is not None else os.environ.pop("APPDATA", None))
         super().setUp()
 
@@ -107,6 +108,53 @@ class Closing(CurvyCase):
         self.app.wait_for_dialog()                                    # the save-changes question
         self.app.key_raw("n")
         self.wait_exit()
+
+
+class Recovery(CurvyCase):
+    """A crash is simulated by killing the app (App.close ends its job object) after the autosave has written its copy; the next start asks once."""
+
+    extra_settings = "autosaveMinutes=1\n"                        # the first autosave comes that long after the start (the default is 5)
+
+    def autosaves(self):
+        folder = os.path.join(self._appdata.name, "curvy", "autosave")
+        return [n for n in os.listdir(folder) if n.endswith(".svg")] if os.path.isdir(folder) else []
+
+    def crash_with_an_autosave(self):
+        self.new_a4()
+        self.app.click("toolbarToggle")                               # the tools are hidden until then, and an unmodified document is not autosaved
+        canvas = self.app.find("canvas")
+        self.app.click("rectangleTool")
+        self.app.drag((canvas.x + 300, canvas.y + 200), (canvas.x + 420, canvas.y + 280))
+        self.app.click("selectTool")
+        self.app.wait_until(self.autosaves, "the autosave to write its copy", timeout=180)   # the timer ticks every 30 s, and a tick writes only once a minute has passed since the start
+        self.app.close()
+        self.assertFalse(self.app.running)
+
+    def restart(self):
+        self.app = self.launch()
+        self.addCleanup(self.app.close)
+        self.app.wait_for_dialog()                                    # the recovery question
+
+    def assert_asked_only_once(self):
+        time.sleep(1.5)                                               # a second question would come from the same startup timer
+        cls, ours = self.app.foreground_class()
+        self.assertFalse(cls == "#32770" and ours, "the recovery question came up again")
+
+    def test_a_crash_leaves_one_question_and_yes_recovers_the_document(self):
+        self.crash_with_an_autosave()
+        self.restart()
+        self.app.key_raw("y")
+        self.app.wait_until(lambda: self.hint_tool() != "Nothing open", "the recovered document to open")
+        self.assert_asked_only_once()
+        self.assertEqual([], self.autosaves())
+
+    def test_no_throws_the_copy_away_and_asks_only_once(self):
+        self.crash_with_an_autosave()
+        self.restart()
+        self.app.key_raw("n")
+        self.assert_asked_only_once()
+        self.assertEqual("Nothing open", self.hint_tool())
+        self.assertEqual([], self.autosaves())
 
 
 class Rings(CurvyCase):
@@ -1024,7 +1072,7 @@ class BackgroundImport(CurvyCase):
         self.app._send([self.app._key(0x1B, up=True)])
         self.app.wait_idle()
 
-    def start_import(self, document_open=False):
+    def start_import(self, document_open=False, pages=None):
         if not document_open:
             self.focus_canvas()                                    # with a document open that click could select the drawing, and Space would open the Object ring
         self.tap_space()
@@ -1042,7 +1090,64 @@ class BackgroundImport(CurvyCase):
         time.sleep(2.0)                                            # the dialog is in front before its file name box is ready (it fills the folder list first): early characters are lost
         self.app.type_raw(MAGAZINE)
         self.app.key_raw("enter")
+        self.app.wait_until(self.pages_dialog_open, "the page dialog to open", timeout=30)   # the 90 MB file is read for its page count first
+        if pages is None:
+            self.app.key_raw("enter")                              # All pages; Import is the default button
+        else:
+            self.choose_pages(*pages)
         self.app.wait_until(self.busy, "the loading overlay to appear", timeout=15)
+
+    def pages_dialog_open(self):
+        try:
+            return self.app.find("pagesImportButton").w > 0
+        except newui_guitest.GuiTestError:
+            return False
+
+    def choose_pages(self, mode, text):
+        self.app.click("pagesModeCombo")                           # focuses it; Down then moves the selection itself: All pages, First pages, Listed pages
+        for _ in range(mode):
+            self.app.key_raw("down")
+        self.app.click("pagesValueField")
+        self.app.key_raw("end")                                    # ctrl+a types an "a" here, so the field is emptied with backspaces
+        for _ in range(12):
+            self.app.key_raw("backspace")
+        self.app.type(text)
+        self.app.key_raw("enter")                                  # Import is the default button; clicking it would wait for an idle the busy window never gives
+
+    def import_pages(self, mode, text, boards):
+        self.start_import(pages=(mode, text))
+        self.app.wait_until(lambda: not self.busy(), "the import to finish", timeout=90)
+        self.app.wait_until(lambda: "(%d artboards)" % boards in self.app.prop("hintKeys", "text"), "the status line to count %d artboards" % boards)
+
+    def test_first_pages_imports_only_those(self):
+        self.import_pages(1, "3", 3)
+
+    def test_listed_pages_imports_only_those(self):
+        self.import_pages(2, "2,5", 2)
+
+    def test_listed_ranges_import_each_page_once(self):
+        self.import_pages(2, "2-4,9", 4)
+
+    def test_the_whole_magazine_exports_to_pdf_quickly(self):      # it took 218 s and a gigabyte before the per-page culling
+        self.start_import()
+        self.app.wait_until(lambda: not self.busy(), "the import to finish", timeout=90)
+        out = tempfile.TemporaryDirectory()
+        self.addCleanup(out.cleanup)
+        path = os.path.join(out.name, "magazine.pdf")
+        self.tap_space()
+        self.app.key("e")                                          # the Document ring's Export slot opens the Export ring
+        self.app.wait_until(lambda: self.app.prop("hintKeys", "text") == "Ring: Export", "the Export ring")
+        self.app.key_raw("p")
+        self.app.wait_for_dialog()
+        time.sleep(2.0)
+        self.app.type_raw(path)
+        self.app.key_raw("enter")
+        started = time.monotonic()
+        self.app.wait_until(lambda: "Exported" in self.app.prop("hintKeys", "text"), "the PDF export to finish", timeout=60, interval=0.25)
+        self.assertLess(time.monotonic() - started, 30)
+        self.assertLess(os.path.getsize(path), 400 * 1024 * 1024)
+        with open(path, "rb") as f:
+            self.assertEqual(b"%PDF-", f.read(5))
 
     def test_the_magazine_opens_when_nothing_cancels_it(self):     # the premise of the test below: the import is not already over
         self.start_import()
