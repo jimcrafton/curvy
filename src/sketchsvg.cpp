@@ -454,6 +454,7 @@ namespace curvy {
             std::string name;
             std::map<std::string, std::string> attrs;
             std::vector<std::unique_ptr<XmlNode>> children;
+            std::string text;   // kept for <style> only
 
             const std::string* attr(const std::string& key) const {
                 auto it = attrs.find(key);
@@ -621,8 +622,16 @@ namespace curvy {
                     if (lt == std::string::npos) {
                         return nullptr;
                     }
+                    const bool isStyle = node->name == "style";
+                    if (isStyle) {
+                        node->text += s_.substr(pos_, lt - pos_);
+                    }
                     pos_ = lt;
-                    if (startsWith("<!--") || startsWith("<?") || startsWith("<![CDATA[")) {
+                    if (isStyle && startsWith("<![CDATA[")) {
+                        const std::size_t end = s_.find("]]>", pos_ + 9);
+                        node->text += s_.substr(pos_ + 9, end == std::string::npos ? std::string::npos : end - pos_ - 9);
+                        pos_ = end == std::string::npos ? s_.size() : end + 3;
+                    } else if (startsWith("<!--") || startsWith("<?") || startsWith("<![CDATA[")) {
                         skipMisc();
                     } else if (startsWith("</")) {
                         std::size_t end = s_.find('>', pos_);
@@ -1049,7 +1058,17 @@ namespace curvy {
             float pageWidth = 612.0f, pageHeight = 792.0f;
             std::vector<std::size_t> groupStack;  // the <g> elements being read (document group ids, outermost first)
             int depth = 0;                        // <use> inside <use>: stops a reference that leads back to itself
+            TaskProgress* progress = nullptr;     // reported to and checked for a cancel once per element read
+            std::size_t elements = 0, seen = 0;
         };
+
+        std::size_t countElements(const XmlNode& node) {
+            std::size_t count = 1;
+            for (const auto& child : node.children) {
+                count += countElements(*child);
+            }
+            return count;
+        }
 
         void collectIds(const XmlNode& node, std::map<std::string, const XmlNode*>& out) {
             if (const std::string* id = node.attr("id")) {
@@ -1977,6 +1996,10 @@ namespace curvy {
         }
 
         void readNode(ReadContext& ctx, const XmlNode& node, const BLMatrix2D& parentMatrix, const Style& inherited, unsigned done) {
+            if (ctx.progress != nullptr && done == 0) {
+                ctx.progress->check();
+                ctx.progress->set(std::min(0.99f, float(++ctx.seen) / float(ctx.elements)));
+            }
             if (node.name == "defs" || node.name == "linearGradient" || node.name == "radialGradient" || node.name == "clipPath"
                 || node.name == "mask" || node.name == "pattern" || node.name == "symbol" || node.name == "style" || node.name == "metadata") {
                 return;
@@ -2349,12 +2372,18 @@ namespace curvy {
 
     // ---------------------------------------------------------------------- public
 
-    std::string svgFromDocument(const SketchDocument& document) {
+    std::string svgFromDocument(const SketchDocument& document, TaskProgress* progress) {
         std::ostringstream defs;
         std::ostringstream body;
         int gradientCount = 0;
         std::vector<std::size_t> openGroups;  // <g> elements currently open (group ids)
         for (std::size_t i = 0; i < document.objectCount(); ++i) {
+            if (progress != nullptr) {
+                if (progress->cancelled()) {
+                    return std::string();
+                }
+                progress->set(float(i) / float(document.objectCount()));
+            }
             const SketchObject& object = document.object(i);
             BLBox box = object.geometryBounds();
             {
@@ -2473,19 +2502,129 @@ namespace curvy {
         return out.str();
     }
 
-    static bool documentFromXml(const XmlNode* root, SketchDocument& document);
+    static bool documentFromXml(const XmlNode* root, SketchDocument& document, TaskProgress* progress = nullptr);
 
-    bool documentFromSvg(const std::string& text, SketchDocument& document) {
+    namespace {
+        struct CssRule {
+            std::string tag, id, cls;   // a simple selector: tag, #id, .class or a mix; empty parts match anything
+            std::string body;
+        };
+
+        void collectCss(const XmlNode& node, std::string& out) {
+            if (node.name == "style") {
+                out += node.text;
+                out += '\n';
+            }
+            for (const auto& child : node.children) {
+                collectCss(*child, out);
+            }
+        }
+
+        std::vector<CssRule> parseCss(std::string css) {
+            for (std::size_t at; (at = css.find("/*")) != std::string::npos;) {
+                const std::size_t end = css.find("*/", at + 2);
+                css.erase(at, end == std::string::npos ? std::string::npos : end + 2 - at);
+            }
+            std::vector<CssRule> rules;
+            std::size_t pos = 0;
+            while (pos < css.size()) {
+                const std::size_t open = css.find('{', pos), close = css.find('}', open == std::string::npos ? pos : open);
+                if (open == std::string::npos || close == std::string::npos) {
+                    break;
+                }
+                const std::string selectors = css.substr(pos, open - pos), body = trim(css.substr(open + 1, close - open - 1));
+                pos = close + 1;
+                if (selectors.find('@') != std::string::npos) {
+                    continue;
+                }
+                std::size_t from = 0;
+                while (from <= selectors.size()) {
+                    std::size_t comma = selectors.find(',', from);
+                    if (comma == std::string::npos) {
+                        comma = selectors.size();
+                    }
+                    const std::string selector = trim(selectors.substr(from, comma - from));
+                    from = comma + 1;
+                    if (selector.empty() || selector.find_first_of(" >+~[:") != std::string::npos) {
+                        continue;
+                    }
+                    CssRule rule;
+                    rule.body = body;
+                    std::string* part = &rule.tag;
+                    for (char c : selector) {
+                        if (c == '.') { part = &rule.cls; }
+                        else if (c == '#') { part = &rule.id; }
+                        else if (c != '*') { *part += c; }
+                    }
+                    rules.push_back(rule);
+                }
+            }
+            return rules;
+        }
+
+        bool hasClass(const XmlNode& node, const std::string& wanted) {
+            const std::string* list = node.attr("class");
+            if (list == nullptr) {
+                return false;
+            }
+            std::size_t at = 0;
+            while (at < list->size()) {
+                const std::size_t end = list->find_first_of(" \t\r\n", at);
+                const std::size_t stop = end == std::string::npos ? list->size() : end;
+                if (list->compare(at, stop - at, wanted) == 0 && stop > at) {
+                    return true;
+                }
+                at = stop + 1;
+            }
+            return false;
+        }
+
+        // Folds the rules that match an element into its style="" (the element's own declarations stay last, so they win).
+        void applyRules(XmlNode& node, const std::vector<CssRule>& rules) {
+            std::string css;
+            for (const CssRule& rule : rules) {
+                const std::string* id = node.attr("id");
+                if ((rule.tag.empty() || rule.tag == node.name) && (rule.id.empty() || (id != nullptr && *id == rule.id))
+                    && (rule.cls.empty() || hasClass(node, rule.cls))) {
+                    css += rule.body + ";";
+                }
+            }
+            if (!css.empty()) {
+                if (const std::string* own = node.attr("style")) {
+                    css += *own;
+                }
+                node.attrs["style"] = css;
+            }
+            for (auto& child : node.children) {
+                applyRules(*child, rules);
+            }
+        }
+    }
+
+    bool documentFromSvg(const std::string& text, SketchDocument& document, TaskProgress* progress) {
         std::unique_ptr<XmlNode> root = XmlParser(text).parseDocument();
         if (!root || root->name != "svg") {
             return false;
         }
-        return documentFromXml(root.get(), document);
+        std::string css;
+        collectCss(*root, css);
+        if (!css.empty()) {
+            applyRules(*root, parseCss(css));
+        }
+        try {
+            return documentFromXml(root.get(), document, progress);
+        } catch (const TaskCancelled&) {
+            return false;
+        }
     }
 
-    static bool documentFromXml(const XmlNode* root, SketchDocument& document) {
+    static bool documentFromXml(const XmlNode* root, SketchDocument& document, TaskProgress* progress) {
         SketchDocument::Batch batch(document);   // one announcement at the end, not one per object
         ReadContext ctx;
+        ctx.progress = progress;
+        if (progress != nullptr) {
+            ctx.elements = countElements(*root);
+        }
         collectIds(*root, ctx.byId);
 
         double width = 0.0, height = 0.0;

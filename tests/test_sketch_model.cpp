@@ -36,6 +36,8 @@
 #include <jitnodes/geo/topology.h>
 
 #include <array>
+#include <atomic>
+#include <thread>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -1298,6 +1300,110 @@ TEST(SketchStrokeOptions, WidthProfileTapersRendersAndRoundTrips) {
     ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), copy));
     ASSERT_EQ(copy.object(0).strokeOptions().widths.size(), 2u);
     EXPECT_NEAR(copy.object(0).strokeOptions().widths[1].left, 0.1, 1e-9);
+}
+
+TEST(SvgStylesheet, ClassRulesInAStyleElementColorTheShapes) {
+    const std::string svg =
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>"
+        "<defs><style type='text/css'>.a {fill:#FF0000} .b, rect.c {fill:#00FF00} .d {fill:none}</style></defs>"
+        "<path class='a' d='M0 0L10 0L10 10Z'/>"
+        "<rect class='x c' width='5' height='5'/>"
+        "<path class='d' d='M0 0L5 0L5 5Z'/>"
+        "<path class='a' style='fill:#0000FF' d='M0 0L9 0L9 9Z'/>"
+        "</svg>";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromSvg(svg, doc));
+    ASSERT_EQ(doc.objectCount(), 4u);
+    EXPECT_EQ(doc.object(0).fill().color().toHex(), "#ff0000");
+    EXPECT_EQ(doc.object(1).fill().color().toHex(), "#00ff00");
+    EXPECT_TRUE(doc.object(2).fill().isNone());
+    EXPECT_EQ(doc.object(3).fill().color().toHex(), "#0000ff");
+}
+
+TEST(BackgroundTask, RunsTheJobOnAnotherThreadAndReportsWhenItEnds) {
+    curvy::BackgroundTask task;
+    std::atomic<bool> release{false};
+    std::thread::id worker;
+    ASSERT_TRUE(task.start([&](curvy::TaskProgress& progress) {
+        worker = std::this_thread::get_id();
+        progress.set(0.5f);
+        while (!release) { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
+    }));
+    EXPECT_TRUE(task.running());
+    EXPECT_FALSE(task.start([](curvy::TaskProgress&) {}));   // one job at a time
+    EXPECT_FALSE(task.waitFor(std::chrono::milliseconds(20)));   // still going: the wait gives up
+    release = true;
+    EXPECT_TRUE(task.waitFor(std::chrono::seconds(5)));
+    EXPECT_FALSE(task.running());
+    EXPECT_NE(worker, std::this_thread::get_id());
+    EXPECT_FLOAT_EQ(task.progress().fraction(), 0.5f);
+    EXPECT_TRUE(task.start([](curvy::TaskProgress&) {}));   // free for the next one
+}
+
+TEST(BackgroundTask, ACancelReachesTheJobAndAThrowingJobDoesNotEscape) {
+    curvy::BackgroundTask task;
+    std::atomic<bool> sawCancel{false};
+    ASSERT_TRUE(task.start([&](curvy::TaskProgress& progress) {
+        try {
+            for (;;) {
+                progress.check();
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        } catch (const curvy::TaskCancelled&) {
+            sawCancel = true;
+        }
+    }));
+    task.cancel();
+    EXPECT_TRUE(task.waitFor(std::chrono::seconds(5)));
+    EXPECT_TRUE(sawCancel);
+    ASSERT_TRUE(task.start([](curvy::TaskProgress&) { throw std::runtime_error("boom"); }));
+    EXPECT_TRUE(task.waitFor(std::chrono::seconds(5)));
+}
+
+TEST(SvgProgress, ReadingReportsHowFarAndStopsWhenCancelled) {
+    std::string svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>";
+    for (int i = 0; i < 50; ++i) {
+        svg += "<rect width='5' height='5' x='" + std::to_string(i) + "'/>";
+    }
+    svg += "</svg>";
+    SketchDocument doc;
+    curvy::TaskProgress progress;
+    ASSERT_TRUE(documentFromSvg(svg, doc, &progress));
+    EXPECT_EQ(doc.objectCount(), 50u);
+    EXPECT_GT(progress.fraction(), 0.9f);
+
+    SketchDocument cancelled;
+    curvy::TaskProgress stop;
+    stop.cancel();
+    EXPECT_FALSE(documentFromSvg(svg, cancelled, &stop));
+    EXPECT_EQ(cancelled.objectCount(), 0u);
+}
+
+TEST(SvgProgress, WritingStopsWhenCancelledAndLeavesTheFileAlone) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    curvy::TaskProgress stop;
+    stop.cancel();
+    EXPECT_TRUE(svgFromDocument(doc, &stop).empty());
+
+    const auto path = std::filesystem::temp_directory_path() / "curvy_cancelled_save.svg";
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << "original";
+    }
+    doc.setTaskProgress(&stop);
+    doc.setBusy(SketchDocument::Busy::Saving);
+    EXPECT_TRUE(doc.isBusy());
+    EXPECT_FALSE(doc.save(path.string()));
+    doc.setTaskProgress(nullptr);
+    doc.setBusy(SketchDocument::Busy::None);
+    EXPECT_FALSE(doc.isBusy());
+    std::ifstream in(path, std::ios::binary);
+    std::string kept((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(kept, "original");
+    in.close();
+    std::filesystem::remove(path);
+    std::filesystem::remove(std::filesystem::path(path.string() + ".bak"));
 }
 
 TEST(SketchBlend, ModesBlendWithWhatIsBelowUndoAndSave) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "curvy/appearancenode.h"
+#include "curvy/backgroundtask.h"
 #include "curvy/brush.h"
 #include "curvy/graphdocument.h"
 #include "curvy/pathops.h"
@@ -10,6 +11,7 @@
 #include <newui/models.h>
 #include <newui/undostack.h>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -930,6 +932,15 @@ namespace curvy {
         bool empty() const override { return objects_.empty(); }
         std::size_t size() const override { return objects_.size(); }
 
+        // What a worker thread is doing to the document (the file controller sets this around a background Open or Save). While it is
+        // anything but None the document is not to be edited, saved, replaced or closed: the worker owns it. Commands check isBusy().
+        enum class Busy { None, Loading, Saving };
+        Busy busy() const { return busyFlag_.value.load(); }
+        bool isBusy() const { return busy() != Busy::None; }
+        void setBusy(Busy busy) { busyFlag_.value.store(busy); }
+        // Where readFromFile / writeToFile report how far they are and look for a cancel; null (the default) means neither.
+        void setTaskProgress(TaskProgress* progress) { taskProgress_ = progress; }
+
     protected:
         bool readFromFile(const std::string& path) override;
         bool writeToFile(const std::string& path) override;
@@ -1118,6 +1129,15 @@ namespace curvy {
         std::size_t activePattern_ = 0;
         int batchDepth_ = 0;
         bool batchPending_ = false;
+        // Atomic so a worker's reads see the UI thread's set; movable (the document is) with the moved-to document not busy.
+        struct BusyFlag {
+            std::atomic<Busy> value{Busy::None};
+            BusyFlag() = default;
+            BusyFlag(BusyFlag&&) noexcept {}
+            BusyFlag& operator=(BusyFlag&&) noexcept { return *this; }
+        };
+        BusyFlag busyFlag_;
+        TaskProgress* taskProgress_ = nullptr;
         std::vector<std::shared_ptr<const BrushDef>> brushes_;
         std::size_t activeBrush_ = 0;
         std::size_t nextBrushId_ = 1;

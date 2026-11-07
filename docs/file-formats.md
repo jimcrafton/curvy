@@ -25,8 +25,24 @@ Source: `sketchsvg.h`, `sketchsvg.cpp`. Curvy files are ordinary SVG plus `data-
 
 - **Own files:** Full. Everything in the document model round-trips.
 - **Other SVG files, supported:** `path` (all commands, arcs), `rect`, `circle`, `ellipse`, `line`, `polyline`, `polygon`, `g`, `transform`, fill/stroke/opacity as attributes or `style=""`, named / `#rgb` / `#rrggbb` / `rgb()` colors, linear and radial gradients (objectBoundingBox or userSpaceOnUse, `href` stops).
-- **Other SVG files, skipped:** `<text>` not written by Curvy, `<image>`, clipping and masks, filters, CSS stylesheets (`<style>`), `<use>` beyond what Curvy writes, animation.
-- **Estimate:** roughly 60-70% of what typical exported-from-a-drawing-tool SVG contains; much lower for SVG that leans on CSS, filters or clip paths.
+- **CSS:** rules in `<style>` elements with a simple selector (`.class`, `#id`, `tag`, `tag.class`, comma lists) are folded into each matching element's `style=""` before reading, in file order; the element's own `style=""` wins. Drawing tools such as CorelDRAW write all their colors this way (`.fil0 {fill:#EFDAC4}`). Not read: descendant / child / attribute / pseudo selectors, `@media`, specificity.
+- **Other SVG files, skipped:** `<text>` not written by Curvy, `<image>`, clipping and masks, filters, `<use>` beyond what Curvy writes, animation.
+- **Estimate:** roughly 60-70% of what typical exported-from-a-drawing-tool SVG contains; much lower for SVG that leans on filters or clip paths.
+
+## Background Open and Save
+
+Source: `backgroundtask.h`, `sketchcontroller.cpp`, `loadingoverlay.h`, `workspacecontroller.cpp`.
+
+In the app, Open, Import PDF, Save and Save As run on a worker thread (`SketchDocumentController::setBackgroundIo(true)`; headless runs and tests stay synchronous). The worker calls `Document::load` / `save` on the live document: there is no scratch copy.
+
+- **Busy flag:** `SketchDocument::busy()` is `Loading` or `Saving` from the start until the worker's end is handled on the UI thread. Every file command, `runCommand` and the autosave refuse while it is set (`refuseWhileBusy`). The controller holds an outer `SketchDocument::Batch` so the document announces nothing until the worker is done (the announcement, and with it the live-shape sync, then runs on the UI thread).
+- **UI during the work:** the root view's children are hidden (the canvas and panels paint the document), the frame window is disabled with `EnableWindow` (no mouse or keys reach the document), and a `LoadingOverlay` shows the task name and a ring with the percentage - or a turning arc while the importer cannot tell. Esc cancels (polled with `GetAsyncKeyState`, since a disabled window gets no keys).
+- **Hand-over:** the worker posts its end with `RunLoop::post`; `finishBusy` then waits for the thread (a condition variable in `BackgroundTask::waitFor`), releases the batch and the busy flag, and runs the same completion as the synchronous path. `onModifiedChanged`, which `Document::load` / `save` fire on the worker, is marshalled to the UI thread (`SketchDocumentController::onUiThread`).
+- **Progress and cancel:** `TaskProgress` (atomic fraction and cancel flag) is passed to the readers: the SVG reader reports elements read out of all elements, the PDF import reports pages, the SVG writer reports objects. `.skb` and gzip steps are indeterminate and not interruptible.
+- **Limits:** a job over 10 minutes (`setBusyLimits`) is cancelled by the controller's 33 ms tick. If the worker still ignores the cancel after 20 s the UI is given back with an error and the document stays busy until the thread really ends.
+- **Cancelled / failed:** a cancelled or timed-out Open leaves an empty untitled document (the old content was already replaced). A cancelled Save leaves the file on disk untouched: the text is built before the file is opened for writing.
+- **Startup:** a file named on the command line is opened from `RunLoop::onStart` (`WorkspaceController::openStartupFile`), because the worker reports through the loop.
+- **Not covered:** the exports (PDF, EPS, image) still run on the UI thread; recovery from an autosave is synchronous.
 
 ## Sketch Binary (`.skb`)
 

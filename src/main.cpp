@@ -159,6 +159,7 @@ int main(int argc, char** argv) {
     window.start(options.startupPath);
     app.runLoop().onStart.add([&window, &options](newui::RunLoop& loop) {
         window.startAutosave();
+        window.openStartupFile();
         // The recovery question and the welcome card wait until the window is on screen, so the question has a window behind it.
         loop.postDelayed(std::chrono::milliseconds(400), [&window, &options] {
             if (options.startupPath.empty() && !window.offerRecovery()) {

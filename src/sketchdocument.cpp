@@ -1406,22 +1406,29 @@ namespace curvy {
             if (!gzipDecompress(text, inflated)) {
                 return false;
             }
-            return documentFromSvg(inflated, *this);
+            return documentFromSvg(inflated, *this, taskProgress_);
         }
         if (isPdfDocument(text)) {   // PDF / Illustrator: told by its first bytes, not its name (the controller makes it an untitled import)
-            return documentFromPdf(text, *this);
+            PdfImportOptions options;
+            options.progress = taskProgress_;
+            return documentFromPdf(text, *this, options);
         }
-        return documentFromSvg(text, *this);
+        return documentFromSvg(text, *this, taskProgress_);
     }
 
     bool SketchDocument::writeToFile(const std::string& path) {
+        // The text is made before the file is opened: opening truncates it, and a cancelled save must leave the old file as it was.
+        const bool binary = hasExtension(path, ".skb");
+        std::string text = binary ? binaryFromDocument(*this) : svgFromDocument(*this, taskProgress_);
+        if (taskProgress_ != nullptr && taskProgress_->cancelled()) {
+            return false;
+        }
+        if (hasExtension(path, ".svgz")) {
+            text = gzipCompress(text);
+        }
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
         if (!out) {
             return false;
-        }
-        std::string text = hasExtension(path, ".skb") ? binaryFromDocument(*this) : svgFromDocument(*this);
-        if (hasExtension(path, ".svgz")) {
-            text = gzipCompress(text);
         }
         out << text;
         return static_cast<bool>(out);

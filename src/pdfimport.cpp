@@ -2012,8 +2012,13 @@ namespace curvy {
             document.setColorMode(ColorSpace::RGB);
 
             Interpreter::FontCache fonts;
+            if (options.progress != nullptr) { options.progress->set(0.02f); }
             ImageCache images = decodeJpegsInParallel(file);
             for (std::size_t i = 0; i < pages.size(); ++i) {
+                if (options.progress != nullptr) {
+                    options.progress->check();
+                    options.progress->set(0.1f + 0.9f * float(i) / float(pages.size()));
+                }
                 const Page& page = pages[i];
                 const double w = page.x1 - page.x0, h = page.y1 - page.y0;
                 BLMatrix2D base;

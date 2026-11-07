@@ -26,6 +26,8 @@
 
 namespace curvy {
 
+    class LoadingOverlay;
+
     // The controller of the pen-and-keyboard workspace (Resources/workspace.newui: a thin top bar, the canvas, the hint bar - no menus,
     // toolbars or panels). It turns the pen, the barrel button and a few held keys into the interaction docs/ui-design.md describes:
     //
@@ -60,8 +62,11 @@ namespace curvy {
         static void applyTheme(bool dark);
         void setDarkTheme(bool dark);
 
-        // Opens the file at `path`; with none the workspace starts empty ("Nothing open").
+        // Sets the workspace up; with a `path` that file is opened by openStartupFile(), with none it starts empty ("Nothing open").
         void start(const std::string& path);
+        // Opens the file start() was given. Call it once the run loop is pumping (RunLoop::onStart): the file loads on a worker thread
+        // that reports back through the loop.
+        void openStartupFile();
 
         newui::Frame& frame() { return frame_; }
         WorkspaceModel& workspace() { return *model_; }
@@ -138,6 +143,15 @@ namespace curvy {
         void showToolOptions(SketchTool tool, const newui::Point& at);
         void clearRecovery();
         void dismissWelcome();
+        // A background Open / Save: a progress overlay over the window and the window itself disabled (nothing can be clicked or typed
+        // into the document while the worker owns it). Esc, polled from the controller's tick because a disabled window gets no keys, cancels.
+        void showLoading();
+        void updateLoading();
+        void hideLoading();
+        LoadingOverlay* loading_ = nullptr;   // owned by the root view while shown
+        // The canvas and panels paint the document, which the worker is changing: they are hidden for the duration.
+        std::vector<newui::SubView*> hiddenForLoad_;
+        std::string startupPath_;
         std::string recoveryFile_;
         std::uintptr_t autosaveTimer_ = 0;
         std::chrono::steady_clock::time_point lastAutosave_ = std::chrono::steady_clock::now();

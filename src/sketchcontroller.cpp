@@ -24,14 +24,146 @@ namespace curvy {
 
     SketchDocumentController::SketchDocumentController(SketchDocument& document, newui::Frame& frame)
         : document_(document), frame_(frame) {
+        uiLoop_ = &newui::RunLoop::current();
+        uiThread_ = std::this_thread::get_id();
+        // A background Open / Save clears the modified flag on the worker thread.
         document_.onModifiedChanged += [this](newui::Document&) {
-            onStateChanged(*this);
+            onUiThread([this]() { onStateChanged(*this); });
             return newui::SyncReturn::Handled;
         };
         std::string folder = newui::SpecialFolders::roamingAppData();
         if (!folder.empty()) {
             setRecentFilesPath(folder + "/sketch/recent.txt");
         }
+    }
+
+    SketchDocumentController::~SketchDocumentController() {
+        *alive_ = false;   // posts still on their way from the worker find this and do nothing
+        task_.cancel();
+        task_.waitFor(std::chrono::seconds(30));   // the task's own destructor joins; this only bounds how long a stuck job is waited on first
+        if (busyTimer_ != newui::RunLoop::kInvalidTimerHandle) {
+            uiLoop_->cancelDelayed(busyTimer_);
+        }
+    }
+
+    void SketchDocumentController::onUiThread(std::function<void()> task) {
+        if (std::this_thread::get_id() == uiThread_) {
+            task();
+            return;
+        }
+        std::shared_ptr<bool> alive = alive_;
+        uiLoop_->post([alive, task = std::move(task)]() {
+            if (*alive) {
+                task();
+            }
+        });
+    }
+
+    // ---- Background work ----
+
+    bool SketchDocumentController::refuseWhileBusy() {
+        if (!document_.isBusy()) {
+            return false;
+        }
+        onStatus(*this, busyLabel_ + " - wait for it to finish, or press Esc to cancel");
+        return true;
+    }
+
+    void SketchDocumentController::cancelBusy() {
+        if (!document_.isBusy() || cancelRequested_) {
+            return;
+        }
+        cancelRequested_ = true;
+        cancelAsked_ = std::chrono::steady_clock::now();
+        task_.cancel();
+    }
+
+    bool SketchDocumentController::startBusy(const std::string& label, SketchDocument::Busy kind, std::function<bool()> work, std::function<void(Outcome)> finish) {
+        if (document_.isBusy() || task_.running()) {
+            return false;
+        }
+        busyLabel_ = label;
+        finish_ = std::move(finish);
+        cancelRequested_ = timedOut_ = released_ = false;
+        busyStart_ = std::chrono::steady_clock::now();
+        document_.setBusy(kind);
+        batch_.emplace(document_);
+        document_.setTaskProgress(&task_.progress());
+        std::shared_ptr<bool> alive = alive_;
+        const bool started = task_.start([this, alive, work = std::move(work)](TaskProgress&) {
+            bool ok = false;
+            try {
+                ok = work();
+            } catch (...) {
+            }
+            uiLoop_->post([this, alive, ok]() {
+                if (*alive) {
+                    finishBusy(ok);
+                }
+            });
+        });
+        if (!started) {
+            batch_.reset();
+            document_.setTaskProgress(nullptr);
+            document_.setBusy(SketchDocument::Busy::None);
+            return false;
+        }
+        busyTimer_ = uiLoop_->postDelayed(std::chrono::milliseconds(33), [this]() { return tickBusy(); });
+        onBusyStarted(*this);
+        return true;
+    }
+
+    bool SketchDocumentController::tickBusy() {
+        if (!document_.isBusy()) {
+            busyTimer_ = newui::RunLoop::kInvalidTimerHandle;
+            return true;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (!cancelRequested_ && now - busyStart_ > timeout_) {
+            timedOut_ = true;
+            cancelBusy();
+        }
+        if (cancelRequested_ && !released_ && now - cancelAsked_ > grace_) {
+            released_ = true;   // the worker ignores the cancel: the UI is given back, the document stays busy until it ends
+            onBusyFinished(*this);
+            reportError("The file is still being processed in the background and does not respond to being cancelled. It will be "
+                        "available again when that ends; quitting curvy stops it.");
+        }
+        if (!released_) {
+            onBusyProgress(*this);
+        }
+        return false;
+    }
+
+    void SketchDocumentController::finishBusy(bool ok) {
+        task_.waitFor(std::chrono::seconds(10));   // the worker posted this as its last act: it is ending
+        const Outcome outcome = ok ? Outcome::Ok : timedOut_ ? Outcome::TimedOut : task_.progress().cancelled() ? Outcome::Cancelled : Outcome::Failed;
+        if (busyTimer_ != newui::RunLoop::kInvalidTimerHandle) {
+            uiLoop_->cancelDelayed(busyTimer_);
+            busyTimer_ = newui::RunLoop::kInvalidTimerHandle;
+        }
+        batch_.reset();   // the document announces what the worker changed, here on the UI thread
+        document_.setTaskProgress(nullptr);
+        document_.setBusy(SketchDocument::Busy::None);
+        std::function<void(Outcome)> finish = std::move(finish_);
+        finish_ = nullptr;
+        if (!released_) {
+            onBusyFinished(*this);
+        }
+        if (finish) {
+            finish(outcome);
+        }
+    }
+
+    // A cancelled or timed-out Open stopped part way through replacing the document: what is left is not the old file and not the new one.
+    void SketchDocumentController::discardPartialLoad() {
+        document_.clearObjects();
+        document_.undoStack().clear();
+        document_.clearSelection();
+        document_.reset();
+        untitledName_ = "Untitled";
+        onDocumentReplaced(*this);
+        onStateChanged(*this);
     }
 
     // ---- Recent files ----
@@ -108,7 +240,7 @@ namespace curvy {
     }
 
     bool SketchDocumentController::newDocument() {
-        if (!confirmDiscardChanges(document_)) {
+        if (refuseWhileBusy() || !confirmDiscardChanges(document_)) {
             return false;
         }
         NewDocumentModel settings;
@@ -120,7 +252,7 @@ namespace curvy {
     }
 
     bool SketchDocumentController::newDocument(const std::string& name, double widthPoints, double heightPoints) {
-        if (!confirmDiscardChanges(document_)) {
+        if (refuseWhileBusy() || !confirmDiscardChanges(document_)) {
             return false;
         }
         NewDocumentModel settings;
@@ -153,8 +285,38 @@ namespace curvy {
         onStateChanged(*this);
     }
 
+    namespace {
+        std::string fileNameOf(const std::string& path) { return std::filesystem::path(std::filesystem::u8path(path)).filename().string(); }
+    }
+
+    void SketchDocumentController::completeImport(const std::string& file) {
+        document_.reset();   // untitled, unmodified ...
+        document_.markModified();   // ... but not saved
+        untitledName_ = std::filesystem::path(std::filesystem::u8path(file)).stem().string();
+        onStatus(*this, "Imported " + file);
+        onDocumentReplaced(*this);
+        onStateChanged(*this);
+    }
+
+    bool SketchDocumentController::startImport(const std::string& file) {
+        return startBusy("Importing " + fileNameOf(file), SketchDocument::Busy::Loading, [this, file]() { return document_.load(file); },
+            [this, file](Outcome outcome) {
+                if (outcome == Outcome::Ok) {
+                    completeImport(file);
+                } else if (outcome == Outcome::Cancelled) {
+                    discardPartialLoad();
+                    onStatus(*this, "Import of " + fileNameOf(file) + " cancelled");
+                } else if (outcome == Outcome::TimedOut) {
+                    discardPartialLoad();
+                    reportError("Importing " + file + " took longer than " + std::to_string(timeout_.count() / 60) + " minutes and was stopped.");
+                } else {
+                    reportError("The file can't be read as a PDF or Illustrator file: " + file);
+                }
+            });
+    }
+
     bool SketchDocumentController::importPdf(const std::string& path) {
-        if (!confirmDiscardChanges(document_)) {
+        if (refuseWhileBusy() || !confirmDiscardChanges(document_)) {
             return false;
         }
         std::string file = path;
@@ -168,29 +330,62 @@ namespace curvy {
                 return false;
             }
         }
-        bool read = false;
+        bool pdf = false;
         try {
             std::ifstream in(std::filesystem::u8path(file), std::ios::binary);
             char head[1024];
             in.read(head, sizeof(head));
-            read = in.gcount() > 0 && isPdfDocument(std::string(head, std::size_t(in.gcount()))) && openInto(document_, file);
+            pdf = in.gcount() > 0 && isPdfDocument(std::string(head, std::size_t(in.gcount())));
         } catch (...) {
-            read = false;
+            pdf = false;
         }
-        if (!read) {
+        if (pdf && background_) {
+            return startImport(file);
+        }
+        if (!pdf || !openInto(document_, file)) {
             reportError("The file can't be read as a PDF or Illustrator file: " + file);
             return false;
         }
-        document_.reset();   // untitled, unmodified ...
-        document_.markModified();   // ... but not saved
-        untitledName_ = std::filesystem::path(std::filesystem::u8path(file)).stem().string();
-        onStatus(*this, "Imported " + file);
-        onDocumentReplaced(*this);
-        onStateChanged(*this);
+        completeImport(file);
         return true;
     }
 
+    void SketchDocumentController::completeOpen(const std::string&) {
+        remember(document_.filePath());
+        onStatus(*this, "Opened " + document_.filePath());
+        onDocumentReplaced(*this);
+        onStateChanged(*this);
+    }
+
+    bool SketchDocumentController::startOpen(const std::string& path) {
+        return startBusy("Opening " + fileNameOf(path), SketchDocument::Busy::Loading, [this, path]() { return document_.load(path); },
+            [this, path](Outcome outcome) {
+                switch (outcome) {
+                    case Outcome::Ok:
+                        completeOpen(path);
+                        break;
+                    case Outcome::Cancelled:
+                        discardPartialLoad();
+                        onStatus(*this, "Opening " + fileNameOf(path) + " cancelled");
+                        break;
+                    case Outcome::TimedOut:
+                        discardPartialLoad();
+                        reportError("Opening " + path + " took longer than " + std::to_string(timeout_.count() / 60) + " minutes and was stopped.");
+                        break;
+                    case Outcome::Failed:
+                        reportError("Could not open " + path);
+                        if (!std::filesystem::exists(std::filesystem::u8path(path))) {
+                            forget(path);   // a recent file that is gone
+                        }
+                        break;
+                }
+            });
+    }
+
     bool SketchDocumentController::open(const std::string& path) {
+        if (refuseWhileBusy()) {
+            return false;
+        }
         if (!path.empty()) {
             std::string extension = std::filesystem::path(std::filesystem::u8path(path)).extension().string();
             std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) { return char(std::tolower(c)); });
@@ -198,21 +393,25 @@ namespace curvy {
                 return importPdf(path);
             }
         }
+        if (background_) {
+            if (!confirmDiscardChanges(document_)) {
+                return false;
+            }
+            const std::string target = path.empty() ? chooseOpenPath() : path;
+            return !target.empty() && startOpen(target);
+        }
         if (!openInto(document_, path)) {
             if (!path.empty() && !std::filesystem::exists(std::filesystem::u8path(path))) {
                 forget(path);  // a recent file that is gone
             }
             return false;
         }
-        remember(document_.filePath());
-        onStatus(*this, "Opened " + document_.filePath());
-        onDocumentReplaced(*this);
-        onStateChanged(*this);
+        completeOpen(path);
         return true;
     }
 
     bool SketchDocumentController::recoverFrom(const std::string& path, const std::string& name) {
-        if (!openInto(document_, path)) {
+        if (refuseWhileBusy() || !openInto(document_, path)) {
             return false;
         }
         document_.reset();   // keeps the content, drops the recovery file as its path
@@ -224,7 +423,30 @@ namespace curvy {
         return true;
     }
 
+    bool SketchDocumentController::startSave(const std::string& path) {
+        return startBusy("Saving " + fileNameOf(path), SketchDocument::Busy::Saving, [this, path]() { return document_.save(path); },
+            [this, path](Outcome outcome) {
+                if (outcome == Outcome::Ok) {
+                    remember(document_.filePath());
+                    onStatus(*this, "Saved " + document_.filePath());
+                    onStateChanged(*this);
+                } else if (outcome == Outcome::Cancelled) {
+                    onStatus(*this, "Save of " + fileNameOf(path) + " cancelled; the file on disk is unchanged");
+                } else if (outcome == Outcome::TimedOut) {
+                    reportError("Saving " + path + " took longer than " + std::to_string(timeout_.count() / 60) + " minutes and was stopped; the file on disk is unchanged.");
+                } else {
+                    reportError("Could not save " + path);
+                }
+            });
+    }
+
     bool SketchDocumentController::save() {
+        if (refuseWhileBusy()) {
+            return false;
+        }
+        if (background_) {
+            return document_.hasFilePath() ? startSave(document_.filePath()) : saveAs();
+        }
         if (!saveDocument(document_)) {
             return false;
         }
@@ -235,6 +457,13 @@ namespace curvy {
     }
 
     bool SketchDocumentController::saveAs() {
+        if (refuseWhileBusy()) {
+            return false;
+        }
+        if (background_) {
+            const std::string target = chooseSavePath(document_);
+            return !target.empty() && startSave(target);
+        }
         if (!saveDocumentAs(document_)) {
             return false;
         }
@@ -245,6 +474,9 @@ namespace curvy {
     }
 
     bool SketchDocumentController::exportImage() {
+        if (refuseWhileBusy()) {
+            return false;
+        }
         newui::FileDialogOptions options;
         options.title = "Export As Image";
         options.filters.push_back({"PNG Image", "*.png"});
@@ -267,6 +499,9 @@ namespace curvy {
     }
 
     bool SketchDocumentController::exportPdf() {
+        if (refuseWhileBusy()) {
+            return false;
+        }
         newui::FileDialogOptions options;
         options.title = "Export As PDF";
         options.filters.push_back({"PDF Document", "*.pdf"});
@@ -288,6 +523,9 @@ namespace curvy {
     }
 
     bool SketchDocumentController::exportEps() {
+        if (refuseWhileBusy()) {
+            return false;
+        }
         newui::FileDialogOptions options;
         options.title = "Export As EPS";
         options.filters.push_back({"Encapsulated PostScript", "*.eps"});
@@ -309,6 +547,9 @@ namespace curvy {
     }
 
     bool SketchDocumentController::exportArtboards() {
+        if (refuseWhileBusy()) {
+            return false;
+        }
         newui::FileDialogOptions options;
         options.title = "Export All Artboards";
         options.filters.push_back({"PNG Image", "*.png"});
@@ -334,6 +575,9 @@ namespace curvy {
     }
 
     bool SketchDocumentController::traceImage() {
+        if (refuseWhileBusy()) {
+            return false;
+        }
         newui::FileDialogOptions options;
         options.title = "Trace Image";
         options.filters.push_back({"Pictures", "*.png;*.jpg;*.jpeg;*.bmp"});
@@ -352,6 +596,9 @@ namespace curvy {
     }
 
     bool SketchDocumentController::placeImage() {
+        if (refuseWhileBusy()) {
+            return false;
+        }
         newui::FileDialogOptions options;
         options.title = "Place Image";
         options.filters.push_back({"Pictures", "*.png;*.jpg;*.jpeg;*.bmp;*.qoi"});
@@ -376,6 +623,9 @@ namespace curvy {
     }
 
     bool SketchDocumentController::traceImageFile(const std::string& path, const TraceOptions& traceOptions) {
+        if (refuseWhileBusy()) {
+            return false;
+        }
         std::vector<std::uint32_t> pixels;
         int width = 0, height = 0;
         bool loaded = false;
@@ -397,6 +647,9 @@ namespace curvy {
     }
 
     bool SketchDocumentController::documentSetup() {
+        if (refuseWhileBusy()) {
+            return false;
+        }
         NewDocumentModel settings;
         PageBackground background = PageBackground::White;
         if (!document_.pageBackground()) {
@@ -435,7 +688,7 @@ namespace curvy {
     }
 
     bool SketchDocumentController::canClose() {
-        return confirmDiscardChanges(document_);
+        return !refuseWhileBusy() && confirmDiscardChanges(document_);
     }
 
     std::string SketchDocumentController::displayName() const {

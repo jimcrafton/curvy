@@ -35,6 +35,8 @@ add_executable(curvy
     src/swatchgrid.cpp
     src/pagepreview.cpp
     src/welcomeoverlay.cpp
+    src/loadingoverlay.cpp
+    src/backgroundtask.cpp
     src/stylepanel.cpp
     src/transformpanel.cpp
     src/layertree.cpp
@@ -139,7 +141,7 @@ set(CURVY_MODEL_SOURCES
     documentlayers documentswatches documentselect documentclip documentsymbols documentbrushes brush
     pathflatten textwarp imagedata documenttextpath documentimages documentexpand pdfexport epsexport pdfimport fontprogram pdfcrypt documentartboards
     documenttrace imagetrace sketchsvg sketchexport shapetools pathops textoutline gzip numberscrubber expressionfield
-    sketchbin cursorset newdocumentmodel graphdocument graphtree pathnode shapenode appearancenode documentlive radialmenu holdscrub workspacemodel dockcontext liveshape settings)
+    backgroundtask sketchbin cursorset newdocumentmodel graphdocument graphtree pathnode shapenode appearancenode documentlive radialmenu holdscrub workspacemodel dockcontext liveshape settings)
 list(TRANSFORM CURVY_MODEL_SOURCES PREPEND src/)
 list(TRANSFORM CURVY_MODEL_SOURCES APPEND .cpp)
 

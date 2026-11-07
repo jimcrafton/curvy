@@ -1,5 +1,7 @@
 #pragma once
 
+#include "curvy/backgroundtask.h"
+
 #include <string>
 
 namespace curvy {
@@ -34,6 +36,8 @@ namespace curvy {
         // exact and need no installed font, but the words can no longer be edited. Text in other fonts, or all text when this is false,
         // becomes live Text objects in an installed font of the same family.
         bool textAsOutlines = true;
+        // Told how many pages are done and checked for a cancel between pages (the import then returns false); null means neither.
+        TaskProgress* progress = nullptr;
     };
     // `problem`, when given, receives a reason the user could act on ("needs a password to open"); it is left alone for other failures.
     bool documentFromPdf(const std::string& data, SketchDocument& document, const PdfImportOptions& options = PdfImportOptions(), std::string* problem = nullptr);

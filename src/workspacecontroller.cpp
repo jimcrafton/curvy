@@ -4,6 +4,7 @@
 #include "curvy/settingsdialog.h"
 #include "curvy/sketchsvg.h"
 #include "curvy/welcomeoverlay.h"
+#include "curvy/loadingoverlay.h"
 
 #include <newui/application.h>
 #include <newui/bundle.h>
@@ -203,6 +204,10 @@ namespace curvy {
         canvas_->setShowGrid(false);
         restyle();
         files_ = std::make_unique<SketchDocumentController>(document_, frame_);
+        files_->setBackgroundIo(true);
+        files_->onBusyStarted += [this](SketchDocumentController&) { showLoading(); return SyncReturn::Handled; };
+        files_->onBusyProgress += [this](SketchDocumentController&) { updateLoading(); return SyncReturn::Handled; };
+        files_->onBusyFinished += [this](SketchDocumentController&) { hideLoading(); return SyncReturn::Handled; };
         commands_ = std::make_unique<SketchCommandController>(document_, *canvas_, *files_);
 
         menu_ = new RadialMenu();
@@ -269,9 +274,11 @@ namespace curvy {
 
         // The document and frame outlive this controller, so their handlers are disconnected with it.
         connections_.add(document_.onModifiedChanged, [this](Document&) {
-            if (!document_.isModified()) {
-                clearRecovery();
-            }
+            files_->onUiThread([this]() {   // a background Open / Save fires this on the worker thread
+                if (!document_.isModified()) {
+                    clearRecovery();
+                }
+            });
             return SyncReturn::Handled;
         });
         connections_.add(frame_.onClosed, [this](Frame&) {
@@ -367,8 +374,50 @@ namespace curvy {
         settings_.save(Settings::defaultPath());
     }
 
+    void WorkspaceController::showLoading() {
+        auto overlay = std::make_unique<LoadingOverlay>();
+        overlay->setTitle(files_->busyLabel());
+        loading_ = overlay.get();
+        frame_.rootView().setOverlay(std::move(overlay));   // replaces the welcome card, if it is still up
+        hiddenForLoad_.clear();
+        for (SubView* child : frame_.rootView().childViews()) {
+            if (child->isVisible()) {
+                hiddenForLoad_.push_back(child);
+                child->setVisible(false);
+            }
+        }
+        ::EnableWindow(frame_.frameHandle(), FALSE);
+        frame_.rootView().markDirty();
+    }
+
+    void WorkspaceController::updateLoading() {
+        if (loading_ == nullptr) {
+            return;
+        }
+        if ((::GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0 && ::GetForegroundWindow() == frame_.frameHandle()) {
+            files_->cancelBusy();
+            loading_->setCancelling();
+        }
+        loading_->update(files_->busyFraction());
+        frame_.rootView().markDirty();
+    }
+
+    void WorkspaceController::hideLoading() {
+        ::EnableWindow(frame_.frameHandle(), TRUE);
+        for (SubView* child : hiddenForLoad_) {
+            child->setVisible(true);
+        }
+        hiddenForLoad_.clear();
+        if (loading_ != nullptr) {
+            loading_ = nullptr;
+            frame_.rootView().setOverlay(nullptr);
+            frame_.rootView().markDirty();
+        }
+        focusCanvas();
+    }
+
     void WorkspaceController::dismissWelcome() {
-        if (frame_.rootView().overlay() != nullptr) {
+        if (loading_ == nullptr && frame_.rootView().overlay() != nullptr) {
             frame_.rootView().setOverlay(nullptr);
             frame_.rootView().markDirty();
             focusCanvas();
@@ -378,7 +427,7 @@ namespace curvy {
     // A recovery copy beside the settings; the user's own file is only ever written by Save.
     void WorkspaceController::autosaveTick() {
         const auto now = std::chrono::steady_clock::now();
-        if (!settings_.autosave || !model_->documentOpen() || !document_.isModified() ||
+        if (document_.isBusy() || !settings_.autosave || !model_->documentOpen() || !document_.isModified() ||
             now - lastAutosave_ < std::chrono::minutes(settings_.autosaveMinutes)) {
             return;
         }
@@ -487,12 +536,18 @@ namespace curvy {
         model_->setDocument(false, std::string());
         canvas_->setShowPages(false);
         canvas_->setShowRulers(false);
-        if (!path.empty()) {
-            files_->open(path);
-        } else {
+        startupPath_ = path;
+        if (path.empty()) {
             frame_.setTitle("curvy");
         }
         focusCanvas();
+    }
+
+    void WorkspaceController::openStartupFile() {
+        if (!startupPath_.empty()) {
+            files_->open(std::move(startupPath_));
+            startupPath_.clear();
+        }
     }
 
     void WorkspaceController::focusCanvas() {
@@ -587,6 +642,10 @@ namespace curvy {
     }
 
     void WorkspaceController::runCommand(const std::string& command) {
+        if (document_.isBusy()) {
+            model_->say(files_->busyLabel() + " - wait for it to finish, or press Esc to cancel");
+            return;
+        }
         if (handlers_.empty()) {
             buildCommandTable();
         }
