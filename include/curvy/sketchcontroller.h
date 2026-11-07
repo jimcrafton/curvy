@@ -134,7 +134,7 @@ namespace curvy {
         void finishBusy(bool ok);
         bool tickBusy();
         bool refuseWhileBusy();
-        void discardPartialLoad();
+        void keepPreviousDocument();
         void completeOpen(const std::string& path);
         void completeImport(const std::string& file);
         bool startOpen(const std::string& path);

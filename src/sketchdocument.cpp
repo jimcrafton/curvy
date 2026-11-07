@@ -1398,22 +1398,31 @@ namespace curvy {
         std::ostringstream buffer;
         buffer << in.rdbuf();
         std::string text = buffer.str();
-        if (isBinaryDocument(text)) {   // .skb: told by its first bytes, not its name
-            return documentFromBinary(text, *this);
-        }
-        if (isGzip(text)) {   // .svgz: told by its first bytes, not its name
-            std::string inflated;
-            if (!gzipDecompress(text, inflated)) {
-                return false;
+        // The readers build into this document, so a read that fails or is cancelled halfway has already replaced what was open: the
+        // document is written out first and put back then (inside load(), so the modified flag and the path stay as they were).
+        const std::string before = svgFromDocument(*this);
+        const bool ok = [&]() {
+            if (isBinaryDocument(text)) {   // .skb: told by its first bytes, not its name
+                return documentFromBinary(text, *this);
             }
-            return documentFromSvg(inflated, *this, taskProgress_);
+            if (isGzip(text)) {   // .svgz: told by its first bytes, not its name
+                std::string inflated;
+                if (!gzipDecompress(text, inflated)) {
+                    return false;
+                }
+                return documentFromSvg(inflated, *this, taskProgress_);
+            }
+            if (isPdfDocument(text)) {   // PDF / Illustrator: told by its first bytes, not its name (the controller makes it an untitled import)
+                PdfImportOptions options;
+                options.progress = taskProgress_;
+                return documentFromPdf(text, *this, options);
+            }
+            return documentFromSvg(text, *this, taskProgress_);
+        }();
+        if (!ok) {
+            documentFromSvg(before, *this);
         }
-        if (isPdfDocument(text)) {   // PDF / Illustrator: told by its first bytes, not its name (the controller makes it an untitled import)
-            PdfImportOptions options;
-            options.progress = taskProgress_;
-            return documentFromPdf(text, *this, options);
-        }
-        return documentFromSvg(text, *this, taskProgress_);
+        return ok;
     }
 
     bool SketchDocument::writeToFile(const std::string& path) {

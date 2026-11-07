@@ -155,14 +155,9 @@ namespace curvy {
         }
     }
 
-    // A cancelled or timed-out Open stopped part way through replacing the document: what is left is not the old file and not the new one.
-    void SketchDocumentController::discardPartialLoad() {
-        document_.clearObjects();
-        document_.undoStack().clear();
-        document_.clearSelection();
-        document_.reset();
-        untitledName_ = "Untitled";
-        onDocumentReplaced(*this);
+    // A cancelled or timed-out Open / Import: SketchDocument::readFromFile has put the previous contents back (its undo history and selection
+    // are gone), and the path, name and modified flag were never touched, so only the title and the like need to be told.
+    void SketchDocumentController::keepPreviousDocument() {
         onStateChanged(*this);
     }
 
@@ -304,10 +299,10 @@ namespace curvy {
                 if (outcome == Outcome::Ok) {
                     completeImport(file);
                 } else if (outcome == Outcome::Cancelled) {
-                    discardPartialLoad();
+                    keepPreviousDocument();
                     onStatus(*this, "Import of " + fileNameOf(file) + " cancelled");
                 } else if (outcome == Outcome::TimedOut) {
-                    discardPartialLoad();
+                    keepPreviousDocument();
                     reportError("Importing " + file + " took longer than " + std::to_string(timeout_.count() / 60) + " minutes and was stopped.");
                 } else {
                     reportError("The file can't be read as a PDF or Illustrator file: " + file);
@@ -365,11 +360,11 @@ namespace curvy {
                         completeOpen(path);
                         break;
                     case Outcome::Cancelled:
-                        discardPartialLoad();
+                        keepPreviousDocument();
                         onStatus(*this, "Opening " + fileNameOf(path) + " cancelled");
                         break;
                     case Outcome::TimedOut:
-                        discardPartialLoad();
+                        keepPreviousDocument();
                         reportError("Opening " + path + " took longer than " + std::to_string(timeout_.count() / 60) + " minutes and was stopped.");
                         break;
                     case Outcome::Failed:

@@ -1379,6 +1379,43 @@ TEST(SvgProgress, ReadingReportsHowFarAndStopsWhenCancelled) {
     EXPECT_EQ(cancelled.objectCount(), 0u);
 }
 
+TEST(SvgProgress, ACancelledOrFailedLoadKeepsThePreviousDocument) {
+    const auto path = std::filesystem::temp_directory_path() / "curvy_cancelled_load.svg";
+    std::string svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>";
+    for (int i = 0; i < 20; ++i) {
+        svg += "<rect width='5' height='5' x='" + std::to_string(i) + "'/>";
+    }
+    svg += "</svg>";
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << svg;
+    }
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    doc.add(SketchObject::makeRect(20, 0, 10, 10));
+    doc.add(SketchObject::makeRect(40, 0, 10, 10));
+    EXPECT_TRUE(doc.isModified());
+
+    curvy::TaskProgress stop;
+    stop.cancel();
+    doc.setTaskProgress(&stop);
+    doc.setBusy(SketchDocument::Busy::Loading);
+    EXPECT_FALSE(doc.load(path.string()));
+    doc.setTaskProgress(nullptr);
+    doc.setBusy(SketchDocument::Busy::None);
+    EXPECT_EQ(doc.objectCount(), 3u);
+    EXPECT_TRUE(doc.isModified());
+    EXPECT_FALSE(doc.hasFilePath());
+
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << "%PDF-1.4 but not really";
+    }
+    EXPECT_FALSE(doc.load(path.string()));
+    EXPECT_EQ(doc.objectCount(), 3u);
+    std::filesystem::remove(path);
+}
+
 TEST(SvgProgress, WritingStopsWhenCancelledAndLeavesTheFileAlone) {
     SketchDocument doc;
     doc.add(SketchObject::makeRect(0, 0, 10, 10));

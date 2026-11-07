@@ -208,6 +208,7 @@ namespace curvy {
         files_->onBusyStarted += [this](SketchDocumentController&) { showLoading(); return SyncReturn::Handled; };
         files_->onBusyProgress += [this](SketchDocumentController&) { updateLoading(); return SyncReturn::Handled; };
         files_->onBusyFinished += [this](SketchDocumentController&) { hideLoading(); return SyncReturn::Handled; };
+        files_->onStatus += [this](SketchDocumentController&, std::string text) { model_->say(text); return SyncReturn::Handled; };
         commands_ = std::make_unique<SketchCommandController>(document_, *canvas_, *files_);
 
         menu_ = new RadialMenu();

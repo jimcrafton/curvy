@@ -11,6 +11,8 @@ import ctypes
 import os
 import sys
 import tempfile
+import time
+import unittest
 
 sys.path.insert(0, r"D:\code\newui\tools\guitest")
 
@@ -1002,6 +1004,149 @@ class Welcome(CurvyCase):
         self.start_with_card()
         self.app.key("a")
         self.app.wait_until(lambda: not self.card_showing(), "the card to close")
+
+
+MAGAZINE = r"C:\Users\jim\Documents\3DCreative_Issue_125_Jan16_highres.pdf"
+
+
+@unittest.skipUnless(os.path.isfile(MAGAZINE), "the 90 MB magazine PDF (about 2 s to import) is not on this machine")
+class BackgroundImport(CurvyCase):
+    """Import PDF runs on a worker behind the loading overlay; Esc cancels it. The overlay itself is not reflected: while it is up the
+    window's children are hidden, so the canvas reporting itself invisible means the app is busy."""
+
+    def busy(self):
+        return not self.app.find("canvas").visible
+
+    def hold_escape(self, seconds=0.15):
+        # The overlay polls the key state every 33 ms, so a press and release in one batch (app.key) can fall between two polls.
+        self.app._send([self.app._key(0x1B)])                      # no bring_to_front: the window is already in front, and the import is short
+        time.sleep(seconds)
+        self.app._send([self.app._key(0x1B, up=True)])
+        self.app.wait_idle()
+
+    def start_import(self, document_open=False):
+        if not document_open:
+            self.focus_canvas()                                    # with a document open that click could select the drawing, and Space would open the Object ring
+        self.tap_space()
+        if document_open:
+            self.app.key("i")                                      # the Document ring's Import slot opens the Import ring
+            self.app.wait_until(lambda: self.app.prop("hintKeys", "text") == "Ring: Import", "the Import ring")
+            self.app.key_raw("f")                                  # PDF / AI
+            self.app.wait_for_dialog()                             # the document is modified: it asks about unsaved changes first
+            time.sleep(0.5)
+            self.app.key_raw("n")                                  # discard them: what the cancelled import must keep is the drawing as it is
+            time.sleep(1.0)
+        else:
+            self.app.key_raw("i")                                  # the New ring's Import slot opens the file dialog, a modal loop: no idle to wait for
+        self.app.wait_for_dialog()
+        time.sleep(2.0)                                            # the dialog is in front before its file name box is ready (it fills the folder list first): early characters are lost
+        self.app.type_raw(MAGAZINE)
+        self.app.key_raw("enter")
+        self.app.wait_until(self.busy, "the loading overlay to appear", timeout=15)
+
+    def test_the_magazine_opens_when_nothing_cancels_it(self):     # the premise of the test below: the import is not already over
+        self.start_import()
+        self.app.wait_until(lambda: not self.busy(), "the import to finish", timeout=90)
+        self.assertNotEqual("Nothing open", self.hint_tool())
+
+    def cancel_import(self, document_open):
+        self.start_import(document_open)
+        self.assertTrue(self.busy(), "the import was over before Esc was sent")
+        self.hold_escape()
+        self.app.wait_until(lambda: not self.busy(), "the overlay to go away after Esc", timeout=30)
+        self.assertTrue(self.app.running)
+        self.assertIn("cancelled", self.app.prop("hintKeys", "text"))
+
+    def test_esc_cancels_the_import_and_nothing_is_open_still(self):
+        self.cancel_import(document_open=False)
+        self.assertEqual("Nothing open", self.hint_tool())
+        self.focus_canvas()                                       # the window is enabled and answers again
+        self.tap_space()
+        self.app.key("escape")
+        self.app.wait_until(lambda: not self.ring_open(), "the ring to close")
+
+    def test_esc_cancels_the_import_and_the_open_document_is_kept(self):
+        self.new_a4()
+        self.app.click("toolbarToggle")
+        canvas = self.app.find("canvas")
+        inside, blank = (canvas.x + 360, canvas.y + 240), (canvas.x + 200, canvas.y + 160)
+        self.app.click("rectangleTool")
+        self.app.drag((canvas.x + 300, canvas.y + 200), (canvas.x + 420, canvas.y + 280))
+        self.app.click("selectTool")
+        self.app.click_at(blank)                                  # nothing selected, so no handle covers the rectangle
+        before = self.app.screenshot().pixel(*inside)
+        self.assertNotEqual(before, self.app.screenshot().pixel(*blank), "the rectangle was not drawn")
+        self.cancel_import(document_open=True)
+        self.assertEqual("Select", self.hint_tool())
+        self.assertEqual(before, self.app.screenshot().pixel(*inside), "the rectangle is gone after the cancel")
+
+
+class BackgroundExport(CurvyCase):
+    """Export As Image / PDF / EPS / All Artboards run on the worker like Save: the file appears, the window comes back, and the status line
+    says what was written. The export ring is Document ring > Export (E); each slot opens a native save dialog."""
+
+    def setUp(self):
+        super().setUp()
+        self._out = tempfile.TemporaryDirectory()
+        self.addCleanup(self._out.cleanup)
+
+    def busy(self):
+        return not self.app.find("canvas").visible
+
+    def draw_a_rectangle(self):
+        self.new_a4()
+        self.app.click("toolbarToggle")
+        canvas = self.app.find("canvas")
+        self.app.click("rectangleTool")
+        self.app.drag((canvas.x + 300, canvas.y + 200), (canvas.x + 420, canvas.y + 280))
+        self.app.click("selectTool")
+        self.app.click_at((canvas.x + 200, canvas.y + 160))       # nothing selected, so Space opens the Document ring and not the Object ring
+
+    def export_as(self, key, file_name):
+        path = os.path.join(self._out.name, file_name)
+        self.tap_space()
+        self.app.key("e")                                          # the Document ring's Export slot opens the Export ring
+        self.app.wait_until(lambda: self.app.prop("hintKeys", "text") == "Ring: Export", "the Export ring")
+        self.app.key_raw(key)                                      # the slot opens a native save dialog, a modal loop: no idle to wait for
+        self.app.wait_for_dialog()
+        time.sleep(2.0)                                            # the dialog is in front before its file name box is ready: early characters are lost
+        self.app.type_raw(path)
+        self.app.key_raw("enter")
+        return path
+
+    def wait_done(self):
+        self.app.wait_until(lambda: not self.busy(), "the export to finish", timeout=30)
+        self.app.wait_until(lambda: "Exported" in self.app.prop("hintKeys", "text"), "the status line to say Exported")
+        self.assertEqual("Select", self.hint_tool())
+
+    def test_pdf(self):
+        self.draw_a_rectangle()
+        path = self.export_as("p", "page.pdf")
+        self.wait_done()
+        with open(path, "rb") as f:
+            self.assertEqual(b"%PDF-", f.read(5))
+
+    def test_eps(self):
+        self.draw_a_rectangle()
+        path = self.export_as("e", "page.eps")
+        self.wait_done()
+        with open(path, "rb") as f:
+            self.assertEqual(b"%!PS-Adobe", f.read(10))
+
+    def test_image(self):
+        self.draw_a_rectangle()
+        path = self.export_as("i", "page.png")
+        self.wait_done()
+        with open(path, "rb") as f:
+            self.assertEqual(b"\x89PNG", f.read(4))
+
+    def test_all_artboards(self):
+        self.draw_a_rectangle()
+        self.export_as("a", "boards.png")
+        self.wait_done()
+        files = [n for n in os.listdir(self._out.name) if n.startswith("boards_") and n.endswith(".png")]
+        self.assertEqual(1, len(files), files)                     # one artboard: boards_1_Artboard-1.png
+        self.assertIn("1 artboards", self.app.prop("hintKeys", "text"))
 
 
 if __name__ == "__main__":
