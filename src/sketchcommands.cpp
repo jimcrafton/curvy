@@ -130,6 +130,7 @@ namespace curvy {
         add("brush.remove", [this]() { document_.applyBrush(0); });
         add("brush.presets", [this]() { document_.addBrushPresets(); });
         add("brush.deform", [this]() { document_.deformSelectionAlongPath(); });
+        add("brush.releaseDeform", [this]() { document_.releaseDeformAlongPath(); });
         add("text.onPath", [this]() { document_.makeTextOnPath(); });
         add("text.betweenPaths", [this]() { document_.makeTextBetweenPaths(); });
         add("text.release", [this]() { document_.releaseTextWarp(); });

@@ -100,6 +100,7 @@ namespace curvy {
         onButton("applyBrushButton", [this]() { document_.applyBrush(document_.activeBrush()); });
         onButton("removeBrushButton", [this]() { document_.applyBrush(0); });
         onButton("deformBrushButton", [this]() { document_.deformSelectionAlongPath(); });
+        onButton("releaseDeformButton", [this]() { document_.releaseDeformAlongPath(); });
         onButton("presetBrushButton", [this]() { document_.addBrushPresets(); });
         onButton("deleteBrushButton", [this]() { document_.deleteBrush(document_.activeBrush()); });
         for (newui::TextField* field : {name_, angle_, roundness_, spacing_, scatter_, sizeVariation_, rotation_, headGuide_, tailGuide_,
@@ -299,6 +300,7 @@ namespace curvy {
         enable("applyBrushButton", def != nullptr && selected);
         enable("removeBrushButton", document_.selectedBrush() != nullptr);
         enable("deformBrushButton", document_.selection().size() == 2);
+        enable("releaseDeformButton", document_.hasDeformAlongPath());
         enable("deleteBrushButton", def != nullptr && document_.brushUseCount(id) == 0);
         fitRows(def.get());
         updating_ = false;

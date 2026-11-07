@@ -62,6 +62,7 @@ namespace curvy {
             {"Object/Brush", "Remove Brush", "brush.remove"},
             {"Object/Brush", "Add Brush Presets", "brush.presets"},
             {"Object/Brush", "Bend Along Path", "brush.deform"},
+            {"Object/Brush", "Release Bend", "brush.releaseDeform"},
             {"Object/Text on Path", "Make Text on Path", "text.onPath"},
             {"Object/Text on Path", "Make Text Between Paths", "text.betweenPaths"},
             {"Object/Text on Path", "Release Text from Path", "text.release"},

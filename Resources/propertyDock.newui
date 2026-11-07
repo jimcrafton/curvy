@@ -90,6 +90,8 @@
                   icon: "icons/brush-remove.svg", iconSize: 15 },
 { type: "ToolbarButton", name: "deformBrushButton", desiredSize: { type: "Size", width: 24, height: 24 }, desiredSizeOverride: true,
                   icon: "icons/brush-deform.svg", iconSize: 15 },
+                { type: "ToolbarButton", name: "releaseDeformButton", desiredSize: { type: "Size", width: 24, height: 24 }, desiredSizeOverride: true,
+                  icon: "icons/brush-release.svg", iconSize: 15 },
                 { type: "ToolbarButton", name: "presetBrushButton", desiredSize: { type: "Size", width: 24, height: 24 }, desiredSizeOverride: true,
                   icon: "icons/brush-presets.svg", iconSize: 15 },
                 { type: "ToolbarButton", name: "deleteBrushButton", desiredSize: { type: "Size", width: 24, height: 24 }, desiredSizeOverride: true,

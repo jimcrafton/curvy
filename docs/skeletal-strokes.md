@@ -77,6 +77,9 @@ by the active brush (weight 1 for artwork, at least 2 for a nib) and stores the 
 proxy: an outlined band as wide as the brush's reach (widened by pressure) with the drawn line down the middle. The real stroke replaces
 it on release.
 
+The Pencil stores the same profile on its plain stroke (`addDrawn` takes it), so a pen drawing is a variable-width line, and its live preview
+swells with the pen. A mouse stores nothing.
+
 ## The brush library
 
 - Brushes live in the document (`SketchDocument::brushes_`, `findBrush`, `activeBrush`). Arming the Paintbrush on a document with no brushes
@@ -93,12 +96,18 @@ it on release.
 
 `curvyDeformAlongPath` (`src/pathnode.cpp`, `DeformAlongPathNode`) runs `bendParts` on any geometry, not only on a stored brush. Inputs: the
 artwork (0) and the spine (1). Parameters: `fit`, `headGuide`, `tailGuide`, `corner`, `cornerRadius`, `miterLimit`, `breakAngle`, `direction`,
-`flipAlong`, `flipAcross`, `width`, and `frame0..frame5`. The box of the artwork is its bounding box. The node ignores the pressure profile.
-
+`flipAlong`, `flipAcross`, `width`, and `frame0..frame5`. The box of the artwork is its bounding box.
 `SketchDocument::addDeformAlongPath(art, spine)` inserts it between an object's shape and its placement. The object becomes "driven": its
 own transform comes after the bend. The spine arrives in page space, so `frame0..5` hold the inverse of the object's current placement, and
 the result lands on the spine where the object sits. `deformSelectionAlongPath()` picks the spine as the open path of two selected objects.
 The whole edit is one undo step (`brush.deform` command, the button in the Brushes box).
+
+The node follows the spine's pen pressure: its `widths` parameter holds the spine's width profile, which `SketchDocument::syncDeformWidths`
+refreshes whenever the spine's stroke options change.
+
+`releaseDeformAlongPath()` (`brush.releaseDeform`, Object > Brush > Release Bend, the release button in the Brushes box) lets go of the bend: the
+bent outline is written into the object's own shape node (a parametric shape is frozen first), the deform node and anything between it and the
+shape are removed, and the object keeps its shape without following the spine. One undo step.
 
 ## Differences from the papers
 
@@ -117,6 +126,6 @@ coordinates, and the pseudo-3D and animation uses.
 ## Known gaps
 
 - Break mode restarts the width profile for each piece.
-- Pressure for the Pencil tool; link to non-symbol shapes; a grid showing how the art is stretched; the picker as a popup.
+- Link to non-symbol shapes; a grid showing how the art is stretched; the picker as a popup.
 - The deform node has no explicit release command (undo, or delete the node).
 - The legacy `Resources/curvy.newui` panel was not updated for the dynamic rows; the dock is the real UI.

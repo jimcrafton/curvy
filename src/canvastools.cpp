@@ -79,7 +79,8 @@ namespace curvy {
 
     // A new object gets the document's default look (a path with no fill and no stroke would be invisible, so
     // that case gets a plain black stroke).
-    void CanvasView::addDrawn(SketchObject* object, const char* name, const char* undoName, bool filled, bool parametric) {
+    void CanvasView::addDrawn(SketchObject* object, const char* name, const char* undoName, bool filled, bool parametric,
+        const std::vector<WidthPoint>& widths) {
         object->setName(name);
         object->setFill(filled ? document_->defaultFill() : SketchPaint::none());   // an open line is not filled
         SketchPaint stroke = document_->defaultStroke();
@@ -88,7 +89,11 @@ namespace curvy {
         }
         object->setStroke(stroke);
         object->setStrokeWidth(document_->defaultStrokeWidth());
-        object->setStrokeOptions(document_->defaultStrokeOptions());
+        StrokeOptions options = document_->defaultStrokeOptions();
+        if (!widths.empty()) {
+            options.widths = widths;
+        }
+        object->setStrokeOptions(options);
         if (parametric) {
             document_->addParametric(object, undoName);
         } else {
@@ -277,7 +282,7 @@ namespace curvy {
             document_->addUndoable(object, "Draw with Paintbrush");
             return;
         }
-        addDrawn(SketchObject::makePath(penPath(anchors, false)), "Pencil Path", "Draw with Pencil", false);
+        addDrawn(SketchObject::makePath(penPath(anchors, false)), "Pencil Path", "Draw with Pencil", false, false, pressureProfile(points, pressure));   // empty for a mouse
     }
 
     void CanvasView::paintPencilPreview(BLContext& ctx) const {
@@ -319,6 +324,17 @@ namespace curvy {
                 ctx.stroke_path(path);
                 return;
             }
+        }
+        if (tool_ == SketchTool::Pencil && pressureProfile(pencilPoints_, pencilPressure_).size() > 0) {
+            // The line swells with the pen as it will once drawn: each piece as wide as the mean pressure at its ends says.
+            const double weight = std::max(1.0, document_->defaultStrokeWidth() * double(zoom_));
+            ctx.set_stroke_caps(BL_STROKE_CAP_ROUND);
+            for (std::size_t i = 1; i < pencilPoints_.size(); ++i) {
+                const BLPoint a = toView(pencilPoints_[i - 1]), b = toView(pencilPoints_[i]);
+                ctx.set_stroke_width(std::max(1.0, weight * 0.5 * double(pencilPressure_[i - 1] + pencilPressure_[i])));
+                ctx.stroke_line(a.x, a.y, b.x, b.y);
+            }
+            return;
         }
         ctx.stroke_path(path);
     }

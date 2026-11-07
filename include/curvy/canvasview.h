@@ -320,7 +320,9 @@ namespace curvy {
         // Up / Down while dragging: more / fewer sides, points or a bigger / smaller corner radius. True when it applied.
         bool adjustShapeParameter(int direction);
         // Adds a drawn object with the document's default fill and stroke as one undo step; it becomes the selection.
-        void addDrawn(SketchObject* object, const char* name, const char* undoName, bool filled = true, bool parametric = false);
+        // `widths` is the stroke's width profile (the Pencil's pen pressure); empty keeps the plain weight.
+        void addDrawn(SketchObject* object, const char* name, const char* undoName, bool filled = true, bool parametric = false,
+            const std::vector<WidthPoint>& widths = {});
         void pencilMove(const BLPoint& point);
         void finishPencil();
         void paintPencilPreview(BLContext& ctx) const;

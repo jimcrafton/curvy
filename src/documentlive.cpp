@@ -2131,6 +2131,22 @@ namespace curvy {
         return NodeRef(placeRef.scope, mover);
     }
 
+    void SketchDocument::syncDeformWidths(std::size_t spineId) {
+        const SketchObject* spine = findById(spineId);
+        const NodeRef place = transformRefOf(spineId);
+        if (spine == nullptr || !place.valid()) {
+            return;
+        }
+        const std::string text = widthProfileText(spine->strokeOptions().widths);
+        jitnodes::Network& net = networkOf(place.scope);
+        for (jitnodes::NodeId id : net.nodeIds()) {
+            jitnodes::Node& node = net.node(id);
+            if (node.typeName() == kDeformAlongPathNodeType && net.inputOf(id, 1) == place.id && node.getString("widths") != text) {
+                node.setString("widths", text);
+            }
+        }
+    }
+
     NodeRef SketchDocument::addDeformAlongPath(std::size_t artId, std::size_t spineId) {
         const SketchObject* art = findById(artId);
         const SketchObject* spine = findById(spineId);
@@ -2154,6 +2170,7 @@ namespace curvy {
             for (int i = 0; i < 6; ++i) {
                 net.node(deform).setFloat(std::string("frame") + std::to_string(i), float(into.m[i]));
             }
+            net.node(deform).setString("widths", widthProfileText(spine->strokeOptions().widths));
             const jitnodes::GeometryHandle bent = cook(NodeRef(artPlace.scope, deform));
             if (!bent || bent->primitiveCount() == 0) {
                 throw std::runtime_error("nothing to bend");
@@ -2164,6 +2181,92 @@ namespace curvy {
         }
         commitGraphEdit(snapshot, "Deform Along Path");
         return NodeRef(artPlace.scope, deform);
+    }
+
+    NodeRef SketchDocument::deformNodeOf(std::size_t objectId) const {
+        const NodeRef place = transformRefOf(objectId);
+        if (!place.valid()) {
+            return kNoNode;
+        }
+        const jitnodes::Network& net = networkOf(place.scope);
+        if (!net.hasNode(place.id)) {
+            return kNoNode;
+        }
+        // A node with no inputs (a shape, a plain path) ends the walk; asking it for input 0 would throw.
+        auto feeder = [&net](jitnodes::NodeId id) { return net.node(id).inputCount() > 0 ? net.inputOf(id, 0) : jitnodes::invalidNodeId; };
+        int guard = 0;
+        for (jitnodes::NodeId at = feeder(place.id); at != jitnodes::invalidNodeId && net.hasNode(at) && guard < 1000; at = feeder(at), ++guard) {
+            if (net.node(at).typeName() == kDeformAlongPathNodeType) {
+                return NodeRef(place.scope, at);
+            }
+        }
+        return kNoNode;
+    }
+
+    bool SketchDocument::hasDeformAlongPath() const {
+        return std::any_of(selection_.begin(), selection_.end(), [this](std::size_t id) { return deformNodeOf(id).valid(); });
+    }
+
+    bool SketchDocument::releaseDeformAlongPath() {
+        const jitnodes::GraphSnapshot snapshot = snapshotGraph();
+        bool released = false;
+        for (std::size_t objectId : selection_) {
+            if (!deformNodeOf(objectId).valid()) {
+                continue;
+            }
+            try {
+                // The object takes its outline from its own shape node, so the bent outline goes there and the deform node (and what sits
+                // between it and the shape) goes away; a parametric shape is frozen first, as a hand edit does.
+                if (isParametric(objectId)) {
+                    freezeParametric(objectId);
+                }
+                const NodeRef found = deformNodeOf(objectId);
+                const SketchObject* object = findById(objectId);
+                if (!found.valid() || object == nullptr) {
+                    throw std::runtime_error("no deform node");
+                }
+                jitnodes::Network& net = networkOf(found.scope);
+                const jitnodes::NodeId deform = found.id, base = object->graphNode();
+                auto feeder = [&net](jitnodes::NodeId id) { return net.node(id).inputCount() > 0 ? net.inputOf(id, 0) : jitnodes::invalidNodeId; };
+                std::vector<jitnodes::NodeId> between;
+                jitnodes::NodeId at = feeder(deform);
+                for (int guard = 0; at != jitnodes::invalidNodeId && at != base && guard < 1000; at = feeder(at), ++guard) {
+                    between.push_back(at);
+                }
+                const jitnodes::GeometryHandle bent = net.cook(deform);
+                if (at != base || net.node(base).typeName() != kPathNodeType || !bent || bent->primitiveCount() == 0) {
+                    throw std::runtime_error("nothing to release");
+                }
+                std::vector<std::pair<jitnodes::NodeId, int>> consumers;
+                for (jitnodes::NodeId other : net.nodeIds()) {
+                    for (int slot = 0; slot < net.node(other).inputCount(); ++slot) {
+                        if (net.inputOf(other, slot) == deform) {
+                            consumers.emplace_back(other, slot);
+                        }
+                    }
+                }
+                if (net.node(base).frozen() || net.inputOf(base, 0) != jitnodes::invalidNodeId) {
+                    net.node(base).setFrozenGeometry(bent);
+                } else {
+                    net.node(base).setGeometryParam("curve", bent);
+                }
+                net.removeNode(deform);
+                for (jitnodes::NodeId id : between) {
+                    net.removeNode(id);
+                }
+                for (const auto& [other, slot] : consumers) {
+                    net.connect(base, other, slot);
+                }
+                released = true;
+            } catch (const std::exception&) {
+                restoreGraph(snapshot);
+                return false;
+            }
+        }
+        if (released) {
+            commitGraphEdit(snapshot, "Release Deform");
+        }
+        return released;
     }
 
     bool SketchDocument::deformSelectionAlongPath() {

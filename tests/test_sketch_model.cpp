@@ -10053,6 +10053,57 @@ TEST(DeformAlongPath, BendsAnObjectAlongAnotherAndFollowsIt) {
     EXPECT_NEAR(box.x1, 400.0, 0.5);
 }
 
+TEST(DeformAlongPath, FollowsThePressureWidthsOfTheSpine) {
+    SketchDocument doc;
+    const std::size_t art = doc.add(SketchObject::makeRect(300, 40, 100, 10)).id();
+    const std::size_t spine = doc.add(SketchObject::makeLine(0, 100, 200, 100)).id();
+    doc.setSelection({spine, art});
+    ASSERT_TRUE(doc.deformSelectionAlongPath());
+    const BLBox plain = doc.findById(art)->geometryBounds();
+    EXPECT_NEAR(plain.y1 - plain.y0, 10.0, 0.5);
+
+    doc.setSelection({spine});
+    doc.changeSelectionStrokeOptions([](curvy::StrokeOptions& o) { o.widths = {{0.0, 1.0, 1.0}, {1.0, 3.0, 3.0}}; });
+    const BLBox pressed = doc.findById(art)->geometryBounds();
+    EXPECT_NEAR(pressed.y1 - pressed.y0, 30.0, 1.0) << "the art swells to three times as wide at the end of the spine";
+
+    doc.changeSelectionStrokeOptions([](curvy::StrokeOptions& o) { o.widths.clear(); });
+    EXPECT_NEAR(doc.findById(art)->geometryBounds().y1 - doc.findById(art)->geometryBounds().y0, 10.0, 0.5);
+
+    const std::vector<curvy::WidthPoint> round = curvy::widthProfileFromText(curvy::widthProfileText({{0.0, 1.0, 2.0}, {0.5, 0.25, 3.0}}));
+    ASSERT_EQ(round.size(), 2u);
+    EXPECT_EQ(round[1], (curvy::WidthPoint{0.5, 0.25, 3.0}));
+}
+
+TEST(DeformAlongPath, ReleasingKeepsTheBentShapeAndLetsGoOfTheSpine) {
+    SketchDocument doc;
+    const std::size_t art = doc.add(SketchObject::makeRect(300, 40, 100, 10)).id();
+    const std::size_t spine = doc.add(SketchObject::makeLine(0, 100, 200, 100)).id();
+    doc.setSelection({art});
+    EXPECT_FALSE(doc.hasDeformAlongPath());
+    EXPECT_FALSE(doc.releaseDeformAlongPath());
+    doc.setSelection({spine, art});
+    ASSERT_TRUE(doc.deformSelectionAlongPath());
+    doc.setSelection({art});
+    EXPECT_TRUE(doc.hasDeformAlongPath());
+    ASSERT_TRUE(doc.releaseDeformAlongPath());
+    EXPECT_FALSE(doc.hasDeformAlongPath());
+
+    BLBox box = doc.findById(art)->geometryBounds();
+    EXPECT_NEAR(box.x0, 0.0, 0.5) << "the bent shape stays";
+    EXPECT_NEAR(box.x1, 200.0, 0.5);
+    doc.transformObjects({spine}, BLMatrix2D::make_translation(0.0, 50.0), "Move");
+    EXPECT_NEAR(doc.findById(art)->geometryBounds().y0, 95.0, 0.5) << "and no longer follows the spine";
+    doc.transformObjects({art}, BLMatrix2D::make_translation(20.0, 0.0), "Move");
+    EXPECT_NEAR(doc.findById(art)->geometryBounds().x0, 20.0, 0.5);
+
+    doc.undoStack().undo();
+    doc.undoStack().undo();
+    doc.undoStack().undo();   // the two moves, then the release
+    doc.setSelection({art});
+    EXPECT_TRUE(doc.hasDeformAlongPath()) << "undo brings the deform node back";
+}
+
 namespace {
     // The brush library is process-wide: leave it empty again so other tests see no graph brushes among the presets.
     struct BrushAssetsGuard {

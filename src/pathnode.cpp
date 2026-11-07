@@ -344,6 +344,29 @@ namespace curvy {
         };
     }
 
+    std::string widthProfileText(const std::vector<WidthPoint>& widths) {
+        std::string text;
+        char row[96];
+        for (const WidthPoint& w : widths) {
+            std::snprintf(row, sizeof row, "%s%.9g,%.9g,%.9g", text.empty() ? "" : ";", w.t, w.left, w.right);
+            text += row;
+        }
+        return text;
+    }
+
+    std::vector<WidthPoint> widthProfileFromText(const std::string& text) {
+        std::vector<WidthPoint> widths;
+        std::istringstream rows(text);
+        std::string row;
+        while (std::getline(rows, row, ';')) {
+            WidthPoint w;
+            if (std::sscanf(row.c_str(), "%lf,%lf,%lf", &w.t, &w.left, &w.right) == 3) {
+                widths.push_back(w);
+            }
+        }
+        return widths;
+    }
+
     namespace {
         constexpr const char* kFrameParams[6] = {"frame0", "frame1", "frame2", "frame3", "frame4", "frame5"};
 
@@ -362,6 +385,7 @@ namespace curvy {
                 declareFloat("flipAlong", 0.0f);
                 declareFloat("flipAcross", 0.0f);
                 declareFloat("width", 1.0f);
+                declareString("widths", "");
                 // Carries the spine (which arrives in page space) into the space the artwork is in before its placement node: the inverse of
                 // that placement when the node was wired, so the placement then moves the bent result as a whole. Identity = already there.
                 const BLMatrix2D identity = BLMatrix2D::make_identity();
@@ -408,7 +432,7 @@ namespace curvy {
                 BrushPart part;
                 part.path = std::move(art);
                 BLPath bent;
-                for (const BrushPart& piece : brush.bendParts({part}, box, spine, double(getFloat("width")))) {
+                for (const BrushPart& piece : brush.bendParts({part}, box, spine, double(getFloat("width")), widthProfileFromText(getString("widths")))) {
                     bent.add_path(piece.path);
                 }
                 return geometryFromPath(bent);

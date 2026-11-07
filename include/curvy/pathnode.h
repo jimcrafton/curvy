@@ -16,6 +16,7 @@ namespace curvy {
 
     class SketchObject;
     struct PaintWarp;
+    struct WidthPoint;
 
     // The graph node type that holds one path object's curves in its geometry parameter "curve": one primitive per sub path, a polyline for a
     // figure of straight lines and a cubic (jitnodes PrimKind) for any other. The node cooks that geometry as it is.
@@ -55,8 +56,11 @@ namespace curvy {
     // corner (bend, smooth, miter, break), cornerRadius, miterLimit, breakAngle, direction (leftToRight, topToBottom), flipAlong,
     // flipAcross, and `width`, the scale across the path (1 draws the artwork at its own size). Without a spine the artwork passes through. The spine
     // comes in page space and is carried by the matrix frame0..frame5 into the artwork's space (see SketchDocument::addDeformAlongPath). Like move points,
-    // it sits between a shape and its placement node and makes the object driven.
+    // it sits between a shape and its placement node and makes the object driven. `widths` is the spine's width profile (pen pressure; see
+    // WidthPoint) as "t,left,right;..." - empty for the plain weight - which the document keeps in step with the spine's stroke options.
     inline constexpr const char* kDeformAlongPathNodeType = "curvyDeformAlongPath";
+    std::string widthProfileText(const std::vector<WidthPoint>& widths);
+    std::vector<WidthPoint> widthProfileFromText(const std::string& text);
     // The int point attribute that names every point for good: it travels with the point through the nodes, so a tag by id survives edits that
     // renumber the points. geometryFromPath gives new points fresh ids and keeps those of points that stayed.
     inline constexpr const char* kPointIdAttrib = "id";

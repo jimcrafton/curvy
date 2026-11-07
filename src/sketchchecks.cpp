@@ -2,6 +2,7 @@
 
 #include "curvy/canvasview.h"
 #include "curvy/gradientbar.h"
+#include "curvy/graphbrush.h"
 #include "curvy/layertree.h"
 #include "curvy/sketchdocument.h"
 #include "curvy/sketchwindow.h"
@@ -751,9 +752,10 @@ namespace curvy {
             return;
         }
         presets->onClick(*presets);
-        expect(document.brushes().size() == 6 && document.activeBrush() != 0, "Add Brush Presets fills the library");
+        const std::size_t presetCount = 6 + curvy::graphBrushes().size();   // the built-in presets and one per graph brush asset loaded
+        expect(document.brushes().size() == presetCount && document.activeBrush() != 0, "Add Brush Presets fills the library");
         nib->onClick(*nib);
-        expect(document.brushes().size() == 7, "New Calligraphic Brush adds one");
+        expect(document.brushes().size() == presetCount + 1, "New Calligraphic Brush adds one");
 
         canvas->setTool(curvy::SketchTool::Paintbrush);
         {

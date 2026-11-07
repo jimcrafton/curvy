@@ -296,6 +296,11 @@ namespace curvy {
         // addDeformAlongPath for the two selected objects: the path (the one that is open; of two alike, the one picked last) is the spine and the
         // other is bent along it. False when the selection is not two objects or the wiring fails.
         bool deformSelectionAlongPath();
+        // Lets go of the deformation of each selected object: the deform node gives way to a frozen path node holding the bent outline, so the
+        // object keeps its shape and no longer follows the spine. One undo step; false when no selected object has a deform node.
+        bool releaseDeformAlongPath();
+        bool hasDeformAlongPath() const;   // a selected object is bent by a deform node
+        NodeRef deformNodeOf(std::size_t objectId) const;
 
         // ---- Nodes: what is selected and picked is the placement (transform) node of a shape ----
         // The outline the graph makes for the object (its shape node's curve carried by the page matrix of its transform node); the object's own
@@ -559,6 +564,8 @@ namespace curvy {
         // The transform node that places an object's shape (kNoNode when it has none). With one object selected the transform origin
         // is that node's pivot, so the canvas and the node show and edit the same point.
         NodeRef transformRefOf(std::size_t objectId) const;
+        // Hands the object's width profile (pen pressure) to every deform-along-path node that has the object for its spine.
+        void syncDeformWidths(std::size_t spineId);
         // The matrix the groups holding `scope` put on everything inside it (identity for the root).
         BLMatrix2D scopeMatrix(std::uint32_t scope) const;
         // Where a placement node puts its shape on the page: its parent links, then the groups holding it.
