@@ -230,8 +230,7 @@ namespace curvy {
         std::vector<std::size_t> top = layerChildren(0);
         activeLayer_ = top.empty() ? layers_.back().id : top.back();
         syncLayers();
-        updateAllViews();
-        onChanged(*this);
+        changed();   // also writes the table to the graph and clears layersEdited_, which would otherwise make the next object ignore the scope it is in
     }
 
     // ---- undo ----

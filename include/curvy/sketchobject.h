@@ -263,7 +263,7 @@ namespace curvy {
 
     // How an object's paint combines with what is under it (the Appearance panel's Blend list; the order is the
     // list's order). Normal is plain source-over.
-    enum class BlendMode { Normal, Multiply, Screen, Overlay, Darken, Lighten, ColorDodge, ColorBurn, HardLight, SoftLight, Difference, Exclusion };
+    enum class BlendMode { Normal, Multiply, Screen, Overlay, Darken, Lighten, ColorDodge, ColorBurn, HardLight, SoftLight, Difference, Exclusion, Hue, Saturation, Color, Luminosity };
     // The mode's name as the panel shows it ("Color Dodge") and as CSS mix-blend-mode spells it ("color-dodge").
     const char* blendModeName(BlendMode mode);
     const char* blendModeCss(BlendMode mode);
@@ -296,6 +296,8 @@ namespace curvy {
         // Normal means "follow the object's blend mode".
         BlendMode blendMode = BlendMode::Normal;
         SketchPaint paint;
+        // Fills only: even-odd instead of non-zero winding.
+        bool evenOdd = false;
         // Strokes only.
         double strokeWidth = 1.0;
         StrokeOptions strokeOptions;
@@ -339,7 +341,7 @@ namespace curvy {
             return item;
         }
         bool operator==(const AppearanceItem& o) const {
-            return kind == o.kind && visible == o.visible && opacity == o.opacity && blendMode == o.blendMode && paint == o.paint &&
+            return kind == o.kind && visible == o.visible && opacity == o.opacity && blendMode == o.blendMode && paint == o.paint && evenOdd == o.evenOdd &&
                 strokeWidth == o.strokeWidth && strokeOptions == o.strokeOptions && effect == o.effect && color == o.color &&
                 softness == o.softness && offsetX == o.offsetX && offsetY == o.offsetY && radius == o.radius;
         }
@@ -363,6 +365,7 @@ namespace curvy {
         std::string name;
         std::string bytes;       // the file as it was (PNG, JPEG, BMP or QOI), saved as it is
         std::string mime;        // "image/png" ...
+        std::string key;         // what the bytes hash to: names the picture in a node, since two pictures can share a name
         int width = 0, height = 0;
         BLImage image;           // PRGB32
         // The picture to draw when it is shown at `scale` times its own size (pixels on screen per pixel of the picture): a copy halved as
@@ -444,11 +447,19 @@ namespace curvy {
 
         // The graph node whose cooked polyline is this object's outline (0 when it is an ordinary object).
         std::uint32_t graphNode() const { return graphNode_; }
-        void setGraphNode(std::uint32_t node) { graphNode_ = node; }
+        void setGraphNode(std::uint32_t node) { graphNode_ = node; nodeStamp_.valid = false; }
         // The scope (network) the node lives in; 0 is the document's root graph.
         std::uint32_t graphScope() const { return graphScope_; }
         NodeRef graphRef() const { return NodeRef(graphScope_, graphNode_); }
-        void setGraphRef(const NodeRef& ref) { graphScope_ = ref.scope; graphNode_ = ref.id; }
+        void setGraphRef(const NodeRef& ref) { graphScope_ = ref.scope; graphNode_ = ref.id; nodeStamp_.valid = false; }
+        // The own flags, opacity, blend and active rows last written to the node (so the sync can skip an object that has not changed),
+        // and adopted from it; cleared whenever the object gets another node.
+        struct NodeStamp {
+            bool valid = false;
+            double values[9] = {};
+            std::string name;
+        };
+        NodeStamp& nodeStamp() const { return nodeStamp_; }
 
         const std::string& name() const { return name_; }
         void setName(const std::string& name) { name_ = name; }
@@ -472,6 +483,8 @@ namespace curvy {
         // panels and the gradient / width tools - work on those. setAppearance keeps at least one fill and one stroke
         // (a none-painted one is added when missing).
         const std::vector<AppearanceItem>& appearance() const { return items_; }
+        // Changes whenever the stack may have been edited; unique across objects, so a cache keyed by it cannot match another object's stack.
+        std::uint64_t appearanceRevision() const { return appearanceRevision_; }
         void setAppearance(const std::vector<AppearanceItem>& items);
         std::size_t activeIndex(AppearanceKind kind) const;
         std::size_t activeFillIndex() const { return activeFill_; }
@@ -483,6 +496,8 @@ namespace curvy {
         const AppearanceItem& activeItem(AppearanceKind kind) const { return activeItemOf(items_, kind, storedActive(kind)); }
         const SketchPaint& fill() const { return activeItem(AppearanceKind::Fill).paint; }
         void setFill(const SketchPaint& paint) { primary(AppearanceKind::Fill).paint = paint; }
+        bool fillEvenOdd() const { return activeItem(AppearanceKind::Fill).evenOdd; }
+        void setFillEvenOdd(bool evenOdd) { primary(AppearanceKind::Fill).evenOdd = evenOdd; }
         const SketchPaint& stroke() const { return activeItem(AppearanceKind::Stroke).paint; }
         void setStroke(const SketchPaint& paint) { primary(AppearanceKind::Stroke).paint = paint; }
         double strokeWidth() const { return activeItem(AppearanceKind::Stroke).strokeWidth; }
@@ -546,11 +561,9 @@ namespace curvy {
         // True while the object's nodes hold what it is: every edit of the outline clears it, and the document sets it once the nodes were
         // written (or the object was read back from them). A document sets it for a new object when it makes the nodes.
         bool boundToNodes() const { return bound_; }
-        // False until the object has been bound once: a loaded or new object whose nodes, if it has any, are the file's.
-        bool everBound() const { return everBound_; }
-        void setBoundToNodes(bool bound) { bound_ = bound; everBound_ = everBound_ || bound; }
+        void setBoundToNodes(bool bound) { bound_ = bound; }
         // A new node chain is about to be made for the object.
-        void forgetNodes() { bound_ = everBound_ = false; }
+        void forgetNodes() { bound_ = false; nodeStamp_.valid = false; }
         // The object this one hangs from (0: none). Transforming the parent carries the child along; the child's own transform node holds
         // its placement relative to the parent's.
         std::size_t parent() const { return parent_; }
@@ -651,6 +664,7 @@ namespace curvy {
         std::size_t storedActive(AppearanceKind kind) const { return kind == AppearanceKind::Fill ? activeFill_ : (kind == AppearanceKind::Stroke ? activeStroke_ : activeEffect_); }
         // The active item of the kind (the first one, added when missing: fills at the bottom, strokes on top).
         AppearanceItem& primary(AppearanceKind kind);
+        static std::uint64_t freshAppearanceRevision();
 
         SketchObjectType type_;
         BLPath path_;
@@ -659,7 +673,7 @@ namespace curvy {
         std::uint32_t graphScope_ = 0;
         std::uint64_t geometryRevision_ = 1;
         bool bound_ = false;
-        bool everBound_ = false;
+        mutable NodeStamp nodeStamp_;
         std::size_t parent_ = 0;
         std::string name_;
         bool visible_ = true;
@@ -669,6 +683,7 @@ namespace curvy {
         bool layerLocked_ = false;
         std::vector<AppearanceItem> items_ = {AppearanceItem::makeFill(SketchPaint::solid(SketchColor::gray(1.0f))),
             AppearanceItem::makeStroke(SketchPaint::solid(SketchColor::gray(0.0f)), 1.0)};
+        std::uint64_t appearanceRevision_ = freshAppearanceRevision();
         double opacity_ = 1.0;
         BlendMode blendMode_ = BlendMode::Normal;
         std::vector<std::size_t> groups_;

@@ -15,6 +15,7 @@ namespace jitnodes {
 namespace curvy {
 
     class SketchObject;
+    enum class SketchObjectType;
     struct PaintWarp;
     struct WidthPoint;
 
@@ -100,6 +101,13 @@ namespace curvy {
     const char* shapeNodeType(const SketchObject& object);
     // The parameters besides "curve" that the object's node holds, as name and text.
     std::vector<std::pair<std::string, std::string>> shapeNodeParams(const SketchObject& object);
+    // The object's own visible / locked flags, opacity and blend mode, held by its shape node; store writes what differs, apply reads back
+    // and says whether the object changed.
+    void storeObjectState(jitnodes::Node& node, const SketchObject& object);
+    // The "type" parameter's spelling for an object type, and back (false for an unknown name).
+    const char* objectTypeName(SketchObjectType type);
+    bool objectTypeFromName(const std::string& name, SketchObjectType& type);
+    bool applyObjectState(SketchObject& object, const jitnodes::Node& node);
     // Gives a text object the words, font, size, placement, style and warp its node holds; false when nothing differed or the text was bad.
     bool applyTextNodeParams(SketchObject& object, const jitnodes::Node& node);
 

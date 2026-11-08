@@ -42,6 +42,8 @@
               { type: "MenuItem", text: "Trace Image..." },
               { type: "MenuItem", text: "Place Image..." },
               { type: "MenuItem", text: "Export As PDF..." },
+              { type: "MenuItem", text: "Export As EPS..." },
+              { type: "MenuItem", text: "Import PDF / Illustrator..." },
               { type: "MenuItem", text: "", separator: true },
               { type: "MenuItem", text: "Document Setup..." },
               { type: "MenuItem", text: "", separator: true },
@@ -1174,7 +1176,7 @@
                             type: "SubView",
                             name: "colorPanelBody",
                             visible: true,
-                            desiredSize: { type: "Size", width: 0, height: 468 },
+                            desiredSize: { type: "Size", width: 0, height: 498 },
                             desiredSizeOverride: true,
                             layout: { type: "FlexLayout", orientation: "Vertical", spacing: 6, padding: 8 },
                             childViews: [
@@ -1232,6 +1234,30 @@
                                     icon: "icons/fill-points.svg",
                                     toggleButton: true,
                                     iconSize: 17
+                                  }
+                                ]
+                              },
+                              {
+                                type: "SubView",
+                                name: "fillRuleRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Toggle",
+                                    name: "evenOddToggle",
+                                    desiredSize: { type: "Size", width: 20, height: 20 },
+                                    desiredSizeOverride: true
+                                  },
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 120, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Even-odd fill rule",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Even-odd fill rule", textAlignment: "Left" }
                                   }
                                 ]
                               },
@@ -2633,7 +2659,7 @@
                                     layoutParams: { type: "FlexLayoutParams", weight: 1 },
                                     model: {
                                       type: "StringListModel",
-                                      items: ["Normal", "Multiply", "Screen", "Overlay", "Darken", "Lighten", "Color Dodge", "Color Burn", "Hard Light", "Soft Light", "Difference", "Exclusion"]
+                                      items: ["Normal", "Multiply", "Screen", "Overlay", "Darken", "Lighten", "Color Dodge", "Color Burn", "Hard Light", "Soft Light", "Difference", "Exclusion", "Hue", "Saturation", "Color", "Luminosity"]
                                     },
                                     selectedIndex: 1
                                   }

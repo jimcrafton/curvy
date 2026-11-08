@@ -1,0 +1,374 @@
+{
+  meta: {
+    author: "",
+    date: "2026-11-07",
+    copyright: "",
+    version: "0.1.0.900"
+  },
+  type: "Frame",
+  title: "Import PDF Pages",
+  name: "pdfpagesdialog",
+  position: "CenterOnRootView",
+  bounds: {
+    type: "Rect",
+    pos: { type: "Point", x: 40, y: 40 },
+    size: { type: "Size", width: 460, height: 320 }
+  },
+  rootView: {
+    type: "RootView",
+    bounds: {
+      type: "Rect",
+      pos: { type: "Point", x: 0, y: 0 },
+      size: { type: "Size", width: 460, height: 340 }
+    },
+    visible: true,
+    name: "rootview",
+    layout: {
+      type: "FlexLayout",
+      orientation: "Vertical",
+      spacing: 8,
+      padding: 12
+    },
+    childViews: [
+      {
+        type: "SubView",
+        bounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 12, y: 12 },
+          size: { type: "Size", width: 406, height: 34 }
+        },
+        visible: true,
+        name: "pagesNote",
+        desiredSize: { type: "Size", width: 406, height: 34 },
+        desiredSizeOverride: true,
+        childViews: [
+          {
+            type: "Label",
+            text: "Choose which pages of the file to import. Each page becomes an artboard.",
+            textAlignment: "Left",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 0, y: 0 },
+              size: { type: "Size", width: 406, height: 35 }
+            },
+            style: {
+              type: "LabelStyle",
+              text: "Choose which pages of the file to import. Each page becomes an artboard.",
+              wordWrap: true,
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+              textAlignment: "Left"
+            }
+          }
+        ]
+      },
+      {
+        type: "SubView",
+        bounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 12, y: 54 },
+          size: { type: "Size", width: 406, height: 26 }
+        },
+        visible: true,
+        name: "pagesFileRow",
+        layout: {
+          type: "FlexLayout",
+          orientation: "Horizontal",
+          crossAxisAlignment: "Center",
+          spacing: 6
+        },
+        desiredSize: { type: "Size", width: 406, height: 26 },
+        desiredSizeOverride: true,
+        childViews: [
+          {
+            type: "Label",
+            text: "File",
+            textAlignment: "Left",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 0, y: 4 },
+              size: { type: "Size", width: 120, height: 17 }
+            },
+            style: {
+              type: "LabelStyle",
+              text: "File",
+              wordWrap: true,
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+              textAlignment: "Left"
+            },
+            desiredSize: { type: "Size", width: 120, height: 17 },
+            desiredSizeOverride: true
+          },
+          {
+            type: "Label",
+            text: "document.pdf",
+            textAlignment: "Left",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 126, y: 4 },
+              size: { type: "Size", width: 280, height: 17 }
+            },
+            name: "pagesFileLabel",
+            layoutParams: { type: "FlexLayoutParams", weight: 1 },
+            style: {
+              type: "LabelStyle",
+              text: "document.pdf",
+              wordWrap: true,
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+              textAlignment: "Left"
+            }
+          }
+        ]
+      },
+      {
+        type: "SubView",
+        bounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 12, y: 88 },
+          size: { type: "Size", width: 406, height: 26 }
+        },
+        visible: true,
+        name: "pagesCountRow",
+        layout: {
+          type: "FlexLayout",
+          orientation: "Horizontal",
+          crossAxisAlignment: "Center",
+          spacing: 6
+        },
+        desiredSize: { type: "Size", width: 406, height: 26 },
+        desiredSizeOverride: true,
+        childViews: [
+          {
+            type: "Label",
+            text: "Pages in file",
+            textAlignment: "Left",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 0, y: 4 },
+              size: { type: "Size", width: 120, height: 17 }
+            },
+            style: {
+              type: "LabelStyle",
+              text: "Pages in file",
+              wordWrap: true,
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+              textAlignment: "Left"
+            },
+            desiredSize: { type: "Size", width: 120, height: 17 },
+            desiredSizeOverride: true
+          },
+          {
+            type: "Label",
+            text: "20",
+            textAlignment: "Left",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 126, y: 4 },
+              size: { type: "Size", width: 280, height: 17 }
+            },
+            name: "pagesCountLabel",
+            layoutParams: { type: "FlexLayoutParams", weight: 1 },
+            style: {
+              type: "LabelStyle",
+              text: "20",
+              wordWrap: true,
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+              textAlignment: "Left"
+            }
+          }
+        ]
+      },
+      {
+        type: "SubView",
+        bounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 12, y: 122 },
+          size: { type: "Size", width: 406, height: 26 }
+        },
+        visible: true,
+        name: "pagesModeRow",
+        layout: {
+          type: "FlexLayout",
+          orientation: "Horizontal",
+          crossAxisAlignment: "Center",
+          spacing: 6
+        },
+        desiredSize: { type: "Size", width: 406, height: 26 },
+        desiredSizeOverride: true,
+        childViews: [
+          {
+            type: "Label",
+            text: "Import",
+            textAlignment: "Left",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 0, y: 4 },
+              size: { type: "Size", width: 120, height: 17 }
+            },
+            style: {
+              type: "LabelStyle",
+              text: "Import",
+              wordWrap: true,
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+              textAlignment: "Left"
+            },
+            desiredSize: { type: "Size", width: 120, height: 17 },
+            desiredSizeOverride: true
+          },
+          {
+            type: "DropDownList",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 126, y: 1 },
+              size: { type: "Size", width: 280, height: 24 }
+            },
+            name: "pagesModeCombo",
+            layoutParams: { type: "FlexLayoutParams", weight: 1 }
+          }
+        ]
+      },
+      {
+        type: "SubView",
+        bounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 12, y: 156 },
+          size: { type: "Size", width: 406, height: 26 }
+        },
+        visible: true,
+        name: "pagesValueRow",
+        layout: {
+          type: "FlexLayout",
+          orientation: "Horizontal",
+          crossAxisAlignment: "Center",
+          spacing: 6
+        },
+        desiredSize: { type: "Size", width: 406, height: 26 },
+        desiredSizeOverride: true,
+        childViews: [
+          {
+            type: "Label",
+            text: "Number of pages",
+            textAlignment: "Left",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 0, y: 4 },
+              size: { type: "Size", width: 120, height: 17 }
+            },
+            name: "pagesValueCaption",
+            style: {
+              type: "LabelStyle",
+              text: "Number of pages",
+              wordWrap: true,
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+              textAlignment: "Left"
+            },
+            desiredSize: { type: "Size", width: 120, height: 17 },
+            desiredSizeOverride: true
+          },
+          {
+            type: "TextField",
+            text: "1",
+            font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 126, y: 3 },
+              size: { type: "Size", width: 200, height: 20 }
+            },
+            name: "pagesValueField",
+            desiredSize: { type: "Size", width: 200, height: 20 },
+            desiredSizeOverride: true
+          }
+        ]
+      },
+      {
+        type: "SubView",
+        bounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 12, y: 190 },
+          size: { type: "Size", width: 406, height: 34 }
+        },
+        visible: true,
+        name: "pagesHint",
+        desiredSize: { type: "Size", width: 406, height: 34 },
+        desiredSizeOverride: true,
+        childViews: [
+          {
+            type: "Label",
+            text: "For specific pages, list page numbers and ranges: 1,5,10 or 2-4,9.",
+            textAlignment: "Left",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 0, y: 0 },
+              size: { type: "Size", width: 406, height: 35 }
+            },
+            style: {
+              type: "LabelStyle",
+              text: "For specific pages, list page numbers and ranges: 1,5,10 or 2-4,9.",
+              wordWrap: true,
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+              textAlignment: "Left"
+            }
+          }
+        ]
+      },
+      {
+        type: "SubView",
+        bounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 12, y: 232 },
+          size: { type: "Size", width: 406, height: 30 }
+        },
+        visible: true,
+        name: "pagesFooter",
+        layout: {
+          type: "FlexLayout",
+          orientation: "Horizontal",
+          crossAxisAlignment: "Center",
+          spacing: 6
+        },
+        desiredSize: { type: "Size", width: 406, height: 30 },
+        desiredSizeOverride: true,
+        childViews: [
+          {
+            type: "SubView",
+            visible: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 1 }
+          },
+          {
+            type: "Button",
+            defaultControl: true,
+            text: "Import",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 0, y: 1 },
+              size: { type: "Size", width: 96, height: 28 }
+            },
+            name: "pagesImportButton",
+            style: {
+              type: "ThemedButtonStyle",
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+            },
+            desiredSize: { type: "Size", width: 96, height: 28 },
+            desiredSizeOverride: true
+          },
+          {
+            type: "Button",
+            cancelControl: true,
+            text: "Cancel",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 102, y: 1 },
+              size: { type: "Size", width: 96, height: 28 }
+            },
+            name: "pagesCancelButton",
+            style: {
+              type: "ThemedButtonStyle",
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+            },
+            desiredSize: { type: "Size", width: 96, height: 28 },
+            desiredSizeOverride: true
+          }
+        ]
+      }
+    ]
+  }
+}

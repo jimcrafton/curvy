@@ -15,7 +15,7 @@
 1. Port the sketch demo and build it (done).
 2. Use a jitnodes `Network` directly from the document code; cook artwork objects from it.
 3. Map the document model (paths, shapes, strokes) onto graph nodes; hide the graph in the default UI, expose it in advanced mode.
-4. Skeletal strokes (see `Skel Strokes.docx`).
+4. Skeletal strokes (see `Skel Strokes.docx`). In progress on a separate branch, not yet merged here.
 5. Replace the sketch UI with new mockups converted through the `html-mockup-to-newui` skill.
 
 ## Phase 2: GraphDocument
@@ -29,24 +29,36 @@ nothing of sketch types (paths, layers, artboards), so it can be unit tested alo
 - **Edit API (all one undo step each):** `addGraphNode`, `removeGraphNode`, `connectGraphNodes`, `setGraphParam`, `renameGraphNode`.
   A drag edits live and commits once, like `commitGeometry`.
 - **Cooking.** `GraphDocument::cook(NodeId)` wraps `Network::cook`; `changed()` marks affected nodes dirty and repaints.
-- **File format.** The document stays SVG. `saveNetwork()` text is embedded in a dedicated element (namespaced, ignored by other
-  SVG readers); `GraphDocument` exposes `graphToText()` / `graphFromText()` and the SVG reader/writer call them. A load goes
-  through `Batch`, and a failed `loadNetwork` leaves the old graph intact.
-- **Phase 2 slice.** A graph-driven "live shape": a `SketchObject` holds a node id; its outline is the cooked polyline of that node
-  (circle / star with parameters), drawn on the canvas, undoable. Geometry from jitnodes is polyline-only, so a `bezierPath` node
-  with in/out handle attributes is a later addition.
-- **Status (2026-10-18).** Implemented: `GraphDocument` (`graphdocument.h/.cpp`), `SketchDocument` derives from it and the undo stack lives there;
-  live shapes in `documentlive.cpp` (`addLiveShape`, `setLiveShapeParam`; `SketchObject::graphNode()`). The graph is saved as
-  `<metadata><jitnodes:graph data="..."/></metadata>` (the reader skips `metadata`, and the XML parser keeps only attributes, so the text is an
-  attribute), and each live object carries `data-graph-node`. Each document's `Network` has one thread (`Network(1)`), since scratch documents are
-  created freely. A live shape's outline is rebuilt from the node on every graph change, so moving or transforming one directly is overwritten;
-  placement belongs in a transform node (next slice). Duplicating a live shape yields a plain polygon.
-- **Direction change (2026-10-18, not yet implemented).** The graph is the document: every path becomes a node (a `bezierPath`-style node holding
-  its points), and the object list, layers, groups and artboards become views over the graph (layers and groups as subnets). `SketchObject` then
-  becomes a cached view of a node rather than the primary store, and the slice above (live shapes beside plain paths) is the stepping stone. The UI
-  consequences are in `docs/ui-design.md` ("The graph is the document", "Document structure views"). **Decided: path nodes need a `bezierPath` node type, or an
-  extension of the geometry model, and one of them will be added** (jitnodes geometry is polyline-only today). Still needs a plan for the migration
-  and for selection and hit testing by node.
+- **File format.** *(Superseded 2026-11-07: the native file is now `.curvy`, JSON5 text holding the graph as data, see
+  `native-format.md`; SVG and `.skb` remain readable, SVG writable as an export.)* Originally the document was SVG: `saveNetwork()`
+  text is embedded in a dedicated element (namespaced, ignored by other SVG readers); `GraphDocument` exposes `graphToText()` /
+  `graphFromText()` and the SVG reader/writer call them. A load goes through `Batch`, and a failed `loadNetwork` leaves the old
+  graph intact.
+- **The model as it stands (2026-11-08).** The graph is the document. Everything after this bullet is the dated history of how it got here; read this bullet first.
+  * **Objects.** Every object has a shape node: `curvyPath` (curves in its geometry parameter `curve`, jitnodes cubic primitives), `curvyShape` (star, polygon, rounded
+    rectangle, arc: a `kind` plus the numbers of the shape, cooked by the generator the canvas handles and Shape box share), `curvyText`, `curvySymbol` or `curvyImage`.
+    After it come a `curvyTransform` (translate, rotation, scale, shear, pivot; a parent's transform is optional input 1) and the appearance chain (`curvyFill`,
+    `curvyStroke`, `curvyEffect`). Name, flags, opacity, blend mode and type are stored on the shape node. A hand edit of a `curvyShape` puts a frozen `curvyPath` after it.
+    There is no separate "live shape" object kind; the generator-backed one (`addLiveShape`) was removed on 2026-11-08.
+  * **Structure.** Groups and layers are `curvySubnet` nodes (scopes, addressed by `NodeRef`). Each scope's `paint` merge node lists what it paints, back to front:
+    a reorder of its inputs reorders objects, and a reorder of layer subnets reorders layers (DG-09). The graph dock's Back and Forward buttons make that reorder
+    (`SketchDocument::movePaintItem`); the Flow view has no dragging. The base layer's objects stay in the root.
+  * **`SketchObject`** is a cached mirror of its nodes, kept in step by `syncPathNodes`, `syncAppearanceNodes` and the pull functions at the start of `changed()`;
+    it stays for read speed (making it a pure view is DG-20, optional).
+  * **Files.** `.curvy` (JSON5, `docs/native-format.md`) stores the graph and nothing about objects; objects are rebuilt from it. SVG and `.skb` remain readable and SVG
+    writable as an export.
+  * **Undo.** One stack in `GraphDocument`; graph edits are snapshot pairs, object edits use `GeometryState` and `LayerState` payloads beside them.
+  * **Not in the graph on purpose.** Handle orientation (`frameAngle_`, `groupAngle_`, `quadFrame_`) and document-level settings (artboards, guides, swatches, libraries).
+  * **Where the rest is.** `docs/graph-migration-roadmap.md` (what is left), `docs/node-only-plan.md` (node-only document), `docs/dg04-layers-subnets.md`,
+    `docs/ui-design.md` ("The graph is the document").
+- **History: first slice (2026-10-18), superseded.** A graph-driven "live shape": a `SketchObject` held a node id and its outline was the cooked polyline of that node.
+  `GraphDocument` (`graphdocument.h/.cpp`) and the shared undo stack came from this slice and are unchanged. Each document's `Network` has one thread (`Network(1)`),
+  since scratch documents are created freely. The `<metadata><jitnodes:graph>` SVG storage of this slice was replaced by `.curvy`.
+- **History: live shapes replaced by `curvyShape` (2026-11-04).** `curvyShape` (`shapenode.h/.cpp`) with Bypass and Freeze: jitnodes has generic `Node::setBypassed`,
+  `Node::setFrozenGeometry` and `Network::freezeNode` (saved inline in files, snapshots, undo and paste), and the graph dock has Bypass and Freeze buttons. Plan and
+  stages: `docs/graph-migration-roadmap.md` B (DG-10); the UI side is in `docs/ui-design.md` ("Graph tree").
+- **History: direction change (2026-10-18), done.** The graph became the document, with layers and groups as subnets and the `bezierPath` idea realised as `curvyPath`
+  with jitnodes cubic primitives. The dated entries below record each step.
 - **Path nodes (2026-10-24, first step of the direction change).** Every Line/Rect/RoundRect/Ellipse/Polygon/Polyline/Path object has a `curvyPath` node
   (`pathnode.h/.cpp`, registered by `GraphDocument`) whose string parameter `d` holds its curves (M/L/Q/C/Z, six significant digits - what the SVG and
   .skb files keep); its cook is the flattened polyline, so other nodes can read it. For now the object is still edited directly and the node is a

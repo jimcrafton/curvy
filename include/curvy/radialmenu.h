@@ -23,6 +23,9 @@ namespace curvy {
         std::string caption;   // under the hub's "...": what tapping the hub opens
         std::string hubCommand;
         std::vector<RadialSlot> slots;
+        int bottomSlot = -1;   // turns the ring so this slot sits at the bottom; -1 leaves slot 0 at the top
+        // The ring's turn as a fraction of a full circle, for RadialLayout.
+        double phase() const { return bottomSlot >= 0 && !slots.empty() ? 0.5 - double(bottomSlot) / double(slots.size()) : 0.0; }
     };
 
     // Where the pointer is relative to a ring, with no drawing involved.
@@ -36,11 +39,12 @@ namespace curvy {
         static constexpr int outside = -2;
 
         // Slot i of n sits at the top for i = 0 and goes clockwise.
-        static newui::Point slotCenter(int index, int count);
+        // `phase` turns the whole ring clockwise by that fraction of a circle.
+        static newui::Point slotCenter(int index, int count, double phase = 0.0);
         // The slot nearest to the direction of (dx, dy) from the ring's centre, the hub, or outside.
-        static int slotAt(double dx, double dy, int count);
+        static int slotAt(double dx, double dy, int count, double phase = 0.0);
         // Where a slot's option box sits relative to the ring's centre: just past the slot's outer end, along the line from the hub.
-        static newui::Point optionBoxCenter(int index, int count);
+        static newui::Point optionBoxCenter(int index, int count, double phase = 0.0);
         static constexpr double optionBoxReach = 13.0;   // the box's tap target, a pen-sized circle
     };
 

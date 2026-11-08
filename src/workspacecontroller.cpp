@@ -1,10 +1,12 @@
 #include "curvy/workspacecontroller.h"
+#include "curvy/curvyfile.h"
 #include "curvy/theme.h"
 #include "curvy/dockcontroller.h"
 #include "curvy/graphbrush.h"
 #include "curvy/settingsdialog.h"
-#include "curvy/sketchsvg.h"
+#include "curvy/io/svg/sketchsvg.h"
 #include "curvy/welcomeoverlay.h"
+#include "curvy/loadingoverlay.h"
 
 #include <newui/application.h>
 #include <newui/bundle.h>
@@ -23,7 +25,6 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #define NOMINMAX
 #include <windows.h>
 #include <cmath>
@@ -36,6 +37,13 @@ namespace curvy {
         std::filesystem::path recoveryFolder() {
             const char* base = std::getenv("APPDATA");
             return std::filesystem::path(base != nullptr ? base : ".") / "curvy" / "autosave";
+        }
+
+        // Test hook: CURVY_AUTOSAVE_SECONDS makes the autosave tick and the gap between copies that many seconds (the setting is in minutes, 1 at least).
+        std::chrono::seconds autosaveSecondsOverride() {
+            const char* text = std::getenv("CURVY_AUTOSAVE_SECONDS");
+            const int seconds = text != nullptr ? std::atoi(text) : 0;
+            return std::chrono::seconds(seconds > 0 ? seconds : 0);
         }
     }
 
@@ -54,7 +62,7 @@ namespace curvy {
         RadialRing newRing() {
             return {"New", "Create...", "dialog.new", {
                 {"Letter", "1", "new.letter"}, {"A4", "2", "new.a4"}, {"Full HD", "3", "new.fullhd"}, {"Square", "4", "new.square"},
-                {"Open", "O", "file.open"}, {"Settings", "S", "dialog.settings"}}};
+                {"Open", "O", "file.open"}, {"Import", "I", "file.importPdf"}, {"Settings", "S", "dialog.settings"}}, 3};
         }
         RadialRing createRing() {
             return {"Create", "Shape options...", "dialog.shape", {
@@ -64,7 +72,15 @@ namespace curvy {
         RadialRing documentRing() {
             return {"Document", "Setup...", "dialog.setup", {
                 {"New artboard", "A", "doc.newArtboard"}, {"New document", "N", "ring.new"}, {"Open", "O", "file.open"}, {"Save", "S", "file.save"},
-                {"Export", "E", "file.exportImage"}, {"Place image", "I", "file.placeImage"}, {"View", "V", "ring.view"}}};
+                {"Export", "E", "ring.export"}, {"Import", "I", "ring.import"}, {"View", "V", "ring.view"}}};
+        }
+        RadialRing exportRing() {
+            return {"Export", "Back", "ring.document", {
+                {"Image", "I", "file.exportImage"}, {"PDF", "P", "file.exportPdf"}, {"EPS", "E", "file.exportEps"}, {"Artboards", "A", "file.exportArtboards"}}};
+        }
+        RadialRing importRing() {
+            return {"Import", "Back", "ring.document", {
+                {"Picture", "P", "file.placeImage"}, {"Trace", "T", "file.traceImage"}, {"PDF / AI", "F", "file.importPdf"}}};
         }
         RadialRing viewRing() {
             return {"View", "Back", "ring.document", {
@@ -196,6 +212,12 @@ namespace curvy {
         canvas_->setShowGrid(false);
         restyle();
         files_ = std::make_unique<SketchDocumentController>(document_, frame_);
+        files_->setBackgroundIo(true);
+        files_->setAskPdfPages(true);
+        files_->onBusyStarted += [this](SketchDocumentController&) { showLoading(); return SyncReturn::Handled; };
+        files_->onBusyProgress += [this](SketchDocumentController&) { updateLoading(); return SyncReturn::Handled; };
+        files_->onBusyFinished += [this](SketchDocumentController&) { hideLoading(); return SyncReturn::Handled; };
+        files_->onStatus += [this](SketchDocumentController&, std::string text) { model_->say(text); return SyncReturn::Handled; };
         commands_ = std::make_unique<SketchCommandController>(document_, *canvas_, *files_);
 
         menu_ = new RadialMenu();
@@ -262,9 +284,11 @@ namespace curvy {
 
         // The document and frame outlive this controller, so their handlers are disconnected with it.
         connections_.add(document_.onModifiedChanged, [this](Document&) {
-            if (!document_.isModified()) {
-                clearRecovery();
-            }
+            files_->onUiThread([this]() {   // a background Open / Save fires this on the worker thread
+                if (!document_.isModified()) {
+                    clearRecovery();
+                }
+            });
             return SyncReturn::Handled;
         });
         connections_.add(frame_.onClosed, [this](Frame&) {
@@ -303,13 +327,15 @@ namespace curvy {
         canvas_->onToolChanged.add(this, &WorkspaceController::handleToolChanged);
         connections_.add(document_.onSelectionChanged, [this](SketchDocument& sender) { return handleSelectionChanged(sender); });
         files_->onDocumentReplaced.add(this, &WorkspaceController::handleDocumentReplaced);
+        files_->onStateChanged.add(this, &WorkspaceController::handleDocumentStateChanged);
     }
 
     // The autosave timer is not cancelled here: the run loop has already ended and kills its timers itself.
     WorkspaceController::~WorkspaceController() = default;
 
     void WorkspaceController::startAutosave() {
-        autosaveTimer_ = Application::instance().runLoop().postDelayed(std::chrono::seconds(30), [this] {
+        const std::chrono::seconds hook = autosaveSecondsOverride();
+        autosaveTimer_ = Application::instance().runLoop().postDelayed(hook.count() > 0 ? hook : std::chrono::seconds(30), [this] {
             autosaveTick();
             return false;
         });
@@ -326,26 +352,20 @@ namespace curvy {
 
     bool WorkspaceController::offerRecovery() {
         std::error_code ignored;
-        std::vector<std::filesystem::directory_entry> found;
-        for (const auto& entry : std::filesystem::directory_iterator(recoveryFolder(), ignored)) {
-            if (entry.is_regular_file(ignored) && entry.path().extension() == ".svg") {
-                found.push_back(entry);
-            }
-        }
-        std::sort(found.begin(), found.end(), [&](const auto& a, const auto& b) { return a.last_write_time(ignored) > b.last_write_time(ignored); });
-        for (const auto& entry : found) {
-            const std::string name = entry.path().stem().string();
+        for (const std::string& found : recoveryCopies(recoveryFolder().string())) {
+            const std::filesystem::path entry = std::filesystem::u8path(found);
+            const std::string name = entry.stem().string();
             const DialogResult answer = Dialog::showMessageBox(frame_.frameHandle(),
                 "curvy closed before \"" + name + "\" was saved. Recover the autosaved copy?\n\nYes recovers it, No throws it away, Cancel asks again next time.",
                 "curvy", MessageBoxButtons::YesNoCancel, MessageBoxIcon::Question);
             if (answer == DialogResult::Cancel) {
                 return false;
             }
-            if (answer == DialogResult::Yes && files_->recoverFrom(entry.path().string(), name)) {
-                std::filesystem::remove(entry.path(), ignored);
+            if (answer == DialogResult::Yes && files_->recoverFrom(found, name)) {
+                std::filesystem::remove(entry, ignored);
                 return true;
             }
-            std::filesystem::remove(entry.path(), ignored);
+            std::filesystem::remove(entry, ignored);
         }
         return false;
     }
@@ -360,8 +380,50 @@ namespace curvy {
         settings_.save(Settings::defaultPath());
     }
 
+    void WorkspaceController::showLoading() {
+        auto overlay = std::make_unique<LoadingOverlay>();
+        overlay->setTitle(files_->busyLabel());
+        loading_ = overlay.get();
+        frame_.rootView().setOverlay(std::move(overlay));   // replaces the welcome card, if it is still up
+        hiddenForLoad_.clear();
+        for (SubView* child : frame_.rootView().childViews()) {
+            if (child->isVisible()) {
+                hiddenForLoad_.push_back(child);
+                child->setVisible(false);
+            }
+        }
+        ::EnableWindow(frame_.frameHandle(), FALSE);
+        frame_.rootView().markDirty();
+    }
+
+    void WorkspaceController::updateLoading() {
+        if (loading_ == nullptr) {
+            return;
+        }
+        if ((::GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0 && ::GetForegroundWindow() == frame_.frameHandle()) {
+            files_->cancelBusy();
+            loading_->setCancelling();
+        }
+        loading_->update(files_->busyFraction());
+        frame_.rootView().markDirty();
+    }
+
+    void WorkspaceController::hideLoading() {
+        ::EnableWindow(frame_.frameHandle(), TRUE);
+        for (SubView* child : hiddenForLoad_) {
+            child->setVisible(true);
+        }
+        hiddenForLoad_.clear();
+        if (loading_ != nullptr) {
+            loading_ = nullptr;
+            frame_.rootView().setOverlay(nullptr);
+            frame_.rootView().markDirty();
+        }
+        focusCanvas();
+    }
+
     void WorkspaceController::dismissWelcome() {
-        if (frame_.rootView().overlay() != nullptr) {
+        if (loading_ == nullptr && frame_.rootView().overlay() != nullptr) {
             frame_.rootView().setOverlay(nullptr);
             frame_.rootView().markDirty();
             focusCanvas();
@@ -371,19 +433,16 @@ namespace curvy {
     // A recovery copy beside the settings; the user's own file is only ever written by Save.
     void WorkspaceController::autosaveTick() {
         const auto now = std::chrono::steady_clock::now();
-        if (!settings_.autosave || !model_->documentOpen() || !document_.isModified() ||
-            now - lastAutosave_ < std::chrono::minutes(settings_.autosaveMinutes)) {
+        const std::chrono::seconds hook = autosaveSecondsOverride();
+        const std::chrono::seconds gap = hook.count() > 0 ? hook : std::chrono::seconds(std::chrono::minutes(settings_.autosaveMinutes));
+        if (document_.isBusy() || !settings_.autosave || !model_->documentOpen() || !document_.isModified() || now - lastAutosave_ < gap) {
             return;
         }
         lastAutosave_ = now;
-        const std::filesystem::path folder = recoveryFolder();
-        std::error_code ignored;
-        std::filesystem::create_directories(folder, ignored);
         const std::string stem = document_.hasFilePath() ? std::filesystem::path(document_.filePath()).stem().string() : files_->untitledName();
-        const std::filesystem::path file = folder / (stem + ".svg");
-        std::ofstream out(file, std::ios::binary | std::ios::trunc);
-        if (out << svgFromDocument(document_)) {
-            recoveryFile_ = file.string();
+        const std::string written = writeRecoveryCopy(document_, recoveryFolder().string(), stem);
+        if (!written.empty()) {
+            recoveryFile_ = written;
             model_->say("Autosaved " + stem);
         }
     }
@@ -480,12 +539,18 @@ namespace curvy {
         model_->setDocument(false, std::string());
         canvas_->setShowPages(false);
         canvas_->setShowRulers(false);
-        if (!path.empty()) {
-            files_->open(path);
-        } else {
+        startupPath_ = path;
+        if (path.empty()) {
             frame_.setTitle("curvy");
         }
         focusCanvas();
+    }
+
+    void WorkspaceController::openStartupFile() {
+        if (!startupPath_.empty()) {
+            files_->open(std::move(startupPath_));
+            startupPath_.clear();
+        }
     }
 
     void WorkspaceController::focusCanvas() {
@@ -585,34 +650,92 @@ namespace curvy {
     }
 
     void WorkspaceController::runCommand(const std::string& command) {
+        if (document_.isBusy()) {
+            model_->say(files_->busyLabel() + " - wait for it to finish, or press Esc to cancel");
+            return;
+        }
+        if (handlers_.empty()) {
+            buildCommandTable();
+        }
         const Rect client = canvas_->getClientBounds();
         const Point at = pointerKnown_ ? pointer_ : Point(client.width() * 0.5f, client.height() * 0.5f);
+        if (auto found = handlers_.find(command); found != handlers_.end()) {
+            found->second(at);
+            return;
+        }
+        // Not in the table: the tool option boxes, then the "dialog.*" stubs, then whatever the shared command controller has.
+        if (SketchTool optionsTool = SketchTool::Select; ToolOptionsCard::toolFromCommand(command, optionsTool)) {
+            showToolOptions(optionsTool, Point(at.x + 28.0f, at.y - 40.0f));
+        } else if (command.compare(0, 7, "dialog.") == 0) {
+            model_->say("The " + command.substr(7) + " dialog is not built yet");
+        } else if (commands_->has(command)) {
+            commands_->run(command);
+        } else {
+            model_->say("(" + command + " is not wired yet)");
+        }
+    }
+
+    void WorkspaceController::showAppearanceCard(bool fill, const Point& at) {
+        if (options_ != nullptr) {
+            options_->close();
+        }
+        if (dock_ == nullptr) {
+            return;
+        }
+        Rect selected;
+        bool haveSelected = false;
+        for (std::size_t id : document_.selection()) {
+            if (const SketchObject* object = document_.findById(id)) {
+                const BLBox box = object->bounds();
+                const BLPoint a = canvas_->toView(BLPoint(box.x0, box.y0)), b = canvas_->toView(BLPoint(box.x1, box.y1));
+                const Rect one(float(std::min(a.x, b.x)), float(std::min(a.y, b.y)), float(std::abs(b.x - a.x)), float(std::abs(b.y - a.y)));
+                selected = haveSelected ? selected.united(one) : one;
+                haveSelected = true;
+            }
+        }
+        dock_->showCard(fill ? DockController::Card::Fill : DockController::Card::Stroke, at, haveSelected ? &selected : nullptr);
+        if (fill && dock_->stylePanel() != nullptr) {
+            // An open path has nothing to fill, so its colour is the stroke's.
+            const SketchObject* shape = document_.selection().empty() ? nullptr : document_.findById(document_.selection().front());
+            const bool strokeOnly = shape != nullptr && (shape->fill().isNone() || !shape->isClosed());
+            dock_->stylePanel()->setTarget(strokeOnly ? StylePanel::Target::Stroke : StylePanel::Target::Fill);
+        }
+        model_->used("appearance");
+    }
+
+    void WorkspaceController::buildCommandTable() {
         for (const PageSize& page : kPages) {
-            if (command == page.command) {
+            handlers_[page.command] = [this, &page](const Point&) {
                 if (files_->newDocument(page.name, page.width, page.height)) {
                     model_->say(std::string("New ") + page.name);
                 }
-                return;
-            }
+            };
         }
         for (const ToolCommand& tool : kToolCommands) {
-            if (command == tool.command) {
+            handlers_[tool.command] = [this, &tool](const Point&) {
                 armTool(tool.tool, true, std::string());
                 model_->say(tool.tool == SketchTool::Select ? std::string("Select") : std::string(toolName(tool.tool)) + " tool armed");
-                return;
-            }
+            };
         }
-        if (command == "ring.document") { menu_->open(documentRing(), at, false); model_->setRing("Document"); }
-        else if (command == "ring.new") { menu_->open(newRing(), at, false); model_->setRing("New"); }
-        else if (command == "ring.object") { menu_->open(objectRing(), at, false); model_->setRing("Object"); }
-        else if (command == "ring.view") { menu_->open(viewRing(), at, false); model_->setRing("View"); }
-        else if (command == "view.toolbar") { model_->setToolbarVisible(!model_->toolbarVisible()); model_->say(model_->toolbarVisible() ? "Toolbar on" : "Toolbar off"); }
-        else if (command == "view.properties") { model_->setPropertiesVisible(!model_->propertiesVisible()); model_->say(model_->propertiesVisible() ? "Properties on" : "Properties off"); }
-        else if (command == "view.graph") { model_->setGraphVisible(!model_->graphVisible()); model_->say(model_->graphVisible() ? "Graph on" : "Graph off"); }
-        else if (command == "view.timeline") { model_->setTimelineVisible(!model_->timelineVisible()); model_->say(model_->timelineVisible() ? "Timeline on" : "Timeline off"); }
-        else if (command == "view.theme") { setDarkTheme(!Theme::current().isDark); model_->say(Theme::current().isDark ? "Dark theme" : "Light theme"); }
-        else if (command == "ring.arrange") { menu_->open(arrangeRing(), at, false); model_->setRing("Arrange"); }
-        else if (command == "doc.newArtboard") {
+
+        auto ring = [this](RadialRing (*make)(), const char* name) {
+            return [this, make, name](const Point& at) { menu_->open(make(), at, false); model_->setRing(name); };
+        };
+        handlers_["ring.document"] = ring(documentRing, "Document");
+        handlers_["ring.new"] = ring(newRing, "New");
+        handlers_["ring.object"] = ring(objectRing, "Object");
+        handlers_["ring.export"] = ring(exportRing, "Export");
+        handlers_["ring.import"] = ring(importRing, "Import");
+        handlers_["ring.view"] = ring(viewRing, "View");
+        handlers_["ring.arrange"] = ring(arrangeRing, "Arrange");
+
+        handlers_["view.toolbar"] = [this](const Point&) { model_->setToolbarVisible(!model_->toolbarVisible()); model_->say(model_->toolbarVisible() ? "Toolbar on" : "Toolbar off"); };
+        handlers_["view.properties"] = [this](const Point&) { model_->setPropertiesVisible(!model_->propertiesVisible()); model_->say(model_->propertiesVisible() ? "Properties on" : "Properties off"); };
+        handlers_["view.graph"] = [this](const Point&) { model_->setGraphVisible(!model_->graphVisible()); model_->say(model_->graphVisible() ? "Graph on" : "Graph off"); };
+        handlers_["view.timeline"] = [this](const Point&) { model_->setTimelineVisible(!model_->timelineVisible()); model_->say(model_->timelineVisible() ? "Timeline on" : "Timeline off"); };
+        handlers_["view.theme"] = [this](const Point&) { setDarkTheme(!Theme::current().isDark); model_->say(Theme::current().isDark ? "Dark theme" : "Light theme"); };
+
+        handlers_["doc.newArtboard"] = [this](const Point& at) {
             const BLPoint world = canvas_->toDocument(at);
             Artboard board;
             board.x = world.x;
@@ -621,46 +744,16 @@ namespace curvy {
             board.height = 300.0;
             document_.addArtboard(board);
             model_->say("New artboard at the pen");
-        }
-        else if (SketchTool optionsTool = SketchTool::Select; ToolOptionsCard::toolFromCommand(command, optionsTool)) {
-            showToolOptions(optionsTool, Point(at.x + 28.0f, at.y - 40.0f));
-        }
-        else if (command == "card.color" || command == "card.stroke") {
-            if (options_ != nullptr) {
-                options_->close();
-            }
-            if (dock_ != nullptr) {
-                Rect selected;
-                bool haveSelected = false;
-                for (std::size_t id : document_.selection()) {
-                    if (const SketchObject* object = document_.findById(id)) {
-                        const BLBox box = object->bounds();
-                        const BLPoint a = canvas_->toView(BLPoint(box.x0, box.y0)), b = canvas_->toView(BLPoint(box.x1, box.y1));
-                        const Rect one(float(std::min(a.x, b.x)), float(std::min(a.y, b.y)), float(std::abs(b.x - a.x)), float(std::abs(b.y - a.y)));
-                        selected = haveSelected ? selected.united(one) : one;
-                        haveSelected = true;
-                    }
-                }
-                dock_->showCard(command == "card.color" ? DockController::Card::Fill : DockController::Card::Stroke, at, haveSelected ? &selected : nullptr);
-                if (command == "card.color" && dock_->stylePanel() != nullptr) {
-                    // An open path has nothing to fill, so its colour is the stroke's.
-                    const SketchObject* shape = document_.selection().empty() ? nullptr : document_.findById(document_.selection().front());
-                    const bool strokeOnly = shape != nullptr && (shape->fill().isNone() || !shape->isClosed());
-                    dock_->stylePanel()->setTarget(strokeOnly ? StylePanel::Target::Stroke : StylePanel::Target::Fill);
-                }
-                model_->used("appearance");
-            }
-        }
-        else if (command == "dialog.new") { files_->newDocument(); }
-        else if (command == "dialog.settings") { openSettings(); }
-        else if (command == "dialog.setup") { commands_->run("file.documentSetup"); }
-        else if (command.compare(0, 7, "dialog.") == 0) { model_->say("The " + command.substr(7) + " dialog is not built yet"); }
-        else if (commands_->has(command)) {
-            if (command == "edit.duplicate") { model_->used("duplicate"); }
-            if (command == "edit.delete") { model_->used("delete"); }
-            commands_->run(command);
-        }
-        else { model_->say("(" + command + " is not wired yet)"); }
+        };
+        handlers_["card.color"] = [this](const Point& at) { showAppearanceCard(true, at); };
+        handlers_["card.stroke"] = [this](const Point& at) { showAppearanceCard(false, at); };
+
+        handlers_["dialog.new"] = [this](const Point&) { files_->newDocument(); };
+        handlers_["dialog.settings"] = [this](const Point&) { openSettings(); };
+        handlers_["dialog.setup"] = [this](const Point&) { commands_->run("file.documentSetup"); };
+
+        handlers_["edit.duplicate"] = [this](const Point&) { model_->used("duplicate"); commands_->run("edit.duplicate"); };
+        handlers_["edit.delete"] = [this](const Point&) { model_->used("delete"); commands_->run("edit.delete"); };
     }
 
     // ---- Document state ----
@@ -672,6 +765,14 @@ namespace curvy {
         applyToolDefaults();
         frame_.setTitle("curvy - " + controller.displayName());
         canvas_->zoomToFit();
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn WorkspaceController::handleDocumentStateChanged(SketchDocumentController& controller) {
+        if (model_->documentOpen() && model_->documentName() != controller.displayName()) {
+            model_->setDocument(true, controller.displayName());
+            frame_.setTitle("curvy - " + controller.displayName());
+        }
         return SyncReturn::Handled;
     }
 

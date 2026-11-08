@@ -1,6 +1,7 @@
 #pragma once
 
 #include "curvy/appearancenode.h"
+#include "curvy/backgroundtask.h"
 #include "curvy/brush.h"
 #include "curvy/graphdocument.h"
 #include "curvy/pathops.h"
@@ -10,8 +11,10 @@
 #include <newui/models.h>
 #include <newui/undostack.h>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <tuple>
 #include <memory>
@@ -344,6 +347,11 @@ namespace curvy {
         // (the file's graph is loaded first, so the path names its subnets).
         std::string scopeText(std::uint32_t scope) const;
         std::uint32_t scopeOfText(const std::string& text);
+        // Builds one object per shape node of the loaded graph, in paint order, from nothing but the nodes (N2 of docs/node-only-plan.md): outline, looks,
+        // name and flags, text, symbol, picture (`pictures` finds one by ImageData::key), layer, groups and parent. The document must have no objects and
+        // its layers and libraries already installed. Returns the number of objects made.
+        using PictureLookup = std::function<std::shared_ptr<const ImageData>(const std::string& key)>;
+        std::size_t objectsFromGraph(const PictureLookup& pictures = nullptr, std::vector<std::string>* notes = nullptr);
         // The group id a scope's subnet stands for; 0 for the root and for a subnet that is not a document group.
         std::size_t groupIdOfScope(std::uint32_t scope) const;
         // The layer id a scope's subnet stands for; 0 for the root and for a subnet that is not a layer.
@@ -353,6 +361,13 @@ namespace curvy {
         GroupProps groupProps(std::size_t groupId) const;
         // The subnet node that holds the group's members (an invalid ref when it has none).
         NodeRef groupSubnetOf(std::size_t group) const;
+        // The subnet node of a layer (an invalid ref for the base layer, whose objects stay in the root).
+        NodeRef layerSubnetOf(std::size_t layer) const;
+        // Moves an item one step or more in the `paint` merge that lists it: `item` is a layer or group subnet, or any node of an object (the object is
+        // moved). Positive `steps` paint later (in front). Layers only trade places with layers of the same parent, and nothing else crosses a layer
+        // subnet, because the layer order wins over the merge. One undo step; false when nothing would move.
+        bool canMovePaintItem(const NodeRef& item, int steps);
+        bool movePaintItem(const NodeRef& item, int steps);
         void setGroupProps(std::size_t groupId, const GroupProps& props);
         // The outermost group the selection is exactly (all its members and nothing else), else 0.
         std::size_t selectedGroup() const;
@@ -583,12 +598,6 @@ namespace curvy {
         bool canReleaseParent() const;
         // `ids` followed by every object that hangs from one of them, directly or not.
         std::vector<std::size_t> withDescendants(const std::vector<std::size_t>& ids) const;
-        // ---- Live shapes: objects whose outline is the cooked polyline of a graph node ----
-        // Adds a graph node of `nodeType` (a closed polyline generator such as "circle"), cooks it and adds an object that follows it,
-        // as one undo step. Returns the object, or null when the node cooks to nothing.
-        SketchObject* addLiveShape(const std::string& nodeType, const std::map<std::string, float>& params, const std::string& description);
-        // Edits one parameter of a live shape's node (one undo step); the outline follows.
-        bool setLiveShapeParam(std::size_t objectId, const std::string& name, float value);
         // Swaps the plain path node of a star, polygon, rounded rectangle or arc for a curvyShape node holding its numbers (one undo step);
         // false when the object is not such a shape or already follows an input. The outline then follows the node's parameters.
         bool makeParametric(std::size_t objectId);
@@ -890,6 +899,7 @@ namespace curvy {
         void setSelectionItemOpacity(AppearanceKind kind, double opacity);
         void setSelectionItemBlendMode(AppearanceKind kind, BlendMode mode);
         void setSelectionItemVisible(AppearanceKind kind, bool visible);
+        void setSelectionFillEvenOdd(bool evenOdd);
         // Each of these is one undo step and returns false when nothing changed.
         // A new fill / stroke on top of the stack (from the document's default paints), which becomes the active one.
         bool addAppearanceItem(AppearanceKind kind);
@@ -950,6 +960,25 @@ namespace curvy {
         bool empty() const override { return objects_.empty(); }
         std::size_t size() const override { return objects_.size(); }
 
+        // Writes the document to `path` in the format its extension names, without making that its file or clearing its modified flag
+        // (a recovery copy).
+        bool saveCopyTo(const std::string& path) { return writeToFile(path); }
+
+
+        // What a worker thread is doing to the document (the file controller sets this around a background Open or Save). While it is
+        // anything but None the document is not to be edited, saved, replaced or closed: the worker owns it. Commands check isBusy().
+        enum class Busy { None, Loading, Saving };
+        Busy busy() const { return busyFlag_.value.load(); }
+        bool isBusy() const { return busy() != Busy::None; }
+        void setBusy(Busy busy) { busyFlag_.value.store(busy); }
+        // Where readFromFile / writeToFile report how far they are and look for a cancel; null (the default) means neither.
+        void setTaskProgress(TaskProgress* progress) { taskProgress_ = progress; }
+        // Why the last readFromFile refused its file (empty when it gave no reason); read after the load has finished.
+        // The pages of a PDF the next load() reads (1-based; empty for all). Used by that one load and then cleared.
+        void setPdfPages(std::vector<int> pages) { pdfPages_ = std::move(pages); }
+        const std::string& lastError() const { return lastError_; }
+        void clearLastError() { lastError_.clear(); }
+
     protected:
         bool readFromFile(const std::string& path) override;
         bool writeToFile(const std::string& path) override;
@@ -994,6 +1023,11 @@ namespace curvy {
         // A reorder made on a paint merge node (or its undo) is adopted into objects_ at the start of changed(), unless objects_ itself changed
         // since syncPaintOrder last wrote the nodes (placedOrder_ / placedPaint_ are what it wrote).
         void pullPaintOrder();
+        // A paint merge whose layer subnets were dragged into a new order rewrites their `layerOrder`, so pullLayerNodes reorders the layers.
+        void pullLayerOrderFromPaint();
+        bool paintStillPlaced() const;
+        // Where an item sits in its scope's merge: the scope, the merge's connected inputs in order, the item's index and where `steps` would put it.
+        bool paintMove(const NodeRef& item, int steps, std::uint32_t& scope, std::vector<jitnodes::NodeId>& inputs, std::size_t& at, std::size_t& to);
         std::vector<std::size_t> placedOrder_;
         std::map<std::uint32_t, std::vector<jitnodes::NodeId>> placedPaint_;
         void pullAppearanceNodes();
@@ -1032,11 +1066,14 @@ namespace curvy {
         // the graph (a thousand-object document syncs on every edit). A graph change throws it away.
         struct AppearanceChain {
             std::vector<std::uint32_t> nodes;
-            std::vector<AppearanceItem> items;
+            std::uint64_t revision = 0;
         };
         std::map<NodeRef, AppearanceChain> appearanceChains_;
         std::size_t appearanceObjectCount_ = 0;
         std::unordered_map<std::uint32_t, jitnodes::NodeId> paintNodes_;
+        std::uint64_t paintSignature() const;
+        void syncPaintOrderNow();
+        std::uint64_t paintSignature_ = 0;   // objects, their nodes and every network's wiring as syncPaintOrder last left them; 0 = unknown
         std::map<NodeRef, std::size_t> paintOwners_;   // the node a scope's paint merge takes for an object -> the object's id
         std::string activeTag_ = "tag1";
         std::shared_ptr<jitnodes::GraphSnapshot> pivotBefore_;   // the graph when a live pivot drag started
@@ -1143,6 +1180,17 @@ namespace curvy {
         // The brushes linked to symbol `symbolId`, each with the brush it becomes when `artwork` is the symbol's new artwork (null artwork: unlinked).
         std::vector<std::pair<std::shared_ptr<const BrushDef>, std::shared_ptr<const BrushDef>>> brushesLinkedTo(
             std::size_t symbolId, const std::shared_ptr<const SymbolDef>& artwork) const;
+        // Atomic so a worker's reads see the UI thread's set; movable (the document is) with the moved-to document not busy.
+        struct BusyFlag {
+            std::atomic<Busy> value{Busy::None};
+            BusyFlag() = default;
+            BusyFlag(BusyFlag&&) noexcept {}
+            BusyFlag& operator=(BusyFlag&&) noexcept { return *this; }
+        };
+        BusyFlag busyFlag_;
+        TaskProgress* taskProgress_ = nullptr;
+        std::string lastError_;
+        std::vector<int> pdfPages_;
         std::vector<std::shared_ptr<const BrushDef>> brushes_;
         std::size_t activeBrush_ = 0;
         std::vector<std::size_t> recentBrushes_;

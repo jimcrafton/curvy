@@ -7,8 +7,14 @@
 #include <newui/controllers.h>
 #include <newui/delegate.h>
 #include <newui/frame.h>
+#include <newui/runloop.h>
 
+#include "curvy/backgroundtask.h"
+
+#include <chrono>
 #include <functional>
+#include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -22,8 +28,33 @@ namespace curvy {
     class SketchDocumentController : public newui::DocumentController {
     public:
         SketchDocumentController(SketchDocument& document, newui::Frame& frame);
+        ~SketchDocumentController() override;
 
         SketchDocument& document() { return document_; }
+
+        // Background file work. With it on (the app turns it on; it is off by default so tests and headless runs stay synchronous), Open,
+        // Import PDF, Save and Save As do their reading / writing on a worker thread and return as soon as it has started (true = started).
+        // The document is marked busy (SketchDocument::busy) from then until the worker is done: nothing else may touch it, and every command
+        // here answers false. The worker posts its end to the UI thread through the RunLoop, which then finishes exactly as the synchronous
+        // path does (recent files, status text, onDocumentReplaced...). While it runs, onBusyProgress fires about 30 times a second.
+        void setBackgroundIo(bool on) { background_ = on; }
+        bool backgroundIo() const { return background_; }
+        // App only: a PDF with several pages first asks which of them to import (PdfPagesDialog). Off, every page is imported.
+        void setAskPdfPages(bool on) { askPdfPages_ = on; }
+        bool busy() const { return document_.isBusy(); }
+        // 0..1, or negative when the work cannot say how far it is.
+        float busyFraction() const { return task_.progress().fraction(); }
+        const std::string& busyLabel() const { return busyLabel_; }
+        // Asks the worker to stop. A cancelled Open leaves an empty untitled document (the old one was already replaced); a cancelled Save
+        // leaves the file on disk as it was.
+        void cancelBusy();
+        // A job that runs longer than this is cancelled by the poll; if the worker then ignores the cancel for `grace`, the UI is given
+        // back (onBusyFinished) with an error while the document stays busy until the worker really ends.
+        void setBusyLimits(std::chrono::seconds timeout, std::chrono::seconds grace) { timeout_ = timeout; grace_ = grace; }
+        newui::Delegate<SketchDocumentController> onBusyStarted, onBusyProgress, onBusyFinished;
+        // Runs `task` now when called on the UI thread, otherwise posts it there. The document fires onModifiedChanged from the worker
+        // during a background Open / Save; handlers that touch the UI go through this.
+        void onUiThread(std::function<void()> task);
 
         // Each returns false when cancelled or failed (the user has already been told about a failure).
         // New: asks to save changes, then shows the New Document dialog and starts a document with the chosen
@@ -46,6 +77,12 @@ namespace curvy {
         bool exportArtboards();
         // File > Export As PDF: every artboard as a page of one PDF file (pdfexport.h).
         bool exportPdf();
+        // File > Export As EPS: the active artboard as an Encapsulated PostScript file (epsexport.h).
+        bool exportEps();
+        // File > Import PDF / Illustrator: asks for a .pdf or .ai file and replaces the document with its artwork (pdfimport.h), one artboard per
+        // page. The result is an untitled, modified document: Save asks where, so the PDF itself is never overwritten with another format.
+        // An empty path asks with the Open dialog.
+        bool importPdf(const std::string& path = std::string());
         // File > Trace Image: asks for a picture (PNG, BMP or JPEG), traces it into vector shapes (imagetrace.h) and adds them to the page.
         bool traceImage();
         // File > Place Image: asks for a picture (PNG, JPEG, BMP or QOI) and puts it on the active artboard as an Image object.
@@ -93,6 +130,39 @@ namespace curvy {
         void reportError(const std::string& message) override;
 
     private:
+        enum class Outcome { Ok, Failed, Cancelled, TimedOut };
+        // Marks the document busy and runs `work` on the worker; `finish` runs on the UI thread afterwards.
+        bool startBusy(const std::string& label, SketchDocument::Busy kind, std::function<bool()> work, std::function<void(Outcome)> finish);
+        void finishBusy(bool ok);
+        bool tickBusy();
+        bool refuseWhileBusy();
+        void keepPreviousDocument();
+        void completeOpen(const std::string& path);
+        void completeImport(const std::string& file);
+        bool startOpen(const std::string& path);
+        bool startImport(const std::string& file);
+        bool startSave(const std::string& path);
+        // Runs an export on the worker in the app, inline otherwise. failedFile, when set by `work`, names the file the message reports.
+        bool startExport(const std::string& label, std::function<bool()> work, const std::string& doneStatus, const std::string& failMessage,
+                         std::shared_ptr<std::string> failedFile = nullptr);
+
+        // Asks which pages of a multi-page PDF to import and hands the answer to the document; false when the user cancelled.
+        bool choosePdfPages(const std::string& file);
+
+        bool background_ = false;
+        bool askPdfPages_ = false;
+        BackgroundTask task_;
+        newui::RunLoop* uiLoop_ = nullptr;
+        std::thread::id uiThread_;
+        std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
+        std::optional<SketchDocument::Batch> batch_;   // holds back the document's announcements until the worker is done
+        std::string busyLabel_;
+        std::function<void(Outcome)> finish_;
+        newui::RunLoop::TimerHandle busyTimer_ = newui::RunLoop::kInvalidTimerHandle;
+        std::chrono::steady_clock::time_point busyStart_, cancelAsked_;
+        bool cancelRequested_ = false, timedOut_ = false, released_ = false;
+        std::chrono::seconds timeout_{600}, grace_{20};
+
         TraceOptions traceOptions_;   // what the last Trace Image dialog chose
         SketchDocument& document_;
         newui::Frame& frame_;

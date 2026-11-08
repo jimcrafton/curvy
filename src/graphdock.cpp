@@ -4,6 +4,7 @@
 #include "curvy/graphbrush.h"
 #include "curvy/numberscrubber.h"
 #include "curvy/pathnode.h"
+#include "curvy/shapenode.h"
 #include "curvy/stylepanel.h"
 #include "curvy/theme.h"
 
@@ -37,6 +38,7 @@ namespace curvy {
 
         std::string typeLabel(const std::string& nodeType) {
             if (nodeType == kPathNodeType) return "Path";
+            if (nodeType == kShapeNodeType) return "Shape";
             if (nodeType == kTextNodeType) return "Text";
             if (nodeType == kSymbolNodeType) return "Symbol";
             if (nodeType == kImageNodeType) return "Image";
@@ -63,7 +65,7 @@ namespace curvy {
             return "icons/node-shape.svg";
         }
 
-        const char* objectTypeName(SketchObjectType type) {
+        const char* objectTypeLabel(SketchObjectType type) {
             switch (type) {
                 case SketchObjectType::Line: return "Line";
                 case SketchObjectType::Rect: return "Rectangle";
@@ -343,6 +345,44 @@ namespace curvy {
             }
             return SyncReturn::Handled;
         });
+        bypassButton_ = new Button();
+        bypassButton_->setName("graphBypassButton");
+        bypassButton_->setVisible(false);
+        detail_->addChild(bypassButton_);
+        connections_.add(bypassButton_->onClick, [this](Control&) {
+            if (detailNode_.valid()) {
+                toggleBypass(detailNode_);
+            }
+            returnFocusToCanvas();
+            return SyncReturn::Handled;
+        });
+        freezeButton_ = new Button();
+        freezeButton_->setName("graphFreezeButton");
+        freezeButton_->setVisible(false);
+        detail_->addChild(freezeButton_);
+        connections_.add(freezeButton_->onClick, [this](Control&) {
+            if (detailNode_.valid()) {
+                toggleFreeze(detailNode_);
+            }
+            returnFocusToCanvas();
+            return SyncReturn::Handled;
+        });
+        const auto reorderButton = [this](Button*& button, const char* text, const char* name, int steps) {
+            button = new Button();
+            button->setText(text);
+            button->setName(name);
+            button->setVisible(false);
+            detail_->addChild(button);
+            connections_.add(button->onClick, [this, steps](Control&) {
+                if (reorderItem_.valid() && document_.movePaintItem(reorderItem_, steps)) {
+                    status_->setText(steps > 0 ? "Moved forward" : "Moved back");
+                }
+                returnFocusToCanvas();
+                return SyncReturn::Handled;
+            });
+        };
+        reorderButton(backButton_, "Back", "graphBackButton", -1);
+        reorderButton(forwardButton_, "Forward", "graphForwardButton", 1);
         connections_.add(pathButtons_[0]->onClick, [this](Control&) {
             if (detailObject_ != 0) {
                 document_.setSelection({detailObject_});
@@ -399,6 +439,16 @@ namespace curvy {
         }
         if (enterButton_->isVisible()) {
             enterButton_->setBounds(Rect(fieldLeft, y, 64.0f, 22.0f));
+            y += kRowHeight;
+        }
+        if (bypassButton_->isVisible()) {
+            bypassButton_->setBounds(Rect(fieldLeft, y, 80.0f, 22.0f));
+            freezeButton_->setBounds(Rect(fieldLeft + 86.0f, y, 80.0f, 22.0f));
+            y += kRowHeight;
+        }
+        if (backButton_->isVisible()) {
+            backButton_->setBounds(Rect(fieldLeft, y, 80.0f, 22.0f));
+            forwardButton_->setBounds(Rect(fieldLeft + 86.0f, y, 80.0f, 22.0f));
             y += kRowHeight;
         }
         auto section = [&](Label* header, Label* none, std::vector<LinkRow>& links) {
@@ -724,7 +774,7 @@ namespace curvy {
             row.summary = "Placement";
         } else if (object != nullptr) {
             row.text = !object->name().empty() ? object->name()
-                : object->isText() ? "\"" + object->text().substr(0, 24) + "\"" : std::string("<") + objectTypeName(object->type()) + ">";
+                : object->isText() ? "\"" + object->text().substr(0, 24) + "\"" : std::string("<") + objectTypeLabel(object->type()) + ">";
             const SketchPaint& paint = object->isClosed() && !object->fill().isNone() ? object->fill() : object->stroke();
             if (paint.kind() == SketchPaint::Kind::Solid) {
                 row.chip = true;
@@ -805,7 +855,7 @@ namespace curvy {
                         describe(node, object.graphRef());
                     }
                     if (node.node == 0) {
-                        node.text = object.name().empty() ? std::string("<") + objectTypeName(object.type()) + ">" : object.name();
+                        node.text = object.name().empty() ? std::string("<") + objectTypeLabel(object.type()) + ">" : object.name();
                         node.icon = iconForType("");
                     }
                     node.objectId = object.id();
@@ -907,6 +957,10 @@ namespace curvy {
             mix(hashText(key));
         }
         mix(detailNode_.key());
+        if (detailNode_.valid() && document_.hasNode(detailNode_)) {
+            const jitnodes::Node& shown = document_.node(detailNode_);
+            mix(std::size_t(shown.bypassed()) + 2 * std::size_t(shown.frozen()));
+        }
         mix(hashText(selectedKey_));
         return h;
     }
@@ -1062,11 +1116,14 @@ namespace curvy {
             for (std::size_t i = 0; i < rows_.size() && !selected.has_value(); ++i) {
                 const GraphRow& candidate = rows_[i];
                 const bool wanted = pass == 0 ? candidate.key == selectedKey_ : !candidate.look;
-                if (wanted && candidate.kind == GraphRow::Kind::Node && candidate.objectId != 0 && std::find(chosen.begin(), chosen.end(), candidate.objectId) != chosen.end()) {
+                if (pass == 0 && wanted && candidate.kind == GraphRow::Kind::Layer && chosen == shownSelection_) {
+                    selected = raw->pathOf(i);   // a layer has no object to follow: its row stays selected (Back / Forward rebuild the tree)
+                } else if (wanted && candidate.kind == GraphRow::Kind::Node && candidate.objectId != 0 && std::find(chosen.begin(), chosen.end(), candidate.objectId) != chosen.end()) {
                     selected = raw->pathOf(i);
                 }
             }
         }
+        shownSelection_ = chosen;
         tree_->clearSelection();
         if (selected.has_value()) {
             tree_->setSelectedPath(selected);
@@ -1257,6 +1314,56 @@ namespace curvy {
         if (enterButton_ != nullptr) {
             enterButton_->setVisible(false);
         }
+        if (bypassButton_ != nullptr) {
+            bypassButton_->setVisible(false);
+            freezeButton_->setVisible(false);
+        }
+        if (backButton_ != nullptr) {
+            backButton_->setVisible(false);
+            forwardButton_->setVisible(false);
+        }
+        reorderItem_ = NodeRef();
+    }
+
+    void GraphDock::returnFocusToCanvas() {
+        if (RootView* root = canvas_.rootView()) {
+            if (SubView* target = UIInputManager::instance().resolveClickFocusTarget(&canvas_)) {
+                root->setFocusedSubView(target);
+            }
+        }
+    }
+
+    void GraphDock::toggleBypass(const NodeRef& id) {
+        if (!document_.hasNode(id)) {
+            return;
+        }
+        jitnodes::Node& node = document_.node(id);
+        const bool on = !node.bypassed();
+        const jitnodes::GraphSnapshot before = document_.snapshotGraph();
+        node.setBypassed(on);
+        document_.commitGraphEdit(before, on ? "Bypass node" : "Remove bypass");
+        status_->setText(on ? "Node bypassed" : "Bypass removed");
+    }
+
+    void GraphDock::toggleFreeze(const NodeRef& id) {
+        if (!document_.hasNode(id)) {
+            return;
+        }
+        jitnodes::Network& net = document_.networkOf(id.scope);
+        jitnodes::Node& node = net.node(id.id);
+        const bool on = !node.frozen();
+        if (on && node.bypassed()) {
+            status_->setText("A bypassed node cannot be frozen");
+            return;
+        }
+        const jitnodes::GraphSnapshot before = document_.snapshotGraph();
+        if (on) {
+            net.freezeNode(id.id);
+        } else {
+            node.setFrozenGeometry(nullptr);
+        }
+        document_.commitGraphEdit(before, on ? "Freeze node" : "Unfreeze node");
+        status_->setText(on ? "Node frozen" : "Node unfrozen");
     }
 
     void GraphDock::resetTransform(const NodeRef& id) {
@@ -1599,6 +1706,28 @@ namespace curvy {
                 number("breakAngle", 5.0, 175.0);
                 number("flipAlong", 0.0, 1.0);
                 number("flipAcross", 0.0, 1.0);
+            } else if (type == kShapeNodeType) {
+                const std::string kind = node.getString("kind");
+                setChoiceRow(at++, "kind", kind, {"polygon", "star", "roundRect", "arc"}, [this, id](const std::string& value) { document_.setGraphString(id, "kind", value); });
+                std::vector<const char*> names = {"centerX", "centerY"};
+                if (kind == "polygon") {
+                    names.insert(names.end(), {"points", "outer", "angle"});
+                } else if (kind == "star") {
+                    names.insert(names.end(), {"points", "outer", "innerRatio", "angle"});
+                } else if (kind == "roundRect") {
+                    names.insert(names.end(), {"width", "height", "radius", "angle"});
+                } else {
+                    names.insert(names.end(), {"outer", "start", "sweep"});
+                }
+                for (const char* name : names) {
+                    setRow(at++, name, numberText(shownParam(node, name)), [this, id, name](const std::string& value) {
+                        double number = 0.0;
+                        if (parseNumber(value, number)) {
+                            document_.setGraphParam(id, name, float(number));
+                        }
+                    });
+                    scrubRow(at - 1, id, name, -100000.0, 100000.0);
+                }
             } else if (type == kTagNodeType || type == kMovePointsNodeType) {
                 auto textRow = [&](const char* caption, const char* name) {
                     setRow(at++, caption, node.getString(name), [this, id, name](const std::string& value) { document_.setGraphString(id, name, value); });
@@ -1656,10 +1785,33 @@ namespace curvy {
                     enterButton_->setVisible(true);
                 }
             }
+            if (!isAppearanceNodeType(type) && type != kSubnetNodeType) {
+                bypassButton_->setText(node.bypassed() ? "Unbypass" : "Bypass");
+                freezeButton_->setText(node.frozen() ? "Unfreeze" : "Freeze");
+                bypassButton_->setVisible(true);
+                freezeButton_->setVisible(true);
+            }
             showLinks(id);
         } else {
             detailTitle_->setText(row->text);
             detailKind_->setText("");
+        }
+        reorderItem_ = NodeRef();
+        if (row != nullptr) {
+            if (row->kind == GraphRow::Kind::Layer) {
+                reorderItem_ = document_.layerSubnetOf(row->layerId);
+            } else if (row->kind == GraphRow::Kind::Group) {
+                reorderItem_ = row->groupId != 0 ? document_.groupSubnetOf(row->groupId) : NodeRef();
+            } else if (detailNode_.valid() && !isAppearanceNodeType(document_.node(detailNode_).typeName())) {
+                reorderItem_ = detailNode_;
+            }
+        }
+        if (reorderItem_.valid()) {
+            const bool back = document_.canMovePaintItem(reorderItem_, -1), forward = document_.canMovePaintItem(reorderItem_, 1);
+            backButton_->setEnabled(back);
+            forwardButton_->setEnabled(forward);
+            backButton_->setVisible(back || forward);
+            forwardButton_->setVisible(back || forward);
         }
         layoutDetail();
         restyle();

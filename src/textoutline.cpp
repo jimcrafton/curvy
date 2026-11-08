@@ -15,6 +15,12 @@ namespace curvy {
             holder.setBold(style.bold);
             holder.setItalic(style.italic);
             BLFont* font = holder.blFont();
+            if ((font == nullptr || !font->is_valid()) && !fontName.empty()) {   // a font that is not installed: the default one
+                holder = newui::Font(defaultTextFontName(), float(std::max(1.0, fontSize)));
+                holder.setBold(style.bold);
+                holder.setItalic(style.italic);
+                font = holder.blFont();
+            }
             return font != nullptr && font->is_valid() ? font : nullptr;
         }
 
@@ -76,6 +82,12 @@ namespace curvy {
 
     std::string defaultTextFontName() {
         return newui::FontManager::getSystemFont(newui::SystemUIFont::Message).name();
+    }
+
+    bool textFontAvailable(const std::string& fontName) {
+        newui::Font holder(fontName, 12.0f);
+        BLFont* font = holder.blFont();
+        return font != nullptr && font->is_valid();
     }
 
     double textLineHeight(const std::string& fontName, double fontSize, const TextStyle& style) {

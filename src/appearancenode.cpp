@@ -206,15 +206,28 @@ namespace curvy {
             }
         }
 
+        // What a new node of this kind declares. It is the same for every node, and nodes are made by the thousand on an import.
+        const AppearanceParams& declaredParams(AppearanceKind kind) {
+            static const std::array<AppearanceParams, 3> all = [] {
+                std::array<AppearanceParams, 3> made;
+                const AppearanceKind kinds[3] = {AppearanceKind::Fill, AppearanceKind::Stroke, AppearanceKind::Effect};
+                for (int i = 0; i < 3; ++i) {
+                    // A solid paint is the shape of the node, so declare every group; which of them count is decided by "paint".
+                    AppearanceItem item = defaultItem(kinds[i]);
+                    if (kinds[i] != AppearanceKind::Effect) {
+                        item.paint = SketchPaint::solid(SketchColor::gray(0.0f));
+                    }
+                    made[i] = full(item);
+                }
+                return made;
+            }();
+            return all[kind == AppearanceKind::Stroke ? 1 : kind == AppearanceKind::Effect ? 2 : 0];
+        }
+
         class AppearanceNode : public jitnodes::Node {
         public:
             AppearanceNode(const char* type, AppearanceKind kind) : Node(type, 1) {
-                // A solid paint is the shape of the node, so declare every group; which of them count is decided by "paint".
-                AppearanceItem item = defaultItem(kind);
-                if (kind != AppearanceKind::Effect) {
-                    item.paint = SketchPaint::solid(SketchColor::gray(0.0f));
-                }
-                for (const auto& [name, value] : full(item).numbers) {
+                for (const auto& [name, value] : declaredParams(kind).numbers) {
                     declareFloat(name, value);
                 }
                 if (kind != AppearanceKind::Effect) {
