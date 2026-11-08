@@ -58,6 +58,8 @@ namespace curvy {
         add("file.traceImage", [this]() { files_.traceImage(); });
         add("file.placeImage", [this]() { files_.placeImage(); });
         add("file.exportPdf", [this]() { files_.exportPdf(); });
+        add("file.exportEps", [this]() { files_.exportEps(); });
+        add("file.importPdf", [this]() { files_.importPdf(); });
         add("file.exportArtboards", [this]() { files_.exportArtboards(); });
         add("file.exit", [this]() {
             if (files_.canClose()) {

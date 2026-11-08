@@ -47,7 +47,7 @@ namespace curvy {
         if (!object.stroke().isNone() && object.nearestOnPath(point, t, distance) && distance <= object.strokeWidth() * 0.5 + tolerance) {
             return ScrubPart::Stroke;
         }
-        if (object.isClosed() && !object.fill().isNone() && object.geometry().hit_test(point, BL_FILL_RULE_NON_ZERO) == BL_HIT_TEST_IN) {
+        if (object.isClosed() && !object.fill().isNone() && object.geometry().hit_test(point, object.fillEvenOdd() ? BL_FILL_RULE_EVEN_ODD : BL_FILL_RULE_NON_ZERO) == BL_HIT_TEST_IN) {
             return ScrubPart::Fill;
         }
         return ScrubPart::None;

@@ -106,28 +106,31 @@ namespace curvy {
                     default: break;
                 }
             }
+            // Resizing grows the arrays to exactly what is asked, so it is done once rather than per figure.
+            const std::size_t base = geometry.pointCount();
+            std::size_t total = base;
+            for (const Figure& figure : figures) {
+                if (figure.points.size() >= 4) {
+                    total += figure.curved ? figure.points.size() : (figure.points.size() + 2) / 3;
+                }
+            }
+            geometry.resizePoints(total);
+            float* x = geometry.x();
+            float* y = geometry.y();
+            std::size_t first = base;
             for (const Figure& figure : figures) {
                 if (figure.points.size() < 4) {
                     continue;
                 }
-                std::vector<BLPoint> points;
-                if (figure.curved) {
-                    points = figure.points;
-                } else {
-                    for (std::size_t k = 0; k < figure.points.size(); k += 3) {
-                        points.push_back(figure.points[k]);
-                    }
+                const std::size_t step = figure.curved ? 1 : 3;
+                std::size_t count = 0;
+                for (std::size_t k = 0; k < figure.points.size(); k += step, ++count) {
+                    x[first + count] = float(figure.points[k].x);
+                    y[first + count] = float(figure.points[k].y);
                 }
-                const std::uint32_t first = std::uint32_t(geometry.pointCount());
-                geometry.resizePoints(first + points.size());
-                float* x = geometry.x();
-                float* y = geometry.y();
-                for (std::size_t k = 0; k < points.size(); ++k) {
-                    x[first + k] = float(points[k].x);
-                    y[first + k] = float(points[k].y);
-                }
-                geometry.addPrimitive({first, std::uint32_t(points.size()), figure.closed,
+                geometry.addPrimitive({std::uint32_t(first), std::uint32_t(count), figure.closed,
                     figure.curved ? jitnodes::PrimKind::cubic : jitnodes::PrimKind::polyline});
+                first += count;
             }
         }
 
@@ -626,12 +629,14 @@ namespace curvy {
         if (shape.pointCount() == 0) {
             return;
         }
-        float x0 = shape.x()[0], x1 = x0, y0 = shape.y()[0], y1 = y0;
+        const float* xs = shape.x();   // each call is a name lookup
+        const float* ys = shape.y();
+        float x0 = xs[0], x1 = x0, y0 = ys[0], y1 = y0;
         for (std::size_t i = 1; i < shape.pointCount(); ++i) {
-            x0 = std::min(x0, shape.x()[i]);
-            x1 = std::max(x1, shape.x()[i]);
-            y0 = std::min(y0, shape.y()[i]);
-            y1 = std::max(y1, shape.y()[i]);
+            x0 = std::min(x0, xs[i]);
+            x1 = std::max(x1, xs[i]);
+            y0 = std::min(y0, ys[i]);
+            y1 = std::max(y1, ys[i]);
         }
         node.setFloat("pivotX", (x0 + x1) * 0.5f);
         node.setFloat("pivotY", (y0 + y1) * 0.5f);
@@ -1055,9 +1060,13 @@ namespace curvy {
         if (!positions || a.pointCount() == 0) {
             return true;
         }
+        const float* ax = a.x();   // each x() / y() call is a name lookup
+        const float* ay = a.y();
+        const float* bx = b.x();
+        const float* by = b.y();
         for (std::size_t i = 0; i < a.pointCount(); ++i) {
-            const double slack = tolerance * (1.0 + std::max(std::fabs(a.x()[i]), std::fabs(a.y()[i])));
-            if (std::fabs(double(a.x()[i]) - b.x()[i]) > slack || std::fabs(double(a.y()[i]) - b.y()[i]) > slack) {
+            const double slack = tolerance * (1.0 + std::max(std::fabs(ax[i]), std::fabs(ay[i])));
+            if (std::fabs(double(ax[i]) - bx[i]) > slack || std::fabs(double(ay[i]) - by[i]) > slack) {
                 return false;
             }
         }

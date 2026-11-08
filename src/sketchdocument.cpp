@@ -3,7 +3,8 @@
 #include "curvy/gzip.h"
 #include "curvy/pathnode.h"
 #include "curvy/sketchbin.h"
-#include "curvy/sketchsvg.h"
+#include "curvy/io/pdf/pdfimport.h"
+#include "curvy/io/svg/sketchsvg.h"
 
 #include <algorithm>
 #include <cctype>
@@ -1399,23 +1400,41 @@ namespace curvy {
         std::ostringstream buffer;
         buffer << in.rdbuf();
         std::string text = buffer.str();
-        if (isBinaryDocument(text)) {   // .skb: told by its first bytes, not its name
-            return documentFromBinary(text, *this);
-        }
-        if (isGzip(text)) {   // .svgz or a compressed .curvy: told by its first bytes, not its name
-            std::string inflated;
-            if (!gzipDecompress(text, inflated)) {
-                return false;
+        lastError_.clear();
+        // The readers build into this document, so a read that fails or is cancelled halfway has already replaced what was open: the
+        // document is written out first and put back then (inside load(), so the modified flag and the path stay as they were).
+        const std::string before = svgFromDocument(*this);
+        const bool ok = [&]() {
+            if (isBinaryDocument(text)) {   // .skb: told by its first bytes, not its name
+                return documentFromBinary(text, *this);
             }
-            text = std::move(inflated);
+            if (isGzip(text)) {   // .svgz or a compressed .curvy: told by its first bytes, not its name
+                std::string inflated;
+                if (!gzipDecompress(text, inflated)) {
+                    return false;
+                }
+                text = std::move(inflated);
+            }
+            if (isCurvyDocument(text)) {
+                return documentFromCurvy(text, *this);
+            }
+            if (isPdfDocument(text)) {   // PDF / Illustrator: told by its first bytes, not its name (the controller makes it an untitled import)
+                PdfImportOptions options;
+                options.progress = taskProgress_;
+                options.pages = std::move(pdfPages_);
+                pdfPages_.clear();
+                return documentFromPdf(text, *this, options, &lastError_);
+            }
+            return documentFromSvg(text, *this, taskProgress_);
+        }();
+        if (!ok) {
+            documentFromSvg(before, *this);
         }
-        if (isCurvyDocument(text)) {
-            return documentFromCurvy(text, *this);
-        }
-        return documentFromSvg(text, *this);
+        return ok;
     }
 
     bool SketchDocument::writeToFile(const std::string& path) {
+        // The text is made before the file is opened: a cancelled save must leave the old file as it was.
         std::string text;
         if (hasExtension(path, ".curvy") || hasExtension(path, ".curvyz")) {
             if (!curvyFileSupports(*this)) {   // refuse rather than save a file that silently drops text, symbols, brushes or images
@@ -1427,7 +1446,10 @@ namespace curvy {
                 text = gzipCompress(text);
             }
         } else {
-            text = hasExtension(path, ".skb") ? binaryFromDocument(*this) : svgFromDocument(*this);
+            text = hasExtension(path, ".skb") ? binaryFromDocument(*this) : svgFromDocument(*this, taskProgress_);
+            if (taskProgress_ != nullptr && taskProgress_->cancelled()) {
+                return false;
+            }
             if (hasExtension(path, ".svgz")) {
                 text = gzipCompress(text);
             }
@@ -1577,6 +1599,15 @@ namespace curvy {
         for (std::size_t id : selection_) {
             if (SketchObject* object = findById(id)) {
                 if (AppearanceItem* item = object->activeItemPtr(kind)) { item->visible = visible; }
+            }
+        }
+        changed();
+    }
+
+    void SketchDocument::setSelectionFillEvenOdd(bool evenOdd) {
+        for (std::size_t id : selection_) {
+            if (SketchObject* object = findById(id)) {
+                if (AppearanceItem* item = object->activeItemPtr(AppearanceKind::Fill)) { item->evenOdd = evenOdd; }
             }
         }
         changed();

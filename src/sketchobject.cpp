@@ -1595,6 +1595,9 @@ namespace curvy {
             {"Color Dodge", "color-dodge", BL_COMP_OP_COLOR_DODGE}, {"Color Burn", "color-burn", BL_COMP_OP_COLOR_BURN},
             {"Hard Light", "hard-light", BL_COMP_OP_HARD_LIGHT}, {"Soft Light", "soft-light", BL_COMP_OP_SOFT_LIGHT},
             {"Difference", "difference", BL_COMP_OP_DIFFERENCE}, {"Exclusion", "exclusion", BL_COMP_OP_EXCLUSION},
+            // Blend2D has no operator for these four; compositeLayer blends them by hand and drawItem draws them as a plain layer.
+            {"Hue", "hue", BL_COMP_OP_SRC_OVER}, {"Saturation", "saturation", BL_COMP_OP_SRC_OVER},
+            {"Color", "color", BL_COMP_OP_SRC_OVER}, {"Luminosity", "luminosity", BL_COMP_OP_SRC_OVER},
         };
     }
 
@@ -1648,9 +1651,10 @@ namespace curvy {
         if (type_ == SketchObjectType::Symbol || type_ == SketchObjectType::Image) {
             return outline.hit_test(point, BL_FILL_RULE_NON_ZERO) == BL_HIT_TEST_IN;
         }
-        if (isClosed() && outline.hit_test(point, BL_FILL_RULE_NON_ZERO) == BL_HIT_TEST_IN) {
+        if (isClosed()) {
             for (const AppearanceItem& item : items_) {
-                if (item.kind == AppearanceKind::Fill && item.visible && !item.paint.isNone()) {
+                if (item.kind == AppearanceKind::Fill && item.visible && !item.paint.isNone() &&
+                    outline.hit_test(point, item.evenOdd ? BL_FILL_RULE_EVEN_ODD : BL_FILL_RULE_NON_ZERO) == BL_HIT_TEST_IN) {
                     return true;
                 }
             }
@@ -1794,7 +1798,90 @@ namespace curvy {
             return true;
         }
 
+        struct Rgbf { float r, g, b; };
+
+        float lumOf(const Rgbf& c) { return 0.3f * c.r + 0.59f * c.g + 0.11f * c.b; }
+
+        Rgbf clipColor(Rgbf c) {
+            const float l = lumOf(c), n = std::min(c.r, std::min(c.g, c.b)), x = std::max(c.r, std::max(c.g, c.b));
+            if (n < 0.0f) {
+                c = {l + (c.r - l) * l / (l - n), l + (c.g - l) * l / (l - n), l + (c.b - l) * l / (l - n)};
+            }
+            if (x > 1.0f) {
+                c = {l + (c.r - l) * (1.0f - l) / (x - l), l + (c.g - l) * (1.0f - l) / (x - l), l + (c.b - l) * (1.0f - l) / (x - l)};
+            }
+            return c;
+        }
+
+        Rgbf withLum(const Rgbf& c, float l) {
+            const float d = l - lumOf(c);
+            return clipColor({c.r + d, c.g + d, c.b + d});
+        }
+
+        float satOf(const Rgbf& c) { return std::max(c.r, std::max(c.g, c.b)) - std::min(c.r, std::min(c.g, c.b)); }
+
+        Rgbf withSat(const Rgbf& c, float s) {
+            const float lo = std::min(c.r, std::min(c.g, c.b)), hi = std::max(c.r, std::max(c.g, c.b));
+            if (hi <= lo) {
+                return {0.0f, 0.0f, 0.0f};
+            }
+            const float k = s / (hi - lo);
+            return {(c.r - lo) * k, (c.g - lo) * k, (c.b - lo) * k};
+        }
+
+        Rgbf nonSeparable(BlendMode mode, const Rgbf& backdrop, const Rgbf& source) {
+            switch (mode) {
+                case BlendMode::Hue: return withLum(withSat(source, satOf(backdrop)), lumOf(backdrop));
+                case BlendMode::Saturation: return withLum(withSat(backdrop, satOf(source)), lumOf(backdrop));
+                case BlendMode::Color: return withLum(source, lumOf(backdrop));
+                default: return withLum(backdrop, lumOf(source));
+            }
+        }
+
+        // Hue, Saturation, Color and Luminosity (W3C compositing): the layer is mixed into the pixels already on the target by hand.
+        void compositeNonSeparable(BLContext& ctx, const DeviceLayer& layer, double opacity, BlendMode mode) {
+            ctx.flush(BL_CONTEXT_FLUSH_SYNC);
+            BLImage* target = ctx.target_image();
+            BLImageData td, ld;
+            if (target == nullptr || target->get_data(&td) != BL_SUCCESS || layer.image.get_data(&ld) != BL_SUCCESS || td.format != BL_FORMAT_PRGB32) {
+                return;
+            }
+            const float alpha = float(opacity);
+            for (int y = 0; y < int(ld.size.h); ++y) {
+                const int ty = layer.top + y;
+                if (ty < 0 || ty >= int(td.size.h)) { continue; }
+                const std::uint32_t* from = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(ld.pixel_data) + std::ptrdiff_t(y) * ld.stride);
+                std::uint32_t* to = reinterpret_cast<std::uint32_t*>(static_cast<std::uint8_t*>(td.pixel_data) + std::ptrdiff_t(ty) * td.stride);
+                for (int x = 0; x < int(ld.size.w); ++x) {
+                    const int tx = layer.left + x;
+                    const std::uint32_t s = from[x];
+                    if (tx < 0 || tx >= int(td.size.w) || (s >> 24) == 0) { continue; }
+                    const float as = float(s >> 24) / 255.0f * alpha;
+                    const float sa = float(s >> 24) / 255.0f;
+                    const Rgbf cs = {float((s >> 16) & 255u) / 255.0f / sa, float((s >> 8) & 255u) / 255.0f / sa, float(s & 255u) / 255.0f / sa};
+                    const std::uint32_t d = to[tx];
+                    const float ab = float(d >> 24) / 255.0f;
+                    Rgbf cb = {0.0f, 0.0f, 0.0f};
+                    if (ab > 0.0f) {
+                        cb = {float((d >> 16) & 255u) / 255.0f / ab, float((d >> 8) & 255u) / 255.0f / ab, float(d & 255u) / 255.0f / ab};
+                    }
+                    const Rgbf mixed = nonSeparable(mode, cb, {std::min(1.0f, cs.r), std::min(1.0f, cs.g), std::min(1.0f, cs.b)});
+                    const float ao = as + ab - as * ab;
+                    auto channel = [&](float source, float backdrop, float blended) {
+                        return std::min(1.0f, std::max(0.0f, as * (1.0f - ab) * source + as * ab * blended + (1.0f - as) * ab * backdrop));
+                    };
+                    const auto byte = [](float v) { return std::uint32_t(std::lround(v * 255.0f)); };
+                    to[tx] = (byte(ao) << 24) | (byte(channel(cs.r, cb.r, mixed.r)) << 16) | (byte(channel(cs.g, cb.g, mixed.g)) << 8) |
+                        byte(channel(cs.b, cb.b, mixed.b));
+                }
+            }
+        }
+
         void compositeLayer(BLContext& ctx, const DeviceLayer& layer, double opacity, BlendMode mode) {
+            if (mode >= BlendMode::Hue) {
+                compositeNonSeparable(ctx, layer, opacity, mode);
+                return;
+            }
             ctx.save();
             BLMatrix2D toDevice = ctx.meta_transform();
             toDevice.invert();
@@ -2027,6 +2114,7 @@ namespace curvy {
         if (item.kind == AppearanceKind::Fill) {
             if (isClosed() && setPaintStyle(ctx, item.paint, frame, false)) {
                 ctx.set_global_alpha(item.opacity);
+                ctx.set_fill_rule(item.evenOdd ? BL_FILL_RULE_EVEN_ODD : BL_FILL_RULE_NON_ZERO);
                 ctx.fill_path(shown);
             }
         } else {

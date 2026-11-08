@@ -1,6 +1,7 @@
 #pragma once
 
 #include "curvy/appearancenode.h"
+#include "curvy/backgroundtask.h"
 #include "curvy/brush.h"
 #include "curvy/graphdocument.h"
 #include "curvy/pathops.h"
@@ -10,6 +11,7 @@
 #include <newui/models.h>
 #include <newui/undostack.h>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -876,6 +878,7 @@ namespace curvy {
         void setSelectionItemOpacity(AppearanceKind kind, double opacity);
         void setSelectionItemBlendMode(AppearanceKind kind, BlendMode mode);
         void setSelectionItemVisible(AppearanceKind kind, bool visible);
+        void setSelectionFillEvenOdd(bool evenOdd);
         // Each of these is one undo step and returns false when nothing changed.
         // A new fill / stroke on top of the stack (from the document's default paints), which becomes the active one.
         bool addAppearanceItem(AppearanceKind kind);
@@ -939,6 +942,21 @@ namespace curvy {
         // Writes the document to `path` in the format its extension names, without making that its file or clearing its modified flag
         // (a recovery copy).
         bool saveCopyTo(const std::string& path) { return writeToFile(path); }
+
+
+        // What a worker thread is doing to the document (the file controller sets this around a background Open or Save). While it is
+        // anything but None the document is not to be edited, saved, replaced or closed: the worker owns it. Commands check isBusy().
+        enum class Busy { None, Loading, Saving };
+        Busy busy() const { return busyFlag_.value.load(); }
+        bool isBusy() const { return busy() != Busy::None; }
+        void setBusy(Busy busy) { busyFlag_.value.store(busy); }
+        // Where readFromFile / writeToFile report how far they are and look for a cancel; null (the default) means neither.
+        void setTaskProgress(TaskProgress* progress) { taskProgress_ = progress; }
+        // Why the last readFromFile refused its file (empty when it gave no reason); read after the load has finished.
+        // The pages of a PDF the next load() reads (1-based; empty for all). Used by that one load and then cleared.
+        void setPdfPages(std::vector<int> pages) { pdfPages_ = std::move(pages); }
+        const std::string& lastError() const { return lastError_; }
+        void clearLastError() { lastError_.clear(); }
 
     protected:
         bool readFromFile(const std::string& path) override;
@@ -1136,6 +1154,17 @@ namespace curvy {
         std::size_t activePattern_ = 0;
         int batchDepth_ = 0;
         bool batchPending_ = false;
+        // Atomic so a worker's reads see the UI thread's set; movable (the document is) with the moved-to document not busy.
+        struct BusyFlag {
+            std::atomic<Busy> value{Busy::None};
+            BusyFlag() = default;
+            BusyFlag(BusyFlag&&) noexcept {}
+            BusyFlag& operator=(BusyFlag&&) noexcept { return *this; }
+        };
+        BusyFlag busyFlag_;
+        TaskProgress* taskProgress_ = nullptr;
+        std::string lastError_;
+        std::vector<int> pdfPages_;
         std::vector<std::shared_ptr<const BrushDef>> brushes_;
         std::size_t activeBrush_ = 0;
         std::size_t nextBrushId_ = 1;

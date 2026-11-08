@@ -604,13 +604,14 @@ namespace curvy {
             }
             for (std::size_t i = 0; i < items.size(); ++i) {
                 jitnodes::Node& node = net.node(chain[i]);
-                const AppearanceParams want = paramsOf(items[i]);
+                AppearanceParams want = paramsOf(items[i]);
                 const auto held = appearanceSynced_.find(NodeRef(scope, chain[i]));
                 if (held == appearanceSynced_.end() || held->second != want) {
-                    if (paramsOf(node) != want) {
+                    // store() leaves equal values alone, so a node made a moment ago needs no comparison first.
+                    if (i >= keep || paramsOf(node) != want) {
                         store(node, want);
                     }
-                    appearanceSynced_[NodeRef(scope, chain[i])] = want;
+                    appearanceSynced_[NodeRef(scope, chain[i])] = std::move(want);
                 }
             }
             appearanceChains_[object->graphRef()] = AppearanceChain{chain, object->appearanceRevision()};

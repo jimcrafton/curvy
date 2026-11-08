@@ -7,9 +7,13 @@
 #include "curvy/pathops.h"
 #include "curvy/imagetrace.h"
 #include "curvy/imagedata.h"
-#include "curvy/pdfexport.h"
+#include "curvy/io/pdf/pdfexport.h"
+#include "curvy/io/eps/epsexport.h"
+#include "curvy/io/pdf/pdfimport.h"
+#include "curvy/io/pdf/fontprogram.h"
+#include "curvy/io/pdf/pdfcrypt.h"
 #include "curvy/gzip.h"
-#include "curvy/sketchsvg.h"
+#include "curvy/io/svg/sketchsvg.h"
 #include "curvy/gzip.h"
 #include "curvy/sketchexport.h"
 #include "curvy/numberscrubber.h"
@@ -33,6 +37,8 @@
 #include <jitnodes/geo/topology.h>
 
 #include <array>
+#include <atomic>
+#include <thread>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -1297,6 +1303,147 @@ TEST(SketchStrokeOptions, WidthProfileTapersRendersAndRoundTrips) {
     EXPECT_NEAR(copy.object(0).strokeOptions().widths[1].left, 0.1, 1e-9);
 }
 
+TEST(SvgStylesheet, ClassRulesInAStyleElementColorTheShapes) {
+    const std::string svg =
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>"
+        "<defs><style type='text/css'>.a {fill:#FF0000} .b, rect.c {fill:#00FF00} .d {fill:none}</style></defs>"
+        "<path class='a' d='M0 0L10 0L10 10Z'/>"
+        "<rect class='x c' width='5' height='5'/>"
+        "<path class='d' d='M0 0L5 0L5 5Z'/>"
+        "<path class='a' style='fill:#0000FF' d='M0 0L9 0L9 9Z'/>"
+        "</svg>";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromSvg(svg, doc));
+    ASSERT_EQ(doc.objectCount(), 4u);
+    EXPECT_EQ(doc.object(0).fill().color().toHex(), "#ff0000");
+    EXPECT_EQ(doc.object(1).fill().color().toHex(), "#00ff00");
+    EXPECT_TRUE(doc.object(2).fill().isNone());
+    EXPECT_EQ(doc.object(3).fill().color().toHex(), "#0000ff");
+}
+
+TEST(BackgroundTask, RunsTheJobOnAnotherThreadAndReportsWhenItEnds) {
+    curvy::BackgroundTask task;
+    std::atomic<bool> release{false};
+    std::thread::id worker;
+    ASSERT_TRUE(task.start([&](curvy::TaskProgress& progress) {
+        worker = std::this_thread::get_id();
+        progress.set(0.5f);
+        while (!release) { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
+    }));
+    EXPECT_TRUE(task.running());
+    EXPECT_FALSE(task.start([](curvy::TaskProgress&) {}));   // one job at a time
+    EXPECT_FALSE(task.waitFor(std::chrono::milliseconds(20)));   // still going: the wait gives up
+    release = true;
+    EXPECT_TRUE(task.waitFor(std::chrono::seconds(5)));
+    EXPECT_FALSE(task.running());
+    EXPECT_NE(worker, std::this_thread::get_id());
+    EXPECT_FLOAT_EQ(task.progress().fraction(), 0.5f);
+    EXPECT_TRUE(task.start([](curvy::TaskProgress&) {}));   // free for the next one
+}
+
+TEST(BackgroundTask, ACancelReachesTheJobAndAThrowingJobDoesNotEscape) {
+    curvy::BackgroundTask task;
+    std::atomic<bool> sawCancel{false};
+    ASSERT_TRUE(task.start([&](curvy::TaskProgress& progress) {
+        try {
+            for (;;) {
+                progress.check();
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        } catch (const curvy::TaskCancelled&) {
+            sawCancel = true;
+        }
+    }));
+    task.cancel();
+    EXPECT_TRUE(task.waitFor(std::chrono::seconds(5)));
+    EXPECT_TRUE(sawCancel);
+    ASSERT_TRUE(task.start([](curvy::TaskProgress&) { throw std::runtime_error("boom"); }));
+    EXPECT_TRUE(task.waitFor(std::chrono::seconds(5)));
+}
+
+TEST(SvgProgress, ReadingReportsHowFarAndStopsWhenCancelled) {
+    std::string svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>";
+    for (int i = 0; i < 50; ++i) {
+        svg += "<rect width='5' height='5' x='" + std::to_string(i) + "'/>";
+    }
+    svg += "</svg>";
+    SketchDocument doc;
+    curvy::TaskProgress progress;
+    ASSERT_TRUE(documentFromSvg(svg, doc, &progress));
+    EXPECT_EQ(doc.objectCount(), 50u);
+    EXPECT_GT(progress.fraction(), 0.9f);
+
+    SketchDocument cancelled;
+    curvy::TaskProgress stop;
+    stop.cancel();
+    EXPECT_FALSE(documentFromSvg(svg, cancelled, &stop));
+    EXPECT_EQ(cancelled.objectCount(), 0u);
+}
+
+TEST(SvgProgress, ACancelledOrFailedLoadKeepsThePreviousDocument) {
+    const auto path = std::filesystem::temp_directory_path() / "curvy_cancelled_load.svg";
+    std::string svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>";
+    for (int i = 0; i < 20; ++i) {
+        svg += "<rect width='5' height='5' x='" + std::to_string(i) + "'/>";
+    }
+    svg += "</svg>";
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << svg;
+    }
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    doc.add(SketchObject::makeRect(20, 0, 10, 10));
+    doc.add(SketchObject::makeRect(40, 0, 10, 10));
+    EXPECT_TRUE(doc.isModified());
+
+    curvy::TaskProgress stop;
+    stop.cancel();
+    doc.setTaskProgress(&stop);
+    doc.setBusy(SketchDocument::Busy::Loading);
+    EXPECT_FALSE(doc.load(path.string()));
+    doc.setTaskProgress(nullptr);
+    doc.setBusy(SketchDocument::Busy::None);
+    EXPECT_EQ(doc.objectCount(), 3u);
+    EXPECT_TRUE(doc.isModified());
+    EXPECT_FALSE(doc.hasFilePath());
+
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << "%PDF-1.4 but not really";
+    }
+    EXPECT_FALSE(doc.load(path.string()));
+    EXPECT_EQ(doc.objectCount(), 3u);
+    std::filesystem::remove(path);
+}
+
+TEST(SvgProgress, WritingStopsWhenCancelledAndLeavesTheFileAlone) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    curvy::TaskProgress stop;
+    stop.cancel();
+    EXPECT_TRUE(svgFromDocument(doc, &stop).empty());
+
+    const auto path = std::filesystem::temp_directory_path() / "curvy_cancelled_save.svg";
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << "original";
+    }
+    doc.setTaskProgress(&stop);
+    doc.setBusy(SketchDocument::Busy::Saving);
+    EXPECT_TRUE(doc.isBusy());
+    EXPECT_FALSE(doc.save(path.string()));
+    doc.setTaskProgress(nullptr);
+    doc.setBusy(SketchDocument::Busy::None);
+    EXPECT_FALSE(doc.isBusy());
+    std::ifstream in(path, std::ios::binary);
+    std::string kept((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(kept, "original");
+    in.close();
+    std::filesystem::remove(path);
+    std::filesystem::remove(std::filesystem::path(path.string() + ".bak"));
+}
+
 TEST(SketchBlend, ModesBlendWithWhatIsBelowUndoAndSave) {
     SketchDocument doc;
     std::size_t id = doc.add(SketchObject::makeRect(10, 10, 50, 50)).id();
@@ -1498,6 +1645,13 @@ TEST(SketchAppearance, ActiveItemEditsAddDuplicateDeleteMoveAndClear) {
     EXPECT_FALSE(edited.visible);
     doc.undoStack().undo();
     EXPECT_TRUE(object->activeItem(AppearanceKind::Stroke).visible);
+
+    auto beforeRule = doc.snapshotStyle();
+    doc.setSelectionFillEvenOdd(true);
+    EXPECT_TRUE(doc.commitStyle(beforeRule, "Even-Odd Fill"));
+    EXPECT_TRUE(object->fillEvenOdd());
+    doc.undoStack().undo();
+    EXPECT_FALSE(object->fillEvenOdd());
 
     // Deleting walks back to a neighbour; the last item of a kind turns None instead of vanishing.
     std::size_t before_count = object->appearance().size();
@@ -8967,6 +9121,22 @@ TEST(RadialLayout, PointerFindsSlotHubOrOutside) {
     EXPECT_EQ(RadialLayout::slotAt(0, 100, 6), 3);
 }
 
+TEST(RadialLayout, ARingCanBeTurnedToPutASlotAtTheBottom) {
+    RadialRing ring;
+    ring.slots.resize(7);
+    ring.bottomSlot = 3;
+    const newui::Point bottom = RadialLayout::slotCenter(3, 7, ring.phase());
+    EXPECT_NEAR(bottom.x, 0.0, 0.01);
+    EXPECT_GT(bottom.y, 0.0f);
+    EXPECT_EQ(RadialLayout::slotAt(0, 100, 7, ring.phase()), 3);
+    for (int i = 0; i < 7; ++i) {
+        const newui::Point at = RadialLayout::slotCenter(i, 7, ring.phase());
+        EXPECT_EQ(RadialLayout::slotAt(double(at.x), double(at.y), 7, ring.phase()), i);
+    }
+    ring.bottomSlot = -1;
+    EXPECT_EQ(ring.phase(), 0.0);
+}
+
 
 // ---- Hold-key scrubbing and the workspace model ----
 
@@ -9939,4 +10109,718 @@ TEST(ShapeNodeObject, AParametricObjectSurvivesSvgAndKeepsItsShapeNodeInTheGraph
         shapes += loaded.network().node(node).typeName() == kShapeNodeType ? 1 : 0;
     }
     EXPECT_LE(shapes, 1);
+}
+
+
+// ---- EPS export and PDF import ----
+
+TEST(SketchEps, AnArtboardBecomesAnEpsWithItsBoundingBoxAndVectorPaths) {
+    SketchDocument doc;
+    doc.setPageSize(200, 100);
+    SketchObject& rect = doc.add(SketchObject::makeRect(10, 10, 80, 40));
+    rect.setFill(SketchPaint::solid(SketchColor::fromHex("#ff0000")));
+    rect.setStroke(SketchPaint::solid(SketchColor::cmyk(1, 0, 0, 0)));
+    rect.setStrokeWidth(3.0);
+    const std::string eps = epsFromDocument(doc);
+    EXPECT_EQ(eps.rfind("%!PS-Adobe-3.0 EPSF-3.0", 0), 0u);
+    EXPECT_NE(eps.find("%%BoundingBox: 0 0 200 100"), std::string::npos);
+    EXPECT_NE(eps.find("1 0 0 setrgbcolor"), std::string::npos);     // the fill
+    EXPECT_NE(eps.find("1 0 0 0 setcmykcolor"), std::string::npos);  // the stroke keeps its color model
+    EXPECT_NE(eps.find("3 setlinewidth"), std::string::npos);
+    EXPECT_NE(eps.find("10 10 moveto"), std::string::npos);
+    EXPECT_NE(eps.find("[1 0 0 -1 0 100] concat"), std::string::npos);   // document y runs down
+    EXPECT_EQ(eps.substr(eps.size() - 6), "%%EOF\n");
+    const std::string path = (std::filesystem::temp_directory_path() / "sketch_test.eps").string();
+    EXPECT_TRUE(writeEps(doc, path));
+    EXPECT_GT(std::filesystem::file_size(path), 200u);
+    std::filesystem::remove(path);
+}
+
+TEST(SketchEps, GradientsAreVectorStepsAndOpacityMixesWithThePage) {
+    SketchDocument doc;
+    doc.setPageSize(100, 100);
+    SketchObject& a = doc.add(SketchObject::makeRect(0, 0, 100, 50));
+    SketchGradient g = SketchGradient::fromColor(SketchColor::fromHex("#000000"));
+    GradientStop end;
+    end.offset = 1.0;
+    end.color = SketchColor::fromHex("#ffffff");
+    g.stops.push_back(end);
+    g.sortStops();
+    a.setFill(SketchPaint::linear(g));
+    SketchObject& b = doc.add(SketchObject::makeRect(0, 60, 40, 40));
+    SketchColor half = SketchColor::rgb(0, 0, 0);
+    half.setAlpha(0.5f);
+    b.setFill(SketchPaint::solid(half));
+    const std::string eps = epsFromDocument(doc);
+    EXPECT_NE(eps.find("clip newpath"), std::string::npos);
+    EXPECT_NE(eps.find("rectfill"), std::string::npos);
+    EXPECT_EQ(eps.find("shfill"), std::string::npos);                 // no level 3 operators
+    EXPECT_NE(eps.find("0.5 0.5 0.5 setrgbcolor"), std::string::npos);   // black at 50% over the white page
+}
+
+TEST(SketchPdfImport, ARoundTripKeepsShapesColorsAndTheArtboardSize) {
+    SketchDocument doc;
+    doc.setPageSize(200, 100);
+    SketchObject& rect = doc.add(SketchObject::makeRect(10, 20, 80, 40));
+    rect.setFill(SketchPaint::solid(SketchColor::fromHex("#ff0000")));
+    rect.setStroke(SketchPaint::solid(SketchColor::fromHex("#0000ff")));
+    rect.setStrokeWidth(3.0);
+    SketchObject& line = doc.add(SketchObject::makeLine(0, 0, 50, 50));
+    line.setStroke(SketchPaint::solid(SketchColor::fromHex("#00ff00")));
+    line.setStrokeWidth(2.0);
+    SketchDocument loaded;
+    ASSERT_TRUE(isPdfDocument(pdfFromDocument(doc)));
+    ASSERT_TRUE(documentFromPdf(pdfFromDocument(doc), loaded));
+    EXPECT_EQ(loaded.pageWidth(), 200.0f);
+    EXPECT_EQ(loaded.pageHeight(), 100.0f);
+    // The page's white background, then the rectangle's fill and its stroke (a PDF paints them separately), then the line.
+    ASSERT_EQ(loaded.objectCount(), 4u);
+    EXPECT_EQ(loaded.object(0).fill().color().toRgba32().value, 0xFFFFFFFFu);
+    const SketchObject& r = loaded.object(1);
+    const BLBox box = r.geometryBounds();
+    EXPECT_NEAR(box.x0, 10.0, 0.01);
+    EXPECT_NEAR(box.y0, 20.0, 0.01);
+    EXPECT_NEAR(box.x1, 90.0, 0.01);
+    EXPECT_NEAR(box.y1, 60.0, 0.01);
+    EXPECT_EQ(r.fill().color().toRgba32().value, 0xFFFF0000u);
+    const SketchObject& outline = loaded.object(2);
+    EXPECT_EQ(outline.stroke().color().toRgba32().value, 0xFF0000FFu);
+    EXPECT_NEAR(outline.strokeWidth(), 3.0, 1e-6);
+    const BLBox lineBox = loaded.object(3).geometryBounds();
+    EXPECT_NEAR(lineBox.x1, 50.0, 0.01);
+    EXPECT_NEAR(lineBox.y1, 50.0, 0.01);
+    EXPECT_EQ(loaded.object(3).stroke().color().toRgba32().value, 0xFF00FF00u);
+}
+
+TEST(SketchPdfImport, EveryPageBecomesAnArtboardAndCmykAndGradientsComeBack) {
+    SketchDocument doc;
+    doc.setPageSize(200, 100);
+    Artboard second;
+    second.name = "Two";
+    second.x = 300;
+    second.width = 50;
+    second.height = 60;
+    doc.addArtboard(second);
+    SketchObject& cmyk = doc.add(SketchObject::makeRect(310, 10, 20, 20));
+    cmyk.setFill(SketchPaint::solid(SketchColor::cmyk(0.1f, 0.2f, 0.3f, 0.4f)));
+    SketchObject& shaded = doc.add(SketchObject::makeRect(10, 10, 80, 40));
+    SketchGradient g = SketchGradient::fromColor(SketchColor::fromHex("#ff0000"));
+    GradientStop end;
+    end.offset = 1.0;
+    end.color = SketchColor::fromHex("#0000ff");
+    g.stops.push_back(end);
+    g.sortStops();
+    shaded.setFill(SketchPaint::linear(g));
+    SketchDocument loaded;
+    ASSERT_TRUE(documentFromPdf(pdfFromDocument(doc), loaded));
+    ASSERT_EQ(loaded.artboards().size(), 2u);
+    EXPECT_EQ(loaded.artboards()[1].width, 50.0);
+    EXPECT_EQ(loaded.artboards()[1].height, 60.0);
+    ASSERT_GE(loaded.objectCount(), 2u);
+    bool sawCmyk = false, sawGradient = false;
+    for (std::size_t i = 0; i < loaded.objectCount(); ++i) {
+        const SketchObject& o = loaded.object(i);
+        if (o.fill().isGradient()) {
+            sawGradient = o.fill().gradient().stops.size() >= 2;
+        } else if (!o.fill().isNone() && o.fill().color().space() == ColorSpace::CMYK) {
+            sawCmyk = std::fabs(o.fill().color().component(3) - 0.4f) < 1e-3f;
+            // The second artboard sits to the right of the first, with a gap.
+            EXPECT_GT(o.geometryBounds().x0, 200.0);
+        }
+    }
+    EXPECT_TRUE(sawCmyk);
+    EXPECT_TRUE(sawGradient);
+}
+
+TEST(SketchPdfImport, HandWrittenFilesAndFormsAreRead) {
+    // Rotated page, a form XObject with its own matrix, dashes, and no cross-reference table at all.
+    const std::string pdf =
+        "%PDF-1.4\n"
+        "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+        "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 100 200] >> endobj\n"
+        "3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R /Rotate 90 /Resources << /XObject << /F 5 0 R >> >> >> endobj\n"
+        "4 0 obj << /Length 66 >>\nstream\nq 1 0 0 1 10 0 cm /F Do Q [3 2] 0 d 4 w 0 0 m 10 0 l S\nendstream\nendobj\n"
+        "5 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 50 50] /Matrix [2 0 0 2 0 0] /Length 22 >>\nstream\n1 0 0 rg 0 0 5 5 re f\nendstream\nendobj\n"
+        "trailer << /Root 1 0 R >>\n%%EOF\n";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(pdf, doc));
+    EXPECT_EQ(doc.pageWidth(), 200.0f);    // turned a quarter: 100 x 200 becomes 200 x 100
+    EXPECT_EQ(doc.pageHeight(), 100.0f);
+    ASSERT_EQ(doc.objectCount(), 2u);
+    const BLBox box = doc.object(0).geometryBounds();   // 10 x 10 square (5 x 5 scaled by the form's matrix)
+    EXPECT_NEAR(box.x1 - box.x0, 10.0, 0.01);
+    EXPECT_NEAR(box.y1 - box.y0, 10.0, 0.01);
+    EXPECT_EQ(doc.object(0).fill().color().toRgba32().value, 0xFFFF0000u);
+    EXPECT_EQ(doc.object(1).strokeOptions().dashes.size(), 2u);
+}
+
+namespace {
+    std::string handWrittenPdf(const std::string& pageExtras, const std::string& content, const std::string& extraObjects = std::string()) {
+        return "%PDF-1.4\n"
+               "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+               "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 100 100] >> endobj\n"
+               "3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R " + pageExtras + " >> endobj\n"
+               "4 0 obj << /Length " + std::to_string(content.size()) + " >>\nstream\n" + content + "\nendstream\nendobj\n" + extraObjects +
+               "trailer << /Root 1 0 R >>\n%%EOF\n";
+    }
+}
+
+TEST(SketchPdfImport, ABlendModeFromAGraphicsStateIsKeptUntilItIsReset) {
+    const std::string pdf = handWrittenPdf("/Resources << /ExtGState << /M << /BM /Multiply /ca 0.5 >> /N << /BM [/Normal] >> >> >>",
+                                           "/M gs 1 0 0 rg 0 0 10 10 re f /N gs 0 0 1 rg 20 0 10 10 re f");
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(pdf, doc));
+    ASSERT_EQ(doc.objectCount(), 2u);
+    EXPECT_EQ(doc.object(0).blendMode(), BlendMode::Multiply);
+    EXPECT_EQ(doc.object(1).blendMode(), BlendMode::Normal);
+}
+
+TEST(SketchPdfImport, AnImageDrawnUnderAnAlphaKeepsThatOpacity) {
+    const std::string pdf = handWrittenPdf("/Resources << /ExtGState << /A << /ca 0.25 >> >> /XObject << /I 5 0 R >> >>",
+                                           "/A gs 10 0 0 10 0 0 cm /I Do",
+                                           "5 0 obj << /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\nx\nendstream\nendobj\n");
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(pdf, doc));
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_NEAR(doc.object(0).opacity(), 0.25, 1e-6);
+}
+
+TEST(SketchPdfImport, ATransparencyGroupFormCarriesTheOpacityAndBlendModeItWasDrawnWith) {
+    const std::string pdf = handWrittenPdf("/Resources << /ExtGState << /A << /ca 0.25 /BM /Multiply >> >> /XObject << /F 5 0 R >> >>",
+                                           "/A gs /F Do",
+                                           "5 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 100 100] /Group << /S /Transparency >> /Resources << /ExtGState << /B << /ca 1 /BM /Normal >> >> >> /Length 38 >>\n"
+                                           "stream\n/B gs 1 0 0 rg 0 0 10 10 re f\nendstream\nendobj\n");
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(pdf, doc));
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_EQ(doc.object(0).blendMode(), BlendMode::Normal);
+    ASSERT_EQ(doc.object(0).groups().size(), 1u);
+    const GroupProps props = doc.groupProps(doc.object(0).groups()[0]);
+    EXPECT_NEAR(props.opacity, 0.25, 1e-6);
+    EXPECT_EQ(props.blendMode, BlendMode::Multiply);
+}
+
+TEST(SketchPdfImport, AClipBecomesAClippingGroupWhoseTopMemberIsTheMask) {
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf("", "0 0 1 rg 20 20 30 30 re W n 0 0 100 100 re f"), doc));
+    ASSERT_EQ(doc.objectCount(), 2u);
+    ASSERT_EQ(doc.object(0).groups().size(), 1u);
+    const std::size_t group = doc.object(0).groups().front();
+    EXPECT_TRUE(doc.groupProps(group).clip);
+    EXPECT_EQ(doc.clipMaskOf(group), &doc.object(1));
+    const BLBox mask = doc.object(1).geometryBounds();
+    EXPECT_NEAR(mask.x1 - mask.x0, 30.0, 0.01);
+
+    SketchDocument whole;   // a clip to the page itself changes nothing and adds nothing
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf("", "0 0 100 100 re W n 0 0 10 10 re f"), whole));
+    ASSERT_EQ(whole.objectCount(), 1u);
+    EXPECT_TRUE(whole.object(0).groups().empty());
+}
+
+TEST(SketchPdfImport, TextBecomesLiveTextObjectsInTheNamedFamily) {
+    const std::string fonts = "/Resources << /Font << /F1 5 0 R >> >>";
+    const std::string font = "5 0 obj << /Type /Font /Subtype /TrueType /BaseFont /ABCDEF+Arial-BoldMT /FirstChar 32 /LastChar 32 /Widths [278] >> endobj\n";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf(fonts, "1 0 0 rg BT /F1 20 Tf 10 50 Td (Hello) Tj 0 -30 Td [(a) -500 (b) 100 (c)] TJ ET", font), doc));
+    ASSERT_EQ(doc.objectCount(), 2u);
+    const SketchObject& hello = doc.object(0);
+    ASSERT_TRUE(hello.isText());
+    EXPECT_EQ(hello.text(), "Hello");
+    EXPECT_EQ(hello.fontName(), "Arial");
+    EXPECT_TRUE(hello.textStyle().bold);
+    EXPECT_FALSE(hello.textStyle().italic);
+    EXPECT_NEAR(hello.fontSize(), 20.0, 0.01);
+    EXPECT_NEAR(hello.textMatrix().m20, 10.0, 0.01);   // the baseline: 50 up from the bottom of a 100 high page
+    EXPECT_NEAR(hello.textMatrix().m21, 50.0, 0.01);
+    EXPECT_EQ(hello.fill().color().toRgba32().value, 0xFFFF0000u);
+    EXPECT_EQ(doc.object(1).text(), "a bc");   // a kern of half an em is a space; a small one is not
+    EXPECT_NEAR(doc.object(1).textMatrix().m21, 80.0, 0.01);
+}
+
+namespace {
+    void be16(std::string& s, unsigned v) { s += char((v >> 8) & 255); s += char(v & 255); }
+    void be32(std::string& s, unsigned v) { be16(s, v >> 16); be16(s, v & 0xFFFF); }
+
+    // A TrueType font of two glyphs: .notdef (empty) and a 500 x 700 box that 'A' maps to, on a 1000 unit em.
+    std::string tinyTrueType() {
+        std::string head(54, '\0');
+        head[18] = char(1000 >> 8); head[19] = char(1000 & 255);   // unitsPerEm; indexToLocFormat 0 (short)
+        std::string maxp(6, '\0');
+        maxp[5] = 2;
+        std::string glyf;
+        be16(glyf, 1); be16(glyf, 0); be16(glyf, 0); be16(glyf, 500); be16(glyf, 700);   // one contour and its box
+        be16(glyf, 3);                                                                   // last point of the contour
+        be16(glyf, 0);                                                                   // no instructions
+        for (int i = 0; i < 4; ++i) { glyf += char(1); }                                 // all on-curve, 16-bit deltas
+        for (int dx : {0, 500, 0, -500}) { be16(glyf, unsigned(dx) & 0xFFFF); }
+        for (int dy : {0, 0, 700, 0}) { be16(glyf, unsigned(dy) & 0xFFFF); }
+        std::string loca;
+        be16(loca, 0); be16(loca, 0); be16(loca, unsigned(glyf.size() / 2));
+        std::string cmap;
+        be16(cmap, 0); be16(cmap, 1); be16(cmap, 3); be16(cmap, 1); be32(cmap, 12);
+        be16(cmap, 4); be16(cmap, 32); be16(cmap, 0); be16(cmap, 4); be16(cmap, 4); be16(cmap, 1); be16(cmap, 0);
+        be16(cmap, 65); be16(cmap, 0xFFFF); be16(cmap, 0); be16(cmap, 65); be16(cmap, 0xFFFF);
+        be16(cmap, unsigned(1 - 65) & 0xFFFF); be16(cmap, 1); be16(cmap, 0); be16(cmap, 0);
+        const std::pair<const char*, std::string> tables[] = {{"cmap", cmap}, {"glyf", glyf}, {"head", head}, {"loca", loca}, {"maxp", maxp}};
+        std::string out;
+        be32(out, 0x00010000); be16(out, 5); be16(out, 64); be16(out, 2); be16(out, 16);
+        unsigned offset = 12 + 16 * 5;
+        for (const auto& t : tables) { out += t.first; be32(out, 0); be32(out, offset); be32(out, unsigned(t.second.size())); offset += unsigned(t.second.size()); }
+        for (const auto& t : tables) { out += t.second; }
+        return out;
+    }
+
+    // A CFF font of .notdef and a box glyph from (100,100) to (600,700), on a 1000 unit em.
+    std::string tinyCff() {
+        const std::string name("\x00\x01\x01\x01\x05Test", 9);
+        std::string top("\x00\x01\x01\x01\x07", 5);
+        const std::string strings("\x00\x00\x00\x00", 4);
+        const unsigned charStringsAt = 4 + unsigned(name.size()) + unsigned(top.size() + 6) + 4;
+        top += char(29); be32(top, charStringsAt); top += char(17);
+        const std::string empty = std::string("\x0E");
+        const std::string box = std::string("\xEF\xEF\x15\xF8\x88\x06\xF8\xEC\x07\xFC\x88\x06\x0E", 13);   // 100 100 rmoveto 500 hlineto 600 vlineto -500 hlineto endchar
+        std::string charStrings;
+        be16(charStrings, 2); charStrings += char(1); charStrings += char(1); charStrings += char(1 + int(empty.size())); charStrings += char(1 + int(empty.size() + box.size()));
+        charStrings += empty; charStrings += box;
+        return std::string("\x01\x00\x04\x01", 4) + name + top + strings + charStrings;
+    }
+
+    std::string t1Encrypt(const std::string& plain, unsigned r) {
+        std::string out;
+        for (unsigned char p : std::string(4, '\0') + plain) {
+            const unsigned char c = (unsigned char)(p ^ (r >> 8));
+            out += char(c);
+            r = ((c + r) * 52845u + 22719u) & 0xFFFFu;
+        }
+        return out;
+    }
+
+    // A Type 1 font of .notdef, a box glyph "A" from (100,100) to (600,700), and "Aacute", a seac of A with a copy of A moved by (100,50).
+    std::string tinyType1() {
+        // 100 600 hsbw; 0 100 rmoveto; 500 hlineto; 600 vlineto; -500 hlineto; closepath; endchar
+        const std::string box("\xEF\xF8\xEC\x0D\x8B\xEF\x15\xF8\x88\x06\xF8\xEC\x07\xFC\x88\x06\x09\x0E", 18);
+        // 100 600 hsbw; 100 100 50 65 65 seac
+        const std::string accented("\xEF\xF8\xEC\x0D\xEF\xEF\xBD\xCC\xCC\x0C\x06\x0E", 12);
+        std::string priv = "dup /Private 8 dict dup begin /RD {string currentfile exch readstring pop} executeonly def /ND {noaccess def} executeonly def "
+                           "/lenIV 4 def /CharStrings 3 dict dup begin ";
+        auto glyph = [&](const std::string& name, const std::string& code) {
+            const std::string sealed = t1Encrypt(code, 4330u);
+            priv += "/" + name + " " + std::to_string(sealed.size()) + " RD " + sealed + " ND ";
+        };
+        glyph(".notdef", std::string("\x8B\xF7\x6C\x0D\x0E", 5));
+        glyph("A", box);
+        glyph("Aacute", accented);
+        priv += "end end readonly put";
+        const std::string head = "%!PS-AdobeFont-1.0: Tiny\n/FontMatrix [0.001 0 0 0.001 0 0] readonly def\n/Encoding 256 array\n0 1 255 {1 index exch /.notdef put} for\n"
+                                 "dup 65 /A put\nreadonly def\ncurrentfile eexec\n";
+        return head + t1Encrypt(priv, 55665u);
+    }
+
+    std::string embeddedFontPdf(const std::string& font) {
+        const std::string objects =
+            "5 0 obj << /Type /Font /Subtype /TrueType /BaseFont /TinyBox /FirstChar 65 /LastChar 65 /Widths [600] /FontDescriptor 6 0 R >> endobj\n"
+            "6 0 obj << /Type /FontDescriptor /FontName /TinyBox /Flags 32 /FontFile2 7 0 R >> endobj\n"
+            "7 0 obj << /Length " + std::to_string(font.size()) + " >>\nstream\n" + font + "\nendstream\nendobj\n";
+        return handWrittenPdf("/Resources << /Font << /F1 5 0 R >> >>", "BT /F1 100 Tf 10 10 Td (A) Tj ET", objects);
+    }
+}
+
+TEST(FontProgram, ReadsTrueTypeGlyfOutlinesAndTheCmap) {
+    const auto font = FontProgram::load(tinyTrueType());
+    ASSERT_TRUE(font);
+    EXPECT_EQ(font->glyphCount(), 2u);
+    EXPECT_EQ(font->glyphForUnicode('A'), 1u);
+    EXPECT_EQ(font->glyphForUnicode('B'), 0u);
+    BLPath path;
+    ASSERT_TRUE(font->outline(1, path));
+    BLBox box;
+    path.get_bounding_box(&box);
+    EXPECT_NEAR(box.x1, 0.5, 1e-6);
+    EXPECT_NEAR(box.y1, 0.7, 1e-6);   // em units, y up
+    EXPECT_NEAR(box.y0, 0.0, 1e-6);
+}
+
+TEST(FontProgram, ReadsBareCffCharstrings) {
+    const auto font = FontProgram::load(tinyCff());
+    ASSERT_TRUE(font);
+    EXPECT_EQ(font->glyphCount(), 2u);
+    EXPECT_EQ(font->glyphForCid(1), 1u);
+    BLPath path;
+    ASSERT_TRUE(font->outline(1, path));
+    BLBox box;
+    path.get_bounding_box(&box);
+    EXPECT_NEAR(box.x0, 0.1, 1e-6);
+    EXPECT_NEAR(box.x1, 0.6, 1e-6);
+    EXPECT_NEAR(box.y0, 0.1, 1e-6);
+    EXPECT_NEAR(box.y1, 0.7, 1e-6);
+    EXPECT_FALSE(FontProgram::load("not a font at all"));
+}
+
+TEST(FontProgram, ReadsType1CharstringsAndSeac) {
+    const auto font = FontProgram::load(tinyType1());
+    ASSERT_TRUE(font);
+    EXPECT_EQ(font->glyphCount(), 3u);
+    EXPECT_EQ(font->glyphForCode('A'), 1u);
+    EXPECT_EQ(font->glyphForUnicode('A'), 1u);
+    EXPECT_EQ(font->glyphForName("Aacute"), 2u);
+    BLPath path;
+    BLBox box;
+    ASSERT_TRUE(font->outline(1, path));
+    path.get_bounding_box(&box);
+    EXPECT_NEAR(box.x0, 0.1, 1e-6);
+    EXPECT_NEAR(box.x1, 0.6, 1e-6);
+    EXPECT_NEAR(box.y0, 0.1, 1e-6);
+    EXPECT_NEAR(box.y1, 0.7, 1e-6);
+    BLPath accented;
+    ASSERT_TRUE(font->outline(2, accented));
+    accented.get_bounding_box(&box);
+    EXPECT_NEAR(box.x0, 0.1, 1e-6);
+    EXPECT_NEAR(box.x1, 0.7, 1e-6);
+    EXPECT_NEAR(box.y1, 0.75, 1e-6);
+}
+
+namespace {
+    std::string hexOf(const std::string& bytes) {
+        static const char* digits = "0123456789abcdef";
+        std::string out;
+        for (unsigned char c : bytes) { out += digits[c >> 4]; out += digits[c & 15]; }
+        return out;
+    }
+    std::string bytesOfHex(const std::string& hex) {
+        std::string out;
+        for (std::size_t i = 0; i + 1 < hex.size(); i += 2) { out += char(std::stoi(hex.substr(i, 2), nullptr, 16)); }
+        return out;
+    }
+
+    // A one-page PDF whose content stream is encrypted with RC4 under the empty user password (revision 3, 128 bit), the way a writer would.
+    std::string rc4EncryptedPdf(const std::string& content, bool breakUserEntry) {
+        const std::string padding = bytesOfHex("28bf4e5e4e758a4164004e56fffa01082e2e00b6d0683e802f0ca9fe6453697a");
+        const std::string owner(32, 'O'), id = "0123456789abcdef", permissions = bytesOfHex("fcffffff");
+        std::string key = md5(padding + owner + permissions + id);
+        for (int i = 0; i < 50; ++i) { key = md5(key); }
+        std::string user = rc4(key, md5(padding + id));
+        for (int i = 1; i <= 19; ++i) {
+            std::string stepped = key;
+            for (char& c : stepped) { c = char(std::uint8_t(c) ^ i); }
+            user = rc4(stepped, user);
+        }
+        user += std::string(16, '\0');
+        if (breakUserEntry) { user[0] = char(user[0] ^ 0x55); }
+        const std::string objectKey = md5(key + std::string("\x04\x00\x00\x00\x00", 5));
+        const std::string cipher = rc4(objectKey, content);
+        return "%PDF-1.4\n"
+               "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+               "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 100 100] >> endobj\n"
+               "3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n"
+               "4 0 obj << /Length " + std::to_string(cipher.size()) + " >>\nstream\n" + cipher + "\nendstream\nendobj\n"
+               "5 0 obj << /Filter /Standard /V 2 /R 3 /Length 128 /P -4 /O <" + hexOf(owner) + "> /U <" + hexOf(user) + "> >> endobj\n"
+               "trailer << /Root 1 0 R /Encrypt 5 0 R /ID [<" + hexOf(id) + "> <" + hexOf(id) + ">] >>\n%%EOF\n";
+    }
+}
+
+TEST(PdfCrypt, MatchesThePublishedTestVectors) {
+    EXPECT_EQ(hexOf(md5("")), "d41d8cd98f00b204e9800998ecf8427e");
+    EXPECT_EQ(hexOf(md5("abc")), "900150983cd24fb0d6963f7d28e17f72");
+    EXPECT_EQ(hexOf(md5(std::string(100, 'a'))), "36a92cc94a9e0fa21f625f8bfb007adf");   // spans two blocks
+    EXPECT_EQ(hexOf(rc4("Key", "Plaintext")), "bbf316e8d940af0ad3");
+
+    std::string plain;   // FIPS 197, appendix C: AES-128 and AES-256 of 00112233445566778899aabbccddeeff
+    ASSERT_TRUE(aesCbcDecrypt(bytesOfHex("000102030405060708090a0b0c0d0e0f"), std::string(16, '\0') + bytesOfHex("69c4e0d86a7b0430d8cdb78070b4c55a"), plain));
+    EXPECT_EQ(hexOf(plain), "00112233445566778899aabbccddeeff");
+    ASSERT_TRUE(aesCbcDecrypt(bytesOfHex("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"), std::string(16, '\0') + bytesOfHex("8ea2b7ca516745bfeafc49904b496089"), plain));
+    EXPECT_EQ(hexOf(plain), "00112233445566778899aabbccddeeff");
+    EXPECT_FALSE(aesCbcDecrypt("short", std::string(32, '\0'), plain));
+}
+
+TEST(SketchPdfImport, EncryptedFilesOpenWithTheEmptyPasswordAndOthersAreRefusedWithAReason) {
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(rc4EncryptedPdf("1 0 0 rg 10 10 30 30 re f", false), doc));
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_EQ(doc.object(0).fill().color().toRgba32().value, 0xFFFF0000u);
+
+    SketchDocument locked;   // the user entry does not come out: the file wants a password
+    std::string problem;
+    EXPECT_FALSE(documentFromPdf(rc4EncryptedPdf("1 0 0 rg 10 10 30 30 re f", true), locked, PdfImportOptions(), &problem));
+    EXPECT_NE(problem.find("password"), std::string::npos);
+    EXPECT_EQ(locked.objectCount(), 0u);
+
+    std::string modern = rc4EncryptedPdf("0 g", false);   // the same file claiming AES-256 (revision 6)
+    modern.replace(modern.find("/V 2 /R 3"), 9, "/V 5 /R 6");
+    EXPECT_FALSE(documentFromPdf(modern, locked, PdfImportOptions(), &problem));
+    EXPECT_NE(problem.find("AES-256"), std::string::npos);
+}
+
+namespace {
+    std::string threePagePdf() {
+        std::string pdf = "%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+                          "2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 /MediaBox [0 0 100 100] >> endobj\n";
+        for (int i = 0; i < 3; ++i) {
+            const std::string content = std::to_string(10 * (i + 1)) + " 0 20 20 re f";
+            pdf += std::to_string(3 + i) + " 0 obj << /Type /Page /Parent 2 0 R /Contents " + std::to_string(6 + i) + " 0 R >> endobj\n";
+            pdf += std::to_string(6 + i) + " 0 obj << /Length " + std::to_string(content.size()) + " >>\nstream\n" + content + "\nendstream\nendobj\n";
+        }
+        return pdf + "trailer << /Root 1 0 R >>\n%%EOF\n";
+    }
+}
+
+TEST(SketchPdfImport, OnlyTheChosenPagesAreImportedAndKeepTheirNumbers) {
+    const std::string pdf = threePagePdf();
+    EXPECT_EQ(pdfPageCount(pdf), 3u);
+    EXPECT_EQ(pdfPageCount("not a pdf"), 0u);
+    SketchDocument all;
+    ASSERT_TRUE(documentFromPdf(pdf, all));
+    EXPECT_EQ(all.artboards().size(), 3u);
+    PdfImportOptions options;
+    options.pages = {1, 3};
+    SketchDocument some;
+    ASSERT_TRUE(documentFromPdf(pdf, some, options));
+    ASSERT_EQ(some.artboards().size(), 2u);
+    EXPECT_EQ(some.artboards()[0].name, "Page 1");
+    EXPECT_EQ(some.artboards()[1].name, "Page 3");
+    options.pages = {7};
+    std::string problem;
+    SketchDocument none;
+    EXPECT_FALSE(documentFromPdf(pdf, none, options, &problem));
+    EXPECT_FALSE(problem.empty());
+}
+
+TEST(SketchPdfImport, APageListReadsNumbersAndRanges) {
+    std::vector<int> pages;
+    std::string problem;
+    EXPECT_TRUE(parsePageList("1,5,10", 20, pages, &problem));
+    EXPECT_EQ(pages, (std::vector<int>{1, 5, 10}));
+    EXPECT_TRUE(parsePageList(" 9 ; 2 - 4, 3 ", 20, pages, &problem));
+    EXPECT_EQ(pages, (std::vector<int>{2, 3, 4, 9}));
+    EXPECT_FALSE(parsePageList("", 20, pages, &problem));
+    EXPECT_FALSE(parsePageList("21", 20, pages, &problem));
+    EXPECT_FALSE(parsePageList("0", 20, pages, &problem));
+    EXPECT_FALSE(parsePageList("3-", 20, pages, &problem));
+    EXPECT_FALSE(parsePageList("a", 20, pages, &problem));
+    EXPECT_TRUE(parsePageList("4-2", 20, pages, &problem));
+    EXPECT_EQ(pages, (std::vector<int>{2, 3, 4}));
+}
+
+TEST(SketchPdfImport, AFileThatCannotBeOpenedSaysWhy) {
+    const std::filesystem::path file = std::filesystem::temp_directory_path() / "curvy_locked_test.pdf";
+    {
+        std::ofstream out(file, std::ios::binary);
+        out << rc4EncryptedPdf("0 g", true);
+    }
+    SketchDocument doc;
+    EXPECT_FALSE(doc.load(file.string()));
+    EXPECT_NE(doc.lastError().find("password"), std::string::npos);
+    std::filesystem::remove(file);
+}
+
+TEST(SketchBlend, LuminosityKeepsTheHueOfWhatIsBelow) {
+    SketchDocument doc;
+    doc.setPageSize(40, 40);
+    doc.setPageBackground(SketchColor::rgb(1.0f, 1.0f, 1.0f));
+    SketchObject& blue = doc.add(SketchObject::makeRect(0, 0, 40, 40));
+    blue.setFill(SketchPaint::solid(SketchColor::fromHex("#0000ff")));
+    blue.setStroke(SketchPaint::none());
+    SketchObject& gray = doc.add(SketchObject::makeRect(0, 0, 40, 40));
+    gray.setFill(SketchPaint::solid(SketchColor::fromHex("#ffffff")));
+    gray.setStroke(SketchPaint::none());
+    gray.setBlendMode(BlendMode::Luminosity);
+    BLImage image;
+    ASSERT_TRUE(renderPageImage(doc, 1.0, image));
+    BLImageData data;
+    image.get_data(&data);
+    const std::uint32_t p = reinterpret_cast<const std::uint32_t*>(data.pixel_data)[20 * (data.stride / 4) + 20];
+    EXPECT_EQ(p & 0xFFFFFFu, 0xFFFFFFu) << "white luminosity over blue is white";
+    gray.setFill(SketchPaint::solid(SketchColor::fromHex("#808080")));
+    ASSERT_TRUE(renderPageImage(doc, 1.0, image));
+    image.get_data(&data);
+    const std::uint32_t q = reinterpret_cast<const std::uint32_t*>(data.pixel_data)[20 * (data.stride / 4) + 20];
+    EXPECT_GT(q & 255u, (q >> 16) & 255u) << "mid gray luminosity over blue stays bluish";
+    EXPECT_EQ(blendModeFromCss("luminosity"), BlendMode::Luminosity);
+}
+
+TEST(SketchPdfImport, TextInAnEmbeddedFontBecomesItsOutlinesUnlessLiveTextIsAsked) {
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(embeddedFontPdf(tinyTrueType()), doc));
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_FALSE(doc.object(0).isText());
+    const BLBox box = doc.object(0).geometryBounds();   // 100 pt: the box is 50 x 70, its baseline 10 above the bottom of the page
+    EXPECT_NEAR(box.x0, 10.0, 0.01);
+    EXPECT_NEAR(box.x1, 60.0, 0.01);
+    EXPECT_NEAR(box.y0, 20.0, 0.01);
+    EXPECT_NEAR(box.y1, 90.0, 0.01);
+    EXPECT_EQ(doc.object(0).name(), "A");
+
+    PdfImportOptions live;
+    live.textAsOutlines = false;
+    SketchDocument typed;
+    ASSERT_TRUE(documentFromPdf(embeddedFontPdf(tinyTrueType()), typed, live));
+    ASSERT_EQ(typed.objectCount(), 1u);
+    EXPECT_TRUE(typed.object(0).isText());
+
+    SketchDocument broken;   // a font program that cannot be read falls back to live text
+    ASSERT_TRUE(documentFromPdf(embeddedFontPdf("not a font program"), broken));
+    ASSERT_EQ(broken.objectCount(), 1u);
+    EXPECT_TRUE(broken.object(0).isText());
+}
+
+TEST(SketchPdfImport, TheStandInFontIsTrackedToTheWidthOfTheRun) {
+    const std::string fonts = "/Resources << /Font << /F1 5 0 R >> >>";
+    const std::string font = "5 0 obj << /Type /Font /Subtype /TrueType /BaseFont /Arial /FirstChar 97 /LastChar 98 /Widths [700 700] >> endobj\n";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf(fonts, "BT /F1 10 Tf 5 50 Td (ab) Tj ET", font), doc));
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_GT(doc.object(0).textStyle().tracking, 1.0);   // the file says 14 units for "ab"; Arial's own "ab" is about 11
+}
+
+TEST(SketchPdfImport, EachPageOfAManyPageFileIsCroppedToItsOwnBox) {
+    const std::string pdf =
+        "%PDF-1.4\n"
+        "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+        "2 0 obj << /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 /MediaBox [0 0 100 100] >> endobj\n"
+        "3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n"
+        "4 0 obj << >>\nstream\n0 0 1 rg -50 10 30 30 re f\nendstream\nendobj\n"
+        "5 0 obj << /Type /Page /Parent 2 0 R /Contents 6 0 R >> endobj\n"
+        "6 0 obj << >>\nstream\n1 0 0 rg 10 10 30 30 re f\nendstream\nendobj\n"
+        "trailer << /Root 1 0 R >>\n%%EOF\n";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(pdf, doc));
+    ASSERT_EQ(doc.objectCount(), 4u);   // two squares and a page mask for each page
+    ASSERT_EQ(doc.object(0).groups().size(), 1u);
+    EXPECT_TRUE(doc.groupProps(doc.object(0).groups().front()).clip);
+    const BLBox mask = doc.object(1).geometryBounds();
+    EXPECT_NEAR(mask.x0, 0.0, 0.01);
+    EXPECT_NEAR(mask.x1, 100.0, 0.01);
+}
+
+TEST(SketchPdfImport, MacRomanFontsAndFontsThatAreNotInstalledStillDrawText) {
+    const std::string fonts = "/Resources << /Font << /F1 5 0 R >> >>";
+    const std::string font = "5 0 obj << /Type /Font /Subtype /TrueType /BaseFont /ZZZZZZ+NoSuchFontAnywhere /Encoding /MacRomanEncoding /FontDescriptor 6 0 R /FirstChar 32 /LastChar 32 /Widths [600] >> endobj\n"
+                             "6 0 obj << /Type /FontDescriptor /Flags 33 >> endobj\n";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf(fonts, "BT /F1 12 Tf 5 50 Td (we\\325re) Tj ET", font), doc));
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_EQ(doc.object(0).text(), "we\xE2\x80\x99re");   // 0xD5 is a right single quote in MacRoman
+    EXPECT_GT(doc.object(0).geometry().size(), 0u);          // set in a stand-in font, not an empty outline
+}
+
+TEST(SketchPdfImport, CompositeFontsReadTheirCharactersFromToUnicode) {
+    const std::string fonts = "/Resources << /Font << /F1 5 0 R >> >>";
+    const std::string objects =
+        "5 0 obj << /Type /Font /Subtype /Type0 /BaseFont /Foo-Italic /Encoding /Identity-H /DescendantFonts [6 0 R] /ToUnicode 7 0 R >> endobj\n"
+        "6 0 obj << /Type /Font /Subtype /CIDFontType2 /BaseFont /Foo-Italic /DW 600 /W [1 [500]] >> endobj\n"
+        "7 0 obj << >>\nstream\n/CIDInit /ProcSet findresource begin begincmap 1 begincodespacerange <0000> <FFFF> endcodespacerange\n"
+        "2 beginbfchar <0001> <0058> <0002> <0059> endbfchar endcmap\nendstream\nendobj\n";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf(fonts, "BT /F1 10 Tf 5 5 Td <00010002> Tj ET", objects), doc));
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_EQ(doc.object(0).text(), "XY");
+    EXPECT_TRUE(doc.object(0).textStyle().italic);
+
+    SketchDocument lost;   // without ToUnicode the codes say nothing, so there is no text to make
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf(fonts, "BT /F1 10 Tf 5 5 Td <00010002> Tj ET", "5 0 obj << /Type /Font /Subtype /Type0 /BaseFont /Foo /DescendantFonts [6 0 R] >> endobj\n"), lost));
+    EXPECT_EQ(lost.objectCount(), 0u);
+}
+
+TEST(SketchPdfImport, EvenOddFillsKeepTheirRuleThroughSvgAndPdf) {
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf("", "0 0 100 100 re 25 25 50 50 re f* 0 0 10 10 re f 0 0 20 20 re 5 5 10 10 re B*"), doc));
+    ASSERT_EQ(doc.objectCount(), 3u);
+    EXPECT_TRUE(doc.object(0).fillEvenOdd());
+    EXPECT_FALSE(doc.object(1).fillEvenOdd());
+    EXPECT_TRUE(doc.object(2).fillEvenOdd());
+
+    SketchDocument viaSvg;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), viaSvg));
+    ASSERT_EQ(viaSvg.objectCount(), 3u);
+    EXPECT_TRUE(viaSvg.object(0).fillEvenOdd());
+    EXPECT_FALSE(viaSvg.object(1).fillEvenOdd());
+
+    SketchDocument viaPdf;
+    ASSERT_TRUE(documentFromPdf(pdfFromDocument(doc), viaPdf));
+    std::size_t evenOddCount = 0;
+    for (std::size_t i = 0; i < viaPdf.objectCount(); ++i) {
+        evenOddCount += viaPdf.object(i).fillEvenOdd() ? 1 : 0;
+    }
+    EXPECT_EQ(evenOddCount, 2u);
+}
+
+TEST(SketchPdfImport, EvenOddClipsAndHitTestsFollowTheRule) {
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf("", "10 10 80 80 re 30 30 40 40 re W* n 0 0 100 100 re f"), doc));
+    ASSERT_EQ(doc.objectCount(), 2u);
+    EXPECT_TRUE(doc.object(1).fillEvenOdd());
+
+    SketchDocument ring;
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf("", "0 0 100 100 re 25 25 50 50 re f* 200 200 10 10 re f"), ring));
+    EXPECT_FALSE(ring.object(0).hitTest(BLPoint(50, 50), 0.0, nullptr));
+    EXPECT_TRUE(ring.object(0).hitTest(BLPoint(10, 10), 0.0, nullptr));
+}
+
+TEST(SketchPdfImport, ClipsNestAndEndWithTheirSavedState) {
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf("", "q 10 10 80 80 re W n q 20 20 50 50 re W n 0 0 100 100 re f Q 0 0 5 5 re f Q 0 0 6 6 re f"), doc));
+    ASSERT_EQ(doc.objectCount(), 5u);   // inner fill, inner mask, second fill, outer mask, a fill outside every clip
+    EXPECT_EQ(doc.object(0).groups().size(), 2u);
+    EXPECT_EQ(doc.object(2).groups().size(), 1u);
+    EXPECT_TRUE(doc.object(4).groups().empty());
+    EXPECT_TRUE(doc.groupProps(doc.object(0).groups()[1]).clip);
+    EXPECT_EQ(doc.clipMaskOf(doc.object(0).groups()[0]), &doc.object(3));
+}
+
+TEST(SketchPdfImport, AShadingFillIsAGradientOverTheClip) {
+    const std::string shading = "/Resources << /Shading << /S1 << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 100 0] "
+                                "/Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> >> >>";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf(shading, "q 10 10 50 50 re W n /S1 sh Q"), doc));
+    ASSERT_EQ(doc.objectCount(), 2u);
+    ASSERT_TRUE(doc.object(0).fill().isGradient());
+    EXPECT_GE(doc.object(0).fill().gradient().stops.size(), 2u);
+    EXPECT_TRUE(doc.groupProps(doc.object(0).groups().front()).clip);
+}
+
+TEST(SketchPdfImport, ALuminositySoftMaskHidesWhatItsGroupPaintsBlack) {
+    const std::string mask = "/Type /XObject /Subtype /Form /BBox [0 0 100 100] /Length ";
+    const std::string maskContent = "1 g 0 0 50 100 re f";
+    const std::string objects = "5 0 obj << /Type /ExtGState /SMask << /S /Luminosity /G 6 0 R >> >> endobj\n"
+                                "6 0 obj << " + mask + std::to_string(maskContent.size()) + " >>\nstream\n" + maskContent + "\nendstream\nendobj\n";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(handWrittenPdf("/Resources << /ExtGState << /GS 5 0 R >> >>", "/GS gs 1 0 0 rg 0 0 100 100 re f", objects), doc));
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_EQ(doc.object(0).type(), SketchObjectType::Image);
+    BLImage image;
+    ASSERT_TRUE(renderPageImage(doc, 1.0, image));
+    BLImageData data;
+    ASSERT_EQ(image.get_data(&data), BL_SUCCESS);
+    auto pixel = [&](int x, int y) { return reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + std::ptrdiff_t(y) * data.stride)[x]; };
+    EXPECT_EQ(pixel(25, 50), 0xFFFF0000u);   // inside the white half: the red fill shows
+    EXPECT_EQ(pixel(75, 50), 0xFFFFFFFFu);   // inside the black half: only the white page
+}
+
+TEST(SketchPdfImport, NotAPdfLeavesTheDocumentAlone) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    EXPECT_FALSE(documentFromPdf("not a pdf", doc));
+    EXPECT_FALSE(documentFromPdf("%PDF-1.4\n%%EOF\n", doc));
+    EXPECT_FALSE(documentFromPdf("%PDF-1.4\n1 0 obj << /Encrypt 2 0 R >> endobj\n", doc));
+    EXPECT_EQ(doc.objectCount(), 1u);
+    SketchDocument source;
+    source.add(SketchObject::makeRect(0, 0, 10, 10));
+    const std::string pdf = pdfFromDocument(source);
+    for (std::size_t length = 0; length < pdf.size(); length += 7) {   // damaged files never crash
+        SketchDocument scratch;
+        documentFromPdf(pdf.substr(0, length), scratch);
+    }
+}
+
+TEST(SketchPdfExport, EachPageHoldsOnlyTheObjectsThatTouchIt) {
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromPdf(threePagePdf(), doc));
+    ASSERT_EQ(doc.artboards().size(), 3u);
+    const PdfView pdf = inspectPdf(pdfFromDocument(doc));
+    ASSERT_TRUE(pdf.structureOk);
+    ASSERT_EQ(pdf.pages, 3);
+    std::size_t moves = 0;
+    for (const std::string& stream : pdf.streams) {
+        for (std::size_t at = stream.find(" m\n"); at != std::string::npos; at = stream.find(" m\n", at + 1)) { ++moves; }
+    }
+    EXPECT_EQ(moves, 6u) << "a rectangle and the page's clip path per page, not every page's content on every page (that was 18)";
 }

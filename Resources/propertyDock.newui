@@ -413,12 +413,12 @@
           bounds: {
             type: "Rect",
             pos: { type: "Point", x: 0, y: 144 },
-            size: { type: "Size", width: 268, height: 372 }
+            size: { type: "Size", width: 268, height: 400 }
           },
           visible: true,
           name: "colorPanel",
           layout: { type: "FlexLayout", orientation: "Vertical" },
-          desiredSize: { type: "Size", width: 268, height: 372 },
+          desiredSize: { type: "Size", width: 268, height: 400 },
           desiredSizeOverride: true,
           childViews: [
             {
@@ -492,7 +492,7 @@
               bounds: {
                 type: "Rect",
                 pos: { type: "Point", x: 0, y: 24 },
-                size: { type: "Size", width: 268, height: 348 }
+                size: { type: "Size", width: 268, height: 376 }
               },
               visible: true,
               name: "colorPanelBody",
@@ -644,6 +644,56 @@
                       },
                       name: "hexField",
                       desiredSize: { type: "Size", width: 70, height: 20 },
+                      desiredSizeOverride: true
+                    }
+                  ]
+                },
+                {
+                  type: "SubView",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 7, y: 63 },
+                    size: { type: "Size", width: 254, height: 24 }
+                  },
+                  visible: true,
+                  name: "fillRuleRow",
+                  layout: {
+                    type: "FlexLayout",
+                    orientation: "Horizontal",
+                    crossAxisAlignment: "Center",
+                    spacing: 6
+                  },
+                  desiredSize: { type: "Size", width: 254, height: 24 },
+                  desiredSizeOverride: true,
+                  childViews: [
+                    {
+                      type: "Toggle",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 0, y: 2 },
+                        size: { type: "Size", width: 20, height: 20 }
+                      },
+                      name: "evenOddToggle",
+                      desiredSize: { type: "Size", width: 20, height: 20 },
+                      desiredSizeOverride: true
+                    },
+                    {
+                      type: "Label",
+                      text: "Even-odd fill rule",
+                      textAlignment: "Left",
+                      bounds: {
+                        type: "Rect",
+                        pos: { type: "Point", x: 26, y: 2 },
+                        size: { type: "Size", width: 120, height: 20 }
+                      },
+                      style: {
+                        type: "LabelStyle",
+                        text: "Even-odd fill rule",
+                        font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                        textColor: "#a0a0a0",
+                        textAlignment: "Left"
+                      },
+                      desiredSize: { type: "Size", width: 120, height: 20 },
                       desiredSizeOverride: true
                     }
                   ]

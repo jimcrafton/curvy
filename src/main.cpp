@@ -25,6 +25,7 @@
 #include "newui/rootview.h"
 
 #include "curvy/newdocumentdialog.h"
+#include "curvy/pdfpagesdialog.h"
 #include "curvy/tracedialog.h"
 #include "curvy/sketchchecks.h"
 #include "curvy/sketchdocument.h"
@@ -140,7 +141,7 @@ int main(int argc, char** argv) {
         return 1;
     }
     if (options.checkNewDocument) {
-        return curvy::NewDocumentDialog::check() + curvy::TraceDialog::check() + curvy::SettingsDialog::check();
+        return curvy::NewDocumentDialog::check() + curvy::TraceDialog::check() + curvy::SettingsDialog::check() + curvy::PdfPagesDialog::check();
     }
     if (options.check) {
         return printLayouts(frame, options.checkDepth);
@@ -159,8 +160,12 @@ int main(int argc, char** argv) {
     window.start(options.startupPath);
     app.runLoop().onStart.add([&window, &options](newui::RunLoop& loop) {
         window.startAutosave();
+        window.openStartupFile();
         // The recovery question and the welcome card wait until the window is on screen, so the question has a window behind it.
-        loop.postDelayed(std::chrono::milliseconds(400), [&window, &options] {
+        // The timer is cancelled before the question: a timer is only killed after its task returns, and the modal question pumps messages, so it fired again and asked twice.
+        auto timer = std::make_shared<newui::RunLoop::TimerHandle>(newui::RunLoop::kInvalidTimerHandle);
+        *timer = loop.postDelayed(std::chrono::milliseconds(400), [&window, &options, &loop, timer] {
+            loop.cancelDelayed(*timer);
             if (options.startupPath.empty() && !window.offerRecovery()) {
                 window.showWelcomeOnce();
             }
