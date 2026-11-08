@@ -107,8 +107,15 @@ information yet (that would need optional metadata in the asset format).
 - The Brushes panel builds one label and field per setting when a graph brush is chosen (as many rows as the asset has; the first time an asset
   is shown, the rows are made and kept, hidden for other brushes), plus a "Reset settings" button. They edit the selected strokes that have that
   brush (one undo step) and are read-only while none is selected.
-- **The brush node.** A stroke with a graph brush has an instance of the asset in the document's graph, wired to its `curvyStroke` node (a leaf, so
-  the look chain is unchanged), with the stroke's settings as its parameters. `syncAppearanceNodes` creates it (an owned node, role `0x1000 + item
+- **The brush node (every brush kind, since 2026-11-08).** A stroke with any brush has its own brush node in the document graph, after its
+  `curvyStroke` node, so the shape's flow reads `Path -> Transform -> Fill -> Stroke -> Brush -> paint`: the node takes the stroke node as input 0,
+  and what took the stroke (the next look node, or the paint node) takes the brush. The chain of look nodes sees through it (`appearanceSuccessors`),
+  so the objects' look stack is unchanged. A graph brush's node is an instance of its asset; any other brush (calligraphic, scatter, art) is a
+  `curvyBrush` node whose floats are `BrushDef::kParamNames` (angle, roundness, spacing, ... flipAcross). An edit of such a node gives that stroke a
+  private copy of the library brush with the changed numbers (`brushWithSettings`, kept in `StrokeOptions::graphSettings` and so in the file); the
+  library brush and other strokes keep theirs. Before this the node was a dead-end leaf off the stroke, only for graph brushes.
+  The text below describes the graph brush's settings.
+  A graph brush's node holds the stroke's settings as its parameters. `syncAppearanceNodes` creates it (an owned node, role `0x1000 + item
   index`, so undo keeps its id), replaces it when the stroke gets another asset, writes the item's settings to it, and removes it with the stroke
   or when the stroke goes back to a plain one. An edit of its parameters in the graph (the graph dock, `setGraphParam`, undo) is adopted by the
   stroke through the same "node wins if it changed since the last sync" rule as the other look nodes: the settings are `brush.<name>` numbers in
@@ -116,8 +123,7 @@ information yet (that would need optional metadata in the asset format).
   cooked by the document (a plain graph cook would use the unscaled path and no chunking).
 - Values go into `cookGraphBrush`/`cookGraphBrushLater` and into the cache key, so changing one recooks that stroke. A name the asset does not have is
   ignored.
-- The binary format keeps them in the stroke's record (bit 5 of the cap byte, then count, names and values) and in the graph. SVG does not carry
-  them yet: that waits for the move of the whole document into the graph on main, where the brush node holds them.
+- The binary format keeps them in the stroke's record (bit 5 of the cap byte, then count, names and values) and in the graph.
 
 ## Colour: `tintable`
 

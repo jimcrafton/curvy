@@ -196,6 +196,23 @@ namespace curvy {
         }
     }
 
+    std::shared_ptr<const BrushDef> brushWithSettings(const std::shared_ptr<const BrushDef>& base, const std::vector<std::pair<std::string, double>>& settings) {
+        if (!base || base->kind == BrushKind::Graph || settings.empty()) {
+            return base;
+        }
+        auto copy = std::make_shared<BrushDef>(*base);
+        std::vector<double> values = copy->params();
+        for (const auto& [name, value] : settings) {
+            for (std::size_t i = 0; i < BrushDef::kParamNames.size(); ++i) {
+                if (name == BrushDef::kParamNames[i]) {
+                    values[i] = value;
+                }
+            }
+        }
+        copy->setParams(values);
+        return copy;
+    }
+
     bool BrushDef::sameLook(const BrushDef& o) const {
         return kind == o.kind && params() == o.params() && graphType == o.graphType;
     }

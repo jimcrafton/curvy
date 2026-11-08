@@ -2,6 +2,7 @@
 
 #include "curvy/sketchobject.h"
 
+#include <array>
 #include <memory>
 #include <string>
 #include <utility>
@@ -103,6 +104,9 @@ namespace curvy {
         // The numbers above in a fixed order (angle, roundness, spacing, scatter, sizeVariation, rotation, followPath, then fit, headGuide,
         // tailGuide, corner, cornerRadius, miterLimit, breakAngle, direction, flipAlong, flipAcross), for saving; the setter keeps what is missing and brings every value into its range.
         static constexpr std::size_t kBaseParams = 7;
+        // The names of params(), in order: the parameters of the stroke's brush node and the keys of StrokeOptions::graphSettings.
+        static constexpr std::array<const char*, 17> kParamNames = {"angle", "roundness", "spacing", "scatter", "sizeVariation", "rotation", "followPath",
+            "fit", "headGuide", "tailGuide", "corner", "cornerRadius", "miterLimit", "breakAngle", "direction", "flipAlong", "flipAcross"};
         std::vector<double> params() const;
         void setParams(const std::vector<double>& values);
         bool sameLook(const BrushDef& other) const;
@@ -128,5 +132,9 @@ namespace curvy {
         mutable std::vector<BrushPart> parts_;
         mutable bool partsBuilt_ = false;
     };
+
+    // The library brush with the numbers one stroke changed (BrushDef::kParamNames and their values) applied: a private copy for that stroke.
+    // The brush itself when nothing changed or it is a graph brush (those keep their settings by the asset's own names).
+    std::shared_ptr<const BrushDef> brushWithSettings(const std::shared_ptr<const BrushDef>& base, const std::vector<std::pair<std::string, double>>& settings);
 
 }

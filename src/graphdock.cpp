@@ -49,6 +49,7 @@ namespace curvy {
             if (nodeType == kSubnetNodeType) return "Group";
             if (nodeType == kFillNodeType) return "Fill";
             if (nodeType == kStrokeNodeType) return "Stroke";
+            if (nodeType == kBrushNodeType) return "Brush";
             if (nodeType == kEffectNodeType) return "Effect";
             return nodeType;
         }
@@ -694,9 +695,11 @@ namespace curvy {
         const jitnodes::Network& net = document_.networkOf(node.scope);
         std::size_t steps = 0;
         NodeRef at = node;
-        while (isAppearanceNodeType(net.node(at.id).typeName()) && steps < 1000) {
+        while ((isAppearanceNodeType(net.node(at.id).typeName()) || isBrushNodeType(net.node(at.id).typeName())) && steps < 1000) {
+            // A brush sits after its stroke and is not a look of its own: it stands for the stroke.
+            const bool brush = isBrushNodeType(net.node(at.id).typeName());
             at.id = net.inputOf(at.id, 0);
-            ++steps;
+            steps += brush ? 0 : 1;
             if (!at.valid()) {
                 return nullptr;
             }
@@ -795,6 +798,10 @@ namespace curvy {
         } else {
             row.text = net.node(node.id).name();
             row.summary = typeLabel(type);
+            if (isBrushNodeType(type)) {
+                const AppearanceItem* item = itemOfNode(node, nullptr);
+                row.text = item != nullptr && item->strokeOptions.brush ? item->strokeOptions.brush->name : row.text;
+            }
         }
     }
 

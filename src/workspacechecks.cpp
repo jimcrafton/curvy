@@ -522,6 +522,47 @@ namespace curvy {
                     nodes += r.kind == GraphRow::Kind::Node ? 1 : 0;
                 }
                 expect(nodes == doc_->network().nodeIds().size() && graph.rows().front().kind == GraphRow::Kind::Node, "Flow view lists the nodes");
+                {
+                    // A stroke drawn the way the Paintbrush draws one: its brush node is a row of the Flow view.
+                    const std::size_t brushesBefore = doc_->brushes().size();
+                    doc_->addBrushPresets();
+                    std::shared_ptr<const BrushDef> oil;
+                    for (const std::shared_ptr<const BrushDef>& def : doc_->brushes()) {
+                        oil = def->graphType == "brush_oil" ? def : oil;
+                    }
+                    expect(oil != nullptr, "the Oil graph brush is in the library (the asset folder was loaded)");
+                    if (oil) {
+                        BLPath path;
+                        path.move_to(20, 20);
+                        path.cubic_to(60, 0, 100, 60, 140, 20);
+                        SketchObject* stroke = SketchObject::makePath(path);
+                        stroke->setFill(SketchPaint::none());
+                        stroke->setStroke(SketchPaint::solid(SketchColor::gray(0.0f)));
+                        StrokeOptions options = doc_->defaultStrokeOptions();
+                        options.brush = oil;
+                        stroke->setStrokeOptions(options);
+                        doc_->addUndoable(stroke, "Draw with Paintbrush");
+                        graph.setMode(GraphDock::Mode::Flow);
+                        // The brush is a row under the paint node with the stroke under it, in the same tree as the shape: no row of its own at the top.
+                        const std::vector<GraphRow>& flow = graph.rows();
+                        std::size_t brushAt = flow.size(), strokeUnder = 0, topLevel = 0;
+                        for (std::size_t k = 0; k < flow.size(); ++k) {
+                            topLevel += flow[k].depth == 0 ? 1 : 0;
+                            if (flow[k].summary == "brush_oil") {
+                                brushAt = k;
+                            }
+                        }
+                        if (brushAt < flow.size() && brushAt + 1 < flow.size()) {
+                            strokeUnder = flow[brushAt + 1].depth == flow[brushAt].depth + 1 && flow[brushAt + 1].kind == GraphRow::Kind::Node ? 1 : 0;
+                        }
+                        expect(brushAt < flow.size() && flow[brushAt].depth == 1, "the brush node is under the paint node in the Flow view");
+                        expect(strokeUnder == 1, "and its Stroke (a full row, not a link) is under it");
+                        expect(topLevel == 1, "the Flow view has one top-level node, the paint node");
+                        graph.setMode(GraphDock::Mode::Document);
+                        doc_->undoStack().undo();
+                    }
+                    (void)brushesBefore;
+                }
                 graph.setMode(GraphDock::Mode::Document);
 
                 // Entering a group scopes the Flow view to the nodes inside it; Esc, the ".." row or exitGroup leaves.

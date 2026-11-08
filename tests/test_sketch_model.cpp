@@ -34,6 +34,7 @@
 #include "curvy/shapenode.h"
 #include "curvy/liveshape.h"
 #include "curvy/graphtree.h"
+#include "curvy/appearancenode.h"
 #include "curvy/graphbrush.h"
 #include <jitnodes/graph/network.h>
 #include <jitnodes/graph/serialize.h>
@@ -11328,6 +11329,124 @@ TEST(GraphBrushAssets, AStrokeWithAGraphBrushHasABrushNodeThatFollowsIt) {
     doc.setSelection({first});
     ASSERT_TRUE(doc.applyBrush(0));
     EXPECT_EQ(brushNodesOf(net, "brush_oil").size(), 1u);   // a plain stroke has none
+}
+
+namespace {
+    // The brush nodes of a network, whatever their kind (a curvyBrush, or an instance of a graph brush asset).
+    std::vector<jitnodes::NodeId> allBrushNodes(const jitnodes::Network& net) {
+        std::vector<jitnodes::NodeId> found;
+        for (const jitnodes::NodeId id : net.nodeIds()) {
+            if (curvy::isBrushNodeType(net.node(id).typeName())) {
+                found.push_back(id);
+            }
+        }
+        return found;
+    }
+
+    bool paintTakes(const jitnodes::Network& net, jitnodes::NodeId node) {
+        const jitnodes::NodeId paint = net.findNode("paint");
+        for (int i = 0; paint != jitnodes::invalidNodeId && i < net.node(paint).inputCount(); ++i) {
+            if (net.inputOf(paint, i) == node) {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+// Every brush of the library, of whatever kind, is one node after its stroke in the shape's own flow (Stroke -> Brush -> paint).
+TEST(GraphBrushAssets, EveryKindOfBrushIsANodeAfterItsStrokeAndTheFlowPassesThroughIt) {
+    BrushAssetsGuard guard;
+    SketchDocument doc;
+    doc.setPageSize(200, 200);
+    doc.addBrushPresets();
+    ASSERT_GT(doc.brushes().size(), 6u);
+    for (const std::shared_ptr<const BrushDef>& brush : doc.brushes()) {
+        SCOPED_TRACE(brush->name);
+        SketchDocument one;
+        one.setPageSize(200, 200);
+        one.addBrushPresets();
+        const std::size_t id = one.add(SketchObject::makeLine(10, 50, 190, 50)).id();
+        one.setSelection({id});
+        ASSERT_TRUE(one.applyBrush(brush->id));
+        const jitnodes::Network& net = one.network();
+        const std::vector<jitnodes::NodeId> nodes = allBrushNodes(net);
+        ASSERT_EQ(nodes.size(), 1u);
+        const jitnodes::NodeId node = nodes[0];
+        ASSERT_NE(net.inputOf(node, 0), jitnodes::invalidNodeId);
+        EXPECT_EQ(net.node(net.inputOf(node, 0)).typeName(), "curvyStroke") << "it follows the stroke";
+        EXPECT_TRUE(paintTakes(net, node)) << "and the paint node takes the brush, not the stroke";
+        EXPECT_FALSE(paintTakes(net, net.inputOf(node, 0)));
+        EXPECT_EQ(one.findById(id)->appearance().size(), 2u) << "the look nodes are unchanged (fill, stroke)";
+
+        one.setSelection({id});
+        ASSERT_TRUE(one.applyBrush(0));
+        EXPECT_TRUE(allBrushNodes(net).empty()) << "a plain stroke has none";
+        EXPECT_TRUE(paintTakes(net, net.inputOf(net.findNode("paint"), 0))) << "the paint node takes the stroke again";
+        const jitnodes::NodeId stroke = one.findById(id)->graphNode();
+        EXPECT_NE(stroke, jitnodes::invalidNodeId);
+    }
+}
+
+TEST(GraphBrushAssets, ABuiltInBrushNodeHoldsThisStrokesNumbersAndAnEditChangesOnlyThatStroke) {
+    SketchDocument doc;
+    doc.setPageSize(200, 200);
+    doc.addBrushPresets();
+    std::shared_ptr<const BrushDef> nib;
+    for (const auto& entry : doc.brushes()) {
+        nib = entry->kind == BrushKind::Calligraphic && !nib ? entry : nib;
+    }
+    ASSERT_NE(nib, nullptr);
+    const std::size_t first = doc.add(SketchObject::makeLine(10, 50, 190, 50)).id();
+    const std::size_t second = doc.add(SketchObject::makeLine(10, 90, 190, 90)).id();
+    doc.setSelection({first, second});
+    ASSERT_TRUE(doc.applyBrush(nib->id));
+    const jitnodes::Network& net = doc.network();
+    ASSERT_EQ(allBrushNodes(net).size(), 2u);   // each shape has its own
+    for (const jitnodes::NodeId id : allBrushNodes(net)) {
+        EXPECT_FLOAT_EQ(net.node(id).getFloat("angle"), float(nib->angle)) << "the library brush's number";
+    }
+    // The node that belongs to the first object: walk up from each brush node to the object's shape node.
+    jitnodes::NodeId brushOfFirst = jitnodes::invalidNodeId;
+    for (const jitnodes::NodeId id : allBrushNodes(net)) {
+        jitnodes::NodeId at = net.inputOf(id, 0);
+        for (int guard = 0; at != jitnodes::invalidNodeId && guard < 20 && at != doc.findById(first)->graphNode(); ++guard) {
+            at = net.inputOf(at, 0);
+        }
+        brushOfFirst = at == doc.findById(first)->graphNode() ? id : brushOfFirst;
+    }
+    ASSERT_NE(brushOfFirst, jitnodes::invalidNodeId);
+
+    doc.setGraphParam(brushOfFirst, "angle", 10.0f);
+    EXPECT_DOUBLE_EQ(doc.findById(first)->strokeOptions().brush->angle, 10.0) << "the edit of the node is this stroke's brush";
+    EXPECT_DOUBLE_EQ(doc.findById(second)->strokeOptions().brush->angle, nib->angle) << "the other stroke is as it was";
+    EXPECT_DOUBLE_EQ(doc.findBrush(nib->id)->angle, nib->angle) << "and so is the library brush";
+
+    SketchDocument back;
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc, true), back));
+    EXPECT_DOUBLE_EQ(back.findById(first)->strokeOptions().brush->angle, 10.0) << "kept through a file";
+    EXPECT_DOUBLE_EQ(back.findById(second)->strokeOptions().brush->angle, nib->angle);
+    EXPECT_EQ(allBrushNodes(back.network()).size(), 2u);
+}
+
+TEST(GraphBrushAssets, AStrokeDrawnWithTheActiveBrushHasItsBrushNodeInTheFlow) {
+    BrushAssetsGuard guard;
+    SketchDocument doc;
+    doc.setPageSize(200, 200);
+    doc.addBrushPresets();
+    for (const std::shared_ptr<const BrushDef>& brush : doc.brushes()) {
+        StrokeOptions options = doc.defaultStrokeOptions();
+        options.brush = brush;
+        SketchObject* line = SketchObject::makeLine(10, 50, 190, 50);
+        line->setStroke(SketchPaint::solid(SketchColor::gray(0.0f)));
+        line->setStrokeOptions(options);
+        doc.addUndoable(line, "Draw with Paintbrush");
+    }
+    const jitnodes::Network& net = doc.network();
+    EXPECT_EQ(allBrushNodes(net).size(), doc.brushes().size()) << "one per stroke";
+    for (const jitnodes::NodeId node : allBrushNodes(net)) {
+        EXPECT_TRUE(paintTakes(net, node));
+    }
 }
 
 // An asset a document brings along (registered from its graph, not in the brush folder) is a usable brush once the graph is read.

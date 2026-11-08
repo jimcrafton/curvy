@@ -116,7 +116,7 @@ namespace curvy {
             for (AppearanceItem& item : items) {
                 if (item.strokeOptions.brushRef != 0) {
                     if (!item.strokeOptions.brush) {
-                        item.strokeOptions.brush = findBrush(item.strokeOptions.brushRef);
+                        item.strokeOptions.brush = brushWithSettings(findBrush(item.strokeOptions.brushRef), item.strokeOptions.graphSettings);   // the stroke's own values
                     }
                     item.strokeOptions.brushRef = 0;
                     any = true;

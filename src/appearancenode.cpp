@@ -1,6 +1,7 @@
 #include "curvy/appearancenode.h"
 
 #include "curvy/brush.h"
+#include "curvy/graphbrush.h"
 #include "curvy/pathnode.h"
 
 #include <jitnodes/graph/network.h>
@@ -244,6 +245,25 @@ namespace curvy {
                 return !inputs.empty() && inputs.front() ? inputs.front() : std::make_shared<jitnodes::Geometry>();
             }
         };
+
+        // The brush of one stroke: the numbers of a library brush, as that stroke has them. Geometry passes through, as for the look nodes.
+        class BrushNode : public jitnodes::Node {
+        public:
+            BrushNode() : Node(kBrushNodeType, 1) {
+                const std::vector<double> defaults = BrushDef().params();
+                for (std::size_t i = 0; i < BrushDef::kParamNames.size(); ++i) {
+                    declareFloat(BrushDef::kParamNames[i], float(defaults[i]));
+                }
+            }
+
+            jitnodes::GeometryHandle cook(jitnodes::CookContext&, const std::vector<jitnodes::GeometryHandle>& inputs) override {
+                return !inputs.empty() && inputs.front() ? inputs.front() : std::make_shared<jitnodes::Geometry>();
+            }
+        };
+    }
+
+    bool isBrushNodeType(const std::string& typeName) {
+        return typeName == kBrushNodeType || findGraphBrush(typeName) != nullptr;
     }
 
     bool isAppearanceNodeType(const std::string& typeName) {
@@ -259,6 +279,7 @@ namespace curvy {
         registry.registerType(kFillNodeType, [] { return std::make_unique<AppearanceNode>(kFillNodeType, AppearanceKind::Fill); });
         registry.registerType(kStrokeNodeType, [] { return std::make_unique<AppearanceNode>(kStrokeNodeType, AppearanceKind::Stroke); });
         registry.registerType(kEffectNodeType, [] { return std::make_unique<AppearanceNode>(kEffectNodeType, AppearanceKind::Effect); });
+        registry.registerType(kBrushNodeType, [] { return std::make_unique<BrushNode>(); });
     }
 
     std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> appearanceSuccessors(const jitnodes::Network& network, const std::vector<jitnodes::NodeId>& ids) {
@@ -271,6 +292,10 @@ namespace curvy {
         for (jitnodes::NodeId id : ids) {
             if (isAppearanceNodeType(network.node(id).typeName())) {
                 jitnodes::NodeId input = network.inputOf(id, 0);
+                // A stroke's brush sits between it and the look node that follows: that node follows the stroke all the same.
+                if (input != jitnodes::invalidNodeId && network.hasNode(input) && isBrushNodeType(network.node(input).typeName())) {
+                    input = network.inputOf(input, 0);
+                }
                 if (const auto through = shapeOf.find(input); through != shapeOf.end()) {
                     input = through->second;
                 }
@@ -441,6 +466,9 @@ namespace curvy {
                 };
                 if (settingsOf(params) != settingsOf(baseParams)) {
                     o.graphSettings = settingsOf(params);
+                    if (o.brush && library.brush) {
+                        o.brush = brushWithSettings(library.brush(o.brush->id), o.graphSettings);
+                    }
                 }
             }
             if (tableDiffers(kDashes)) {
