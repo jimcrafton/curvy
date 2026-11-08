@@ -1,4 +1,5 @@
 #include "curvy/sketchdocument.h"
+#include "curvy/curvyfile.h"
 #include "curvy/gzip.h"
 #include "curvy/pathnode.h"
 #include "curvy/sketchbin.h"
@@ -8,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <sstream>
@@ -1406,12 +1408,15 @@ namespace curvy {
             if (isBinaryDocument(text)) {   // .skb: told by its first bytes, not its name
                 return documentFromBinary(text, *this);
             }
-            if (isGzip(text)) {   // .svgz: told by its first bytes, not its name
+            if (isGzip(text)) {   // .svgz or a compressed .curvy: told by its first bytes, not its name
                 std::string inflated;
                 if (!gzipDecompress(text, inflated)) {
                     return false;
                 }
-                return documentFromSvg(inflated, *this, taskProgress_);
+                text = std::move(inflated);
+            }
+            if (isCurvyDocument(text)) {
+                return documentFromCurvy(text, *this);
             }
             if (isPdfDocument(text)) {   // PDF / Illustrator: told by its first bytes, not its name (the controller makes it an untitled import)
                 PdfImportOptions options;
@@ -1429,21 +1434,51 @@ namespace curvy {
     }
 
     bool SketchDocument::writeToFile(const std::string& path) {
-        // The text is made before the file is opened: opening truncates it, and a cancelled save must leave the old file as it was.
-        const bool binary = hasExtension(path, ".skb");
-        std::string text = binary ? binaryFromDocument(*this) : svgFromDocument(*this, taskProgress_);
-        if (taskProgress_ != nullptr && taskProgress_->cancelled()) {
+        // The text is made before the file is opened: a cancelled save must leave the old file as it was.
+        std::string text;
+        if (hasExtension(path, ".curvy") || hasExtension(path, ".curvyz")) {
+            if (!curvyFileSupports(*this)) {   // refuse rather than save a file that silently drops text, symbols, brushes or images
+                return false;
+            }
+            syncPathNodes();   // the file is the graph: a document just opened from SVG may not have written every object's state into its node yet
+            text = curvyFromDocument(*this);
+            if (hasExtension(path, ".curvyz")) {
+                text = gzipCompress(text);
+            }
+        } else {
+            text = hasExtension(path, ".skb") ? binaryFromDocument(*this) : svgFromDocument(*this, taskProgress_);
+            if (taskProgress_ != nullptr && taskProgress_->cancelled()) {
+                return false;
+            }
+            if (hasExtension(path, ".svgz")) {
+                text = gzipCompress(text);
+            }
+        }
+        // Written beside the target and renamed over it, so a crash or a full disk leaves the previous version whole.
+        const std::filesystem::path target = std::filesystem::u8path(path);
+        std::filesystem::path temporary = target;
+        temporary += ".tmp";
+        {
+            std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+            if (!out) {
+                return false;
+            }
+            out << text;
+            out.flush();
+            if (!out) {
+                out.close();
+                std::error_code ignored;
+                std::filesystem::remove(temporary, ignored);
+                return false;
+            }
+        }
+        std::error_code error;
+        std::filesystem::rename(temporary, target, error);
+        if (error) {
+            std::filesystem::remove(temporary, error);
             return false;
         }
-        if (hasExtension(path, ".svgz")) {
-            text = gzipCompress(text);
-        }
-        std::ofstream out(path, std::ios::binary | std::ios::trunc);
-        if (!out) {
-            return false;
-        }
-        out << text;
-        return static_cast<bool>(out);
+        return true;
     }
 
     void SketchDocument::changed() {
@@ -1451,6 +1486,7 @@ namespace curvy {
             batchPending_ = true;
             return;
         }
+        pullLayerOrderFromPaint();
         pullLayerNodes();
         pullPaintOrder();
         syncLayers();   // new objects find their layer, layer state reaches the objects, the stack follows the layers

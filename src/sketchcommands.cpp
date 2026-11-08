@@ -96,10 +96,6 @@ namespace curvy {
 
     void SketchCommandController::addObjectCommands() {
         add("object.group", [this]() { document_.groupSelection(); });
-        add("liveShape.circle", [this]() {
-            const Artboard& board = document_.activeArtboardRect();
-            document_.addLiveShape("circle", {{"count", 48.0f}, {"radius", 50.0f}, {"cx", float(board.x + board.width * 0.5)}, {"cy", float(board.y + board.height * 0.5)}}, "New Live Circle");
-        });
         add("liveShape.makeParametric", [this]() {
             for (std::size_t id : std::vector<std::size_t>(document_.selection())) {
                 document_.makeParametric(id);

@@ -1,3 +1,4 @@
+#include "curvy/curvyfile.h"
 #include "curvy/sketchdocument.h"
 #include "curvy/sketchexport.h"
 #include "curvy/sketchobject.h"
@@ -495,6 +496,103 @@ void sparkles(Builder& b, std::vector<std::pair<std::size_t, std::string>>& twin
 
 }  // namespace
 
+TEST(SampleArt, DISABLED_WriteLayerStack) {
+    namespace fs = std::filesystem;
+    const fs::path out = fs::path(__FILE__).parent_path().parent_path() / "Resources" / "samples";
+    fs::create_directories(out);
+
+    SketchDocument doc;
+    doc.setPageSize(800.0f, 600.0f);
+    const auto block = [&](const std::string& name, double x, double y, double w, double h, const char* color) {
+        SketchObject& object = doc.add(SketchObject::makeRect(x, y, w, h));
+        object.setName(name);
+        object.setAppearance({fill(solid(color)), line("#202020", 3.0)});
+    };
+    const auto disc = [&](const std::string& name, double x, double y, double r, const char* color) {
+        SketchObject& object = doc.add(SketchObject::makeEllipse(x, y, r, r));
+        object.setName(name);
+        object.setAppearance({fill(solid(color)), line("#202020", 3.0)});
+    };
+    {
+        SketchDocument::Batch batch(doc);
+        block("Backdrop", 40, 40, 720, 520, "#d9d4c7");
+        doc.addLayer(0, "Red");
+        block("Red square", 100, 100, 260, 260, "#d94a3d");
+        doc.addLayer(0, "Green");
+        block("Green square", 200, 160, 260, 260, "#4aa564");
+        doc.addLayer(0, "Blue");
+        block("Blue square", 300, 220, 260, 260, "#3d6fd9");
+        const std::size_t outer = doc.addLayer(0, "Discs");
+        doc.addLayer(outer, "Yellow disc");
+        disc("Yellow disc", 560, 170, 90, "#f2c230");
+        doc.addLayer(outer, "Purple disc");
+        disc("Purple disc", 620, 230, 90, "#8e44ad");
+    }
+    doc.undoStack().clear();
+
+    const std::string native = curvyFromDocument(doc);
+    {
+        std::ofstream file(out / "layerStack.curvy", std::ios::binary | std::ios::trunc);
+        ASSERT_TRUE(static_cast<bool>(file));
+        file << native;
+    }
+    SketchDocument loaded;
+    std::string error;
+    ASSERT_TRUE(documentFromCurvy(native, loaded, &error)) << error;
+    EXPECT_EQ(loaded.objectCount(), doc.objectCount());
+    EXPECT_EQ(loaded.layers().size(), doc.layers().size());
+}
+
+TEST(SampleArt, DISABLED_RenderLayerStackAfterGreenBack) {
+    namespace fs = std::filesystem;
+    const fs::path samples = fs::path(__FILE__).parent_path().parent_path() / "Resources" / "samples";
+    std::ifstream in(samples / "layerStack.curvy", std::ios::binary);
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    SketchDocument doc;
+    std::string error;
+    ASSERT_TRUE(documentFromCurvy(text, doc, &error)) << error;
+    const char* dir = std::getenv("CURVY_RENDER_DIR");
+    ASSERT_NE(dir, nullptr);
+    ASSERT_TRUE(exportPageImage(doc, (fs::path(dir) / "before.png").string(), 1.0));
+    for (std::size_t i = 0; i < doc.objectCount(); ++i) {
+        std::cout << "before " << i << " " << doc.object(i).name() << " layer " << doc.layerOf(doc.object(i)) << "\n";
+    }
+    {
+        const jitnodes::Network& root = doc.network();
+        const jitnodes::NodeId merge = root.findNode("paint");
+        for (int i = 0; merge != jitnodes::invalidNodeId && i < root.node(merge).inputCount(); ++i) {
+            const jitnodes::NodeId in = root.inputOf(merge, i);
+            std::cout << "merge input " << i << " " << (in == jitnodes::invalidNodeId ? std::string("-") : root.node(in).name() + " (" + root.node(in).typeName() + ")") << "\n";
+        }
+        for (const Layer& layer : doc.layers()) {
+            std::cout << "layer " << layer.id << " " << layer.name << " parent " << layer.parent << "\n";
+        }
+        for (std::uint32_t scope = 1; scope < doc.scopeCount(); ++scope) {
+            const NodeRef at = doc.parentOfScope(scope);
+            std::cout << "scope " << scope << " subnet " << (doc.hasNode(at) ? doc.node(at).getString("label") : std::string("?")) << " layerIdOfScope "
+                      << doc.layerIdOfScope(scope) << " layerParent " << (doc.hasNode(at) ? doc.node(at).getFloat("layerParent") : -9.0f) << "\n";
+        }
+        for (std::size_t i = 0; i < doc.objectCount(); ++i) {
+            std::cout << "obj " << doc.object(i).name() << " scope " << doc.object(i).graphScope() << " layer() " << doc.object(i).layer()
+                      << " placed " << doc.object(i).placedLayer() << " layerOf " << doc.layerOf(doc.object(i)) << "\n";
+        }
+    }
+    NodeRef green;
+    for (std::uint32_t scope = 1; scope < doc.scopeCount(); ++scope) {
+        const NodeRef at = doc.parentOfScope(scope);
+        if (doc.hasNode(at) && doc.node(at).getString("label") == "Green") {
+            green = at;
+        }
+    }
+    ASSERT_TRUE(doc.hasNode(green));
+    ASSERT_TRUE(doc.movePaintItem(green, -1));
+    ASSERT_TRUE(exportPageImage(doc, (fs::path(dir) / "after.png").string(), 1.0));
+    for (std::size_t i = 0; i < doc.objectCount(); ++i) {
+        std::cout << i << " " << doc.object(i).name() << " layer " << doc.layerOf(doc.object(i)) << " visible " << doc.object(i).isVisible()
+                  << " opacity " << doc.object(i).opacity() << "\n";
+    }
+}
+
 TEST(SampleArt, DISABLED_WriteSkyDreamer) {
     namespace fs = std::filesystem;
     const fs::path out = fs::path(__FILE__).parent_path().parent_path() / "Resources" / "samples";
@@ -557,4 +655,25 @@ TEST(SampleArt, DISABLED_WriteSkyDreamer) {
         ++expressions;
     }
     EXPECT_EQ(expressions, twinkles.size() * 2);
+
+    // The native file, written beside the SVG: it must open, still pulse, and resave to itself.
+    const std::string native = curvyFromDocument(doc);
+    {
+        std::ofstream file(out / "skyDreamer.curvy", std::ios::binary | std::ios::trunc);
+        ASSERT_TRUE(static_cast<bool>(file));
+        file << native;
+    }
+    SketchDocument fromNative;
+    std::string error;
+    ASSERT_TRUE(documentFromCurvy(native, fromNative, &error)) << error;
+    EXPECT_EQ(fromNative.objectCount(), doc.objectCount());
+    std::size_t nativeExpressions = 0;
+    const std::string nativeGraph = fromNative.graphToText();
+    for (std::size_t at = nativeGraph.find("sin(time"); at != std::string::npos; at = nativeGraph.find("sin(time", at + 1)) {
+        ++nativeExpressions;
+    }
+    EXPECT_EQ(nativeExpressions, twinkles.size() * 2);
+    SketchDocument again;
+    ASSERT_TRUE(documentFromCurvy(curvyFromDocument(fromNative), again, &error)) << error;
+    EXPECT_EQ(curvyFromDocument(again), curvyFromDocument(fromNative)) << "a resave of the sample diffs to nothing";
 }

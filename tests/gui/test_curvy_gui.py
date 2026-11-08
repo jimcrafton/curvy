@@ -286,6 +286,28 @@ class GraphDock(CurvyCase):
         self.app.key("ctrl+z")
         self.app.wait_until(lambda: self.app.prop("graphBypassButton", "text") == "Bypass", "one undo to remove the bypass")
 
+    def test_back_and_forward_move_an_object_in_the_paint_order_and_undo_takes_it_back(self):
+        self.new_a4()
+        self.app.click("toolbarToggle")
+        canvas = self.app.find("canvas")
+        self.app.click("rectangleTool")
+        self.app.drag((canvas.x + 300, canvas.y + 200), (canvas.x + 420, canvas.y + 280))
+        self.app.drag((canvas.x + 360, canvas.y + 220), (canvas.x + 480, canvas.y + 300))
+        self.app.click("selectTool")
+        self.app.click("graphToggle")
+        self.app.wait_until(lambda: self.app.prop("graphToggle", "checked"), "the toggle to check")
+        self.app.click_at((canvas.x + 470, canvas.y + 290))             # only the second (top) rectangle is under this point
+        self.app.wait_until(lambda: self.app.prop("graphDetailKind", "text") == "Path", "the top rectangle's box")
+        self.assertTrue(self.app.prop("graphBackButton", "visible"))
+        self.assertTrue(self.app.prop("graphBackButton", "enabled"))
+        self.assertFalse(self.app.prop("graphForwardButton", "enabled"), "it is already the front one")
+        self.app.click("graphBackButton")
+        self.app.wait_until(lambda: self.app.prop("graphForwardButton", "enabled"), "Forward to open once it moved back")
+        self.assertFalse(self.app.prop("graphBackButton", "enabled"))
+        self.app.key("ctrl+z")
+        self.app.wait_until(lambda: self.app.prop("graphBackButton", "enabled"), "one undo to put it back in front")
+        self.assertFalse(self.app.prop("graphForwardButton", "enabled"))
+
     # The parameter box is painted by one grid; a value is read by opening its editor.
     def param_point(self, row, dx=100):
         grid = self.app.find("graphParams")

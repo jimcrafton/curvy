@@ -139,6 +139,16 @@ namespace curvy {
             PathNode(const char* type, std::initializer_list<const char*> extras, bool optionalInput = false)
                 : Node(type, optionalInput ? 1 : 0), optionalInput_(optionalInput) {
                 declareGeometry("curve");
+                declareString("label", "");
+                declareFloat("visible", 1.0f);
+                declareFloat("locked", 0.0f);
+                declareFloat("opacity", 1.0f);
+                declareString("blend", "normal");
+                declareFloat("activeFill", 0.0f);
+                declareFloat("activeStroke", 0.0f);
+                declareFloat("activeEffect", 0.0f);
+                declareFloat("frameAngle", 0.0f);
+                declareString("type", "path");
                 for (const char* name : extras) {
                     declareString(name, "");
                 }
@@ -694,7 +704,10 @@ namespace curvy {
 
     BLMatrix2D worldTransformOf(const jitnodes::Network& network, jitnodes::NodeId place) {
         BLMatrix2D world = resolvedTransformOf(network.node(place));
-        for (jitnodes::NodeId up = network.inputOf(place, 1); up != jitnodes::invalidNodeId; up = network.inputOf(up, 1)) {
+        // A wire to anything but a transform node (a hand-edited file) is no parent; the guard stops a cycle.
+        int guard = 0;
+        for (jitnodes::NodeId up = network.inputOf(place, 1); up != jitnodes::invalidNodeId && network.node(up).typeName() == kTransformNodeType && ++guard < 1000;
+             up = network.inputOf(up, 1)) {
             world.post_transform(resolvedTransformOf(network.node(up)));
         }
         return world;
@@ -709,7 +722,7 @@ namespace curvy {
             registerShapeNode();
             registry.registerType(kTextNodeType, [] { return std::make_unique<PathNode>(kTextNodeType, Extras{"text", "font", "size", "matrix", "style", "warp"}); });
             registry.registerType(kSymbolNodeType, [] { return std::make_unique<PathNode>(kSymbolNodeType, Extras{"symbol"}); });
-            registry.registerType(kImageNodeType, [] { return std::make_unique<PathNode>(kImageNodeType, Extras{"image"}); });
+            registry.registerType(kImageNodeType, [] { return std::make_unique<PathNode>(kImageNodeType, Extras{"image", "imageKey"}); });
             registry.registerType(kTransformNodeType, [] { return std::make_unique<TransformNode>(); });
             registry.registerType(kSubnetNodeType, [] { return std::make_unique<CurvySubnetNode>(); });
             registry.registerType(kTagNodeType, [] { return std::make_unique<TagNode>(); });
@@ -774,11 +787,137 @@ namespace curvy {
                 params = {{"symbol", object.symbol() ? std::to_string(object.symbol()->id) : std::string()}};
                 break;
             case SketchObjectType::Image:
-                params = {{"image", object.image() ? object.image()->name : std::string()}};
+                params = {{"image", object.image() ? object.image()->name : std::string()}, {"imageKey", object.image() ? object.image()->key : std::string()}};
                 break;
             default: break;
         }
         return params;
+    }
+
+    namespace {
+        constexpr const char* kActiveRowParams[3] = {"activeFill", "activeStroke", "activeEffect"};
+    }
+
+    const char* objectTypeName(SketchObjectType type) {
+        switch (type) {
+            case SketchObjectType::Line: return "line";
+            case SketchObjectType::Rect: return "rect";
+            case SketchObjectType::RoundRect: return "roundRect";
+            case SketchObjectType::Ellipse: return "ellipse";
+            case SketchObjectType::Polygon: return "polygon";
+            case SketchObjectType::Polyline: return "polyline";
+            case SketchObjectType::Text: return "text";
+            case SketchObjectType::Symbol: return "symbol";
+            case SketchObjectType::Image: return "image";
+            default: return "path";
+        }
+    }
+
+    bool objectTypeFromName(const std::string& name, SketchObjectType& type) {
+        for (const SketchObjectType candidate : {SketchObjectType::Line, SketchObjectType::Rect, SketchObjectType::RoundRect, SketchObjectType::Ellipse,
+                                                 SketchObjectType::Polygon, SketchObjectType::Polyline, SketchObjectType::Path, SketchObjectType::Text,
+                                                 SketchObjectType::Symbol, SketchObjectType::Image}) {
+            if (name == objectTypeName(candidate)) {
+                type = candidate;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    namespace {
+        void stampOf(const SketchObject& object, double (&values)[9]) {
+            values[0] = object.ownVisible();
+            values[1] = object.ownLocked();
+            values[2] = object.opacity();
+            values[3] = double(int(object.blendMode()));
+            values[4] = double(object.activeFillIndex());
+            values[5] = double(object.activeStrokeIndex());
+            values[6] = double(object.activeEffectIndex());
+            values[7] = object.frameAngle();
+        }
+    }
+
+    void storeObjectState(jitnodes::Node& node, const SketchObject& object) {
+        SketchObject::NodeStamp& stamp = object.nodeStamp();
+        double now[9] = {};
+        stampOf(object, now);
+        if (stamp.valid && std::equal(now, now + 9, stamp.values) && stamp.name == object.name()) {
+            return;
+        }
+        std::copy(now, now + 9, stamp.values);
+        stamp.name = object.name();
+        stamp.valid = true;
+        if (node.getString("label") != object.name()) {
+            node.setString("label", object.name());
+        }
+        const auto flag = [&](const char* name, bool on) {
+            if ((node.getFloat(name) != 0.0f) != on) {
+                node.setFloat(name, on ? 1.0f : 0.0f);
+            }
+        };
+        flag("visible", object.ownVisible());
+        flag("locked", object.ownLocked());
+        if (node.getFloat("opacity") != float(object.opacity())) {
+            node.setFloat("opacity", float(object.opacity()));
+        }
+        if (node.getString("blend") != blendModeCss(object.blendMode())) {
+            node.setString("blend", blendModeCss(object.blendMode()));
+        }
+        const float active[3] = {float(object.activeFillIndex()), float(object.activeStrokeIndex()), float(object.activeEffectIndex())};
+        for (int i = 0; i < 3; ++i) {
+            if (node.getFloat(kActiveRowParams[i]) != active[i]) {
+                node.setFloat(kActiveRowParams[i], active[i]);
+            }
+        }
+        if (node.getFloat("frameAngle") != float(object.frameAngle())) {
+            node.setFloat("frameAngle", float(object.frameAngle()));
+        }
+        // An object never changes type, so the node only ever records it; nothing is adopted back.
+        if (node.getString("type") != objectTypeName(object.type())) {
+            node.setString("type", objectTypeName(object.type()));
+        }
+    }
+
+    bool applyObjectState(SketchObject& object, const jitnodes::Node& node) {
+        bool changed = false;
+        const bool visible = node.getFloat("visible") != 0.0f, locked = node.getFloat("locked") != 0.0f;
+        if (visible != object.ownVisible()) {
+            object.setVisible(visible);
+            changed = true;
+        }
+        if (locked != object.ownLocked()) {
+            object.setLocked(locked);
+            changed = true;
+        }
+        if (node.getFloat("opacity") != float(object.opacity())) {
+            object.setOpacity(double(node.getFloat("opacity")));
+            changed = true;
+        }
+        const BlendMode blend = blendModeFromCss(node.getString("blend"));
+        if (blend != object.blendMode()) {
+            object.setBlendMode(blend);
+            changed = true;
+        }
+        const std::size_t items = object.appearance().size();
+        std::size_t active[3];
+        for (int i = 0; i < 3; ++i) {
+            const float held = node.getFloat(kActiveRowParams[i]);
+            active[i] = held >= 0.0f && std::size_t(held) < std::max<std::size_t>(items, 1) ? std::size_t(held) : 0;
+        }
+        if (active[0] != object.activeFillIndex() || active[1] != object.activeStrokeIndex() || active[2] != object.activeEffectIndex()) {
+            object.setActiveIndices(active[0], active[1], active[2]);
+            changed = true;
+        }
+        if (node.getFloat("frameAngle") != float(object.frameAngle())) {
+            object.setFrameAngle(double(node.getFloat("frameAngle")));
+            changed = true;
+        }
+        SketchObject::NodeStamp& stamp = object.nodeStamp();
+        stampOf(object, stamp.values);
+        stamp.name = object.name();
+        stamp.valid = true;
+        return changed;
     }
 
     bool applyTextNodeParams(SketchObject& object, const jitnodes::Node& node) {

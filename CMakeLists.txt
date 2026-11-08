@@ -31,6 +31,7 @@ add_executable(curvy
     src/textoutline.cpp
     src/gzip.cpp
     src/sketchbin.cpp
+    src/curvyfile.cpp
     src/gradientbar.cpp
     src/swatchgrid.cpp
     src/pagepreview.cpp
@@ -142,11 +143,11 @@ set(CURVY_MODEL_SOURCES
     documentlayers documentswatches documentselect documentclip documentsymbols documentbrushes brush
     pathflatten textwarp imagedata documenttextpath documentimages documentexpand io/pdf/pdfexport io/eps/epsexport io/pdf/pdfimport io/pdf/fontprogram io/pdf/pdfcrypt documentartboards
     documenttrace imagetrace io/svg/sketchsvg sketchexport shapetools pathops textoutline gzip numberscrubber expressionfield
-    backgroundtask sketchbin cursorset newdocumentmodel graphdocument graphtree pathnode shapenode appearancenode documentlive radialmenu holdscrub workspacemodel dockcontext liveshape settings)
+    backgroundtask sketchbin curvyfile cursorset newdocumentmodel graphdocument graphtree pathnode shapenode appearancenode documentlive radialmenu holdscrub workspacemodel dockcontext liveshape settings)
 list(TRANSFORM CURVY_MODEL_SOURCES PREPEND src/)
 list(TRANSFORM CURVY_MODEL_SOURCES APPEND .cpp)
 
-add_executable(curvyTests tests/test_sketch_model.cpp tests/sampleart.cpp ${CURVY_MODEL_SOURCES})
+add_executable(curvyTests tests/test_sketch_model.cpp tests/sampleart.cpp tests/graphprobe.cpp tests/curvyfile.cpp ${CURVY_MODEL_SOURCES})
 target_include_directories(curvyTests PRIVATE include)
 target_link_libraries(curvyTests PRIVATE newui jitnodes::jitnodes zlib_static windowscodecs ole32 GTest::gtest_main)
 include(GoogleTest)

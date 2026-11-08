@@ -1,5 +1,6 @@
 #include "curvy/sketchcontroller.h"
 
+#include "curvy/curvyfile.h"
 #include "curvy/io/pdf/pdfexport.h"
 #include "curvy/io/eps/epsexport.h"
 #include "curvy/io/pdf/pdfimport.h"
@@ -746,10 +747,11 @@ namespace curvy {
     namespace {
     newui::FileDialogOptions fileOptions() {
         newui::FileDialogOptions options;
+        options.filters.push_back({"Curvy Files", "*.curvy;*.curvyz"});
         options.filters.push_back({"SVG Files", "*.svg;*.svgz"});
         options.filters.push_back({"Sketch Binary Files", "*.skb"});
         options.filters.push_back({"All Files", "*.*"});
-        options.defaultExtension = "svg";
+        options.defaultExtension = "curvy";
         return options;
     }
     }
@@ -766,7 +768,18 @@ namespace curvy {
     std::string SketchDocumentController::chooseSavePath(newui::Document& document) {
         newui::FileDialogOptions options = fileOptions();
         options.title = "Save As";
-        options.defaultFileName = document.hasFilePath() ? std::filesystem::path(document.filePath()).filename().string() : untitledName_ + ".svg";
+        // A document opened from SVG or .skb offers .curvy under the same name; until the format holds text, symbols, brushes and images, those fall back to SVG.
+        const bool native = curvyFileSupports(document_);
+        if (document.hasFilePath()) {
+            std::filesystem::path name = std::filesystem::path(document.filePath()).filename();
+            const std::string extension = name.extension().string();
+            if (native && extension != ".curvy" && extension != ".curvyz") {
+                name.replace_extension(".curvy");
+            }
+            options.defaultFileName = name.string();
+        } else {
+            options.defaultFileName = untitledName_ + (native ? ".curvy" : ".svg");
+        }
         std::string path;
         newui::Dialog::showSaveFile(frame_.frameHandle(), options, path);
         return path;

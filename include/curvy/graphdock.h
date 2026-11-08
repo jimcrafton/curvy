@@ -184,6 +184,11 @@ namespace curvy {
         newui::Button* enterButton_ = nullptr;
         newui::Button* bypassButton_ = nullptr;
         newui::Button* freezeButton_ = nullptr;
+        // Forward / Back move the shown layer, group or object one place in the paint merge that lists it (SketchDocument::movePaintItem).
+        newui::Button* forwardButton_ = nullptr;
+        newui::Button* backButton_ = nullptr;
+        NodeRef reorderItem_;
+        std::vector<std::size_t> shownSelection_;   // the document's selection at the last rebuild: a selected Layer row survives a rebuild only while it holds
         std::uint32_t viewScope_ = 0;             // the network the Flow view lists
         std::vector<LinkRow> inputRows_, userRows_;
         std::shared_ptr<jitnodes::GraphSnapshot> scrubBefore_;   // the graph when the drag started
