@@ -1,5 +1,6 @@
 #include "curvy/io/pdf/pdfexport.h"
 
+#include "curvy/graphbrush.h"
 #include "curvy/gzip.h"
 #include "curvy/sketchdocument.h"
 
@@ -425,13 +426,17 @@ namespace curvy {
             const BrushDef& brush = *item.strokeOptions.brush;
             const BLPath shown = object.itemOutline(index);
             if (brush.kind == BrushKind::Calligraphic) {
-                return fillPath(brush.nibOutline(shown, item.strokeWidth), item.paint, item.opacity, item.blendMode);
+                return fillPath(brush.nibOutline(shown, item.strokeWidth, item.strokeOptions.widths), item.paint, item.opacity, item.blendMode);
             }
             if (brush.kind == BrushKind::Art) {
-                return drawParts(brush.bendAlong(shown, item.strokeWidth), item.opacity);
+                return drawParts(brush.bendAlong(shown, item.strokeWidth, item.strokeOptions.widths), item.opacity);
+            }
+            if (brush.kind == BrushKind::Graph) {
+                const auto cooked = cookGraphBrush(brush.graphType, shown, item.strokeWidth, item.strokeOptions.widths, item.strokeOptions.graphSettings);
+                return cooked ? drawParts(graphBrushParts(cooked, item.strokeOptions, item.paint), item.opacity) : std::string();
             }
             std::string out;
-            for (const BLMatrix2D& matrix : brush.placements(shown, item.strokeWidth)) {
+            for (const BLMatrix2D& matrix : brush.placements(shown, item.strokeWidth, item.strokeOptions.widths)) {
                 std::vector<BrushPart> moved = brush.parts();
                 for (BrushPart& part : moved) {
                     part.path.transform(matrix);

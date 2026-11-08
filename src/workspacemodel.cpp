@@ -158,7 +158,18 @@ namespace curvy {
         return !message_.empty() && selectionCount_ == 0 && hover_.part == ScrubPart::None ? message_ + "  |  " + hint : hint;
     }
 
+    void WorkspaceModel::setBrushProgress(int percent) {
+        percent = percent < 0 ? -1 : std::min(percent, 100);
+        if (percent != brushPercent_) {
+            brushPercent_ = percent;
+            touch();
+        }
+    }
+
     std::string WorkspaceModel::hintInfo() const {
+        if (brushPercent_ >= 0) {
+            return "Brush " + std::to_string(brushPercent_) + "% - Esc stops";
+        }
         if (!documentOpen_ || !pointerKnown_) {
             return std::string();
         }

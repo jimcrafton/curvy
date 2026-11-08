@@ -63,6 +63,8 @@ namespace curvy {
             {"Object/Brush", "Apply Brush", "brush.apply"},
             {"Object/Brush", "Remove Brush", "brush.remove"},
             {"Object/Brush", "Add Brush Presets", "brush.presets"},
+            {"Object/Brush", "Bend Along Path", "brush.deform"},
+            {"Object/Brush", "Release Bend", "brush.releaseDeform"},
             {"Object/Text on Path", "Make Text on Path", "text.onPath"},
             {"Object/Text on Path", "Make Text Between Paths", "text.betweenPaths"},
             {"Object/Text on Path", "Release Text from Path", "text.release"},
@@ -241,6 +243,12 @@ namespace curvy {
         artboardPanel_ = std::make_unique<ArtboardPanel>(frame_.rootView(), document_);   // the artboard list and the active one
         libraryPanel_ = std::make_unique<LibraryPanel>(frame_.rootView(), document_);   // symbols and patterns
         brushPanel_ = std::make_unique<BrushPanel>(frame_.rootView(), document_);   // brushes
+        canvas_->onToolChanged += [this](CanvasView& view) {   // choosing the Paintbrush shows the brushes to pick from
+            if (view.tool() == SketchTool::Paintbrush) {
+                brushPanel_->reveal();
+            }
+            return newui::SyncReturn::Handled;
+        };
         transformPanel_ = std::make_unique<TransformPanel>(frame_.rootView(), document_);   // X / Y / W / H / angle of the selection
 
         bindFileEvents();

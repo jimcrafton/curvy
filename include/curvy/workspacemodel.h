@@ -60,6 +60,8 @@ namespace curvy {
         void setSelectionCount(std::size_t count);
         void setPointer(bool known, double x, double y, double zoomPercent);
         void say(const std::string& text);
+        // Graph brush strokes still being drawn in the background: how far they have got in percent, -1 when none. Shown in place of the pointer position.
+        void setBrushProgress(int percent);
 
         // A hint shows until the user has done its thing a few times.
         bool fresh(const std::string& feature) const;
@@ -90,6 +92,7 @@ namespace curvy {
         std::size_t selectionCount_ = 0;
         bool pointerKnown_ = false;
         double pointerX_ = 0.0, pointerY_ = 0.0, zoomPercent_ = 100.0;
+        int brushPercent_ = -1;
         std::string message_ = "Tap Space to start";
         std::map<std::string, int> uses_;
         bool hintsFade_ = true;

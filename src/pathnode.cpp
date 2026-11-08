@@ -1,6 +1,7 @@
 #include "curvy/pathnode.h"
 
 #include "curvy/appearancenode.h"
+#include "curvy/brush.h"
 #include "curvy/shapenode.h"
 #include "curvy/sketchobject.h"
 
@@ -356,6 +357,102 @@ namespace curvy {
         };
     }
 
+    std::string widthProfileText(const std::vector<WidthPoint>& widths) {
+        std::string text;
+        char row[96];
+        for (const WidthPoint& w : widths) {
+            std::snprintf(row, sizeof row, "%s%.9g,%.9g,%.9g", text.empty() ? "" : ";", w.t, w.left, w.right);
+            text += row;
+        }
+        return text;
+    }
+
+    std::vector<WidthPoint> widthProfileFromText(const std::string& text) {
+        std::vector<WidthPoint> widths;
+        std::istringstream rows(text);
+        std::string row;
+        while (std::getline(rows, row, ';')) {
+            WidthPoint w;
+            if (std::sscanf(row.c_str(), "%lf,%lf,%lf", &w.t, &w.left, &w.right) == 3) {
+                widths.push_back(w);
+            }
+        }
+        return widths;
+    }
+
+    namespace {
+        constexpr const char* kFrameParams[6] = {"frame0", "frame1", "frame2", "frame3", "frame4", "frame5"};
+
+        class DeformAlongPathNode : public jitnodes::Node {
+        public:
+            DeformAlongPathNode() : Node(kDeformAlongPathNodeType, 2) {
+                const BrushDef defaults;
+                declareString("fit", "stretch");
+                declareFloat("headGuide", float(defaults.headGuide));
+                declareFloat("tailGuide", float(defaults.tailGuide));
+                declareString("corner", "smooth");
+                declareFloat("cornerRadius", float(defaults.cornerRadius));
+                declareFloat("miterLimit", float(defaults.miterLimit));
+                declareFloat("breakAngle", float(defaults.breakAngle));
+                declareString("direction", "leftToRight");
+                declareFloat("flipAlong", 0.0f);
+                declareFloat("flipAcross", 0.0f);
+                declareFloat("width", 1.0f);
+                declareString("widths", "");
+                // Carries the spine (which arrives in page space) into the space the artwork is in before its placement node: the inverse of
+                // that placement when the node was wired, so the placement then moves the bent result as a whole. Identity = already there.
+                const BLMatrix2D identity = BLMatrix2D::make_identity();
+                for (int i = 0; i < 6; ++i) {
+                    declareFloat(kFrameParams[i], float(identity.m[i]));
+                }
+            }
+
+            bool hasVariableInputs() const override { return true; }
+
+            jitnodes::GeometryHandle cook(jitnodes::CookContext&, const std::vector<jitnodes::GeometryHandle>& inputs) override {
+                if (inputs.empty() || !inputs.front()) {
+                    return std::make_shared<jitnodes::Geometry>();
+                }
+                BLPath art, spine;
+                BLMatrix2D frame;
+                for (int i = 0; i < 6; ++i) {
+                    frame.m[i] = double(getFloat(kFrameParams[i]));
+                }
+                jitnodes::GeometryHandle carried = inputs.size() > 1 && inputs[1] ? placeGeometry(*inputs[1], frame) : nullptr;
+                if (!carried || !pathFromGeometry(*carried, spine) || spine.size() == 0 ||
+                    !pathFromGeometry(*inputs.front(), art) || art.size() == 0) {
+                    return inputs.front();
+                }
+                BrushDef brush;
+                brush.kind = BrushKind::Art;
+                const std::string& fit = getString("fit");
+                brush.fit = fit == "guided" ? BrushFit::Guided : fit == "repeat" ? BrushFit::Repeat : BrushFit::Stretch;
+                brush.headGuide = getFloat("headGuide");
+                brush.tailGuide = getFloat("tailGuide");
+                const std::string& corner = getString("corner");
+                brush.corner = corner == "bend" ? BrushCorner::Bend : corner == "miter" ? BrushCorner::Miter : corner == "break" ? BrushCorner::Break : BrushCorner::Smooth;
+                brush.cornerRadius = getFloat("cornerRadius");
+                brush.miterLimit = getFloat("miterLimit");
+                brush.breakAngle = getFloat("breakAngle");
+                brush.direction = getString("direction") == "topToBottom" ? BrushDirection::TopToBottom : BrushDirection::LeftToRight;
+                brush.flipAlong = getFloat("flipAlong") != 0.0f;
+                brush.flipAcross = getFloat("flipAcross") != 0.0f;
+                brush.setParams(brush.params());   // into range
+                BLBox box;
+                if (art.get_bounding_box(&box) != BL_SUCCESS) {
+                    return inputs.front();
+                }
+                BrushPart part;
+                part.path = std::move(art);
+                BLPath bent;
+                for (const BrushPart& piece : brush.bendParts({part}, box, spine, double(getFloat("width")), widthProfileFromText(getString("widths")))) {
+                    bent.add_path(piece.path);
+                }
+                return geometryFromPath(bent);
+            }
+        };
+    }
+
     namespace {
         // Which points of a primitive are anchors; a cubic's handles sit between them (out handle after its anchor, in handle before the next).
         bool isAnchor(const jitnodes::Primitive& prim, std::uint32_t local) {
@@ -558,7 +655,10 @@ namespace curvy {
     }
 
     jitnodes::NodeId shapeBehind(const jitnodes::Network& network, jitnodes::NodeId node) {
-        auto passes = [&network](jitnodes::NodeId at) { return network.node(at).typeName() == kTagNodeType || network.node(at).typeName() == kMovePointsNodeType; };
+        auto passes = [&network](jitnodes::NodeId at) {
+            const std::string& type = network.node(at).typeName();
+            return type == kTagNodeType || type == kMovePointsNodeType || type == kDeformAlongPathNodeType;
+        };
         for (int guard = 0; node != jitnodes::invalidNodeId && guard < 1000 && passes(node); ++guard) {
             node = network.inputOf(node, 0);
         }
@@ -728,6 +828,7 @@ namespace curvy {
             registry.registerType(kTagNodeType, [] { return std::make_unique<TagNode>(); });
             registry.registerType(kBaseLayerNodeType, [] { return std::make_unique<BaseLayerNode>(); });
             registry.registerType(kMovePointsNodeType, [] { return std::make_unique<MovePointsNode>(); });
+            registry.registerType(kDeformAlongPathNodeType, [] { return std::make_unique<DeformAlongPathNode>(); });
             registerAppearanceNodes();
         });
     }

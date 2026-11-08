@@ -2,6 +2,7 @@
 #include "curvy/curvyfile.h"
 #include "curvy/theme.h"
 #include "curvy/dockcontroller.h"
+#include "curvy/graphbrush.h"
 #include "curvy/settingsdialog.h"
 #include "curvy/io/svg/sketchsvg.h"
 #include "curvy/welcomeoverlay.h"
@@ -560,6 +561,11 @@ namespace curvy {
         }
     }
 
+    void WorkspaceController::brushProgressChanged() {
+        const GraphBrushProgress progress = graphBrushProgress();
+        model_->setBrushProgress(progress.busy() ? int(progress.fraction * 100.0) : -1);
+    }
+
     SyncReturn WorkspaceController::modelChanged(Model&) {
         // A label sizes itself when the bar is laid out, so new text needs a layout pass or it is clipped to the old width
         // (the document name started empty and showed as a sliver beside the title).
@@ -955,6 +961,11 @@ namespace curvy {
             return false;
         }
         if (vk == vkEscape) {
+            if (graphBrushProgress().busy()) {   // the hint bar says Esc stops the rendering
+                cancelGraphBrushCooks();
+                model_->say("Brush rendering stopped - edit the stroke to try again");
+                return true;
+            }
             if (dock_ != nullptr && dock_->card() != DockController::Card::None) {
                 dock_->closeCard();
                 return true;

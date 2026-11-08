@@ -1870,6 +1870,7 @@ namespace curvy {
                 StrokeOptions options = object->strokeOptions();
                 change(options);
                 object->setStrokeOptions(options);
+                syncDeformWidths(id);
             }
         }
         changed();

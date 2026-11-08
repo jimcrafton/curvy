@@ -4,6 +4,7 @@
 #include "curvy/pathflatten.h"
 #include "curvy/pathops.h"
 #include "curvy/brush.h"
+#include "curvy/graphbrush.h"
 #include "curvy/textwarp.h"
 #include "curvy/textoutline.h"
 
@@ -1624,7 +1625,7 @@ namespace curvy {
             }
             double h = item.strokeWidth * 0.5;
             if (item.strokeOptions.brush) {
-                h = item.strokeOptions.brush->reach(item.strokeWidth);
+                h = item.strokeOptions.brush->reach(item.strokeWidth, item.strokeOptions.widths);
             } else if (!item.strokeOptions.widths.empty()) {
                 double widest = 0.0;
                 for (const WidthPoint& p : item.strokeOptions.widths) { widest = std::max(widest, std::max(p.left, p.right)); }
@@ -1665,7 +1666,7 @@ namespace curvy {
         for (const AppearanceItem& item : items_) {
             if (item.kind == AppearanceKind::Stroke && item.visible && !item.paint.isNone() && item.strokeWidth > 0.0) {
                 any = true;
-                const double covered = item.strokeOptions.brush ? item.strokeOptions.brush->reach(item.strokeWidth) * 2.0 : item.strokeWidth;
+                const double covered = item.strokeOptions.brush ? item.strokeOptions.brush->reach(item.strokeWidth, item.strokeOptions.widths) * 2.0 : item.strokeWidth;
                 if (strokeHit(outline, covered + tolerance * 2.0, item.strokeOptions, point)) {
                     return true;
                 }
@@ -1697,17 +1698,31 @@ namespace curvy {
             if (brush.kind == BrushKind::Calligraphic) {
                 if (setPaintStyle(ctx, item.paint, frame, false)) {
                     ctx.set_global_alpha(alpha);
-                    ctx.fill_path(brush.nibOutline(path, width));
+                    ctx.fill_path(brush.nibOutline(path, width, item.strokeOptions.widths));
                 }
                 return;
             }
+            const bool tinted = brush.kind == BrushKind::Graph && graphBrushTinted(brush.graphType, item.strokeOptions.graphSettings);
             auto draw = [&](BLContext& target) {
                 target.set_global_alpha(1.0);
-                if (brush.kind == BrushKind::Art) {
-                    paintBrushParts(target, brush.bendAlong(path, width));
+                if (brush.kind == BrushKind::Graph) {
+                    // Dots and polygons come out of the asset already coloured; a missing asset, or one still being cooked in the background,
+                    // leaves a hairline so the stroke is not lost.
+                    if (const auto cooked = cookGraphBrushLater(brush.graphType, path, width, item.strokeOptions.widths, nullptr, item.strokeOptions.graphSettings)) {
+                        if (tinted) {
+                            paintGraphBrushTinted(target, cooked, [&](BLContext& c) { return setPaintStyle(c, item.paint, frame, false); });
+                        } else {
+                            paintGraphBrush(target, cooked);   // from a cached image: a stroke has tens of thousands of dots
+                        }
+                    } else if (setPaintStyle(target, item.paint, frame, true)) {
+                        target.set_stroke_width(1.0);
+                        target.stroke_path(path);
+                    }
+                } else if (brush.kind == BrushKind::Art) {
+                    paintBrushParts(target, brush.bendAlong(path, width, item.strokeOptions.widths));
                 } else {
                     const std::vector<BrushPart>& parts = brush.parts();
-                    for (const BLMatrix2D& matrix : brush.placements(path, width)) {
+                    for (const BLMatrix2D& matrix : brush.placements(path, width, item.strokeOptions.widths)) {
                         target.save();
                         target.apply_transform(matrix);
                         paintBrushParts(target, parts);
@@ -1715,12 +1730,12 @@ namespace curvy {
                     }
                 }
             };
-            if (alpha >= 1.0) {
+            if (alpha >= 1.0 && !tinted) {   // a tinted brush clears what is outside its shapes, so it needs a layer of its own
                 draw(ctx);
             } else {
-                const double reach = brush.reach(width);
+                const double reach = brush.reach(width, item.strokeOptions.widths);
                 const BLBox& box = frame.world;
-                paintIsolated(ctx, BLBox(box.x0 - reach, box.y0 - reach, box.x1 + reach, box.y1 + reach), alpha, BlendMode::Normal, draw);
+                paintIsolated(ctx, BLBox(box.x0 - reach, box.y0 - reach, box.x1 + reach, box.y1 + reach), alpha, item.blendMode, draw);
             }
         }
 

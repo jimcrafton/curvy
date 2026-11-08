@@ -1,5 +1,6 @@
 #include "curvy/sketchexport.h"
 
+#include "curvy/graphbrush.h"
 #include "curvy/sketchdocument.h"
 
 #include <algorithm>
@@ -62,6 +63,7 @@ namespace curvy {
         ctx.scale(scale);
         ctx.translate(-board.x, -board.y);
         ctx.clip_to_rect(BLRect(board.x, board.y, board.width, board.height));
+        const GraphBrushBlockingScope waitForBrushes;
         document.paint(ctx);
         ctx.end();
         out = image;

@@ -1,0 +1,58 @@
+// Gas ink: the stroke is poured into a gasField and settles for settleTime seconds, so it swirls and feathers like ink dropped in moving water.
+// A simulation brush: settleTime marks it (the host cooks the whole stroke at once, at that time), and the host gives the box of the guide
+// (guideMinX..guideMaxY) so the gas grid is placed around the stroke: spread is the room left around it, cell the size of a grid cell, both in guide
+// units. A long stroke gets bigger cells (at most 256 cells along its longer side) so the run stays affordable.
+{
+  format: "jitnodes-asset",
+  version: 1,
+  assetVersion: 1,
+  type: "brush_gas",
+  inputs: 1,
+  promote: {
+    referenceWidth: 1.6, guideLength: 14, guideMinX: 0, guideMinY: 0, guideMaxX: 14, guideMaxY: 0, settleTime: 2.5,
+    spread: 4, cell: 0.1, vorticity: 14, flow: 2.5, inkAmount: 1.4
+  },
+  graph: {
+    fps: 24,
+    display: 8,
+    nodes: [
+      { id: 1, type: "subnetInput", name: "guide", floats: { index: 0 }, inputs: [] },
+      { id: 2, type: "resample", name: "even", floats: { spacing: 0.1 }, inputs: [1] },
+      { id: 3, type: "smooth", name: "clean", floats: { iterations: 4, strength: 0.5, preserve: 1 }, inputs: [2] },
+      { id: 4, type: "curveSample", name: "sources", floats: { count: 0, spacing: 0.3 }, inputs: [3] },
+      {
+        id: 5, type: "wrangle", name: "blow",
+        strings: { code: "vx = tx * a; vy = ty * a; density = (0.8 + 4.5 * sin(u * 3.14159)) * b * w; radius = max(d * 0.5, 1.4 * c);" },
+        expressions: {
+          a: "parent.flow", b: "parent.inkAmount", d: "parent.referenceWidth",
+          c: "max(parent.cell, max(parent.guideMaxX - parent.guideMinX, parent.guideMaxY - parent.guideMinY) / 256 + parent.spread / 128)"
+        },
+        inputs: [4]
+      },
+      {
+        id: 6, type: "gasField", name: "ink",
+        floats: { resolution: 180, open: 1, vorticity: 14, dissipation: 0.12, cooling: 1, buoyancy: 0, viscosity: 0.002, redBlack: 1 },
+        expressions: {
+          boundsMinX: "parent.guideMinX - parent.spread", boundsMaxX: "parent.guideMaxX + parent.spread",
+          boundsMinY: "parent.guideMinY - parent.spread", boundsMaxY: "parent.guideMaxY + parent.spread",
+          resolution: "(parent.guideMaxX - parent.guideMinX + 2 * parent.spread) / max(parent.cell, max(parent.guideMaxX - parent.guideMinX, parent.guideMaxY - parent.guideMinY) / 256 + parent.spread / 128)",
+          vorticity: "parent.vorticity"
+        },
+        inputs: [5]
+      },
+      {
+        id: 7, type: "colorRamp", name: "color", floats: { min: 0, max: 6 },
+        strings: { attribute: "density", ramp: "0 #2a1a6e, 0.35 #3a1c8f, 0.7 #e0407a, 1 #ff9a3c" },
+        inputs: [6]
+      },
+      {
+        id: 8, type: "wrangle", name: "look",
+        strings: { code: "radius = a * 0.75; alpha = clamp(density * 0.5, 0, 1); softness = 1;" },
+        expressions: {
+          a: "max(parent.cell, max(parent.guideMaxX - parent.guideMinX, parent.guideMaxY - parent.guideMinY) / 256 + parent.spread / 128)"
+        },
+        inputs: [7]
+      }
+    ]
+  }
+}

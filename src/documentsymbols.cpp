@@ -186,7 +186,9 @@ namespace curvy {
                 follow.push_back({object->id(), object->geometry(), fresh->geometry()});
             }
         }
-        auto apply = [this, symbolId, follow](const std::shared_ptr<const SymbolDef>& to, bool forward) {
+        // Brushes made from this symbol take the new artwork too, and the strokes drawn with them follow.
+        const auto linked = brushesLinkedTo(symbolId, def);
+        auto apply = [this, symbolId, follow, linked](const std::shared_ptr<const SymbolDef>& to, bool forward) {
             for (std::shared_ptr<const SymbolDef>& entry : symbols_) {
                 if (entry->id == symbolId) {
                     entry = to;
@@ -197,6 +199,9 @@ namespace curvy {
                     object->setSymbol(to);
                     setObjectOutline(*object, forward ? f.after : f.before);
                 }
+            }
+            for (const auto& brush : linked) {
+                swapBrush(brush.first->id, forward ? brush.second : brush.first);
             }
             changed();
         };
@@ -296,9 +301,23 @@ namespace curvy {
                 after.push_back(entry);
             }
         }
+        // Brushes made from the symbol keep their artwork but lose the link.
+        const auto linked = brushesLinkedTo(symbolId, nullptr);
         undoStack_.push({"Delete Symbol",
-            [this, after]() { symbols_ = after; changed(); },
-            [this, before]() { symbols_ = before; changed(); }});
+            [this, after, linked]() {
+                symbols_ = after;
+                for (const auto& brush : linked) {
+                    swapBrush(brush.first->id, brush.second);
+                }
+                changed();
+            },
+            [this, before, linked]() {
+                symbols_ = before;
+                for (const auto& brush : linked) {
+                    swapBrush(brush.first->id, brush.first);
+                }
+                changed();
+            }});
         return true;
     }
 

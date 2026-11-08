@@ -89,7 +89,7 @@ namespace curvy {
         void setDetailValue(std::size_t index, const std::string& text);
         std::string title() const;
 
-        static constexpr std::size_t kDetailRows = 9;
+        static constexpr std::size_t kDetailRows = 12;
         static constexpr std::size_t kLinkRows = 3;
 
     private:

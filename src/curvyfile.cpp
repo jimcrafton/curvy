@@ -342,6 +342,13 @@ namespace curvy {
                     if (options.brush) {
                         row.set("brush", Json::num(double(options.brush->id)));
                     }
+                    if (!options.graphSettings.empty()) {
+                        Json settings = Json::obj();
+                        for (const auto& [name, value] : options.graphSettings) {
+                            settings.set(name.c_str(), Json::num(value));
+                        }
+                        row.set("graphSettings", std::move(settings));
+                    }
                     if (options.decorated()) {
                         row.set("align", Json::num(double(unsigned(options.align))));
                         row.set("arrowStart", Json::num(double(unsigned(options.arrowStart))));
@@ -430,10 +437,10 @@ namespace curvy {
             return std::size_t(n);
         }
 
-        std::vector<double> numbers(const json5::value& value, std::size_t count, const std::string& where) {
+        std::vector<double> numbers(const json5::value& value, std::size_t count, const std::string& where, bool orMore = false) {
             const json5::array_view list(value);
-            if (!list.is_valid() || list.size() != count) {
-                fail(where + " must be a list of " + std::to_string(count) + " numbers");
+            if (!list.is_valid() || (orMore ? list.size() < count : list.size() != count)) {
+                fail(where + " must be a list of " + (orMore ? "at least " : "") + std::to_string(count) + " numbers");
             }
             std::vector<double> out;
             for (const json5::value& item : list) {
@@ -681,6 +688,11 @@ namespace curvy {
                     if (find(row, "brush", part)) {
                         options.brushRef = index(part, where + ".brush");
                     }
+                    if (find(row, "graphSettings", part)) {
+                        for (auto [name, child] : json5::object_view(part)) {
+                            options.graphSettings.emplace_back(std::string(name), number(child, where + ".graphSettings"));
+                        }
+                    }
                     options.align = StrokeAlign(enumOr(row, "align", 0, 3, where));
                     options.arrowStart = ArrowStyle(enumOr(row, "arrowStart", 0, 4, where));
                     options.arrowEnd = ArrowStyle(enumOr(row, "arrowEnd", 0, 4, where));
@@ -862,6 +874,18 @@ namespace curvy {
                     params.add(Json::num(value));
                 }
                 row.set("params", std::move(params));
+                if (!def->graphType.empty()) {
+                    row.set("graphType", Json::str(def->graphType));
+                }
+                if (def->sourceSymbol != 0) {
+                    row.set("sourceSymbol", Json::num(double(def->sourceSymbol)));
+                }
+                if (!def->category.empty()) {
+                    row.set("category", Json::str(def->category));
+                }
+                if (def->favorite) {
+                    row.set("favorite", Json::boolean(true));
+                }
                 if (def->hasArt() && def->art && def->art->content) {
                     row.set("art", symbolJson(*def->art));
                 }
@@ -1098,8 +1122,12 @@ namespace curvy {
                         auto def = std::make_shared<BrushDef>();
                         def->id = index(need(row, "id", "brush"), "brush.id");
                         def->name = stringOr(row, "name", "", "brush");
-                        def->kind = BrushKind(enumeration(need(row, "kind", "brush"), 3, "brush.kind"));
-                        def->setParams(numbers(need(row, "params", "brush"), 7, "brush.params"));
+                        def->kind = BrushKind(enumeration(need(row, "kind", "brush"), 4, "brush.kind"));
+                        def->setParams(numbers(need(row, "params", "brush"), BrushDef::kBaseParams, "brush.params", true));
+                        def->graphType = stringOr(row, "graphType", "", "brush");
+                        def->sourceSymbol = std::size_t(numberOr(row, "sourceSymbol", 0.0, "brush"));
+                        def->category = stringOr(row, "category", "", "brush");
+                        def->favorite = flagOr(row, "favorite", false);
                         if (def->hasArt()) {
                             const std::shared_ptr<SymbolDef> art = symbolOf(need(row, "art", "brush"), depth, "brush.art");
                             art->id = def->id;

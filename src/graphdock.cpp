@@ -1,6 +1,7 @@
 #include "curvy/graphdock.h"
 
 #include "curvy/appearancenode.h"
+#include "curvy/graphbrush.h"
 #include "curvy/numberscrubber.h"
 #include "curvy/pathnode.h"
 #include "curvy/shapenode.h"
@@ -44,9 +45,11 @@ namespace curvy {
             if (nodeType == kTransformNodeType) return "Transform";
             if (nodeType == kTagNodeType) return "Tag";
             if (nodeType == kMovePointsNodeType) return "Move Points";
+            if (nodeType == kDeformAlongPathNodeType) return "Deform Along Path";
             if (nodeType == kSubnetNodeType) return "Group";
             if (nodeType == kFillNodeType) return "Fill";
             if (nodeType == kStrokeNodeType) return "Stroke";
+            if (nodeType == kBrushNodeType) return "Brush";
             if (nodeType == kEffectNodeType) return "Effect";
             return nodeType;
         }
@@ -675,7 +678,7 @@ namespace curvy {
         const jitnodes::Network& net = document_.networkOf(node.scope);
         for (int steps = 0; steps < 1000 && node.valid(); ++steps) {
             const std::string type = net.node(node.id).typeName();
-            if (type != kTransformNodeType && type != kTagNodeType && type != kMovePointsNodeType) {
+            if (type != kTransformNodeType && type != kTagNodeType && type != kMovePointsNodeType && type != kDeformAlongPathNodeType) {
                 break;
             }
             node.id = net.inputOf(node.id, 0);
@@ -692,9 +695,11 @@ namespace curvy {
         const jitnodes::Network& net = document_.networkOf(node.scope);
         std::size_t steps = 0;
         NodeRef at = node;
-        while (isAppearanceNodeType(net.node(at.id).typeName()) && steps < 1000) {
+        while ((isAppearanceNodeType(net.node(at.id).typeName()) || isBrushNodeType(net.node(at.id).typeName())) && steps < 1000) {
+            // A brush sits after its stroke and is not a look of its own: it stands for the stroke.
+            const bool brush = isBrushNodeType(net.node(at.id).typeName());
             at.id = net.inputOf(at.id, 0);
-            ++steps;
+            steps += brush ? 0 : 1;
             if (!at.valid()) {
                 return nullptr;
             }
@@ -793,6 +798,10 @@ namespace curvy {
         } else {
             row.text = net.node(node.id).name();
             row.summary = typeLabel(type);
+            if (isBrushNodeType(type)) {
+                const AppearanceItem* item = itemOfNode(node, nullptr);
+                row.text = item != nullptr && item->strokeOptions.brush ? item->strokeOptions.brush->name : row.text;
+            }
         }
     }
 
@@ -1680,6 +1689,30 @@ namespace curvy {
                 setRow(at++, "Picture", node.getString("image"), nullptr);
             } else if (isAppearanceNodeType(type)) {
                 lookRows(node, id, at);
+            } else if (type == kDeformAlongPathNodeType) {
+                auto choice = [&](const char* name, std::vector<std::string> options) {
+                    setChoiceRow(at++, name, node.getString(name), std::move(options), [this, id, name](const std::string& value) { document_.setGraphString(id, name, value); });
+                };
+                auto number = [&](const char* name, double lowest, double highest) {
+                    setRow(at++, name, numberText(node.baseFloat(name)), [this, id, name](const std::string& value) {
+                        double parsed = 0.0;
+                        if (parseNumber(value, parsed)) {
+                            document_.setGraphParam(id, name, float(parsed));
+                        }
+                    });
+                    scrubRow(at - 1, id, name, lowest, highest);
+                };
+                choice("fit", {"stretch", "guided", "repeat"});
+                choice("corner", {"bend", "smooth", "miter", "break"});
+                choice("direction", {"leftToRight", "topToBottom"});
+                number("width", 0.0, 100.0);
+                number("headGuide", 0.0, 1.0);
+                number("tailGuide", 0.0, 1.0);
+                number("cornerRadius", 0.0, 1000.0);
+                number("miterLimit", 1.0, 20.0);
+                number("breakAngle", 5.0, 175.0);
+                number("flipAlong", 0.0, 1.0);
+                number("flipAcross", 0.0, 1.0);
             } else if (type == kShapeNodeType) {
                 const std::string kind = node.getString("kind");
                 setChoiceRow(at++, "kind", kind, {"polygon", "star", "roundRect", "arc"}, [this, id](const std::string& value) { document_.setGraphString(id, "kind", value); });
@@ -1736,8 +1769,12 @@ namespace curvy {
                 if (type == kTransformNodeType) {
                     names = {"translateX", "translateY", "rotation", "scaleX", "scaleY", "shear", "pivotX", "pivotY"};
                 }
+                const bool graphBrush = findGraphBrush(type) != nullptr;
+                if (graphBrush) {
+                    names.erase(std::remove_if(names.begin(), names.end(), isHostBrushParam), names.end());
+                }
                 for (const std::string& name : names) {
-                    if (at >= (type == kTransformNodeType ? kDetailRows : 4)) {
+                    if (at >= (type == kTransformNodeType || graphBrush ? kDetailRows : 4)) {
                         break;
                     }
                     setRow(at++, name, numberText(shownParam(node, name)), [this, id, name](const std::string& value) {

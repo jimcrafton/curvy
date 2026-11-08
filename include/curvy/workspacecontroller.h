@@ -68,6 +68,9 @@ namespace curvy {
         // that reports back through the loop.
         void openStartupFile();
 
+        // Shows how far the background graph brush cooks have got in the hint bar; call on the loop thread.
+        void brushProgressChanged();
+
         newui::Frame& frame() { return frame_; }
         WorkspaceModel& workspace() { return *model_; }
         CanvasView& canvas() { return *canvas_; }

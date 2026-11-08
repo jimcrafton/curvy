@@ -1,0 +1,35 @@
+// Sumi ink: one flat black, crisp edges, and as the brush runs dry the bristles drop out in streaks. Input 0 is the guide (with pen pressure in `w`).
+// dryLength is the distance travelled at which the ink is almost gone, so a growing stroke does not change behind the pen.
+{
+  format: "jitnodes-asset",
+  version: 1,
+  assetVersion: 1,
+  type: "brush_ink",
+  inputs: 1,
+  promote: { referenceWidth: 1.3, guideLength: 25, guideStart: 0, strokeLength: 0, bristles: 64, dryLength: 70, dryness: 1.5, tintable: 1, tailTaper: 0 },
+  graph: {
+    fps: 24,
+    display: 7,
+    nodes: [
+      { id: 1, type: "subnetInput", name: "guide", floats: { index: 0 }, inputs: [] },
+      { id: 2, type: "resample", name: "even", floats: { spacing: 0.06 }, inputs: [1] },
+      { id: 3, type: "smooth", name: "clean", floats: { iterations: 4, strength: 0.5, preserve: 1 }, inputs: [2] },
+      {
+        id: 4, type: "ribbon", name: "brush", floats: { width: 1.3, widthEnd: 1.3 }, strings: { widthAttrib: "w", output: "rungs" },
+        expressions: { width: "parent.referenceWidth", widthEnd: "parent.referenceWidth" },
+        inputs: [3]
+      },
+      { id: 5, type: "wrangle", name: "keepAlong", strings: { code: "along = (b + u * a) / max(1, c / d);" },
+        expressions: { a: "parent.guideLength", b: "parent.guideStart", c: "parent.strokeLength", d: "parent.dryLength" }, inputs: [4] },
+      { id: 6, type: "curveSample", name: "bristles", floats: { count: 0, spacing: 0.022 }, inputs: [5] },
+      {
+        id: 7, type: "wrangle", name: "ink",
+        strings: {
+          code: "k = floor(u * b); h = sin(k * 12.9898 + 78.233) * 43758.5453; h = h - floor(h); g = sin(x * 91.7 + y * 53.1) * 43758.5453; g = g - floor(g); f = along / a; dry = f * f * c - 0.1; keep = h > dry ? 1 : 0; keep = g > dry * 0.35 ? keep : 0; Cd.x = lerp(0.05, 1, d); Cd.y = lerp(0.05, 1, d); Cd.z = lerp(0.07, 1, d); radius = 0.06; softness = 0.4; alpha = keep * 0.95;"
+        },
+        expressions: { a: "parent.dryLength", b: "parent.bristles", c: "parent.dryness", d: "parent.tintable" },
+        inputs: [6]
+      }
+    ]
+  }
+}

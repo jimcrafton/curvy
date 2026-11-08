@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Node Parameters</title>
+<style>
+  :root { --panel: #2b2d31; --text: #e6e6e6; --muted: #9a9ca3; --accent: #5a7cff; }
+  body { width: 320px; height: 420px; display: flex; flex-direction: column; gap: 10px; padding: 12px;
+         background: var(--panel); color: var(--text); font-family: "Segoe UI", sans-serif; font-size: 12px; }
+  .header { display: flex; flex-direction: row; justify-content: space-between; align-items: center; }
+  .header h2 { font-size: 16px; font-weight: 600; margin: 0; }
+  .muted { color: var(--muted); }
+  .row { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+  .row .name { width: 90px; color: var(--muted); }
+  .row input[type=range] { flex-grow: 1; }
+  .badge { background: var(--accent); border-radius: 4px; padding: 4px; color: white; }
+  hr { border-color: #44474d; }
+  .bar { height: 10px; background: linear-gradient(to right, #5a7cff, #36d1c4); border-radius: 5px; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h2>transform1</h2>
+    <button id="resetButton">Reset</button>
+  </div>
+  <span class="muted">Moves and scales every point</span>
+  <hr>
+  <div class="row"><span class="name">Scale X</span><input id="scaleX" type="range" min="0" max="100" value="50"><span class="badge">1.0</span></div>
+  <div class="row"><span class="name">Scale Y</span><input id="scaleY" type="range" min="0" max="100" value="50"><span class="badge">1.0</span></div>
+  <div class="row"><span class="name">Translate X</span><input id="translateX" type="text" value="0"></div>
+  <div class="row"><span class="name">Class</span><select id="attribClass"><option>point</option><option>primitive</option></select></div>
+  <label class="row"><input id="enableFusion" type="checkbox" checked> Allow fusion</label>
+  <fieldset id="timing">
+    <legend>Last cook</legend>
+    <div class="row"><span class="name">Kernel</span><progress id="kernelMs" value="0.3" max="1"></progress></div>
+  </fieldset>
+  <div class="bar"></div>
+</body>
+</html>

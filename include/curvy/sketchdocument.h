@@ -291,6 +291,19 @@ namespace curvy {
         // Adds a move-points node for `group` (every point when empty) just before the object's placement node, as one undo step, and returns it.
         // The object is driven from then on: it shows what its chain cooks (see kMovePointsNodeType).
         NodeRef addMovePoints(std::size_t objectId, const std::string& group);
+        // Bends the artwork `artId` along the path `spineId` with a deform-along-path node (pathnode.h) between the artwork's shape and its
+        // placement: the artwork then shows what the chain cooks, follows the spine when it changes, and the node's fit, corner, direction and
+        // flip settings are edited in the graph. One undo step. kNoNode when either object is not in the graph, they are in different groups or
+        // layers, or the wire would loop.
+        NodeRef addDeformAlongPath(std::size_t artId, std::size_t spineId);
+        // addDeformAlongPath for the two selected objects: the path (the one that is open; of two alike, the one picked last) is the spine and the
+        // other is bent along it. False when the selection is not two objects or the wiring fails.
+        bool deformSelectionAlongPath();
+        // Lets go of the deformation of each selected object: the deform node gives way to a frozen path node holding the bent outline, so the
+        // object keeps its shape and no longer follows the spine. One undo step; false when no selected object has a deform node.
+        bool releaseDeformAlongPath();
+        bool hasDeformAlongPath() const;   // a selected object is bent by a deform node
+        NodeRef deformNodeOf(std::size_t objectId) const;
 
         // ---- Nodes: what is selected and picked is the placement (transform) node of a shape ----
         // The outline the graph makes for the object (its shape node's curve carried by the page matrix of its transform node); the object's own
@@ -473,6 +486,9 @@ namespace curvy {
         // The brush the Brushes panel, the Paintbrush and the Object menu use (view state, not an undo step): the one chosen in the panel,
         // else the one last made, else the first; 0 when there are none.
         std::size_t activeBrush() const;
+        // The brushes most recently made active, newest first (at most kRecentBrushes; view state, not saved).
+        static constexpr std::size_t kRecentBrushes = 8;
+        const std::vector<std::size_t>& recentBrushes() const { return recentBrushes_; }
         void setActiveBrush(std::size_t id);
         // How many objects have a stroke drawn by the brush.
         std::size_t brushUseCount(std::size_t id) const;
@@ -488,6 +504,9 @@ namespace curvy {
         bool applyBrush(std::size_t id);
         // The brush as `edited` says (its name and numbers; kind and artwork are kept); strokes using it follow. False when it changes nothing.
         bool changeBrush(std::size_t id, const BrushDef& edited);
+        // Links an art or scatter brush to a symbol of the library (0 = unlink): the brush takes a copy of the symbol's artwork now and again
+        // whenever the symbol is redefined. Unlinking keeps the artwork as it is. False when nothing changes.
+        bool linkBrushToSymbol(std::size_t brushId, std::size_t symbolId);
         // Removes a brush no stroke uses; false when it is used or unknown.
         bool deleteBrush(std::size_t id);
         // `def` (from another document) as a member of this library: the entry that already is the same, else a copy under a fresh id.
@@ -560,6 +579,8 @@ namespace curvy {
         // The transform node that places an object's shape (kNoNode when it has none). With one object selected the transform origin
         // is that node's pivot, so the canvas and the node show and edit the same point.
         NodeRef transformRefOf(std::size_t objectId) const;
+        // Hands the object's width profile (pen pressure) to every deform-along-path node that has the object for its spine.
+        void syncDeformWidths(std::size_t spineId);
         // The matrix the groups holding `scope` put on everything inside it (identity for the root).
         BLMatrix2D scopeMatrix(std::uint32_t scope) const;
         // Where a placement node puts its shape on the page: its parent links, then the groups holding it.
@@ -1154,6 +1175,11 @@ namespace curvy {
         std::size_t activePattern_ = 0;
         int batchDepth_ = 0;
         bool batchPending_ = false;
+        // Puts `to` in the place of brush `id` in the library and in every stroke and graphic style that uses it (not an undo step).
+        void swapBrush(std::size_t id, const std::shared_ptr<const BrushDef>& to);
+        // The brushes linked to symbol `symbolId`, each with the brush it becomes when `artwork` is the symbol's new artwork (null artwork: unlinked).
+        std::vector<std::pair<std::shared_ptr<const BrushDef>, std::shared_ptr<const BrushDef>>> brushesLinkedTo(
+            std::size_t symbolId, const std::shared_ptr<const SymbolDef>& artwork) const;
         // Atomic so a worker's reads see the UI thread's set; movable (the document is) with the moved-to document not busy.
         struct BusyFlag {
             std::atomic<Busy> value{Busy::None};
@@ -1167,6 +1193,7 @@ namespace curvy {
         std::vector<int> pdfPages_;
         std::vector<std::shared_ptr<const BrushDef>> brushes_;
         std::size_t activeBrush_ = 0;
+        std::vector<std::size_t> recentBrushes_;
         std::size_t nextBrushId_ = 1;
         std::size_t nextSymbolId_ = 1;
         float ppi_ = 72.0f;

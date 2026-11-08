@@ -1,6 +1,7 @@
 #include "curvy/appearancenode.h"
 
 #include "curvy/brush.h"
+#include "curvy/graphbrush.h"
 #include "curvy/pathnode.h"
 
 #include <jitnodes/graph/network.h>
@@ -8,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <initializer_list>
 #include <memory>
 
@@ -104,6 +106,9 @@ namespace curvy {
                 n["arrowEnd"] = float(int(o.arrowEnd));
                 n["arrowScale"] = float(o.arrowScale);
                 n["brush"] = float(o.brush ? o.brush->id : o.brushRef);
+                for (const auto& [name, value] : o.graphSettings) {
+                    n[kBrushSettingPrefix + name] = float(value);   // held by the stroke's brush node (an instance of the asset), not by this one
+                }
                 std::vector<std::vector<float>>& dashes = p.tables[kDashes.name];
                 for (double dash : o.dashes) {
                     dashes.push_back({float(dash)});
@@ -240,6 +245,25 @@ namespace curvy {
                 return !inputs.empty() && inputs.front() ? inputs.front() : std::make_shared<jitnodes::Geometry>();
             }
         };
+
+        // The brush of one stroke: the numbers of a library brush, as that stroke has them. Geometry passes through, as for the look nodes.
+        class BrushNode : public jitnodes::Node {
+        public:
+            BrushNode() : Node(kBrushNodeType, 1) {
+                const std::vector<double> defaults = BrushDef().params();
+                for (std::size_t i = 0; i < BrushDef::kParamNames.size(); ++i) {
+                    declareFloat(BrushDef::kParamNames[i], float(defaults[i]));
+                }
+            }
+
+            jitnodes::GeometryHandle cook(jitnodes::CookContext&, const std::vector<jitnodes::GeometryHandle>& inputs) override {
+                return !inputs.empty() && inputs.front() ? inputs.front() : std::make_shared<jitnodes::Geometry>();
+            }
+        };
+    }
+
+    bool isBrushNodeType(const std::string& typeName) {
+        return typeName == kBrushNodeType || findGraphBrush(typeName) != nullptr;
     }
 
     bool isAppearanceNodeType(const std::string& typeName) {
@@ -255,6 +279,7 @@ namespace curvy {
         registry.registerType(kFillNodeType, [] { return std::make_unique<AppearanceNode>(kFillNodeType, AppearanceKind::Fill); });
         registry.registerType(kStrokeNodeType, [] { return std::make_unique<AppearanceNode>(kStrokeNodeType, AppearanceKind::Stroke); });
         registry.registerType(kEffectNodeType, [] { return std::make_unique<AppearanceNode>(kEffectNodeType, AppearanceKind::Effect); });
+        registry.registerType(kBrushNodeType, [] { return std::make_unique<BrushNode>(); });
     }
 
     std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> appearanceSuccessors(const jitnodes::Network& network, const std::vector<jitnodes::NodeId>& ids) {
@@ -267,6 +292,10 @@ namespace curvy {
         for (jitnodes::NodeId id : ids) {
             if (isAppearanceNodeType(network.node(id).typeName())) {
                 jitnodes::NodeId input = network.inputOf(id, 0);
+                // A stroke's brush sits between it and the look node that follows: that node follows the stroke all the same.
+                if (input != jitnodes::invalidNodeId && network.hasNode(input) && isBrushNodeType(network.node(input).typeName())) {
+                    input = network.inputOf(input, 0);
+                }
                 if (const auto through = shapeOf.find(input); through != shapeOf.end()) {
                     input = through->second;
                 }
@@ -423,6 +452,24 @@ namespace curvy {
                 const std::size_t id = std::size_t(std::lround(params.numbers.at("brush")));
                 o.brush = id != 0 && library.brush ? library.brush(id) : nullptr;
                 o.brushRef = o.brush ? 0 : id;
+            }
+            {
+                // The settings are all the brush.* numbers; they are replaced as a whole when the set differs (a value put back is gone from it).
+                auto settingsOf = [](const AppearanceParams& q) {
+                    std::vector<std::pair<std::string, double>> found;
+                    for (const auto& [name, value] : q.numbers) {
+                        if (name.compare(0, std::strlen(kBrushSettingPrefix), kBrushSettingPrefix) == 0 && name.size() > std::strlen(kBrushSettingPrefix)) {
+                            found.emplace_back(name.substr(std::strlen(kBrushSettingPrefix)), double(value));
+                        }
+                    }
+                    return found;
+                };
+                if (settingsOf(params) != settingsOf(baseParams)) {
+                    o.graphSettings = settingsOf(params);
+                    if (o.brush && library.brush) {
+                        o.brush = brushWithSettings(library.brush(o.brush->id), o.graphSettings);
+                    }
+                }
             }
             if (tableDiffers(kDashes)) {
                 o.dashes.clear();

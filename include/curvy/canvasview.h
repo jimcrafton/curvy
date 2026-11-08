@@ -21,7 +21,6 @@ namespace curvy {
 
     // What a left-button drag on the canvas does. The order matches the status bar hints in main.cpp.
     enum class SketchTool { Select, DirectSelect, Rectangle, Ellipse, Circle, RoundRect, Polygon, Star, Arc, Line, Pen, Pencil, Paintbrush, Text, Gradient, Width, Scissors, Knife, Eraser, ShapeBuilder, Eyedropper, MagicWand, Lasso, Artboard, Rotate, Scale, Reflect, Hand, Zoom };
-
     // The drawing surface: the gray pasteboard, the white page with its grid, and (later) the
     // document's objects, the selection overlay and the rulers - all painted by this one view,
     // since a ruler is meaningless without the canvas's zoom/pan. Sketch's own "CanvasView
@@ -34,7 +33,10 @@ namespace curvy {
     public:
         // Declared (not implicit) so reflectgen registers it - a .newui load builds one through it.
         CanvasView();
-        virtual ~CanvasView() {}
+        virtual ~CanvasView();
+
+        // Repaints every canvas (UI thread only): for when something drawn in the background, such as a graph brush stroke, is ready.
+        static void repaintAll();
 
         // Page size in document units (points). A US Letter portrait page by default.
         float pageWidth() const { return pageWidth_; }
@@ -318,7 +320,9 @@ namespace curvy {
         // Up / Down while dragging: more / fewer sides, points or a bigger / smaller corner radius. True when it applied.
         bool adjustShapeParameter(int direction);
         // Adds a drawn object with the document's default fill and stroke as one undo step; it becomes the selection.
-        void addDrawn(SketchObject* object, const char* name, const char* undoName, bool filled = true, bool parametric = false);
+        // `widths` is the stroke's width profile (the Pencil's pen pressure); empty keeps the plain weight.
+        void addDrawn(SketchObject* object, const char* name, const char* undoName, bool filled = true, bool parametric = false,
+            const std::vector<WidthPoint>& widths = {});
         void pencilMove(const BLPoint& point);
         void finishPencil();
         void paintPencilPreview(BLContext& ctx) const;
@@ -454,6 +458,8 @@ namespace curvy {
         int pencilSmoothing_ = 40;
         bool dragShift_ = false;               // Shift was down at the last drag update (the preview follows it)
         std::vector<BLPoint> pencilPoints_;    // the freehand points so far
+        std::vector<float> pencilPressure_;    // the pen pressure (0..1; 1 for a mouse or a pen without pressure) at each of them
+        float currentPressure() const;
         std::vector<PenAnchor> penAnchors_;    // the pen path being built (empty when none)
 
         // ---- Gradient tool ----

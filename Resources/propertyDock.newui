@@ -44,6 +44,183 @@
         },
         {
           type: "SubView",
+          visible: true,
+          name: "brushPanel",
+          layout: { type: "FlexLayout", orientation: "Vertical" },
+          desiredSize: { type: "Size", width: 268, height: 400 },
+          desiredSizeOverride: true,
+          childViews: [
+            {
+              type: "SubView",
+              visible: true,
+              name: "brushPanelHeaderBar",
+              layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6, padding: 4 },
+              style: { type: "ViewStyle", backgroundFill: { type: "Fill", kind: "Color", color: "#2e2e2e99" } },
+              desiredSize: { type: "Size", width: 268, height: 24 },
+              desiredSizeOverride: true,
+              childViews: [
+                {
+                  type: "Label", text: "Brushes", textAlignment: "Left", name: "brushPanelHeader",
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                  style: { type: "LabelStyle", text: "Brushes", wordWrap: true, font: { type: "Font", name: "Segoe UI", size: 12, bold: true, italic: false, strikeThrough: false, underlined: false }, textColor: "#f0f0f0", textAlignment: "Left" }
+                }
+              ]
+            },
+            {
+              type: "SubView",
+              visible: true,
+              name: "brushPanelBody",
+              layout: { type: "FlexLayout", orientation: "Vertical", spacing: 6, padding: 8 },
+              desiredSize: { type: "Size", width: 268, height: 376 },
+              desiredSizeOverride: true,
+              childViews: [
+                { type: "BrushList", name: "brushList", visible: true, desiredSize: { type: "Size", width: 0, height: 170 }, desiredSizeOverride: true },
+                { type: "SubView", name: "brushActions", visible: true, desiredSize: { type: "Size", width: 0, height: 26 }, desiredSizeOverride: true,
+                  layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                  childViews: [
+                { type: "ToolbarButton", name: "newCalligraphicBrushButton", desiredSize: { type: "Size", width: 24, height: 24 }, desiredSizeOverride: true,
+                  icon: "icons/brush-new.svg", iconSize: 15 },
+                { type: "ToolbarButton", name: "newArtBrushButton", desiredSize: { type: "Size", width: 24, height: 24 }, desiredSizeOverride: true,
+                  icon: "icons/brush-art.svg", iconSize: 15 },
+                { type: "ToolbarButton", name: "newScatterBrushButton", desiredSize: { type: "Size", width: 24, height: 24 }, desiredSizeOverride: true,
+                  icon: "icons/brush-scatter.svg", iconSize: 15 },
+                { type: "ToolbarButton", name: "applyBrushButton", desiredSize: { type: "Size", width: 24, height: 24 }, desiredSizeOverride: true,
+                  icon: "icons/brush-apply.svg", iconSize: 15 },
+                { type: "ToolbarButton", name: "removeBrushButton", desiredSize: { type: "Size", width: 24, height: 24 }, desiredSizeOverride: true,
+                  icon: "icons/brush-remove.svg", iconSize: 15 },
+{ type: "ToolbarButton", name: "deformBrushButton", desiredSize: { type: "Size", width: 24, height: 24 }, desiredSizeOverride: true,
+                  icon: "icons/brush-deform.svg", iconSize: 15 },
+                { type: "ToolbarButton", name: "releaseDeformButton", desiredSize: { type: "Size", width: 24, height: 24 }, desiredSizeOverride: true,
+                  icon: "icons/brush-release.svg", iconSize: 15 },
+                { type: "ToolbarButton", name: "presetBrushButton", desiredSize: { type: "Size", width: 24, height: 24 }, desiredSizeOverride: true,
+                  icon: "icons/brush-presets.svg", iconSize: 15 },
+                { type: "ToolbarButton", name: "deleteBrushButton", desiredSize: { type: "Size", width: 24, height: 24 }, desiredSizeOverride: true,
+                  icon: "icons/layer-delete.svg", iconSize: 15 }
+                  ] },
+                { type: "SubView", name: "brushNameRow", visible: true, desiredSize: { type: "Size", width: 0, height: 24 }, desiredSizeOverride: true,
+                  layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                  childViews: [
+                { type: "Label", text: "Name", textAlignment: "Left", desiredSize: { type: "Size", width: 44, height: 17 }, desiredSizeOverride: true,
+                  style: { type: "LabelStyle", text: "Name", wordWrap: true, font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#a0a0a0", textAlignment: "Left" } },
+                { type: "TextField", name: "brushNameField", text: "", font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#f0f0f0", desiredSize: { type: "Size", width: 0, height: 20 }, desiredSizeOverride: true,
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 } }
+                  ] },
+                { type: "SubView", name: "brushNibRow", visible: true, desiredSize: { type: "Size", width: 0, height: 24 }, desiredSizeOverride: true,
+                  layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                  childViews: [
+                { type: "Label", text: "Angle", textAlignment: "Left", desiredSize: { type: "Size", width: 44, height: 17 }, desiredSizeOverride: true,
+                  style: { type: "LabelStyle", text: "Angle", wordWrap: true, font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#a0a0a0", textAlignment: "Left" } },
+                { type: "TextField", name: "brushAngleField", text: "", font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#f0f0f0", desiredSize: { type: "Size", width: 0, height: 20 }, desiredSizeOverride: true,
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 } },
+                { type: "Label", text: "Round", textAlignment: "Left", desiredSize: { type: "Size", width: 44, height: 17 }, desiredSizeOverride: true,
+                  style: { type: "LabelStyle", text: "Round", wordWrap: true, font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#a0a0a0", textAlignment: "Left" } },
+                { type: "TextField", name: "brushRoundnessField", text: "", font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#f0f0f0", desiredSize: { type: "Size", width: 0, height: 20 }, desiredSizeOverride: true,
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 } }
+                  ] },
+                { type: "SubView", name: "brushSpacingRow", visible: true, desiredSize: { type: "Size", width: 0, height: 24 }, desiredSizeOverride: true,
+                  layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                  childViews: [
+                { type: "Label", text: "Space", textAlignment: "Left", desiredSize: { type: "Size", width: 44, height: 17 }, desiredSizeOverride: true,
+                  style: { type: "LabelStyle", text: "Space", wordWrap: true, font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#a0a0a0", textAlignment: "Left" } },
+                { type: "TextField", name: "brushSpacingField", text: "", font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#f0f0f0", desiredSize: { type: "Size", width: 0, height: 20 }, desiredSizeOverride: true,
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 } },
+                { type: "Label", text: "Stray", textAlignment: "Left", desiredSize: { type: "Size", width: 44, height: 17 }, desiredSizeOverride: true,
+                  style: { type: "LabelStyle", text: "Stray", wordWrap: true, font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#a0a0a0", textAlignment: "Left" } },
+                { type: "TextField", name: "brushScatterField", text: "", font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#f0f0f0", desiredSize: { type: "Size", width: 0, height: 20 }, desiredSizeOverride: true,
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 } }
+                  ] },
+                { type: "SubView", name: "brushVariationRow", visible: true, desiredSize: { type: "Size", width: 0, height: 24 }, desiredSizeOverride: true,
+                  layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                  childViews: [
+                { type: "Label", text: "Size", textAlignment: "Left", desiredSize: { type: "Size", width: 44, height: 17 }, desiredSizeOverride: true,
+                  style: { type: "LabelStyle", text: "Size", wordWrap: true, font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#a0a0a0", textAlignment: "Left" } },
+                { type: "TextField", name: "brushSizeVariationField", text: "", font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#f0f0f0", desiredSize: { type: "Size", width: 0, height: 20 }, desiredSizeOverride: true,
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 } },
+                { type: "Label", text: "Turn", textAlignment: "Left", desiredSize: { type: "Size", width: 44, height: 17 }, desiredSizeOverride: true,
+                  style: { type: "LabelStyle", text: "Turn", wordWrap: true, font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#a0a0a0", textAlignment: "Left" } },
+                { type: "TextField", name: "brushRotationField", text: "", font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#f0f0f0", desiredSize: { type: "Size", width: 0, height: 20 }, desiredSizeOverride: true,
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 } }
+                  ] },
+                { type: "SubView", name: "brushFollowRow", visible: true, desiredSize: { type: "Size", width: 0, height: 26 }, desiredSizeOverride: true,
+                  layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                  childViews: [
+                { type: "Label", text: "Follow path", textAlignment: "Left", desiredSize: { type: "Size", width: 70, height: 17 }, desiredSizeOverride: true,
+                  style: { type: "LabelStyle", text: "Follow path", wordWrap: true, font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#a0a0a0", textAlignment: "Left" } },
+                { type: "ToolbarButton", name: "brushFollowButton", desiredSize: { type: "Size", width: 24, height: 24 }, desiredSizeOverride: true,
+                  icon: "icons/brush-follow.svg", iconSize: 15, toggleButton: true }
+                  ] },
+                { type: "SubView", name: "brushFitRow", visible: true, desiredSize: { type: "Size", width: 0, height: 24 }, desiredSizeOverride: true,
+                  layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                  childViews: [
+                { type: "Label", text: "Fit", textAlignment: "Left", desiredSize: { type: "Size", width: 44, height: 17 }, desiredSizeOverride: true,
+                  style: { type: "LabelStyle", text: "Fit", wordWrap: true, font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#a0a0a0", textAlignment: "Left" } },
+                { type: "DropDownList", name: "brushFitCombo", desiredSize: { type: "Size", width: 0, height: 20 }, desiredSizeOverride: true,
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 }, model: { type: "StringListModel", items: ["Stretch", "Guided", "Repeat"] }, selectedIndex: 0 },
+                { type: "Label", text: "Run", textAlignment: "Left", desiredSize: { type: "Size", width: 44, height: 17 }, desiredSizeOverride: true,
+                  style: { type: "LabelStyle", text: "Run", wordWrap: true, font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#a0a0a0", textAlignment: "Left" } },
+                { type: "DropDownList", name: "brushDirectionCombo", desiredSize: { type: "Size", width: 0, height: 20 }, desiredSizeOverride: true,
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 }, model: { type: "StringListModel", items: ["Left to right", "Top to bottom"] }, selectedIndex: 0 }
+                  ] },
+                { type: "SubView", name: "brushGuideRow", visible: true, desiredSize: { type: "Size", width: 0, height: 24 }, desiredSizeOverride: true,
+                  layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                  childViews: [
+                { type: "Label", text: "Head", textAlignment: "Left", desiredSize: { type: "Size", width: 44, height: 17 }, desiredSizeOverride: true,
+                  style: { type: "LabelStyle", text: "Head", wordWrap: true, font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#a0a0a0", textAlignment: "Left" } },
+                { type: "TextField", name: "brushHeadGuideField", text: "", font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#f0f0f0", desiredSize: { type: "Size", width: 0, height: 20 }, desiredSizeOverride: true,
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 } },
+                { type: "Label", text: "Tail", textAlignment: "Left", desiredSize: { type: "Size", width: 44, height: 17 }, desiredSizeOverride: true,
+                  style: { type: "LabelStyle", text: "Tail", wordWrap: true, font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#a0a0a0", textAlignment: "Left" } },
+                { type: "TextField", name: "brushTailGuideField", text: "", font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#f0f0f0", desiredSize: { type: "Size", width: 0, height: 20 }, desiredSizeOverride: true,
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 } }
+                  ] },
+                { type: "SubView", name: "brushCornerRow", visible: true, desiredSize: { type: "Size", width: 0, height: 24 }, desiredSizeOverride: true,
+                  layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                  childViews: [
+                { type: "Label", text: "Corner", textAlignment: "Left", desiredSize: { type: "Size", width: 44, height: 17 }, desiredSizeOverride: true,
+                  style: { type: "LabelStyle", text: "Corner", wordWrap: true, font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#a0a0a0", textAlignment: "Left" } },
+                { type: "DropDownList", name: "brushCornerCombo", desiredSize: { type: "Size", width: 0, height: 20 }, desiredSizeOverride: true,
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 }, model: { type: "StringListModel", items: ["Bend", "Smooth", "Miter", "Break"] }, selectedIndex: 0 },
+                { type: "Label", text: "Radius", textAlignment: "Left", desiredSize: { type: "Size", width: 44, height: 17 }, desiredSizeOverride: true,
+                  style: { type: "LabelStyle", text: "Radius", wordWrap: true, font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#a0a0a0", textAlignment: "Left" } },
+                { type: "TextField", name: "brushCornerRadiusField", text: "", font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#f0f0f0", desiredSize: { type: "Size", width: 0, height: 20 }, desiredSizeOverride: true,
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 } }
+                  ] },
+                { type: "SubView", name: "brushLimitRow", visible: true, desiredSize: { type: "Size", width: 0, height: 24 }, desiredSizeOverride: true,
+                  layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                  childViews: [
+                { type: "Label", text: "Miter", textAlignment: "Left", desiredSize: { type: "Size", width: 44, height: 17 }, desiredSizeOverride: true,
+                  style: { type: "LabelStyle", text: "Miter", wordWrap: true, font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#a0a0a0", textAlignment: "Left" } },
+                { type: "TextField", name: "brushMiterLimitField", text: "", font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#f0f0f0", desiredSize: { type: "Size", width: 0, height: 20 }, desiredSizeOverride: true,
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 } },
+                { type: "Label", text: "Break", textAlignment: "Left", desiredSize: { type: "Size", width: 44, height: 17 }, desiredSizeOverride: true,
+                  style: { type: "LabelStyle", text: "Break", wordWrap: true, font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#a0a0a0", textAlignment: "Left" } },
+                { type: "TextField", name: "brushBreakAngleField", text: "", font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#f0f0f0", desiredSize: { type: "Size", width: 0, height: 20 }, desiredSizeOverride: true,
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 } }
+                  ] },
+                { type: "SubView", name: "brushFlipRow", visible: true, desiredSize: { type: "Size", width: 0, height: 26 }, desiredSizeOverride: true,
+                  layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                  childViews: [
+                { type: "Label", text: "Flip", textAlignment: "Left", desiredSize: { type: "Size", width: 44, height: 17 }, desiredSizeOverride: true,
+                  style: { type: "LabelStyle", text: "Flip", wordWrap: true, font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#a0a0a0", textAlignment: "Left" } },
+                { type: "ToolbarButton", name: "brushFlipAlongButton", desiredSize: { type: "Size", width: 24, height: 24 }, desiredSizeOverride: true,
+                  icon: "icons/brush-flip-along.svg", iconSize: 15, toggleButton: true },
+                { type: "ToolbarButton", name: "brushFlipAcrossButton", desiredSize: { type: "Size", width: 24, height: 24 }, desiredSizeOverride: true,
+                  icon: "icons/brush-flip-across.svg", iconSize: 15, toggleButton: true }
+                  ] },
+                { type: "SubView", name: "brushLinkRow", visible: true, desiredSize: { type: "Size", width: 0, height: 24 }, desiredSizeOverride: true,
+                  layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                  childViews: [
+                { type: "Label", text: "Link", textAlignment: "Left", desiredSize: { type: "Size", width: 44, height: 17 }, desiredSizeOverride: true,
+                  style: { type: "LabelStyle", text: "Link", wordWrap: true, font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }, textColor: "#a0a0a0", textAlignment: "Left" } },
+                { type: "DropDownList", name: "brushLinkCombo", desiredSize: { type: "Size", width: 0, height: 20 }, desiredSizeOverride: true,
+                  layoutParams: { type: "FlexLayoutParams", weight: 1 }, model: { type: "StringListModel", items: ["(none)"] }, selectedIndex: 0 }
+                  ] }
+              ]
+            }
+          ]
+        },
+        {
+          type: "SubView",
           bounds: {
             type: "Rect",
             pos: { type: "Point", x: 0, y: 22 },

@@ -1,4 +1,5 @@
 #include "curvy/workspacechecks.h"
+#include "curvy/brushlist.h"
 
 #include "curvy/liveshape.h"
 #include "curvy/pathnode.h"
@@ -194,6 +195,50 @@ namespace curvy {
                 key(newui::vkLetterS);
                 expect(canvas_->tool() == SketchTool::Star && !shown("transformPanel") && shown("colorPanel") && shown("strokePanel") && shown("opacityPanel"), "an armed drawing tool shows the colour boxes for new shapes");
                 keyUp(newui::vkLetterS);
+                canvas_->setTool(SketchTool::Paintbrush);
+                expect(shown("brushPanel") && shown("colorPanel") && shown("opacityPanel") && !shown("strokePanel"), "the Paintbrush shows the Brushes box with Colour and Opacity");
+                {
+                    auto* list = dynamic_cast<curvy::BrushList*>(dock->propertyDock()->findView("brushList"));
+                    expect(list != nullptr && list->isVisible() && list->bounds().height() > 100.0f && !list->rows().empty(), "the Brushes box lists brushes");
+                    if (list != nullptr) {
+                        const float view = list->getClientBounds().height();
+                        expect(list->scrollable() && list->thumb().second >= 24.0f && list->thumb().second < view, "a list taller than its view has a scroll bar");
+                        list->setScroll(100000.0f);
+                        expect(std::fabs(list->scroll() - (list->contentHeight() - view)) < 0.01f && std::fabs(list->thumb().first + list->thumb().second - view) < 0.01f, "scrolled to the end the thumb is at the bottom");
+                        list->setScroll(0.0f);
+                    }
+                }
+                {
+                    // A graph brush lists the settings of its asset as rows built at run time; Enter in a field stores a changed value.
+                    std::size_t oil = 0;
+                    for (const auto& entry : doc_->brushes()) {
+                        oil = entry->graphType == "brush_oil" ? entry->id : oil;
+                    }
+                    expect(oil != 0, "the oil graph brush is in the library");
+                    if (oil != 0) {
+                        doc_->clearSelection();
+                        doc_->setActiveBrush(oil);
+                        auto* field = dynamic_cast<newui::TextField*>(dock->propertyDock()->findView("brushSetting_dryStart"));
+                        expect(field != nullptr && field->isVisible() && field->text() == L"50" && !field->isEnabled(),
+                            "a graph brush shows the asset's values, read-only while no stroke with it is selected");
+                        const std::size_t line = doc_->add(SketchObject::makeLine(10, 10, 60, 10)).id();
+                        doc_->setSelection({line});
+                        doc_->applyBrush(oil);
+                        if (field != nullptr) {
+                            expect(field->isEnabled(), "the fields are editable with a stroke of that brush selected");
+                            field->setText(L"20");
+                            field->onReturnPressed(*field);
+                            const auto& tuned = doc_->findById(line)->strokeOptions().graphSettings;
+                            expect(tuned.size() == 1 && tuned[0].first == "dryStart" && tuned[0].second == 20.0, "Enter in a setting field changes that stroke");
+                            expect(doc_->findBrush(oil) != nullptr, "the brush in the library is not changed");
+                            field->setText(L"50");
+                            field->onReturnPressed(*field);
+                            expect(doc_->findById(line)->strokeOptions().graphSettings.empty(), "a value back at the asset's own is not stored");
+                        }
+                        doc_->deleteSelection();
+                    }
+                }
+                canvas_->setTool(SketchTool::Select);
                 key(newui::vkLetterE);
                 key(newui::vkLetterV);
                 expect(canvas_->tool() == SketchTool::Select && model_->heldToolKey().empty(), "V goes back to the Select tool from a held drawing tool");
@@ -477,6 +522,47 @@ namespace curvy {
                     nodes += r.kind == GraphRow::Kind::Node ? 1 : 0;
                 }
                 expect(nodes == doc_->network().nodeIds().size() && graph.rows().front().kind == GraphRow::Kind::Node, "Flow view lists the nodes");
+                {
+                    // A stroke drawn the way the Paintbrush draws one: its brush node is a row of the Flow view.
+                    const std::size_t brushesBefore = doc_->brushes().size();
+                    doc_->addBrushPresets();
+                    std::shared_ptr<const BrushDef> oil;
+                    for (const std::shared_ptr<const BrushDef>& def : doc_->brushes()) {
+                        oil = def->graphType == "brush_oil" ? def : oil;
+                    }
+                    expect(oil != nullptr, "the Oil graph brush is in the library (the asset folder was loaded)");
+                    if (oil) {
+                        BLPath path;
+                        path.move_to(20, 20);
+                        path.cubic_to(60, 0, 100, 60, 140, 20);
+                        SketchObject* stroke = SketchObject::makePath(path);
+                        stroke->setFill(SketchPaint::none());
+                        stroke->setStroke(SketchPaint::solid(SketchColor::gray(0.0f)));
+                        StrokeOptions options = doc_->defaultStrokeOptions();
+                        options.brush = oil;
+                        stroke->setStrokeOptions(options);
+                        doc_->addUndoable(stroke, "Draw with Paintbrush");
+                        graph.setMode(GraphDock::Mode::Flow);
+                        // The brush is a row under the paint node with the stroke under it, in the same tree as the shape: no row of its own at the top.
+                        const std::vector<GraphRow>& flow = graph.rows();
+                        std::size_t brushAt = flow.size(), strokeUnder = 0, topLevel = 0;
+                        for (std::size_t k = 0; k < flow.size(); ++k) {
+                            topLevel += flow[k].depth == 0 ? 1 : 0;
+                            if (flow[k].summary == "brush_oil") {
+                                brushAt = k;
+                            }
+                        }
+                        if (brushAt < flow.size() && brushAt + 1 < flow.size()) {
+                            strokeUnder = flow[brushAt + 1].depth == flow[brushAt].depth + 1 && flow[brushAt + 1].kind == GraphRow::Kind::Node ? 1 : 0;
+                        }
+                        expect(brushAt < flow.size() && flow[brushAt].depth == 1, "the brush node is under the paint node in the Flow view");
+                        expect(strokeUnder == 1, "and its Stroke (a full row, not a link) is under it");
+                        expect(topLevel == 1, "the Flow view has one top-level node, the paint node");
+                        graph.setMode(GraphDock::Mode::Document);
+                        doc_->undoStack().undo();
+                    }
+                    (void)brushesBefore;
+                }
                 graph.setMode(GraphDock::Mode::Document);
 
                 // Entering a group scopes the Flow view to the nodes inside it; Esc, the ".." row or exitGroup leaves.

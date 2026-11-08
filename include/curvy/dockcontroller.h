@@ -4,6 +4,7 @@
 
 #include "curvy/canvasview.h"
 #include "curvy/dockcontext.h"
+#include "curvy/brushpanel.h"
 #include "curvy/stylepanel.h"
 #include "curvy/sketchdocument.h"
 #include "curvy/shapepanel.h"
@@ -112,6 +113,7 @@ namespace curvy {
         std::unique_ptr<StylePanel> stylePanel_;
         std::unique_ptr<TextPanel> textPanel_;
         std::unique_ptr<ShapePanel> shapePanel_;
+        std::unique_ptr<BrushPanel> brushPanel_;
         DockBoxes boxes_;
         newui::Connections connections_;
     };

@@ -6,6 +6,7 @@
 #include "curvy/pathnode.h"
 #include "curvy/sketchdocument.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -115,7 +116,8 @@ namespace curvy {
                 writePaint(out, item.paint);
                 if (item.kind == AppearanceKind::Stroke) {
                     out.f64(item.strokeWidth);
-                    out.u8(unsigned(item.strokeOptions.cap) | (item.strokeOptions.brush ? 0x80u : 0u) | (item.strokeOptions.decorated() ? 0x40u : 0u));   // bit 7: a brush follows; bit 6: align and arrows follow
+                    out.u8(unsigned(item.strokeOptions.cap) | (item.strokeOptions.brush ? 0x80u : 0u) | (item.strokeOptions.decorated() ? 0x40u : 0u) |
+                        (item.strokeOptions.graphSettings.empty() ? 0u : 0x20u));   // bit 7: a brush follows; bit 6: align and arrows follow; bit 5: graph brush settings follow the brush
                     out.u8(unsigned(item.strokeOptions.join));
                     out.f64(item.strokeOptions.miterLimit);
                     out.varint(item.strokeOptions.dashes.size());
@@ -130,6 +132,13 @@ namespace curvy {
                     }
                     if (item.strokeOptions.brush) {
                         out.varint(item.strokeOptions.brush->id);
+                    }
+                    if (!item.strokeOptions.graphSettings.empty()) {
+                        out.varint(item.strokeOptions.graphSettings.size());
+                        for (const auto& [name, value] : item.strokeOptions.graphSettings) {
+                            out.text(name);
+                            out.f64(value);
+                        }
                     }
                     if (item.strokeOptions.decorated()) {
                         out.u8(unsigned(item.strokeOptions.align));
@@ -169,8 +178,38 @@ namespace curvy {
             std::unordered_map<std::string, std::uint32_t> index_;
         };
 
-        void chunk(std::string& body, const char* tag, const std::string& payload) {
-            body.append(tag, 4);
+        // A chunk tag is four characters as one 32-bit value, the first in the lowest byte, so it is stored in the file in reading order (the
+        // format is little-endian throughout) and compared as an integer.
+        constexpr std::uint32_t fourcc(char a, char b, char c, char d) {
+            return std::uint32_t(static_cast<unsigned char>(a)) | (std::uint32_t(static_cast<unsigned char>(b)) << 8) |
+                   (std::uint32_t(static_cast<unsigned char>(c)) << 16) | (std::uint32_t(static_cast<unsigned char>(d)) << 24);
+        }
+
+        struct Tag {
+            static constexpr std::uint32_t page = fourcc('P', 'A', 'G', 'E');
+            static constexpr std::uint32_t guides = fourcc('G', 'U', 'I', 'D');
+            static constexpr std::uint32_t layers = fourcc('L', 'A', 'Y', 'R');
+            static constexpr std::uint32_t swatches = fourcc('S', 'W', 'C', 'H');
+            static constexpr std::uint32_t strings = fourcc('S', 'T', 'R', 'S');
+            static constexpr std::uint32_t looks = fourcc('S', 'T', 'Y', 'L');
+            static constexpr std::uint32_t groups = fourcc('G', 'R', 'P', 'S');
+            static constexpr std::uint32_t clips = fourcc('C', 'L', 'I', 'P');
+            static constexpr std::uint32_t symbols = fourcc('S', 'Y', 'M', 'B');
+            static constexpr std::uint32_t patterns = fourcc('P', 'A', 'T', 'N');
+            static constexpr std::uint32_t brushes = fourcc('B', 'R', 'S', 'H');
+            static constexpr std::uint32_t brushFits = fourcc('B', 'F', 'I', 'T');
+            static constexpr std::uint32_t brushSources = fourcc('B', 'S', 'R', 'C');
+            static constexpr std::uint32_t brushCategories = fourcc('B', 'C', 'A', 'T');
+            static constexpr std::uint32_t graphBrushes = fourcc('B', 'G', 'R', 'F');
+            static constexpr std::uint32_t images = fourcc('I', 'M', 'G', 'S');
+            static constexpr std::uint32_t artboards = fourcc('A', 'B', 'R', 'D');
+            static constexpr std::uint32_t graphicStyles = fourcc('G', 'S', 'T', 'Y');
+            static constexpr std::uint32_t graph = fourcc('G', 'R', 'P', 'H');
+            static constexpr std::uint32_t objects = fourcc('O', 'B', 'J', 'S');
+        };
+
+        void chunk(std::string& body, std::uint32_t tag, const std::string& payload) {
+            body.append(reinterpret_cast<const char*>(&tag), 4);
             std::uint64_t size = payload.size();
             body.append(reinterpret_cast<const char*>(&size), 8);
             body.append(payload);
@@ -465,7 +504,7 @@ namespace curvy {
                 if (item.kind == AppearanceKind::Stroke) {
                     item.strokeWidth = in.f64();
                     const unsigned capByte = in.u8();
-                    item.strokeOptions.cap = (capByte & 0x3Fu) < 3u ? StrokeCap(capByte & 0x3Fu) : StrokeCap::Butt;
+                    item.strokeOptions.cap = (capByte & 0x1Fu) < 3u ? StrokeCap(capByte & 0x1Fu) : StrokeCap::Butt;
                     item.strokeOptions.join = StrokeJoin(in.enumeration(3));
                     item.strokeOptions.miterLimit = in.f64();
                     std::size_t dashes = in.count(8);
@@ -482,6 +521,14 @@ namespace curvy {
                     }
                     if ((capByte & 0x80u) != 0u) {
                         item.strokeOptions.brushRef = std::size_t(in.varint());   // bound to the brush once the library is in
+                    }
+                    if ((capByte & 0x20u) != 0u) {
+                        const std::size_t settings = in.count(9);
+                        for (std::size_t s = 0; s < settings && in.ok(); ++s) {
+                            std::string name = in.text();
+                            const double value = in.f64();
+                            item.strokeOptions.graphSettings.emplace_back(std::move(name), value);
+                        }
                     }
                     if ((capByte & 0x40u) != 0u) {
                         item.strokeOptions.align = StrokeAlign(in.enumeration(3));
@@ -740,9 +787,11 @@ namespace curvy {
         for (const std::shared_ptr<const BrushDef>& def : document.brushes()) {
             brushChunk.varint(def->id);
             brushChunk.text(def->name);
-            brushChunk.u8(unsigned(def->kind));
-            for (double value : def->params()) {
-                brushChunk.f64(value);
+            // A graph brush is written as a plain nib, so a reader that does not know the kind still opens the file; BGRF turns it back.
+            brushChunk.u8(def->kind == BrushKind::Graph ? 0u : unsigned(def->kind));
+            const std::vector<double> numbers = def->params();
+            for (std::size_t k = 0; k < BrushDef::kBaseParams; ++k) {
+                brushChunk.f64(numbers[k]);
             }
             const bool art = def->hasArt() && def->art && def->art->content;
             brushChunk.f64(art ? def->art->box.x0 : 0.0);
@@ -750,6 +799,61 @@ namespace curvy {
             brushChunk.f64(art ? def->art->box.x1 : 1.0);
             brushChunk.f64(art ? def->art->box.y1 : 1.0);
             brushChunk.text(art ? binaryFromDocument(*def->art->content, false) : std::string());
+        }
+
+        // How art brushes are fitted: later than the first version of BRSH, so a chunk of its own (older readers skip it).
+        ByteWriter fitChunk;
+        fitChunk.varint(document.brushes().size());
+        for (const std::shared_ptr<const BrushDef>& def : document.brushes()) {
+            const std::vector<double> numbers = def->params();
+            fitChunk.varint(def->id);
+            fitChunk.varint(numbers.size() - BrushDef::kBaseParams);
+            for (std::size_t k = BrushDef::kBaseParams; k < numbers.size(); ++k) {
+                fitChunk.f64(numbers[k]);
+            }
+        }
+
+        // Which brushes are linked to which symbol: a chunk of its own (older readers skip it).
+        ByteWriter sourceChunk;
+        std::size_t linkedBrushes = 0;
+        for (const std::shared_ptr<const BrushDef>& def : document.brushes()) {
+            linkedBrushes += def->sourceSymbol != 0 ? 1 : 0;
+        }
+        sourceChunk.varint(linkedBrushes);
+        for (const std::shared_ptr<const BrushDef>& def : document.brushes()) {
+            if (def->sourceSymbol != 0) {
+                sourceChunk.varint(def->id);
+                sourceChunk.varint(def->sourceSymbol);
+            }
+        }
+
+        // The picker's category and favorite flag of each brush that has either, in a chunk of its own (older readers skip it).
+        ByteWriter categoryChunk;
+        std::size_t sortedBrushes = 0;
+        for (const std::shared_ptr<const BrushDef>& def : document.brushes()) {
+            sortedBrushes += def->favorite || !def->category.empty() ? 1 : 0;
+        }
+        categoryChunk.varint(sortedBrushes);
+        for (const std::shared_ptr<const BrushDef>& def : document.brushes()) {
+            if (def->favorite || !def->category.empty()) {
+                categoryChunk.varint(def->id);
+                categoryChunk.u8(def->favorite ? 1u : 0u);
+                categoryChunk.text(def->category);
+            }
+        }
+
+        // Which brushes are graph brushes and the asset that paints each: a chunk of its own (older readers skip it and see a nib).
+        ByteWriter graphBrushChunk;
+        std::size_t graphBrushes = 0;
+        for (const std::shared_ptr<const BrushDef>& def : document.brushes()) {
+            graphBrushes += def->kind == BrushKind::Graph ? 1 : 0;
+        }
+        graphBrushChunk.varint(graphBrushes);
+        for (const std::shared_ptr<const BrushDef>& def : document.brushes()) {
+            if (def->kind == BrushKind::Graph) {
+                graphBrushChunk.varint(def->id);
+                graphBrushChunk.text(def->graphType);
+            }
         }
 
         ByteWriter imageChunk;
@@ -807,24 +911,34 @@ namespace curvy {
         }
 
         std::string body;
-        chunk(body, "PAGE", page.data());
-        chunk(body, "GUID", guideChunk.data());
-        chunk(body, "LAYR", layerChunk.data());
-        chunk(body, "SWCH", swatchChunk.data());
-        chunk(body, "STRS", stringChunk.data());
-        chunk(body, "STYL", lookChunk.data());
-        chunk(body, "GRPS", groups.data());
-        chunk(body, "CLIP", clips.data());
-        chunk(body, "SYMB", symbolChunk.data());
-        chunk(body, "PATN", patternChunk.data());
-        chunk(body, "BRSH", brushChunk.data());
-        chunk(body, "IMGS", imageChunk.data());
-        chunk(body, "ABRD", boards.data());
-        chunk(body, "GSTY", styles.data());
-        if (version >= 4) {
-            chunk(body, "GRPH", graphChunk.data());
+        chunk(body, Tag::page, page.data());
+        chunk(body, Tag::guides, guideChunk.data());
+        chunk(body, Tag::layers, layerChunk.data());
+        chunk(body, Tag::swatches, swatchChunk.data());
+        chunk(body, Tag::strings, stringChunk.data());
+        chunk(body, Tag::looks, lookChunk.data());
+        chunk(body, Tag::groups, groups.data());
+        chunk(body, Tag::clips, clips.data());
+        chunk(body, Tag::symbols, symbolChunk.data());
+        chunk(body, Tag::patterns, patternChunk.data());
+        chunk(body, Tag::brushes, brushChunk.data());
+        chunk(body, Tag::brushFits, fitChunk.data());
+        if (linkedBrushes != 0) {
+            chunk(body, Tag::brushSources, sourceChunk.data());
         }
-        chunk(body, "OBJS", objects.data());
+        if (sortedBrushes != 0) {
+            chunk(body, Tag::brushCategories, categoryChunk.data());
+        }
+        if (graphBrushes != 0) {
+            chunk(body, Tag::graphBrushes, graphBrushChunk.data());
+        }
+        chunk(body, Tag::images, imageChunk.data());
+        chunk(body, Tag::artboards, boards.data());
+        chunk(body, Tag::graphicStyles, styles.data());
+        if (version >= 4) {
+            chunk(body, Tag::graph, graphChunk.data());
+        }
+        chunk(body, Tag::objects, objects.data());
 
         ByteWriter file;
         file.bytes(kMagic, 4);
@@ -894,13 +1008,15 @@ namespace curvy {
             if (!file.ok() || size > file.left()) {
                 return false;
             }
-            std::string tag(tagBytes, 4);
+            std::uint32_t tag = 0;
+            std::memcpy(&tag, tagBytes, 4);
             ByteReader in(file.view(std::size_t(size)), std::size_t(size));
             if (!file.ok()) {
                 return false;
             }
 
-            if (tag == "PAGE") {
+            switch (tag) {
+            case Tag::page: {
                 pageWidth = in.f32();
                 pageHeight = in.f32();
                 ppi = in.f32();
@@ -912,7 +1028,9 @@ namespace curvy {
                     return false;
                 }
                 havePage = true;
-            } else if (tag == "GUID") {
+                break;
+            }
+            case Tag::guides: {
                 std::size_t n = in.count(9);
                 for (std::size_t i = 0; i < n && in.ok(); ++i) {
                     Guide guide;
@@ -925,7 +1043,9 @@ namespace curvy {
                 if (!in.ok()) {
                     return false;
                 }
-            } else if (tag == "SWCH") {
+                break;
+            }
+            case Tag::swatches: {
                 std::size_t n = in.count(1);
                 swatches.clear();
                 for (std::size_t i = 0; i < n && in.ok(); ++i) {
@@ -934,7 +1054,9 @@ namespace curvy {
                 if (!in.ok()) {
                     return false;
                 }
-            } else if (tag == "LAYR") {
+                break;
+            }
+            case Tag::layers: {
                 std::size_t n = in.count(4);
                 for (std::size_t i = 0; i < n && in.ok(); ++i) {
                     Layer layer;
@@ -962,7 +1084,9 @@ namespace curvy {
                 if (!in.ok()) {
                     return false;
                 }
-            } else if (tag == "STRS") {
+                break;
+            }
+            case Tag::strings: {
                 std::size_t n = in.count(1);
                 strings.reserve(n);
                 for (std::size_t i = 0; i < n && in.ok(); ++i) {
@@ -971,7 +1095,9 @@ namespace curvy {
                 if (!in.ok() || strings.empty()) {
                     return false;
                 }
-            } else if (tag == "STYL") {
+                break;
+            }
+            case Tag::looks: {
                 std::size_t n = in.count(8);
                 looks.reserve(n);
                 for (std::size_t i = 0; i < n && in.ok(); ++i) {
@@ -990,7 +1116,9 @@ namespace curvy {
                 if (!in.ok()) {
                     return false;
                 }
-            } else if (tag == "GRPS") {
+                break;
+            }
+            case Tag::groups: {
                 std::size_t n = in.count(10);
                 for (std::size_t i = 0; i < n && in.ok(); ++i) {
                     std::size_t id = std::size_t(in.varint());
@@ -1002,8 +1130,11 @@ namespace curvy {
                 if (!in.ok()) {
                     return false;
                 }
-            } else if (tag == "SYMB" || tag == "PATN") {
-                std::vector<std::shared_ptr<const SymbolDef>>& target = tag == "SYMB" ? symbolLibrary : patternLibrary;
+                break;
+            }
+            case Tag::symbols:
+            case Tag::patterns: {
+                std::vector<std::shared_ptr<const SymbolDef>>& target = tag == Tag::symbols ? symbolLibrary : patternLibrary;
                 std::size_t n = in.count(40);
                 for (std::size_t i = 0; i < n && in.ok(); ++i) {
                     auto def = std::make_shared<SymbolDef>();
@@ -1024,7 +1155,9 @@ namespace curvy {
                 if (!in.ok()) {
                     return false;
                 }
-            } else if (tag == "IMGS") {
+                break;
+            }
+            case Tag::images: {
                 std::size_t n = in.count(2);
                 for (std::size_t i = 0; i < n && in.ok(); ++i) {
                     std::string name = in.text();
@@ -1037,7 +1170,9 @@ namespace curvy {
                 if (!in.ok()) {
                     return false;
                 }
-            } else if (tag == "BRSH") {
+                break;
+            }
+            case Tag::brushes: {
                 std::size_t n = in.count(50);
                 for (std::size_t i = 0; i < n && in.ok(); ++i) {
                     auto def = std::make_shared<BrushDef>();
@@ -1076,7 +1211,104 @@ namespace curvy {
                 if (!in.ok()) {
                     return false;
                 }
-            } else if (tag == "ABRD") {
+                break;
+            }
+            case Tag::brushFits: {
+                std::size_t n = in.count(8);
+                for (std::size_t i = 0; i < n && in.ok(); ++i) {
+                    const std::size_t id = std::size_t(in.varint());
+                    std::vector<double> extras;
+                    const std::size_t extraCount = in.count(8);   // a later version may write more than this one knows
+                    for (std::size_t k = 0; k < extraCount && in.ok(); ++k) {
+                        extras.push_back(in.f64());
+                    }
+                    if (!in.ok()) {
+                        return false;
+                    }
+                    for (std::shared_ptr<const BrushDef>& entry : brushLibrary) {
+                        if (entry->id == id) {
+                            auto edited = std::make_shared<BrushDef>(*entry);
+                            std::vector<double> all = edited->params();
+                            all.resize(BrushDef::kBaseParams);
+                            all.insert(all.end(), extras.begin(), extras.end());
+                            edited->setParams(all);
+                            entry = edited;
+                        }
+                    }
+                }
+                if (!in.ok()) {
+                    return false;
+                }
+                break;
+            }
+            case Tag::brushSources: {
+                std::size_t n = in.count(2);
+                for (std::size_t i = 0; i < n && in.ok(); ++i) {
+                    const std::size_t brushId = std::size_t(in.varint()), symbolId = std::size_t(in.varint());
+                    if (!in.ok()) {
+                        return false;
+                    }
+                    const bool known = std::any_of(symbolLibrary.begin(), symbolLibrary.end(),
+                                                   [&](const std::shared_ptr<const SymbolDef>& def) { return def->id == symbolId; });
+                    for (std::shared_ptr<const BrushDef>& entry : brushLibrary) {
+                        if (known && entry->id == brushId) {
+                            auto linked = std::make_shared<BrushDef>(*entry);
+                            linked->sourceSymbol = symbolId;
+                            entry = linked;
+                        }
+                    }
+                }
+                if (!in.ok()) {
+                    return false;
+                }
+                break;
+            }
+            case Tag::brushCategories: {
+                std::size_t n = in.count(3);
+                for (std::size_t i = 0; i < n && in.ok(); ++i) {
+                    const std::size_t brushId = std::size_t(in.varint());
+                    const bool favorite = in.u8() != 0;
+                    const std::string category = in.text();
+                    if (!in.ok()) {
+                        return false;
+                    }
+                    for (std::shared_ptr<const BrushDef>& entry : brushLibrary) {
+                        if (entry->id == brushId) {
+                            auto sorted = std::make_shared<BrushDef>(*entry);
+                            sorted->favorite = favorite;
+                            sorted->category = category;
+                            entry = sorted;
+                        }
+                    }
+                }
+                if (!in.ok()) {
+                    return false;
+                }
+                break;
+            }
+            case Tag::graphBrushes: {
+                std::size_t n = in.count(2);
+                for (std::size_t i = 0; i < n && in.ok(); ++i) {
+                    const std::size_t brushId = std::size_t(in.varint());
+                    const std::string type = in.text();
+                    if (!in.ok()) {
+                        return false;
+                    }
+                    for (std::shared_ptr<const BrushDef>& entry : brushLibrary) {
+                        if (entry->id == brushId && !type.empty()) {
+                            auto graph = std::make_shared<BrushDef>(*entry);
+                            graph->kind = BrushKind::Graph;
+                            graph->graphType = type;
+                            entry = graph;
+                        }
+                    }
+                }
+                if (!in.ok()) {
+                    return false;
+                }
+                break;
+            }
+            case Tag::artboards: {
                 std::size_t n = in.count(33);
                 artboardActive = std::size_t(in.varint());
                 for (std::size_t i = 0; i < n && in.ok(); ++i) {
@@ -1094,7 +1326,9 @@ namespace curvy {
                 if (!in.ok()) {
                     return false;
                 }
-            } else if (tag == "CLIP") {
+                break;
+            }
+            case Tag::clips: {
                 std::size_t n = in.count(1);
                 for (std::size_t i = 0; i < n && in.ok(); ++i) {
                     clipGroups.insert(std::size_t(in.varint()));
@@ -1102,7 +1336,9 @@ namespace curvy {
                 if (!in.ok()) {
                     return false;
                 }
-            } else if (tag == "GSTY") {
+                break;
+            }
+            case Tag::graphicStyles: {
                 std::size_t n = in.count(11);
                 for (std::size_t i = 0; i < n && in.ok(); ++i) {
                     GraphicStyle style;
@@ -1119,7 +1355,9 @@ namespace curvy {
                 if (!in.ok()) {
                     return false;
                 }
-            } else if (tag == "GRPH") {
+                break;
+            }
+            case Tag::graph: {
                 graphText = in.text();
                 const std::size_t n = in.count(1);
                 for (std::size_t i = 0; i < n && in.ok(); ++i) {
@@ -1132,7 +1370,9 @@ namespace curvy {
                     return false;
                 }
                 haveGraph = true;
-            } else if (tag == "OBJS") {
+                break;
+            }
+            case Tag::objects: {
                 if (strings.empty()) {
                     return false;   // the strings and appearances come first
                 }
@@ -1257,8 +1497,11 @@ namespace curvy {
                     return false;
                 }
                 haveObjects = true;
+                break;
             }
-            // any other chunk: skipped (its bytes were already consumed from `file`)
+            default:
+                break;   // any other chunk: skipped (its bytes were already consumed from `file`)
+            }
         }
         if (!havePage || !haveObjects) {
             return false;

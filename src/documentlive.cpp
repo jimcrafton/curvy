@@ -1,6 +1,7 @@
 #include "curvy/sketchdocument.h"
 
 #include "curvy/appearancenode.h"
+#include "curvy/graphbrush.h"
 #include "curvy/pathnode.h"
 #include "curvy/shapenode.h"
 
@@ -13,6 +14,76 @@
 namespace curvy {
 
     namespace {
+        // The brush node of a stroke node: the node after it that is a brush (a curvyBrush, or an instance of a graph brush asset).
+        jitnodes::NodeId brushInstanceOf(const jitnodes::Network& net, jitnodes::NodeId stroke) {
+            for (jitnodes::NodeId consumer : net.consumersOf(stroke)) {
+                if (net.hasNode(consumer) && isBrushNodeType(net.node(consumer).typeName())) {
+                    return consumer;
+                }
+            }
+            return jitnodes::invalidNodeId;
+        }
+
+        // Puts `brush` after `stroke` in the flow: what took the stroke as input takes the brush instead.
+        void insertAfter(jitnodes::Network& net, jitnodes::NodeId stroke, jitnodes::NodeId brush) {
+            const std::vector<jitnodes::NodeId> consumers = net.consumersOf(stroke);
+            for (jitnodes::NodeId consumer : consumers) {
+                for (int i = 0; consumer != brush && i < net.node(consumer).inputCount(); ++i) {
+                    if (net.inputOf(consumer, i) == stroke) {
+                        net.connect(brush, consumer, i);
+                    }
+                }
+            }
+            net.connect(stroke, brush, 0);
+        }
+
+        // Takes `brush` out of the flow: what took it as input takes its own input again.
+        void removeBrushNode(jitnodes::Network& net, jitnodes::NodeId brush) {
+            const jitnodes::NodeId input = net.inputOf(brush, 0);
+            const std::vector<jitnodes::NodeId> consumers = net.consumersOf(brush);
+            for (jitnodes::NodeId consumer : consumers) {
+                for (int i = 0; input != jitnodes::invalidNodeId && i < net.node(consumer).inputCount(); ++i) {
+                    if (net.inputOf(consumer, i) == brush) {
+                        net.connect(input, consumer, i);
+                    }
+                }
+            }
+            net.removeNode(brush);
+        }
+
+        // paramsOf(node) plus, for a stroke node, the brush.* numbers of its brush node: the settings that differ from the asset's own value
+        // (a graph brush) or from the library brush the stroke names (any other).
+        AppearanceParams paramsWithBrush(const jitnodes::Network& net, jitnodes::NodeId id, const AppearanceLibrary& library) {
+            AppearanceParams params = paramsOf(net.node(id));
+            if (net.node(id).typeName() != kStrokeNodeType) {
+                return params;
+            }
+            const jitnodes::NodeId instance = brushInstanceOf(net, id);
+            if (instance == jitnodes::invalidNodeId) {
+                return params;
+            }
+            const jitnodes::Node& node = net.node(instance);
+            if (node.typeName() == kBrushNodeType) {
+                const auto named = params.numbers.find("brush");
+                const std::shared_ptr<const BrushDef> base = named != params.numbers.end() && library.brush ? library.brush(std::size_t(std::lround(named->second))) : nullptr;
+                const std::vector<double> values = base ? base->params() : std::vector<double>{};
+                for (std::size_t i = 0; i < values.size() && i < BrushDef::kParamNames.size(); ++i) {
+                    const char* name = BrushDef::kParamNames[i];
+                    if (node.hasFloat(name) && node.baseFloat(name) != float(values[i])) {
+                        params.numbers[kBrushSettingPrefix + std::string(name)] = node.baseFloat(name);
+                    }
+                }
+                return params;
+            }
+            const GraphBrushInfo* info = findGraphBrush(node.typeName());
+            for (const GraphBrushSetting& setting : info != nullptr ? info->settings : std::vector<GraphBrushSetting>{}) {
+                if (node.hasFloat(setting.name) && node.baseFloat(setting.name) != float(setting.defaultValue)) {
+                    params.numbers[kBrushSettingPrefix + setting.name] = node.baseFloat(setting.name);
+                }
+            }
+            return params;
+        }
+
         bool hasNode(const jitnodes::Network& net, jitnodes::NodeId id) {
             const std::vector<jitnodes::NodeId> ids = net.nodeIds();
             return std::find(ids.begin(), ids.end(), id) != ids.end();
@@ -123,7 +194,7 @@ namespace curvy {
                 at = node.inputCount() > 0 ? net.inputOf(at, 0) : jitnodes::invalidNodeId;
             }
             for (jitnodes::NodeId at = net.inputOf(place, 0); at != jitnodes::invalidNodeId && at != shape && guard < 1000; at = net.inputOf(at, 0), ++guard) {
-                if (net.node(at).typeName() == kMovePointsNodeType || animatedNode(net.node(at))) {
+                if (net.node(at).typeName() == kMovePointsNodeType || net.node(at).typeName() == kDeformAlongPathNodeType || animatedNode(net.node(at))) {
                     return true;
                 }
             }
@@ -501,7 +572,9 @@ namespace curvy {
             d.all = false;
             for (jitnodes::NodeId id : touched) {
                 for (int guard = 0; id != jitnodes::invalidNodeId && net->hasNode(id) && guard < 1000; ++guard) {
-                    const jitnodes::NodeId up = isAppearanceNodeType(net->node(id).typeName()) ? net->inputOf(id, 0) : jitnodes::invalidNodeId;
+                    // A brush node follows its stroke node, so an edit of it is an edit of the stroke's look.
+                    const bool brushNode = isBrushNodeType(net->node(id).typeName());
+                    const jitnodes::NodeId up = isAppearanceNodeType(net->node(id).typeName()) || brushNode ? net->inputOf(id, 0) : jitnodes::invalidNodeId;
                     if (up == jitnodes::invalidNodeId) {
                         // The chain hangs off the shape's placement node, so the shape is the one behind it.
                         d.shapes.insert(id);
@@ -550,7 +623,7 @@ namespace curvy {
                 if (held == appearanceSynced_.end() || node.typeName() != appearanceNodeType(items[i].kind)) {
                     continue;
                 }
-                const AppearanceParams have = paramsOf(node), want = paramsOf(items[i]);
+                const AppearanceParams have = paramsWithBrush(net, chain[i], library), want = paramsOf(items[i]);
                 if (have != held->second && want == held->second) {
                     items[i] = itemFrom(have, want, items[i], library);
                     held->second = paramsOf(items[i]);
@@ -590,6 +663,10 @@ namespace curvy {
                 ++keep;
             }
             while (chain.size() > keep) {
+                if (const jitnodes::NodeId brush = brushInstanceOf(net, chain.back()); brush != jitnodes::invalidNodeId) {
+                    removeBrushNode(net, brush);
+                    paintSignature_ = 0;
+                }
                 net.removeNode(chain.back());
                 appearanceSynced_.erase(NodeRef(scope, chain.back()));
                 chain.pop_back();
@@ -612,6 +689,46 @@ namespace curvy {
                         store(node, want);
                     }
                     appearanceSynced_[NodeRef(scope, chain[i])] = std::move(want);
+                }
+                // While a file is being read a brush is only an id, bound to the library afterwards; its node (from the file's graph) stays as it is.
+                if (items[i].kind == AppearanceKind::Stroke && !(items[i].strokeOptions.brushRef != 0 && !items[i].strokeOptions.brush)) {
+                    // Whatever its kind, a brush is one node after the stroke node in the flow; its parameters are this stroke's values.
+                    const StrokeOptions& options = items[i].strokeOptions;
+                    const GraphBrushInfo* info = options.brush && options.brush->kind == BrushKind::Graph ? findGraphBrush(options.brush->graphType) : nullptr;
+                    const std::string wantType = info != nullptr ? info->type : options.brush && options.brush->kind != BrushKind::Graph ? kBrushNodeType : "";
+                    jitnodes::NodeId instance = brushInstanceOf(net, chain[i]);
+                    if (instance != jitnodes::invalidNodeId && net.node(instance).typeName() != wantType) {
+                        removeBrushNode(net, instance);
+                        instance = jitnodes::invalidNodeId;
+                        paintSignature_ = 0;   // the paint node takes the brush, so its inputs are written again
+                    }
+                    if (!wantType.empty()) {
+                        if (instance == jitnodes::invalidNodeId) {
+                            instance = addOwnedNode(net, scope, shape, std::uint32_t(0x1000 + i), wantType, net.uniqueName("brush"));
+                            insertAfter(net, chain[i], instance);
+                            paintSignature_ = 0;
+                        }
+                        jitnodes::Node& brushNode = net.node(instance);
+                        auto put = [&brushNode](const char* name, double value) {
+                            if (brushNode.hasFloat(name) && brushNode.baseFloat(name) != float(value)) {
+                                brushNode.setFloat(name, float(value));
+                            }
+                        };
+                        if (info != nullptr) {
+                            for (const GraphBrushSetting& setting : info->settings) {
+                                double value = setting.defaultValue;
+                                for (const auto& [name, changed] : options.graphSettings) {
+                                    value = name == setting.name ? changed : value;
+                                }
+                                put(setting.name.c_str(), value);
+                            }
+                        } else {
+                            const std::vector<double> values = options.brush->params();
+                            for (std::size_t p = 0; p < values.size() && p < BrushDef::kParamNames.size(); ++p) {
+                                put(BrushDef::kParamNames[p], values[p]);
+                            }
+                        }
+                    }
                 }
             }
             appearanceChains_[object->graphRef()] = AppearanceChain{chain, object->appearanceRevision()};
@@ -643,6 +760,16 @@ namespace curvy {
                 if (used.count(NodeRef(scope, id)) == 0 && isAppearanceNodeType(net->node(id).typeName())) {
                     net->removeNode(id);
                     appearanceSynced_.erase(NodeRef(scope, id));
+                }
+            }
+            // A brush node whose stroke node is gone (or never was a look node of an object) goes with it.
+            for (jitnodes::NodeId id : net->nodeIds()) {
+                if (net->hasNode(id) && isBrushNodeType(net->node(id).typeName())) {
+                    const jitnodes::NodeId input = net->inputOf(id, 0);
+                    if (input == jitnodes::invalidNodeId || !net->hasNode(input) || net->node(input).typeName() != kStrokeNodeType) {
+                        removeBrushNode(*net, id);
+                        paintSignature_ = 0;
+                    }
                 }
             }
         }
@@ -857,7 +984,7 @@ namespace curvy {
             if (const jitnodes::NodeId merge = net->findNode("paint"); merge != jitnodes::invalidNodeId && net->node(merge).isMerge()) {
                 for (int i = 0; i < net->node(merge).inputCount(); ++i) {
                     jitnodes::NodeId at = net->inputOf(merge, i);
-                    for (int guard = 0; at != jitnodes::invalidNodeId && guard < 1000 && isAppearanceNodeType(net->node(at).typeName()); ++guard) {
+                    for (int guard = 0; at != jitnodes::invalidNodeId && guard < 1000 && (isAppearanceNodeType(net->node(at).typeName()) || isBrushNodeType(net->node(at).typeName())); ++guard) {
                         at = net->inputOf(at, 0);
                     }
                     if (at == jitnodes::invalidNodeId) {
@@ -1240,7 +1367,10 @@ namespace curvy {
             // The chain cache syncAppearanceNodes just filled; only an object without a look needs the placement scan.
             const auto cached = appearanceChains_.find(object->graphRef());
             if (cached != appearanceChains_.end() && !cached->second.nodes.empty() && net->hasNode(cached->second.nodes.back())) {
-                order[scope].push_back(cached->second.nodes.back());
+                // The brush of the last look node, when it has one, is what the paint node takes.
+                const jitnodes::NodeId last = cached->second.nodes.back();
+                const jitnodes::NodeId brush = brushInstanceOf(*net, last);
+                order[scope].push_back(brush != jitnodes::invalidNodeId ? brush : last);
             } else {
                 ScopeViews::View& view = views.of(scope);
                 const auto place = view.placed.find(shape);
@@ -2415,6 +2545,158 @@ namespace curvy {
         }
         commitGraphEdit(snapshot, "Move Points");
         return NodeRef(placeRef.scope, mover);
+    }
+
+    void SketchDocument::syncDeformWidths(std::size_t spineId) {
+        const SketchObject* spine = findById(spineId);
+        const NodeRef place = transformRefOf(spineId);
+        if (spine == nullptr || !place.valid()) {
+            return;
+        }
+        const std::string text = widthProfileText(spine->strokeOptions().widths);
+        jitnodes::Network& net = networkOf(place.scope);
+        for (jitnodes::NodeId id : net.nodeIds()) {
+            jitnodes::Node& node = net.node(id);
+            if (node.typeName() == kDeformAlongPathNodeType && net.inputOf(id, 1) == place.id && node.getString("widths") != text) {
+                node.setString("widths", text);
+            }
+        }
+    }
+
+    NodeRef SketchDocument::addDeformAlongPath(std::size_t artId, std::size_t spineId) {
+        const SketchObject* art = findById(artId);
+        const SketchObject* spine = findById(spineId);
+        const NodeRef artPlace = transformRefOf(artId), spinePlace = transformRefOf(spineId);
+        // Both must be in the graph, in the same scope (a wire cannot leave its network), and not the same object.
+        if (art == nullptr || spine == nullptr || artId == spineId || !artPlace.valid() || !spinePlace.valid() || artPlace.scope != spinePlace.scope ||
+            art->isText() || art->isImage()) {
+            return kNoNode;
+        }
+        const jitnodes::GraphSnapshot snapshot = snapshotGraph();
+        jitnodes::Network& net = networkOf(artPlace.scope);
+        const jitnodes::NodeId deform = net.addNode(kDeformAlongPathNodeType, net.uniqueName("deformAlongPath"));
+        try {
+            const jitnodes::NodeId feeder = net.inputOf(artPlace.id, 0);
+            net.connect(feeder, deform, 0);
+            net.connect(spinePlace.id, deform, 1);
+            net.connect(deform, artPlace.id, 0);
+            // The artwork's own placement comes after the deformation, so the spine is brought into the space before it: where the artwork
+            // sits now, the result lands on the spine.
+            const BLMatrix2D into = inverseOf(worldTransformOf(net, artPlace.id));
+            for (int i = 0; i < 6; ++i) {
+                net.node(deform).setFloat(std::string("frame") + std::to_string(i), float(into.m[i]));
+            }
+            net.node(deform).setString("widths", widthProfileText(spine->strokeOptions().widths));
+            const jitnodes::GeometryHandle bent = cook(NodeRef(artPlace.scope, deform));
+            if (!bent || bent->primitiveCount() == 0) {
+                throw std::runtime_error("nothing to bend");
+            }
+        } catch (const std::exception&) {
+            restoreGraph(snapshot);   // a wire that would loop, or nothing to bend: leave the graph as it was
+            return kNoNode;
+        }
+        commitGraphEdit(snapshot, "Deform Along Path");
+        return NodeRef(artPlace.scope, deform);
+    }
+
+    NodeRef SketchDocument::deformNodeOf(std::size_t objectId) const {
+        const NodeRef place = transformRefOf(objectId);
+        if (!place.valid()) {
+            return kNoNode;
+        }
+        const jitnodes::Network& net = networkOf(place.scope);
+        if (!net.hasNode(place.id)) {
+            return kNoNode;
+        }
+        // A node with no inputs (a shape, a plain path) ends the walk; asking it for input 0 would throw.
+        auto feeder = [&net](jitnodes::NodeId id) { return net.node(id).inputCount() > 0 ? net.inputOf(id, 0) : jitnodes::invalidNodeId; };
+        int guard = 0;
+        for (jitnodes::NodeId at = feeder(place.id); at != jitnodes::invalidNodeId && net.hasNode(at) && guard < 1000; at = feeder(at), ++guard) {
+            if (net.node(at).typeName() == kDeformAlongPathNodeType) {
+                return NodeRef(place.scope, at);
+            }
+        }
+        return kNoNode;
+    }
+
+    bool SketchDocument::hasDeformAlongPath() const {
+        return std::any_of(selection_.begin(), selection_.end(), [this](std::size_t id) { return deformNodeOf(id).valid(); });
+    }
+
+    bool SketchDocument::releaseDeformAlongPath() {
+        const jitnodes::GraphSnapshot snapshot = snapshotGraph();
+        bool released = false;
+        for (std::size_t objectId : selection_) {
+            if (!deformNodeOf(objectId).valid()) {
+                continue;
+            }
+            try {
+                // The object takes its outline from its own shape node, so the bent outline goes there and the deform node (and what sits
+                // between it and the shape) goes away; a parametric shape is frozen first, as a hand edit does.
+                if (isParametric(objectId)) {
+                    freezeParametric(objectId);
+                }
+                const NodeRef found = deformNodeOf(objectId);
+                const SketchObject* object = findById(objectId);
+                if (!found.valid() || object == nullptr) {
+                    throw std::runtime_error("no deform node");
+                }
+                jitnodes::Network& net = networkOf(found.scope);
+                const jitnodes::NodeId deform = found.id, base = object->graphNode();
+                auto feeder = [&net](jitnodes::NodeId id) { return net.node(id).inputCount() > 0 ? net.inputOf(id, 0) : jitnodes::invalidNodeId; };
+                std::vector<jitnodes::NodeId> between;
+                jitnodes::NodeId at = feeder(deform);
+                for (int guard = 0; at != jitnodes::invalidNodeId && at != base && guard < 1000; at = feeder(at), ++guard) {
+                    between.push_back(at);
+                }
+                const jitnodes::GeometryHandle bent = net.cook(deform);
+                if (at != base || net.node(base).typeName() != kPathNodeType || !bent || bent->primitiveCount() == 0) {
+                    throw std::runtime_error("nothing to release");
+                }
+                std::vector<std::pair<jitnodes::NodeId, int>> consumers;
+                for (jitnodes::NodeId other : net.nodeIds()) {
+                    for (int slot = 0; slot < net.node(other).inputCount(); ++slot) {
+                        if (net.inputOf(other, slot) == deform) {
+                            consumers.emplace_back(other, slot);
+                        }
+                    }
+                }
+                if (net.node(base).frozen() || net.inputOf(base, 0) != jitnodes::invalidNodeId) {
+                    net.node(base).setFrozenGeometry(bent);
+                } else {
+                    net.node(base).setGeometryParam("curve", bent);
+                }
+                net.removeNode(deform);
+                for (jitnodes::NodeId id : between) {
+                    net.removeNode(id);
+                }
+                for (const auto& [other, slot] : consumers) {
+                    net.connect(base, other, slot);
+                }
+                released = true;
+            } catch (const std::exception&) {
+                restoreGraph(snapshot);
+                return false;
+            }
+        }
+        if (released) {
+            commitGraphEdit(snapshot, "Release Deform");
+        }
+        return released;
+    }
+
+    bool SketchDocument::deformSelectionAlongPath() {
+        if (selection_.size() != 2) {
+            return false;
+        }
+        const SketchObject* first = findById(selection_[0]);
+        const SketchObject* second = findById(selection_[1]);
+        if (first == nullptr || second == nullptr) {
+            return false;
+        }
+        const bool firstSpine = !first->isClosed() && second->isClosed();   // an open path is the spine; of two alike the later pick is
+        const std::size_t spine = firstSpine ? first->id() : second->id(), art = firstSpine ? second->id() : first->id();
+        return addDeformAlongPath(art, spine).valid();
     }
 
     int SketchDocument::pointIdNear(std::size_t objectId, const BLPoint& world, double reach) const {

@@ -1,5 +1,6 @@
 #include "curvy/canvasview.h"
 #include "curvy/theme.h"
+#include "curvy/graphbrush.h"
 
 #include <newui/bundle.h>
 
@@ -22,7 +23,27 @@ namespace curvy {
 
     using namespace newui;
 
+    namespace {
+        std::vector<CanvasView*>& canvases() {
+            static std::vector<CanvasView*> all;
+            return all;
+        }
+    }
+
+    CanvasView::~CanvasView() {
+        auto& all = canvases();
+        all.erase(std::remove(all.begin(), all.end(), this), all.end());
+    }
+
+    void CanvasView::repaintAll() {
+        for (CanvasView* canvas : canvases()) {
+            canvas->style().markDirty();
+            canvas->refreshCursor(canvas->lastPointer_, 0);   // the busy cursor comes and goes with the background cooks
+        }
+    }
+
     CanvasView::CanvasView() {
+        canvases().push_back(this);
         setName("CanvasView");
         setVisible(true);
         setAcceptsFocus(true);
@@ -245,6 +266,7 @@ namespace curvy {
         }
         if (tool_ == SketchTool::Pencil || tool_ == SketchTool::Paintbrush) {
             pencilPoints_.assign(1, dragStartDoc_);
+            pencilPressure_.assign(1, currentPressure());
             drag_ = Drag::Pencil;
             return SyncReturn::Handled;
         }
@@ -836,6 +858,7 @@ namespace curvy {
         // The system cursor that stands in when a cursor image cannot be loaded.
         CursorKind fallbackFor(const std::string& name) {
             if (name == "crosshair" || name == "gradient" || name == "pen" || name == "pencil" || name == "scissors" || name == "knife" || name == "eraser") return CursorKind::Cross;
+            if (name == "busy") return CursorKind::AppStarting;
             if (name == "text") return CursorKind::IBeam;
             if (name == "hand" || name == "hand-grab" || name == "rotate") return CursorKind::Hand;
             if (name == "resize-ns") return CursorKind::SizeNS;
@@ -967,6 +990,9 @@ namespace curvy {
                     name = document_->guides()[std::size_t(guide)].vertical ? "resize-we" : "resize-ns";
                 }
             }
+        }
+        if (drag_ == Drag::None && !panning_ && graphBrushProgress().busy()) {
+            name = "busy";   // the arrow with a spinner: the editor still works while a brush stroke is drawn
         }
         setCanvasCursor(name);
     }
@@ -1120,6 +1146,7 @@ namespace curvy {
         }
         if (vkCode == vkEscape) {
             pencilPoints_.clear();
+            pencilPressure_.clear();
             cutPoints_.clear();
             if (drag_ != Drag::None) {  // cancel an in-progress drag, restoring the outlines
                 if (drag_ == Drag::GradientNew || drag_ == Drag::GradientEnd || drag_ == Drag::GradientStop) {

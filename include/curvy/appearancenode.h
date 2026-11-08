@@ -23,10 +23,21 @@ namespace curvy {
     inline constexpr const char* kStrokeNodeType = "curvyStroke";
     inline constexpr const char* kEffectNodeType = "curvyEffect";
 
+    // The brush of a stroke is one node after its curvyStroke node, whatever kind of brush it is: curvyBrush for the brushes of the library
+    // (calligraphic, scatter, art), an instance of the asset for a graph brush (graphbrush.h). It takes the stroke node as input 0 and passes
+    // on to what followed the stroke (the next look node or the paint node), so the flow reads Path -> Transform -> Fill -> Stroke -> Brush
+    // -> paint. The chain of look nodes sees through it.
+    inline constexpr const char* kBrushNodeType = "curvyBrush";
+    bool isBrushNodeType(const std::string& typeName);
+
     bool isAppearanceNodeType(const std::string& typeName);
     const char* appearanceNodeType(AppearanceKind kind);
     // Registers the three node types with jitnodes' registry (registerCurvyNodes() calls it).
     void registerAppearanceNodes();
+
+    // A stroke whose brush has changed settings has them in the params as `brush.<name>` numbers (the names of the asset's settings, or
+    // BrushDef::kParamNames). They are held by the stroke's brush node, so paramsOf(Node) of the stroke node itself never has them.
+    inline constexpr const char* kBrushSettingPrefix = "brush.";
 
     // What a node holds for an item, as plain values: every float parameter that applies to the item (a solid paint has no gradient
     // parameters) and the tables, whose rows are the columns of the table in order. Two items are the same look exactly when their params

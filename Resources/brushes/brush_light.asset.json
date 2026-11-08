@@ -1,0 +1,57 @@
+// Light paint: particles scattered along the stroke are told to follow it while their own gas stirs them, so the band feathers into eddies; each
+// velocity becomes a short streak, dotted and coloured along the stroke (cyan, magenta, amber). A simulation brush: settleTime marks it (the host cooks
+// the whole stroke at once, at that time) and gives the box of the guide (guideMinX..guideMaxY) for the gas box. density is the number of particles per
+// guide unit (at most 6000 in all), spread the room left around the stroke for the gas, cell the gas cell size; a long stroke gets bigger cells.
+{
+  format: "jitnodes-asset",
+  version: 1,
+  assetVersion: 1,
+  type: "brush_light",
+  inputs: 1,
+  promote: {
+    referenceWidth: 1.4, guideLength: 14, guideMinX: 0, guideMinY: 0, guideMaxX: 14, guideMaxY: 0, settleTime: 1.6,
+    spread: 3, cell: 0.2, density: 120, follow: 3.5, vorticity: 14, alpha: 0.3
+  },
+  graph: {
+    fps: 24,
+    display: 10,
+    nodes: [
+      { id: 1, type: "subnetInput", name: "guide", floats: { index: 0 }, inputs: [] },
+      { id: 2, type: "resample", name: "even", floats: { spacing: 0.1 }, inputs: [1] },
+      { id: 3, type: "smooth", name: "clean", floats: { iterations: 4, strength: 0.5, preserve: 1 }, inputs: [2] },
+      {
+        id: 4, type: "scatter", name: "seeds", floats: { count: 0, lineCount: 7000, spread: 0.7, seed: 3 },
+        expressions: { lineCount: "min(6000, parent.guideLength * parent.density)", spread: "parent.referenceWidth * 0.5" },
+        inputs: [3]
+      },
+      { id: 5, type: "wrangle", name: "keepU", strings: { code: "pu = u;" }, inputs: [4] },
+      {
+        id: 6, type: "particles", name: "light",
+        floats: {
+          gravityY: 0, drag: 1.5, follow: 3.5, followPull: 0.4, followRadius: 2.2,
+          gas: 1, gasResolution: 96, gasInfluence: 3, gasPush: 10, gasVorticity: 14, gasDissipation: 0.4, bounce: 0.3
+        },
+        strings: { boundary: "bounce" },
+        expressions: {
+          follow: "parent.follow", gasVorticity: "parent.vorticity",
+          boundsMinX: "parent.guideMinX - parent.spread", boundsMaxX: "parent.guideMaxX + parent.spread",
+          boundsMinY: "parent.guideMinY - parent.spread", boundsMaxY: "parent.guideMaxY + parent.spread",
+          gasResolution: "(parent.guideMaxX - parent.guideMinX + 2 * parent.spread) / max(parent.cell, max(parent.guideMaxX - parent.guideMinX, parent.guideMaxY - parent.guideMinY) / 128 + parent.spread / 64)"
+        },
+        inputs: [5, 3]
+      },
+      { id: 7, type: "trail", name: "streaks", floats: { length: 0.3, segments: 8, fade: 1 }, inputs: [6] },
+      { id: 8, type: "curveSample", name: "dots", floats: { count: 0, spacing: 0.07 }, inputs: [7] },
+      {
+        id: 9, type: "colorRamp", name: "color", floats: { min: 0, max: 1 },
+        strings: { attribute: "pu", ramp: "0 #0aa5d8, 0.5 #d81b78, 1 #e08a00" },
+        inputs: [8]
+      },
+      {
+        id: 10, type: "wrangle", name: "look", strings: { code: "radius = 0.05; alpha = a; softness = 1;" },
+        expressions: { a: "parent.alpha" },
+        inputs: [9]
+      }
+    ]
+  }
+}

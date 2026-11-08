@@ -1,8 +1,10 @@
 #include "curvy/sketchdocument.h"
 
+#include "curvy/graphbrush.h"
 #include "curvy/io/svg/sketchsvg.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 
 // The brush library (see brush.h): calligraphic brushes, and brushes made of artwork that is stretched or scattered along a stroke.
@@ -35,6 +37,16 @@ namespace curvy {
             return def;
         }
 
+        // A copy of a symbol's artwork to serve as the artwork of brush `brushId`.
+        std::shared_ptr<SymbolDef> artOf(const SymbolDef& symbol, std::size_t brushId, const std::string& name) {
+            auto art = std::make_shared<SymbolDef>();
+            art->id = brushId;
+            art->name = name;
+            art->box = symbol.box;
+            art->content = symbol.content;
+            return art;
+        }
+
         SketchObject* filled(SketchObject* object, const char* color) {
             object->setFill(SketchPaint::solid(SketchColor::fromHex(color)));
             object->setStroke(SketchPaint::none());
@@ -61,6 +73,11 @@ namespace curvy {
     void SketchDocument::setActiveBrush(std::size_t id) {
         if (id != activeBrush_ && findBrush(id)) {
             activeBrush_ = id;
+            recentBrushes_.erase(std::remove(recentBrushes_.begin(), recentBrushes_.end(), id), recentBrushes_.end());
+            recentBrushes_.insert(recentBrushes_.begin(), id);
+            if (recentBrushes_.size() > kRecentBrushes) {
+                recentBrushes_.resize(kRecentBrushes);
+            }
             onChanged(*this);
         }
     }
@@ -99,7 +116,7 @@ namespace curvy {
             for (AppearanceItem& item : items) {
                 if (item.strokeOptions.brushRef != 0) {
                     if (!item.strokeOptions.brush) {
-                        item.strokeOptions.brush = findBrush(item.strokeOptions.brushRef);
+                        item.strokeOptions.brush = brushWithSettings(findBrush(item.strokeOptions.brushRef), item.strokeOptions.graphSettings);   // the stroke's own values
                     }
                     item.strokeOptions.brushRef = 0;
                     any = true;
@@ -130,11 +147,22 @@ namespace curvy {
         def->kind = kind;
         def->name = name.empty() ? std::string(brushKindName(kind)) + " Brush " + std::to_string(brushes_.size() + 1) : name;
         if (kind != BrushKind::Calligraphic) {
-            std::shared_ptr<SymbolDef> art = selectionArtwork(id, def->name);
+            // One selected symbol instance: the brush is linked to that symbol. Anything else is copied from the selection.
+            std::shared_ptr<SymbolDef> art;
+            if (selection_.size() == 1) {
+                const SketchObject* picked = findById(*selection_.begin());
+                if (picked != nullptr && picked->isSymbol() && picked->symbol()) {
+                    art = artOf(*picked->symbol(), id, def->name);
+                    def->sourceSymbol = picked->symbol()->id;
+                }
+            }
+            if (!art) {
+                art = selectionArtwork(id, def->name);
+            }
             if (!art) {
                 return 0;
             }
-            def->art = art;
+            def->setArt(art);
             if (kind == BrushKind::Scatter) {
                 def->spacing = 150.0;
                 def->scatter = 30.0;
@@ -157,6 +185,7 @@ namespace curvy {
             def->name = name;
             def->angle = angle;
             def->roundness = roundness;
+            def->category = "Calligraphic";
             presets.push_back(def);
         };
         calligraphic("Calligraphic 45", 45.0, 25.0);
@@ -173,6 +202,7 @@ namespace curvy {
             def->sizeVariation = size;
             def->rotation = turn;
             def->followPath = follow;
+            def->category = "Scatter";
             presets.push_back(def);
         };
         scatter("Dots", artFrom({filled(SketchObject::makeEllipse(4, 4, 4, 4), "#222222")}, 0, BLBox(0, 0, 8, 8)), 170.0, 25.0, 40.0, 0.0, true);
@@ -195,7 +225,23 @@ namespace curvy {
             auto def = std::make_shared<BrushDef>();
             def->name = "Tapered";
             def->kind = BrushKind::Art;
+            def->category = "Art";
+            def->favorite = true;
             def->art = artFrom({filled(SketchObject::makePath(lens), "#222222")}, 0, BLBox(0, 0, 100, 6));
+            presets.push_back(def);
+        }
+
+        // One brush per graph brush asset that is loaded ("brush_oil" is "Oil").
+        for (const GraphBrushInfo& info : graphBrushes()) {
+            auto def = std::make_shared<BrushDef>();
+            std::string name = info.type.rfind("brush_", 0) == 0 ? info.type.substr(6) : info.type;
+            if (!name.empty()) {
+                name[0] = char(std::toupper(static_cast<unsigned char>(name[0])));
+            }
+            def->name = name;
+            def->kind = BrushKind::Graph;
+            def->graphType = info.type;
+            def->category = "Graph";
             presets.push_back(def);
         }
 
@@ -246,10 +292,11 @@ namespace curvy {
             }
             options.brush = def;
             options.brushRef = 0;
+            options.graphSettings.clear();   // the settings belong to the asset of the brush they were made for
             object->setStrokeOptions(options);
             if (def && object->stroke().isNone()) {
                 object->setStroke(defaultStroke().isNone() ? SketchPaint::solid(SketchColor::gray(0.0f)) : defaultStroke());
-                object->setStrokeWidth(def->kind == BrushKind::Calligraphic ? std::max(2.0, defaultStrokeWidth()) : 1.0);
+                object->setStrokeWidth(def->startingWeight(defaultStrokeWidth()));
             }
             any = true;
         }
@@ -270,27 +317,78 @@ namespace curvy {
             fresh->name = edited.name;
         }
         fresh->setParams(edited.params());
-        if (fresh->name == old->name && fresh->sameLook(*old)) {
+        fresh->category = edited.category;
+        fresh->favorite = edited.favorite;
+        if (fresh->name == old->name && fresh->sameLook(*old) && fresh->category == old->category && fresh->favorite == old->favorite) {
             return false;
         }
         auto apply = [this, id](const std::shared_ptr<const BrushDef>& to) {
-            for (std::shared_ptr<const BrushDef>& entry : brushes_) {
-                if (entry->id == id) {
-                    entry = to;
-                }
-            }
-            for (const std::unique_ptr<SketchObject>& object : objects_) {
-                std::vector<AppearanceItem> items = object->appearance();
-                if (rebind(items, id, to)) {
-                    object->setAppearance(items);
-                }
-            }
-            for (GraphicStyle& style : graphicStyles_) {
-                rebind(style.items, id, to);
-            }
+            swapBrush(id, to);
             changed();
         };
         undoStack_.push({"Edit Brush", [apply, fresh]() { apply(fresh); }, [apply, old]() { apply(old); }});
+        return true;
+    }
+
+    void SketchDocument::swapBrush(std::size_t id, const std::shared_ptr<const BrushDef>& to) {
+        for (std::shared_ptr<const BrushDef>& entry : brushes_) {
+            if (entry->id == id) {
+                entry = to;
+            }
+        }
+        for (const std::unique_ptr<SketchObject>& object : objects_) {
+            std::vector<AppearanceItem> items = object->appearance();
+            if (rebind(items, id, to)) {
+                object->setAppearance(items);
+            }
+        }
+        for (GraphicStyle& style : graphicStyles_) {
+            rebind(style.items, id, to);
+        }
+    }
+
+    std::vector<std::pair<std::shared_ptr<const BrushDef>, std::shared_ptr<const BrushDef>>> SketchDocument::brushesLinkedTo(
+        std::size_t symbolId, const std::shared_ptr<const SymbolDef>& artwork) const {
+        std::vector<std::pair<std::shared_ptr<const BrushDef>, std::shared_ptr<const BrushDef>>> linked;
+        for (const std::shared_ptr<const BrushDef>& entry : brushes_) {
+            if (symbolId == 0 || entry->sourceSymbol != symbolId) {
+                continue;
+            }
+            auto fresh = std::make_shared<BrushDef>(*entry);
+            if (artwork) {
+                fresh->setArt(artOf(*artwork, entry->id, entry->name));
+            } else {
+                fresh->sourceSymbol = 0;
+            }
+            linked.emplace_back(entry, fresh);
+        }
+        return linked;
+    }
+
+    bool SketchDocument::linkBrushToSymbol(std::size_t brushId, std::size_t symbolId) {
+        std::shared_ptr<const BrushDef> old = findBrush(brushId);
+        if (!old || !old->hasArt()) {
+            return false;
+        }
+        auto fresh = std::make_shared<BrushDef>(*old);
+        if (symbolId == 0) {
+            if (old->sourceSymbol == 0) {
+                return false;
+            }
+            fresh->sourceSymbol = 0;
+        } else {
+            std::shared_ptr<const SymbolDef> symbol = findSymbol(symbolId);
+            if (!symbol || !symbol->content) {
+                return false;
+            }
+            fresh->sourceSymbol = symbolId;
+            fresh->setArt(artOf(*symbol, brushId, old->name));
+        }
+        auto apply = [this, brushId](const std::shared_ptr<const BrushDef>& to) {
+            swapBrush(brushId, to);
+            changed();
+        };
+        undoStack_.push({symbolId == 0 ? "Unlink Brush" : "Link Brush", [apply, fresh]() { apply(fresh); }, [apply, old]() { apply(old); }});
         return true;
     }
 
@@ -326,6 +424,7 @@ namespace curvy {
         }
         auto copy = std::make_shared<BrushDef>(*def);
         copy->id = nextBrushId_++;
+        copy->sourceSymbol = 0;   // the symbol belongs to the document it came from
         brushes_.push_back(copy);
         return copy;
     }

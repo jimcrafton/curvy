@@ -1,0 +1,39 @@
+// Leaves: a closed leaf polygon stamped along the guide with copyToPoints (vector output, no dots). Input 0 is the guide (with pen pressure in `w`).
+// stampSpacing is the distance between stamps; driftLength is the distance over which the colour moves from green to autumn.
+{
+  format: "jitnodes-asset",
+  version: 1,
+  assetVersion: 1,
+  type: "brush_leaves",
+  inputs: 1,
+  promote: { referenceWidth: 1.6, guideLength: 14, guideStart: 0, strokeLength: 0, stampSpacing: 0.064, driftLength: 40, tailTaper: 0 },
+  graph: {
+    fps: 24,
+    display: 9,
+    nodes: [
+      { id: 1, type: "subnetInput", name: "guide", floats: { index: 0 }, inputs: [] },
+      { id: 2, type: "resample", name: "even", floats: { spacing: 0.08 }, inputs: [1] },
+      { id: 3, type: "smooth", name: "clean", floats: { iterations: 4, strength: 0.5, preserve: 1 }, inputs: [2] },
+      { id: 4, type: "curveSample", name: "stamps", floats: { count: 0, spacing: 0.064 }, expressions: { spacing: "parent.stampSpacing" }, inputs: [3] },
+      {
+        id: 5, type: "wrangle", name: "orient",
+        strings: {
+          code: "ax = abs(tx); ay = abs(ty); lo = min(ax, ay); hi = max(ax, ay); z = lo / (hi + 0.000001); q = z * (0.7853982 + 0.273 * (1 - z)); q = ay > ax ? 1.5707963 - q : q; q = tx < 0 ? 3.1415927 - q : q; q = ty < 0 ? 0 - q : q; h = sin(x * 57.3 + y * 131.7) * 43758.5453; h = h - floor(h); g = sin(x * 12.9 + y * 78.2) * 24634.6345; g = g - floor(g); k = sin(x * 39.3 + y * 11.1) * 31415.9265; k = k - floor(k); across = (h - 0.5) * a * w; x = x + nx * across; y = y + ny * across; angle = q + (g - 0.5) * 1.3; scale = w * (0.55 + 0.7 * k);"
+        },
+        expressions: { a: "parent.referenceWidth" },
+        inputs: [4]
+      },
+      { id: 6, type: "circle", name: "blank", floats: { count: 14, radius: 1 }, inputs: [] },
+      { id: 7, type: "wrangle", name: "leaf", strings: { code: "x = x * 1.5; y = y * 0.5 * (1 - 0.55 * abs(x) / 1.5);" }, inputs: [6] },
+      { id: 8, type: "copyToPoints", name: "stamp", floats: { scale: 0.6, angle: 0 }, inputs: [7, 5] },
+      {
+        id: 9, type: "wrangle", name: "paint",
+        strings: {
+          code: "m = clamp((c + copyIndex * a) / (b * max(1, d / b)), 0, 1); h = sin(copyIndex * 12.9898 + 78.233) * 43758.5453; h = h - floor(h); t = clamp(m + (h - 0.5) * 0.35, 0, 1); Cd.x = lerp(0.1, 0.95, t); Cd.y = lerp(0.45, 0.62, t * t) + 0.12 * h; Cd.z = lerp(0.5, 0.18, t); alpha = 0.78;"
+        },
+        expressions: { a: "parent.stampSpacing", b: "parent.driftLength", c: "parent.guideStart", d: "parent.strokeLength" },
+        inputs: [8]
+      }
+    ]
+  }
+}
