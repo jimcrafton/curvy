@@ -19,12 +19,15 @@ namespace curvy {
     // path (all commands, arcs included), rect, circle, ellipse, line, polyline, polygon, <g>, transform,
     // fill/stroke/opacity as attributes or style="", named/#rgb/#rrggbb/rgb() colors, and gradients
     // (objectBoundingBox or userSpaceOnUse, href'd stops). Text objects are read back from their own
-    // data-text attributes (other <text> elements, images, clipping, filters and CSS stylesheets are skipped).
-    std::string svgFromDocument(const SketchDocument& document);
+    // data-text attributes (other <text> elements, images, clipping and filters are skipped). Rules in <style> elements with a simple
+    // selector (.class, #id, tag, or a comma list of those) are applied as if written in each matching element's style="".
+    //
+    // `progress`, when given, receives how far along the work is and is checked for a cancel (the call then returns an empty string / false).
+    std::string svgFromDocument(const SketchDocument& document, TaskProgress* progress = nullptr);
 
     // Replaces the document's contents with the SVG in `text` (page size, ppi and objects; undo history and
     // selection are cleared). Returns false - and leaves the document untouched - when `text` is not well-formed
     // XML with an <svg> root.
-    bool documentFromSvg(const std::string& text, SketchDocument& document);
+    bool documentFromSvg(const std::string& text, SketchDocument& document, TaskProgress* progress = nullptr);
 
 }

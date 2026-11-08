@@ -28,6 +28,8 @@ namespace curvy {
             {"File", "Export As Image...", "file.exportImage"},
             {"File", "Export All Artboards...", "file.exportArtboards"},
             {"File", "Export As PDF...", "file.exportPdf"},
+            {"File", "Export As EPS...", "file.exportEps"},
+            {"File", "Import PDF / Illustrator...", "file.importPdf"},
             {"File", "Trace Image...", "file.traceImage"},
             {"File", "Place Image...", "file.placeImage"},
             {"File", "Exit", "file.exit"},

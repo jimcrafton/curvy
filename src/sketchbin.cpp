@@ -459,7 +459,7 @@ namespace curvy {
                 AppearanceItem item;
                 item.kind = AppearanceKind(in.enumeration(3));
                 item.visible = in.u8() != 0;
-                item.blendMode = BlendMode(in.enumeration(12));
+                item.blendMode = BlendMode(in.enumeration(16));
                 item.opacity = in.f64();
                 item.paint = readPaint(in);
                 if (item.kind == AppearanceKind::Stroke) {
@@ -978,7 +978,7 @@ namespace curvy {
                     Look look;
                     look.items = readItems(in);
                     look.opacity = in.f64();
-                    look.blendMode = BlendMode(in.enumeration(12));
+                    look.blendMode = BlendMode(in.enumeration(16));
                     look.activeFill = std::size_t(in.varint());
                     look.activeStroke = std::size_t(in.varint());
                     look.activeEffect = std::size_t(in.varint());
@@ -996,7 +996,7 @@ namespace curvy {
                     std::size_t id = std::size_t(in.varint());
                     GroupProps props;
                     props.opacity = in.f64();
-                    props.blendMode = BlendMode(in.enumeration(12));
+                    props.blendMode = BlendMode(in.enumeration(16));
                     groupProps[id] = props;
                 }
                 if (!in.ok()) {
@@ -1113,7 +1113,7 @@ namespace curvy {
                     style.name = strings[nameAt];
                     style.items = readItems(in);
                     style.opacity = in.f64();
-                    style.blendMode = BlendMode(in.enumeration(12));
+                    style.blendMode = BlendMode(in.enumeration(16));
                     graphicStyles.push_back(std::move(style));
                 }
                 if (!in.ok()) {

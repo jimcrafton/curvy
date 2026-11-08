@@ -19,10 +19,14 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 namespace curvy {
+
+    class LoadingOverlay;
 
     // The controller of the pen-and-keyboard workspace (Resources/workspace.newui: a thin top bar, the canvas, the hint bar - no menus,
     // toolbars or panels). It turns the pen, the barrel button and a few held keys into the interaction docs/ui-design.md describes:
@@ -58,8 +62,11 @@ namespace curvy {
         static void applyTheme(bool dark);
         void setDarkTheme(bool dark);
 
-        // Opens the file at `path`; with none the workspace starts empty ("Nothing open").
+        // Sets the workspace up; with a `path` that file is opened by openStartupFile(), with none it starts empty ("Nothing open").
         void start(const std::string& path);
+        // Opens the file start() was given. Call it once the run loop is pumping (RunLoop::onStart): the file loads on a worker thread
+        // that reports back through the loop.
+        void openStartupFile();
 
         newui::Frame& frame() { return frame_; }
         WorkspaceModel& workspace() { return *model_; }
@@ -88,6 +95,9 @@ namespace curvy {
         newui::SyncReturn modelChanged(newui::Model& model) override;
 
     private:
+        using CommandHandler = std::function<void(const newui::Point& at)>;
+        void buildCommandTable();
+        void showAppearanceCard(bool fill, const newui::Point& at);
         bool filterPress(const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys);
         bool filterKey(std::uint32_t keyMask, std::uint32_t vkCode);
         newui::SyncReturn handleKeyUp(newui::View& sender, std::uint32_t keyMask, int keyChar, int repeatCount, std::uint32_t vkCode);
@@ -120,6 +130,7 @@ namespace curvy {
         newui::Label* hintInfo_ = nullptr;
         newui::Label* documentName_ = nullptr;
         WorkspaceModel* model_ = nullptr;   // owned by the Controller base (setModel)
+        std::unordered_map<std::string, CommandHandler> handlers_;
         std::unique_ptr<SketchDocumentController> files_;
         std::unique_ptr<SketchCommandController> commands_;
         std::unique_ptr<DockController> dock_;
@@ -132,6 +143,15 @@ namespace curvy {
         void showToolOptions(SketchTool tool, const newui::Point& at);
         void clearRecovery();
         void dismissWelcome();
+        // A background Open / Save: a progress overlay over the window and the window itself disabled (nothing can be clicked or typed
+        // into the document while the worker owns it). Esc, polled from the controller's tick because a disabled window gets no keys, cancels.
+        void showLoading();
+        void updateLoading();
+        void hideLoading();
+        LoadingOverlay* loading_ = nullptr;   // owned by the root view while shown
+        // The canvas and panels paint the document, which the worker is changing: they are hidden for the duration.
+        std::vector<newui::SubView*> hiddenForLoad_;
+        std::string startupPath_;
         std::string recoveryFile_;
         std::uintptr_t autosaveTimer_ = 0;
         std::chrono::steady_clock::time_point lastAutosave_ = std::chrono::steady_clock::now();

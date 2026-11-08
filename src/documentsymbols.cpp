@@ -1,6 +1,6 @@
 #include "curvy/sketchdocument.h"
 
-#include "curvy/sketchsvg.h"
+#include "curvy/io/svg/sketchsvg.h"
 
 #include <algorithm>
 #include <cmath>

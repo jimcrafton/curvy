@@ -1,7 +1,7 @@
 #include "curvy/sketchdocument.h"
 #include "curvy/sketchexport.h"
 #include "curvy/sketchobject.h"
-#include "curvy/sketchsvg.h"
+#include "curvy/io/svg/sketchsvg.h"
 #include "curvy/shapetools.h"
 
 #include <gtest/gtest.h>
