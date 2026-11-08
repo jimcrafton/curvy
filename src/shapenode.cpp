@@ -43,6 +43,16 @@ namespace curvy {
         class ShapeNode : public jitnodes::Node {
         public:
             ShapeNode() : Node(kShapeNodeType, 0) {
+                declareString("label", "");
+                declareFloat("visible", 1.0f);
+                declareFloat("locked", 0.0f);
+                declareFloat("opacity", 1.0f);
+                declareString("blend", "normal");
+                declareFloat("activeFill", 0.0f);
+                declareFloat("activeStroke", 0.0f);
+                declareFloat("activeEffect", 0.0f);
+                declareFloat("frameAngle", 0.0f);
+                declareString("type", "path");
                 declareString("kind", kindName(LiveKind::Star));
                 declareFloat("centerX", 0.0f);
                 declareFloat("centerY", 0.0f);

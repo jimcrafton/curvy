@@ -29,7 +29,7 @@ per network, so a node is always addressed as `NodeRef(scope, id)`.
 | Object <-> node sync | `documentlive.cpp`, `pathnode.*`, `shapenode.*`, `appearancenode.*`, `liveshape.*` | The node types and the code that mirrors objects into nodes and pulls graph edits back. The hot area. |
 | Canvas and tools | `canvasview.*`, `canvastools.cpp`, `shapetools.cpp`, `transformtools.cpp`, `cuttools.cpp`, `texttool.cpp`, `artboardtool.cpp`, `guides.cpp` | Input handling and overlays; each tool turns mouse/pen events into document calls. |
 | Panels | `stylepanel.*`, `shapepanel.*`, `textpanel.*`, `layerspanel.*`, `graphdock.*`, `timelinebar.*`, ... | Property docks and the node graph editor; read the model and call document methods. |
-| Files and export | `sketchbin.cpp` (.skb), `sketchsvg.cpp`, `pdfexport.cpp`, `sketchexport.cpp` | Serialisation and output. |
+| Files and export | `curvyfile.cpp` (.curvy, the native format), `sketchbin.cpp` (.skb), `sketchsvg.cpp`, `pdfexport.cpp`, `sketchexport.cpp` | Serialisation and output. |
 | Geometry | `pathops.cpp`, `pathflatten.cpp`, `textoutline.cpp`, `imagetrace.cpp` | Boolean ops, flattening, text to outlines, tracing. |
 | Checks | `sketchchecks.cpp`, `workspacechecks.cpp` | `--check-tools` and `--check-workspace` headless self-tests. |
 | External | `3rdparty/newui` (UI toolkit, Blend2D drawing), `3rdparty/jitnodes` (node engine) | newui draws everything with Blend2D; jitnodes cooks nodes (asmjit kernels for point-wise work). |

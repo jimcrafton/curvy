@@ -143,6 +143,15 @@ namespace curvy {
         }
         data->name = name;
         data->bytes = bytes;
+        {
+            std::uint64_t hash = 1469598103934665603ull;   // FNV-1a
+            for (const unsigned char c : bytes) {
+                hash = (hash ^ c) * 1099511628211ull;
+            }
+            char text[40];
+            std::snprintf(text, sizeof text, "%016llx-%zx", static_cast<unsigned long long>(hash), bytes.size());
+            data->key = text;
+        }
         data->mime = imageMimeType(bytes);
         if (data->mime.empty()) {
             data->mime = "image/png";   // it decoded, so it is some picture; the name is only a label

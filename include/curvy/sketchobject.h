@@ -360,6 +360,7 @@ namespace curvy {
         std::string name;
         std::string bytes;       // the file as it was (PNG, JPEG, BMP or QOI), saved as it is
         std::string mime;        // "image/png" ...
+        std::string key;         // what the bytes hash to: names the picture in a node, since two pictures can share a name
         int width = 0, height = 0;
         BLImage image;           // PRGB32
         // The picture to draw when it is shown at `scale` times its own size (pixels on screen per pixel of the picture): a copy halved as
@@ -441,11 +442,19 @@ namespace curvy {
 
         // The graph node whose cooked polyline is this object's outline (0 when it is an ordinary object).
         std::uint32_t graphNode() const { return graphNode_; }
-        void setGraphNode(std::uint32_t node) { graphNode_ = node; }
+        void setGraphNode(std::uint32_t node) { graphNode_ = node; nodeStamp_.valid = false; }
         // The scope (network) the node lives in; 0 is the document's root graph.
         std::uint32_t graphScope() const { return graphScope_; }
         NodeRef graphRef() const { return NodeRef(graphScope_, graphNode_); }
-        void setGraphRef(const NodeRef& ref) { graphScope_ = ref.scope; graphNode_ = ref.id; }
+        void setGraphRef(const NodeRef& ref) { graphScope_ = ref.scope; graphNode_ = ref.id; nodeStamp_.valid = false; }
+        // The own flags, opacity, blend and active rows last written to the node (so the sync can skip an object that has not changed),
+        // and adopted from it; cleared whenever the object gets another node.
+        struct NodeStamp {
+            bool valid = false;
+            double values[9] = {};
+            std::string name;
+        };
+        NodeStamp& nodeStamp() const { return nodeStamp_; }
 
         const std::string& name() const { return name_; }
         void setName(const std::string& name) { name_ = name; }
@@ -545,11 +554,9 @@ namespace curvy {
         // True while the object's nodes hold what it is: every edit of the outline clears it, and the document sets it once the nodes were
         // written (or the object was read back from them). A document sets it for a new object when it makes the nodes.
         bool boundToNodes() const { return bound_; }
-        // False until the object has been bound once: a loaded or new object whose nodes, if it has any, are the file's.
-        bool everBound() const { return everBound_; }
-        void setBoundToNodes(bool bound) { bound_ = bound; everBound_ = everBound_ || bound; }
+        void setBoundToNodes(bool bound) { bound_ = bound; }
         // A new node chain is about to be made for the object.
-        void forgetNodes() { bound_ = everBound_ = false; }
+        void forgetNodes() { bound_ = false; nodeStamp_.valid = false; }
         // The object this one hangs from (0: none). Transforming the parent carries the child along; the child's own transform node holds
         // its placement relative to the parent's.
         std::size_t parent() const { return parent_; }
@@ -659,7 +666,7 @@ namespace curvy {
         std::uint32_t graphScope_ = 0;
         std::uint64_t geometryRevision_ = 1;
         bool bound_ = false;
-        bool everBound_ = false;
+        mutable NodeStamp nodeStamp_;
         std::size_t parent_ = 0;
         std::string name_;
         bool visible_ = true;

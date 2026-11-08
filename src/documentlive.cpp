@@ -44,7 +44,7 @@ namespace curvy {
             try {
                 const jitnodes::Node& node = net.node(id);
                 const bool path = node.typeName() == kPathNodeType;
-                if (node.typeName() == kShapeNodeType || (path && (node.frozen() || node.bypassed() || net.inputOf(id, 0) != jitnodes::invalidNodeId))) {
+                if (!isShapeNodeType(node.typeName()) || node.typeName() == kShapeNodeType || (path &&(node.frozen() || node.bypassed() || net.inputOf(id, 0) != jitnodes::invalidNodeId))) {
                     return net.cook(id);
                 }
                 return node.geometryParam("curve");
@@ -136,6 +136,7 @@ namespace curvy {
         }
 
         void writeNode(jitnodes::Node& node, SketchObject& object, bool outline = true) {
+            storeObjectState(node, object);
             if (outline && !object.boundToNodes()) {
                 // A shape node, and a path node that follows an input, own their outline: the object takes it back from them.
                 if (node.typeName() == kShapeNodeType) {
@@ -159,21 +160,9 @@ namespace curvy {
             }
         }
 
-        // Files hold their numbers to a few digits, so a loaded object and its loaded node can differ in the last one: they agree when they are
-        // that close.
+        // How close an outline read back from a node must be to the object's to count as the same shape.
         constexpr double kFileTolerance = 1e-4;
         constexpr const char* kBaseLayerNodeName = "baseLayer";
-
-        // A node bound to an object that has not been written to it yet (a loaded file) stays as the file had it when it agrees with the
-        // object to within what a file holds; otherwise the object wins and the node follows.
-        bool bindLoadedNode(const jitnodes::Geometry& held, const BLMatrix2D* world, SketchObject& object) {
-            if (world == nullptr || !sameMatrix(*world, object.paintToPage(), kFileTolerance) || held.primitiveCount() == 0 ||
-                !sameCurveShape(held, *geometryFromPath(drawnPath(object)), kFileTolerance)) {
-                return false;
-            }
-            object.setBoundToNodes(true);
-            return true;
-        }
 
         // The first primitive of the geometry as a closed outline; empty when there is none.
         BLPath outlineOf(const jitnodes::Geometry& geometry) {
@@ -448,6 +437,10 @@ namespace curvy {
                 }
             }
             jitnodes::Node& target = net.node(node);
+            if (target.getString("label") != object->name()) {
+                object->setName(target.getString("label"));
+            }
+            applyObjectState(*object, target);
             if (object->isText()) {
                 // A text follows its placement node like any shape: the move is carried by the object and by the text's own matrix string.
                 if (const auto home = placed.find(node); home != placed.end() && existing.count(home->second) != 0) {
@@ -750,6 +743,188 @@ namespace curvy {
         return true;
     }
 
+    std::size_t SketchDocument::objectsFromGraph(const PictureLookup& pictures, std::vector<std::string>* notes) {
+        if (!objects_.empty()) {
+            return 0;
+        }
+        Batch batch(*this);   // one sync at the end: after each object alone, the nodes of the ones not yet added look unused
+        const AppearanceLibrary library{[this](std::size_t id) { return findPattern(id); }, [this](std::size_t id) { return findBrush(id); }};
+
+        struct Made {
+            std::unique_ptr<SketchObject> object;
+            NodeRef place;   // invalid when the shape has no placement node yet; the first sync adds one
+            std::string name;
+        };
+        std::vector<Made> made;
+        std::unordered_set<NodeRef> seen;
+
+        const auto build = [&](std::uint32_t scope, jitnodes::Network& net, jitnodes::NodeId shape, const std::unordered_map<jitnodes::NodeId, jitnodes::NodeId>& placed,
+                               const std::unordered_map<jitnodes::NodeId, jitnodes::NodeId>& following) {
+            if (shape == jitnodes::invalidNodeId || !net.hasNode(shape)) {
+                return;
+            }
+            const jitnodes::Node& node = net.node(shape);
+            if (!isShapeNodeType(node.typeName())) {
+                return;   // a generator wired in by hand is not an object
+            }
+            const auto home = placed.find(shape);
+            const NodeRef place = home != placed.end() ? NodeRef(scope, home->second) : NodeRef();
+            const BLMatrix2D world = place.valid() ? worldOf(place) : BLMatrix2D::make_identity();
+
+            SketchObjectType type = SketchObjectType::Path;
+            if (node.typeName() == kTextNodeType) {
+                type = SketchObjectType::Text;
+            } else if (node.typeName() == kSymbolNodeType) {
+                type = SketchObjectType::Symbol;
+            } else if (node.typeName() == kImageNodeType) {
+                type = SketchObjectType::Image;
+            } else if (SketchObjectType named; objectTypeFromName(node.getString("type"), named) && named != SketchObjectType::Text &&
+                                               named != SketchObjectType::Symbol && named != SketchObjectType::Image) {
+                type = named;
+            }
+
+            BLPath outline;
+            const jitnodes::GeometryHandle drawn = drawnGeometry(net, shape);
+            if (drawn->primitiveCount() > 0) {
+                pathFromGeometry(*placeGeometry(*drawn, world), outline);
+            }
+            std::unique_ptr<SketchObject> object(SketchObject::make(type, outline));
+            if (type == SketchObjectType::Text) {
+                applyTextNodeParams(*object, node);
+            } else if (type == SketchObjectType::Symbol) {
+                const std::string& id = node.getString("symbol");
+                std::shared_ptr<const SymbolDef> def = id.empty() ? nullptr : findSymbol(std::size_t(std::strtoull(id.c_str(), nullptr, 10)));
+                if (!def) {
+                    object.reset(SketchObject::make(SketchObjectType::Path, outline));   // its artwork is missing: keep the outline
+                } else {
+                    SketchObject::Prototype::setSymbol(*object, def);
+                }
+            } else if (type == SketchObjectType::Image) {
+                std::shared_ptr<const ImageData> picture = pictures ? pictures(node.getString("imageKey")) : nullptr;
+                if (!picture) {
+                    object.reset(SketchObject::make(SketchObjectType::Path, outline));   // its picture is missing: keep the outline
+                } else {
+                    SketchObject::Prototype::setImage(*object, picture);
+                }
+            }
+
+            std::vector<AppearanceItem> items;
+            for (const jitnodes::NodeId link : appearanceChain(following, shape)) {
+                AppearanceItem base;
+                for (const AppearanceKind kind : {AppearanceKind::Fill, AppearanceKind::Stroke, AppearanceKind::Effect}) {
+                    if (net.node(link).typeName() == appearanceNodeType(kind)) {
+                        base.kind = kind;
+                    }
+                }
+                items.push_back(itemFrom(paramsOf(net.node(link)), paramsOf(base), base, library));
+            }
+            object->setAppearance(items);
+            object->setName(node.getString("label"));
+            applyObjectState(*object, node);
+            SketchObject::Prototype::setPaintMatrix(*object, world);
+            if (place.valid()) {
+                SketchObject::Prototype::setPaintWarp(*object, paintWarpOf(net.node(place.id)));
+            }
+
+            object->setGraphNode(shape);
+            object->setGraphRef(NodeRef(scope, shape));
+            const std::vector<std::size_t> chain = groupChainOfScope(scope);
+            object->setGroups(chain);
+            object->setPlacedGroups(chain);
+            for (std::size_t group : chain) {
+                nextGroupId_ = std::max(nextGroupId_, group + 1);
+            }
+            const std::size_t layer = layerOfScope(scope);
+            object->setLayer(layer);
+            object->setPlacedLayer(layer);
+            made.push_back({std::move(object), place, node.name()});
+        };
+
+        const auto walk = [&](auto&& self, std::uint32_t scope) -> void {
+            jitnodes::Network* net = findNetwork(scope);
+            if (net == nullptr) {
+                return;
+            }
+            const std::vector<jitnodes::NodeId> ids = net->nodeIds();
+            const auto placed = placementNodes(*net, ids);
+            const auto following = appearanceSuccessors(*net, ids);
+            const auto visit = [&](jitnodes::NodeId shape) {
+                if (seen.insert(NodeRef(scope, shape)).second) {
+                    build(scope, *net, shape, placed, following);
+                }
+            };
+            if (const jitnodes::NodeId merge = net->findNode("paint"); merge != jitnodes::invalidNodeId && net->node(merge).isMerge()) {
+                for (int i = 0; i < net->node(merge).inputCount(); ++i) {
+                    jitnodes::NodeId at = net->inputOf(merge, i);
+                    for (int guard = 0; at != jitnodes::invalidNodeId && guard < 1000 && isAppearanceNodeType(net->node(at).typeName()); ++guard) {
+                        at = net->inputOf(at, 0);
+                    }
+                    if (at == jitnodes::invalidNodeId) {
+                        continue;
+                    }
+                    if (net->node(at).typeName() == kSubnetNodeType) {
+                        self(self, scopeOfSubnet(NodeRef(scope, at)));
+                    } else if (net->node(at).typeName() == kTransformNodeType) {
+                        visit(shapeBehind(*net, net->inputOf(at, 0)));
+                    } else {
+                        visit(at);   // a shape node the merge lists with no placement node after it
+                    }
+                }
+            }
+            std::vector<jitnodes::NodeId> rest;   // shapes no paint node lists: after the listed ones, by id
+            for (const auto& [shape, place] : placed) {
+                rest.push_back(shape);
+            }
+            for (const jitnodes::NodeId id : ids) {
+                if (isShapeNodeType(net->node(id).typeName()) && placed.count(id) == 0) {
+                    rest.push_back(id);   // no placement node: the first sync adds one
+                }
+            }
+            std::sort(rest.begin(), rest.end());
+            for (const jitnodes::NodeId shape : rest) {
+                visit(shape);
+            }
+            for (const jitnodes::NodeId id : ids) {
+                if (net->node(id).typeName() == kSubnetNodeType) {
+                    if (const std::uint32_t inner = scopeOfSubnet(NodeRef(scope, id)); findNetwork(inner) != nullptr) {
+                        self(self, inner);   // a scope already walked adds nothing: its shapes are in `seen`
+                    }
+                }
+            }
+        };
+        walk(walk, 0);
+
+        std::unordered_map<NodeRef, SketchObject*> byPlace;
+        std::vector<SketchObject*> added;
+        for (Made& entry : made) {
+            SketchObject* object = entry.object.get();
+            if (entry.place.valid()) {
+                byPlace.emplace(entry.place, object);
+            }
+            add(entry.object.release());
+            added.push_back(object);
+        }
+        // A child's transform node takes its parent's as input 1; only a parent in the same scope can be named.
+        for (std::size_t i = 0; i < made.size(); ++i) {
+            const NodeRef place = made[i].place;
+            if (!place.valid()) {
+                continue;
+            }
+            SketchObject* self = added[i];
+            const jitnodes::NodeId linked = networkOf(place.scope).inputOf(place.id, 1);
+            if (linked == jitnodes::invalidNodeId) {
+                continue;
+            }
+            const auto parent = byPlace.find(NodeRef(place.scope, linked));
+            if (parent != byPlace.end() && parent->second != self) {
+                self->setParent(parent->second->id());
+            } else if (notes != nullptr) {
+                notes->push_back("'" + made[i].name + "' takes node " + std::to_string(linked) + " as its parent, which is not the placement of another object in its scope");
+            }
+        }
+        return added.size();
+    }
+
     std::string SketchDocument::scopeText(std::uint32_t scope) const {
         std::string text;
         for (jitnodes::NodeId id : scopePath(scope)) {
@@ -1016,9 +1191,7 @@ namespace curvy {
                     source->removeNode(id);
                 }
                 object.setGraphRef(NodeRef(move.to, made[feeding.size()]));
-                if (object.everBound()) {
-                    object.setBoundToNodes(false);   // its placement is rewritten relative to the new group
-                }
+                object.setBoundToNodes(false);   // its placement is rewritten relative to the new group
             }
         }
         placedCache_.clear();
@@ -1132,14 +1305,69 @@ namespace curvy {
         }
     }
 
-    void SketchDocument::pullPaintOrder() {
+    bool SketchDocument::paintStillPlaced() const {
         if (placedOrder_.size() != objects_.size()) {
-            return;
+            return false;
         }
         for (std::size_t i = 0; i < objects_.size(); ++i) {
             if (objects_[i]->id() != placedOrder_[i]) {
-                return;
+                return false;
             }
+        }
+        return true;
+    }
+
+    void SketchDocument::pullLayerOrderFromPaint() {
+        if (layersEdited_ || !paintStillPlaced()) {
+            return;
+        }
+        const std::size_t base = baseLayer();
+        for (const auto& [scope, want] : placedPaint_) {
+            const jitnodes::Network* net = findNetwork(scope);
+            const auto held = paintNodes_.find(scope);
+            if (net == nullptr || held == paintNodes_.end() || !net->hasNode(held->second)) {
+                continue;
+            }
+            std::vector<jitnodes::NodeId> have;
+            for (int i = 0; i < net->node(held->second).inputCount(); ++i) {
+                if (const jitnodes::NodeId in = net->inputOf(held->second, i); in != jitnodes::invalidNodeId) {
+                    have.push_back(in);
+                }
+            }
+            if (have == want) {
+                continue;
+            }
+            // Layer subnets by the parent they declare (a sublayer of the base layer sits in the root beside the top-level ones); each family
+            // keeps the set of order values it had and hands them out again in the dragged order.
+            std::map<float, std::vector<NodeRef>> families;
+            for (jitnodes::NodeId in : have) {
+                const NodeRef ref(scope, in);
+                if (!net->hasNode(in) || net->node(in).typeName() != kSubnetNodeType) {
+                    continue;
+                }
+                const std::size_t id = layerIdOfScope(scopeOfSubnet(ref));
+                if (id != 0 && id != base) {
+                    families[net->node(in).getFloat("layerParent")].push_back(ref);
+                }
+            }
+            for (auto& [parent, refs] : families) {
+                std::vector<float> values;
+                for (const NodeRef& ref : refs) {
+                    values.push_back(node(ref).getFloat("layerOrder"));
+                }
+                std::sort(values.begin(), values.end());
+                for (std::size_t i = 0; i < refs.size(); ++i) {
+                    if (node(refs[i]).getFloat("layerOrder") != values[i]) {
+                        node(refs[i]).setFloat("layerOrder", values[i]);
+                    }
+                }
+            }
+        }
+    }
+
+    void SketchDocument::pullPaintOrder() {
+        if (!paintStillPlaced()) {
+            return;
         }
         bool edited = false;
         for (const auto& [scope, want] : placedPaint_) {
@@ -1209,6 +1437,97 @@ namespace curvy {
             }
         }
         return out;
+    }
+
+    NodeRef SketchDocument::layerSubnetOf(std::size_t layer) const {
+        for (std::uint32_t scope = 1; scope < scopeCount(); ++scope) {
+            if (layerIdOfScope(scope) == layer) {
+                return parentOfScope(scope);
+            }
+        }
+        return NodeRef();
+    }
+
+    bool SketchDocument::paintMove(const NodeRef& item, int steps, std::uint32_t& scope, std::vector<jitnodes::NodeId>& inputs, std::size_t& at, std::size_t& to) {
+        jitnodes::NodeId input = jitnodes::invalidNodeId;
+        scope = item.scope;
+        if (hasNode(item) && node(item).typeName() == kSubnetNodeType) {
+            input = item.id;
+        } else if (const std::size_t object = objectOfNode(item); object != 0) {
+            for (const auto& [ref, owner] : paintOwners_) {
+                if (owner == object) {
+                    scope = ref.scope;
+                    input = ref.id;
+                    break;
+                }
+            }
+        }
+        const jitnodes::Network* net = findNetwork(scope);
+        const auto held = paintNodes_.find(scope);
+        if (input == jitnodes::invalidNodeId || net == nullptr || held == paintNodes_.end() || !net->hasNode(held->second)) {
+            return false;
+        }
+        inputs.clear();
+        for (int i = 0; i < net->node(held->second).inputCount(); ++i) {
+            if (const jitnodes::NodeId in = net->inputOf(held->second, i); in != jitnodes::invalidNodeId) {
+                inputs.push_back(in);
+            }
+        }
+        const auto found = std::find(inputs.begin(), inputs.end(), input);
+        if (found == inputs.end() || steps == 0) {
+            return false;
+        }
+        at = std::size_t(found - inputs.begin());
+        const auto layerKey = [&](jitnodes::NodeId id) -> float {   // -1 for what is not a layer subnet, else its parent layer
+            const NodeRef ref(scope, id);
+            if (!hasNode(ref) || node(ref).typeName() != kSubnetNodeType || layerIdOfScope(scopeOfSubnet(ref)) == 0) {
+                return -1.0f;
+            }
+            return node(ref).getFloat("layerParent");
+        };
+        const float mine = layerKey(inputs[at]);
+        const int direction = steps > 0 ? 1 : -1;
+        to = at;
+        for (int left = std::abs(steps); left > 0; --left) {
+            const long next = long(to) + direction;
+            if (next < 0 || next >= long(inputs.size()) || layerKey(inputs[std::size_t(next)]) != mine) {
+                break;
+            }
+            to = std::size_t(next);
+        }
+        return to != at;
+    }
+
+    bool SketchDocument::canMovePaintItem(const NodeRef& item, int steps) {
+        std::uint32_t scope = 0;
+        std::vector<jitnodes::NodeId> inputs;
+        std::size_t at = 0, to = 0;
+        return paintMove(item, steps, scope, inputs, at, to);
+    }
+
+    bool SketchDocument::movePaintItem(const NodeRef& item, int steps) {
+        std::uint32_t scope = 0;
+        std::vector<jitnodes::NodeId> inputs;
+        std::size_t at = 0, to = 0;
+        if (!paintMove(item, steps, scope, inputs, at, to)) {
+            return false;
+        }
+        jitnodes::Network* net = findNetwork(scope);
+        const jitnodes::NodeId merge = paintNodes_[scope];
+        const jitnodes::GraphSnapshot before = snapshotGraph();
+        const jitnodes::NodeId moving = inputs[at];
+        inputs.erase(inputs.begin() + std::ptrdiff_t(at));
+        inputs.insert(inputs.begin() + std::ptrdiff_t(to), moving);
+        for (int i = net->node(merge).inputCount() - 1; i >= 0; --i) {
+            if (net->inputOf(merge, i) != jitnodes::invalidNodeId) {
+                net->disconnect(merge, i);
+            }
+        }
+        for (std::size_t k = 0; k < inputs.size(); ++k) {
+            net->connect(inputs[k], merge, int(k));
+        }
+        commitGraphEdit(before, "Reorder paint");
+        return true;
     }
 
     void SketchDocument::pruneGroupScopes() {
@@ -1505,7 +1824,6 @@ namespace curvy {
         struct Bound {
             SketchObject* object;
             jitnodes::NodeId node;
-            bool known;
             bool settled = false;   // untouched since the last sync, with its placement
         };
         std::vector<Bound> bound;
@@ -1520,7 +1838,7 @@ namespace curvy {
             !placedCache.empty() && before->second.objects == objectsNow;
         if (steady) {
             for (const auto& [object, node] : before->second.bound) {
-                bound.push_back({object, node, true});
+                bound.push_back({object, node});
             }
         }
         if (!steady) {
@@ -1563,7 +1881,7 @@ namespace curvy {
         for (std::size_t index = 0; index < objects.size(); ++index) {
             SketchObject* object = objects[index];
             if (settled[index] != jitnodes::invalidNodeId) {
-                bound.push_back({object, settled[index], true, true});
+                bound.push_back({object, settled[index], true});
                 continue;
             }
             const char* type = shapeNodeType(*object);
@@ -1588,7 +1906,7 @@ namespace curvy {
                 madeNow.insert(node);
             }
             used.insert(node);
-            bound.push_back({object, node, known});
+            bound.push_back({object, node});
         }
         // Shape nodes no object uses any more: the ones its objects left behind or that were touched (added, restored) since the last sync;
         // without that history, all of them.
@@ -1702,7 +2020,8 @@ namespace curvy {
         }
 
         }
-        // A child's transform node takes its parent's as input 1. A loaded graph that links nodes gives its objects that parent.
+        // A child's transform node takes its parent's as input 1. An object not yet written to its nodes (a document just read from a file)
+        // takes the parent its node links to; a bound object's parent is the object's own, and the node follows it.
         std::unordered_set<jitnodes::NodeId> relinked;
         std::unordered_map<jitnodes::NodeId, SketchObject*> byPlace;
         for (const Bound& entry : bound) {
@@ -1717,7 +2036,7 @@ namespace curvy {
                 const auto it = placedCache.find(parent->graphNode());
                 want = it != placedCache.end() ? it->second : jitnodes::invalidNodeId;
             }
-            if (linked != jitnodes::invalidNodeId && entry.known && !entry.object->everBound() && entry.object->parent() == 0) {
+            if (linked != jitnodes::invalidNodeId && !entry.object->boundToNodes() && entry.object->parent() == 0) {
                 if (byPlace.empty()) {
                     for (const Bound& other : bound) {
                         byPlace.emplace(placedCache.at(other.node), other.object);
@@ -1745,12 +2064,8 @@ namespace curvy {
             const bool fresh = created.count(entry.node) != 0;
             const bool follows = relinked.count(entry.node) != 0 || (parent != nullptr && !parent->boundToNodes());
             jitnodes::Node* place = (stale || fresh || follows) ? &net.node(placedCache.at(entry.node)) : nullptr;
-            const BLMatrix2D world = place != nullptr ? worldOf(NodeRef(scope, placedCache.at(entry.node))) : BLMatrix2D::make_identity();
             const bool driven = drivenPlace(NodeRef(scope, placedCache.at(entry.node)));
-            const bool loaded = !driven && entry.known && !entry.object->everBound() && place != nullptr;
-            if (!loaded || !bindLoadedNode(*drawnGeometry(net, entry.node), &world, *entry.object)) {
-                writeNode(net.node(entry.node), *entry.object, !driven);
-            }
+            writeNode(net.node(entry.node), *entry.object, !driven);
             if (place != nullptr) {
                 if (fresh) {
                     centerTransformPivot(*place, *drawnGeometry(net, entry.node));
@@ -1775,67 +2090,6 @@ namespace curvy {
             state.bound.emplace_back(entry.object, entry.node);
         }
         return removedShape;
-    }
-
-    SketchObject* SketchDocument::addLiveShape(const std::string& nodeType, const std::map<std::string, float>& params, const std::string& description) {
-        const jitnodes::GraphSnapshot before = snapshotGraph();
-        const jitnodes::NodeId node = network().addNode(nodeType);
-        BLPath path;
-        try {
-            for (const auto& [name, value] : params) {
-                network().node(node).setFloat(name, value);
-            }
-            path = outlineOf(*cook(node));
-        } catch (...) {
-            restoreGraph(before);
-            throw;
-        }
-        if (path.size() == 0) {
-            restoreGraph(before);
-            return nullptr;
-        }
-        auto after = std::make_shared<const jitnodes::GraphSnapshot>(jitnodes::snapshotNetwork(network(), &before));
-        auto prior = std::make_shared<const jitnodes::GraphSnapshot>(before);
-
-        struct Slot {
-            std::unique_ptr<SketchObject> object;
-            std::size_t id = 0;
-            std::size_t index = 0;
-        };
-        auto slot = std::make_shared<Slot>();
-        slot->object.reset(SketchObject::make(SketchObjectType::Polygon, path));
-        slot->object->setGraphNode(node);
-        slot->object->setId(nextId_++);
-        slot->id = slot->object->id();
-        slot->index = objects_.size();
-        SketchObject* raw = slot->object.get();
-        auto applied = std::make_shared<bool>(true);   // the graph already holds the node when push() runs doIt
-        undoStack_.push({description,
-            [this, slot, after, prior, applied]() {
-                if (*applied) {
-                    *applied = false;
-                } else {
-                    jitnodes::restoreSnapshot(network(), *after, prior.get());
-                }
-                attach(std::move(slot->object), slot->index);
-                setSelection({slot->id});
-                graphChanged();
-            },
-            [this, slot, after, prior]() {
-                slot->object = detach(slot->id, &slot->index);
-                jitnodes::restoreSnapshot(network(), *prior, after.get());
-                graphChanged();
-            }});
-        return raw;
-    }
-
-    bool SketchDocument::setLiveShapeParam(std::size_t objectId, const std::string& name, float value) {
-        const SketchObject* object = findById(objectId);
-        if (object == nullptr || object->graphNode() == jitnodes::invalidNodeId) {
-            return false;
-        }
-        setGraphParam(object->graphNode(), name, value);
-        return true;
     }
 
     bool SketchDocument::makeParametric(std::size_t objectId) {

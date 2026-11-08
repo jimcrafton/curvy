@@ -1,8 +1,8 @@
 #include "curvy/workspacecontroller.h"
+#include "curvy/curvyfile.h"
 #include "curvy/theme.h"
 #include "curvy/dockcontroller.h"
 #include "curvy/settingsdialog.h"
-#include "curvy/sketchsvg.h"
 #include "curvy/welcomeoverlay.h"
 
 #include <newui/application.h>
@@ -22,7 +22,6 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #define NOMINMAX
 #include <windows.h>
 #include <cmath>
@@ -35,6 +34,13 @@ namespace curvy {
         std::filesystem::path recoveryFolder() {
             const char* base = std::getenv("APPDATA");
             return std::filesystem::path(base != nullptr ? base : ".") / "curvy" / "autosave";
+        }
+
+        // Test hook: CURVY_AUTOSAVE_SECONDS makes the autosave tick and the gap between copies that many seconds (the setting is in minutes, 1 at least).
+        std::chrono::seconds autosaveSecondsOverride() {
+            const char* text = std::getenv("CURVY_AUTOSAVE_SECONDS");
+            const int seconds = text != nullptr ? std::atoi(text) : 0;
+            return std::chrono::seconds(seconds > 0 ? seconds : 0);
         }
     }
 
@@ -302,13 +308,15 @@ namespace curvy {
         canvas_->onToolChanged.add(this, &WorkspaceController::handleToolChanged);
         connections_.add(document_.onSelectionChanged, [this](SketchDocument& sender) { return handleSelectionChanged(sender); });
         files_->onDocumentReplaced.add(this, &WorkspaceController::handleDocumentReplaced);
+        files_->onStateChanged.add(this, &WorkspaceController::handleDocumentStateChanged);
     }
 
     // The autosave timer is not cancelled here: the run loop has already ended and kills its timers itself.
     WorkspaceController::~WorkspaceController() = default;
 
     void WorkspaceController::startAutosave() {
-        autosaveTimer_ = Application::instance().runLoop().postDelayed(std::chrono::seconds(30), [this] {
+        const std::chrono::seconds hook = autosaveSecondsOverride();
+        autosaveTimer_ = Application::instance().runLoop().postDelayed(hook.count() > 0 ? hook : std::chrono::seconds(30), [this] {
             autosaveTick();
             return false;
         });
@@ -325,26 +333,20 @@ namespace curvy {
 
     bool WorkspaceController::offerRecovery() {
         std::error_code ignored;
-        std::vector<std::filesystem::directory_entry> found;
-        for (const auto& entry : std::filesystem::directory_iterator(recoveryFolder(), ignored)) {
-            if (entry.is_regular_file(ignored) && entry.path().extension() == ".svg") {
-                found.push_back(entry);
-            }
-        }
-        std::sort(found.begin(), found.end(), [&](const auto& a, const auto& b) { return a.last_write_time(ignored) > b.last_write_time(ignored); });
-        for (const auto& entry : found) {
-            const std::string name = entry.path().stem().string();
+        for (const std::string& found : recoveryCopies(recoveryFolder().string())) {
+            const std::filesystem::path entry = std::filesystem::u8path(found);
+            const std::string name = entry.stem().string();
             const DialogResult answer = Dialog::showMessageBox(frame_.frameHandle(),
                 "curvy closed before \"" + name + "\" was saved. Recover the autosaved copy?\n\nYes recovers it, No throws it away, Cancel asks again next time.",
                 "curvy", MessageBoxButtons::YesNoCancel, MessageBoxIcon::Question);
             if (answer == DialogResult::Cancel) {
                 return false;
             }
-            if (answer == DialogResult::Yes && files_->recoverFrom(entry.path().string(), name)) {
-                std::filesystem::remove(entry.path(), ignored);
+            if (answer == DialogResult::Yes && files_->recoverFrom(found, name)) {
+                std::filesystem::remove(entry, ignored);
                 return true;
             }
-            std::filesystem::remove(entry.path(), ignored);
+            std::filesystem::remove(entry, ignored);
         }
         return false;
     }
@@ -370,19 +372,16 @@ namespace curvy {
     // A recovery copy beside the settings; the user's own file is only ever written by Save.
     void WorkspaceController::autosaveTick() {
         const auto now = std::chrono::steady_clock::now();
-        if (!settings_.autosave || !model_->documentOpen() || !document_.isModified() ||
-            now - lastAutosave_ < std::chrono::minutes(settings_.autosaveMinutes)) {
+        const std::chrono::seconds hook = autosaveSecondsOverride();
+        const std::chrono::seconds gap = hook.count() > 0 ? hook : std::chrono::seconds(std::chrono::minutes(settings_.autosaveMinutes));
+        if (!settings_.autosave || !model_->documentOpen() || !document_.isModified() || now - lastAutosave_ < gap) {
             return;
         }
         lastAutosave_ = now;
-        const std::filesystem::path folder = recoveryFolder();
-        std::error_code ignored;
-        std::filesystem::create_directories(folder, ignored);
         const std::string stem = document_.hasFilePath() ? std::filesystem::path(document_.filePath()).stem().string() : files_->untitledName();
-        const std::filesystem::path file = folder / (stem + ".svg");
-        std::ofstream out(file, std::ios::binary | std::ios::trunc);
-        if (out << svgFromDocument(document_)) {
-            recoveryFile_ = file.string();
+        const std::string written = writeRecoveryCopy(document_, recoveryFolder().string(), stem);
+        if (!written.empty()) {
+            recoveryFile_ = written;
             model_->say("Autosaved " + stem);
         }
     }
@@ -666,6 +665,14 @@ namespace curvy {
         applyToolDefaults();
         frame_.setTitle("curvy - " + controller.displayName());
         canvas_->zoomToFit();
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn WorkspaceController::handleDocumentStateChanged(SketchDocumentController& controller) {
+        if (model_->documentOpen() && model_->documentName() != controller.displayName()) {
+            model_->setDocument(true, controller.displayName());
+            frame_.setTitle("curvy - " + controller.displayName());
+        }
         return SyncReturn::Handled;
     }
 

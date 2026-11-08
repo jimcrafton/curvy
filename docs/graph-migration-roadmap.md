@@ -14,13 +14,20 @@ code on 2026-11-01.
 | `layers_` member (S4c-4) | It is the pending table: it lives between a layer edit and its sync, and `pullLayerNodes` refills it from the nodes otherwise. The loaders already replace it only through `setLayers` / `writeLayerTable`. Removing the member means adding an equivalent buffer plus a cache behind about 25 read sites, with the risk of per-edit scans that cost 8 to 10 s in three perf tests. | Never needed for correctness. |
 | `syncLayers` sort of `objects_` | It runs only when the list is out of layer order (a layer edit changed the ranks, or a new object landed below the top layer). `pullPaintOrder` already takes a reorder made in a `paint` merge node first. | With S4d below. |
 | `frameAngle_`, `groupAngle_`, `quadFrame_` outside the graph | They are the orientation of the selection handles, not geometry; a probe showed the node's rotation drifts from the frame once the matrix gains shear (DG-03 design 1). They travel in the undo step beside the graph snapshot. | If handle orientation ever needs to be saved per object in the graph. |
-| `syncPathNodes`, `bindLoadedNode`, `GeometryState` | A per-object node build inside `add` is quadratic in a batch; SVG files and `.skb` before version 4 still match outlines to nodes; `GeometryState` is the small undo payload (a full graph snapshot costs 135 ms at 2000 objects). DG-03 S6. | A file format that stores only the graph. |
+| `syncPathNodes`, `bindLoadedNode`, `GeometryState` | A per-object node build inside `add` is quadratic in a batch; SVG files and `.skb` before version 4 still match outlines to nodes; `GeometryState` is the small undo payload (a full graph snapshot costs 135 ms at 2000 objects). DG-03 S6. | A file format that stores only the graph. (`.curvy` exists since 2026-11-07 but still stores the looks and object table, approach A in `native-format.md`; these stay until approach B drops them.) |
 
 ## Open items, by area
 
 ### A. Layers and groups (DG-04 residue)
 
-1. **S4d: the graph owns cross-layer stacking.** Put layer ranks into the `paint` merge ordering so a layer reorder rewrites the merge nodes and `objects_` follows; the
+1. **S4d: the graph owns cross-layer stacking. Started 2026-11-08: a rewired `paint` merge reorders the layers** (`pullLayerOrderFromPaint` rewrites the
+   subnets' `layerOrder`, then `pullLayerNodes` and `pullPaintOrder` follow); the `syncLayers` sort is kept for new objects and layer-table edits. **Usable since 2026-11-08 through Back and Forward buttons in the graph dock's box** (the Flow view is a list of rows, so there is no dragging):
+   `SketchDocument::movePaintItem` moves a selected layer, group, object or subnet node one place in the `paint` merge that lists it, as one undo step; layers swap only with
+   layers of the same parent and nothing else crosses a layer subnet. GUI tests: `GraphDock.test_back_and_forward_move_an_object_in_the_paint_order_and_undo_takes_it_back`
+   and `LayerReorder` (on `layerStack.curvy`). Waiting for you to try it.
+   Two limits by design: the base layer cannot be reordered (its objects sit in the
+   root, no subnet) and a sublayer cannot be moved past its parent's own objects (they always paint above their sublayers). Tests `DraggingALayerSubnetInThePaintNodeReordersTheLayers`
+   and `DraggingSublayerSubnetsInsideALayerReordersThem`; GUI suite 65/65 (no GUI test can exercise it). Sample document: `Resources/samples/layerStack.curvy`. Original plan: Put layer ranks into the `paint` merge ordering so a layer reorder rewrites the merge nodes and `objects_` follows; the
    `syncLayers` sort goes. Touches `layerRanks`, `syncPaintOrder` and the layer-reorder edits in `documentlayers.cpp`. Buys: reordering a layer by dragging its subnet in
    a `paint` merge in the node view. Already true without it: layer order is saved in the nodes (`layerOrder`). Risk: moderate; rerun the three perf tests
    (`AnEditCostsLittleWhenManyObjectsAreGrouped`, `AThousandsObjectDocumentStaysResponsive`, `TheFrameOfALargeGraphIsCheapToMeasureWhileScrubbing`) and the GUI suite.

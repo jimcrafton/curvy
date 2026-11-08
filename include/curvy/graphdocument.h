@@ -95,6 +95,9 @@ namespace curvy {
         std::string graphToText() const { return jitnodes::saveNetwork(*network_, true, true); }
         // Leaves the current graph untouched and returns false when the text is not a valid graph.
         bool graphFromText(const std::string& text);
+        // For a loader that replaced the network itself (jitnodes::loadNetworkValue on network()): refreshes what depends on the graph, as
+        // graphFromText does after it loads.
+        void graphReplaced() { graphChanged(); }
         // Replaces the graph with an empty one without an undo step (a load, New).
         void clearGraph();
 

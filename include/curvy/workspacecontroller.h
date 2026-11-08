@@ -97,6 +97,7 @@ namespace curvy {
         newui::SyncReturn handleToolChanged(CanvasView& sender);
         newui::SyncReturn handleSelectionChanged(SketchDocument& sender);
         newui::SyncReturn handleDocumentReplaced(SketchDocumentController& sender);
+        newui::SyncReturn handleDocumentStateChanged(SketchDocumentController& sender);
 
         void bindViews();
         void restyle();

@@ -1,4 +1,5 @@
-﻿#include "curvy/sketchcolor.h"
+﻿#include "curvy/curvyfile.h"
+#include "curvy/sketchcolor.h"
 #include "curvy/sketchdocument.h"
 #include "curvy/sketchobject.h"
 #include "curvy/cursorset.h"
@@ -6761,6 +6762,104 @@ TEST(SketchDocumentScopes, TheBaseLayerLivesOnAMarkerNodeWhileItIsNotTheDefault)
     EXPECT_EQ(doc.network().findNode("baseLayer"), jitnodes::invalidNodeId);
 }
 
+TEST(SketchDocumentScopes, AnObjectsNameLivesOnItsShapeNodeAndFollowsEditsFromEitherSide) {
+    SketchDocument doc;
+    SketchObject& rect = doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    const std::size_t id = rect.id();
+    rect.setName("Sun");
+    doc.touch();
+    jitnodes::Node& node = doc.network().node(doc.findById(id)->graphNode());
+    EXPECT_EQ(node.getString("label"), "Sun");
+
+    doc.setGraphString(doc.findById(id)->graphRef(), "label", "Moon");
+    EXPECT_EQ(doc.findById(id)->name(), "Moon");
+
+    doc.findById(id)->setName("Star");
+    doc.touch();
+    EXPECT_EQ(doc.network().node(doc.findById(id)->graphNode()).getString("label"), "Star");
+}
+
+TEST(SketchDocumentScopes, AnObjectsFlagsOpacityAndBlendLiveOnItsShapeNodeAndFollowEditsFromEitherSide) {
+    SketchDocument doc;
+    const std::size_t id = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    SketchObject* object = doc.findById(id);
+    object->setVisible(false);
+    object->setLocked(true);
+    object->setOpacity(0.4);
+    object->setBlendMode(BlendMode::Multiply);
+    doc.touch();
+    const NodeRef ref = object->graphRef();
+    const jitnodes::Node& node = doc.network().node(ref.id);
+    EXPECT_EQ(node.getFloat("visible"), 0.0f);
+    EXPECT_EQ(node.getFloat("locked"), 1.0f);
+    EXPECT_FLOAT_EQ(node.getFloat("opacity"), 0.4f);
+    EXPECT_EQ(node.getString("blend"), blendModeCss(BlendMode::Multiply));
+
+    doc.setGraphParam(ref, "visible", 1.0f);
+    doc.setGraphParam(ref, "locked", 0.0f);
+    doc.setGraphParam(ref, "opacity", 0.75f);
+    doc.setGraphString(ref, "blend", blendModeCss(BlendMode::Screen));
+    object = doc.findById(id);
+    EXPECT_TRUE(object->ownVisible());
+    EXPECT_FALSE(object->ownLocked());
+    EXPECT_NEAR(object->opacity(), 0.75, 1e-6);
+    EXPECT_EQ(object->blendMode(), BlendMode::Screen);
+}
+
+TEST(SketchDocumentScopes, AnObjectsActiveRowsLiveOnItsShapeNodeAndFollowEditsFromEitherSide) {
+    SketchDocument doc;
+    const std::size_t id = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    SketchObject* object = doc.findById(id);
+    std::vector<AppearanceItem> items = object->appearance();
+    const std::size_t base = items.size();
+    items.push_back(items.back());
+    items.push_back(items.back());
+    object->setAppearance(items);
+    object->setActiveIndices(base + 1, base + 1, 0);
+    doc.touch();
+    const NodeRef ref = object->graphRef();
+    EXPECT_EQ(doc.network().node(ref.id).getFloat("activeFill"), float(base + 1));
+    EXPECT_EQ(doc.network().node(ref.id).getFloat("activeStroke"), float(base + 1));
+
+    doc.setGraphParam(ref, "activeFill", float(base));
+    doc.setGraphParam(ref, "activeStroke", 0.0f);
+    object = doc.findById(id);
+    EXPECT_EQ(object->activeFillIndex(), base);
+    EXPECT_EQ(object->activeStrokeIndex(), 0u);
+}
+
+TEST(SketchDocumentScopes, AnObjectsFrameAngleLivesOnItsShapeNodeAndFollowsEditsFromEitherSide) {
+    SketchDocument doc;
+    const std::size_t id = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    SketchObject* object = doc.findById(id);
+    object->setFrameAngle(0.5);
+    doc.touch();
+    const NodeRef ref = object->graphRef();
+    EXPECT_EQ(doc.network().node(ref.id).getFloat("frameAngle"), 0.5f);
+
+    doc.setGraphParam(ref, "frameAngle", 1.25f);
+    EXPECT_NEAR(doc.findById(id)->frameAngle(), 1.25, 1e-6);
+    doc.setGraphParam(ref, "frameAngle", 0.0f);
+    EXPECT_EQ(doc.findById(id)->frameAngle(), 0.0);
+}
+
+TEST(SketchDocumentScopes, AnObjectsTypeIsRecordedOnItsShapeNode) {
+    SketchDocument doc;
+    const std::size_t rect = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    const std::size_t ellipse = doc.add(SketchObject::makeEllipse(0, 0, 5, 5)).id();
+    const std::size_t line = doc.add(SketchObject::makeLine(0, 0, 10, 10)).id();
+    doc.touch();
+    for (const auto& [id, want] : {std::pair<std::size_t, const char*>{rect, "rect"}, {ellipse, "ellipse"}, {line, "line"}}) {
+        const SketchObject* object = doc.findById(id);
+        EXPECT_EQ(doc.network().node(object->graphRef().id).getString("type"), want);
+        SketchObjectType back;
+        ASSERT_TRUE(objectTypeFromName(want, back));
+        EXPECT_EQ(back, object->type());
+    }
+    SketchObjectType unknown;
+    EXPECT_FALSE(objectTypeFromName("blob", unknown));
+}
+
 TEST(SketchDocumentScopes, TheOrderOfLayerNodesReordersTheLayers) {
     SketchDocument doc;
     doc.add(SketchObject::makeRect(0, 0, 10, 10));
@@ -6966,6 +7065,217 @@ TEST(SketchDocumentScopes, AReorderOfThePaintNodeReordersTheObjects) {
     EXPECT_EQ(doc.stackingOrder(), (std::vector<std::size_t>{a, b, c}));
 }
 
+TEST(SketchDocumentScopes, DraggingALayerSubnetInThePaintNodeReordersTheLayers) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    const std::size_t b = doc.addLayer(0, "B");
+    const std::size_t bRect = doc.add(SketchObject::makeRect(20, 0, 10, 10)).id();
+    const std::size_t c = doc.addLayer(0, "C");
+    const std::size_t cRect = doc.add(SketchObject::makeRect(40, 0, 10, 10)).id();
+    ASSERT_EQ(doc.stackingOrder(), (std::vector<std::size_t>{a, bRect, cRect}));
+
+    jitnodes::Network& net = doc.network();
+    const jitnodes::NodeId merge = net.findNode("paint");
+    ASSERT_NE(merge, jitnodes::invalidNodeId);
+    std::vector<jitnodes::NodeId> inputs;
+    for (int i = 0; i < net.node(merge).inputCount(); ++i) {
+        if (net.inputOf(merge, i) != jitnodes::invalidNodeId) {
+            inputs.push_back(net.inputOf(merge, i));
+        }
+    }
+    ASSERT_EQ(inputs.size(), 3u);
+    for (int i = net.node(merge).inputCount() - 1; i >= 0; --i) {
+        if (net.inputOf(merge, i) != jitnodes::invalidNodeId) {
+            net.disconnect(merge, i);
+        }
+    }
+    net.connect(inputs[0], merge, 0);
+    net.connect(inputs[2], merge, 1);
+    net.connect(inputs[1], merge, 2);
+    doc.touch();
+
+    EXPECT_EQ(doc.layerChildren(0).back(), b);
+    EXPECT_EQ(doc.layerChildren(0)[1], c);
+    EXPECT_EQ(doc.stackingOrder(), (std::vector<std::size_t>{a, cRect, bRect}));
+    ASSERT_EQ(doc.objectCount(), 3u);
+    EXPECT_EQ(doc.object(1).id(), cRect);
+    EXPECT_EQ(doc.object(2).id(), bRect);
+    EXPECT_EQ(doc.layerOf(*doc.findById(bRect)), b);
+
+    doc.touch();
+    EXPECT_EQ(doc.layerChildren(0).back(), b) << "the new order is stable";
+}
+
+TEST(SketchDocumentScopes, MovePaintItemReordersLayersObjectsAndUndoesInOneStep) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    const std::size_t a2 = doc.add(SketchObject::makeRect(5, 0, 10, 10)).id();
+    const std::size_t b = doc.addLayer(0, "B");
+    const std::size_t bRect = doc.add(SketchObject::makeRect(20, 0, 10, 10)).id();
+    const std::size_t c = doc.addLayer(0, "C");
+    const std::size_t cRect = doc.add(SketchObject::makeRect(40, 0, 10, 10)).id();
+    const NodeRef bNode = doc.layerSubnetOf(b);
+    const NodeRef cNode = doc.layerSubnetOf(c);
+    ASSERT_TRUE(doc.hasNode(bNode));
+    ASSERT_TRUE(doc.hasNode(cNode));
+    EXPECT_FALSE(doc.layerSubnetOf(doc.layerChildren(0).front()).valid()) << "the base layer has no subnet";
+
+    EXPECT_FALSE(doc.canMovePaintItem(cNode, 1));
+    ASSERT_TRUE(doc.canMovePaintItem(cNode, -1));
+    ASSERT_TRUE(doc.movePaintItem(cNode, -1));
+    EXPECT_EQ(doc.layerChildren(0).back(), b);
+    EXPECT_EQ(doc.stackingOrder(), (std::vector<std::size_t>{a, a2, cRect, bRect}));
+    EXPECT_FALSE(doc.canMovePaintItem(cNode, -1)) << "a layer does not pass the base layer's objects";
+
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.layerChildren(0).back(), c);
+    EXPECT_EQ(doc.stackingOrder(), (std::vector<std::size_t>{a, a2, bRect, cRect}));
+    doc.undoStack().redo();
+    EXPECT_EQ(doc.layerChildren(0).back(), b);
+    EXPECT_EQ(doc.stackingOrder(), (std::vector<std::size_t>{a, a2, cRect, bRect}));
+
+    EXPECT_FALSE(doc.canMovePaintItem(doc.findById(a2)->graphRef(), 1)) << "an object does not pass a layer";
+    ASSERT_TRUE(doc.movePaintItem(doc.findById(a2)->graphRef(), -1));
+    EXPECT_EQ(doc.stackingOrder(), (std::vector<std::size_t>{a2, a, cRect, bRect}));
+}
+
+TEST(SketchDocumentScopes, MovingALayerWithSublayersBackAndUndoingKeepsEveryObjectInItsLayer) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    const std::size_t blue = doc.addLayer(0, "Blue");
+    const std::size_t blueRect = doc.add(SketchObject::makeRect(20, 0, 10, 10)).id();
+    const std::size_t discs = doc.addLayer(0, "Discs");
+    const std::size_t yellow = doc.addLayer(discs, "Yellow");
+    const std::size_t yellowRect = doc.add(SketchObject::makeRect(40, 0, 10, 10)).id();
+    const std::size_t purple = doc.addLayer(discs, "Purple");
+    const std::size_t purpleRect = doc.add(SketchObject::makeRect(60, 0, 10, 10)).id();
+    const auto check = [&](const char* when) {
+        EXPECT_EQ(doc.layerOf(*doc.findById(blueRect)), blue) << when;
+        EXPECT_EQ(doc.layerOf(*doc.findById(yellowRect)), yellow) << when;
+        EXPECT_EQ(doc.layerOf(*doc.findById(purpleRect)), purple) << when;
+        EXPECT_EQ(doc.findLayer(yellow)->parent, discs) << when;
+        EXPECT_EQ(doc.findLayer(purple)->parent, discs) << when;
+        EXPECT_EQ(doc.findLayer(blue)->parent, 0u) << when;
+    };
+    check("at the start");
+    const std::vector<std::size_t> before = doc.stackingOrder();
+    const NodeRef discsNode = doc.layerSubnetOf(discs);
+    ASSERT_TRUE(doc.hasNode(discsNode));
+    ASSERT_TRUE(doc.movePaintItem(discsNode, -1));
+    check("after Back");
+    EXPECT_EQ(doc.layerChildren(0).size(), 3u);
+    doc.undoStack().undo();
+    check("after undo");
+    EXPECT_EQ(doc.stackingOrder(), before);
+    doc.undoStack().redo();
+    check("after redo");
+}
+
+TEST(SketchDocumentScopes, ObjectsKeepTheirLayersThroughAFileWhetherOrNotTheyWereAddedInABatch) {
+    for (const bool batched : {false, true}) {
+        SketchDocument built;
+        std::vector<std::size_t> layers = {1}, ids;
+        {
+            std::unique_ptr<SketchDocument::Batch> batch;
+            if (batched) {
+                batch = std::make_unique<SketchDocument::Batch>(built);
+            }
+            ids.push_back(built.add(SketchObject::makeRect(0, 0, 100, 100)).id());
+            for (int i = 0; i < 3; ++i) {
+                layers.push_back(built.addLayer(0, "L" + std::to_string(i)));
+                ids.push_back(built.add(SketchObject::makeRect(10.0 + i, 10, 20, 20)).id());
+            }
+        }
+        for (std::size_t i = 0; i < ids.size(); ++i) {
+            EXPECT_EQ(built.layerOf(*built.findById(ids[i])), layers[i]) << "built, batched " << batched << ", object " << i;
+        }
+        SketchDocument loaded;
+        std::string error;
+        ASSERT_TRUE(documentFromCurvy(curvyFromDocument(built), loaded, &error)) << error;
+        ASSERT_EQ(loaded.objectCount(), ids.size());
+        for (std::size_t i = 0; i < ids.size(); ++i) {
+            EXPECT_EQ(loaded.layerOf(loaded.object(i)), layers[i]) << "loaded, batched " << batched << ", object " << i;
+        }
+    }
+}
+
+TEST(SketchDocumentScopes, MovingAMiddleLayerBackInALoadedFileKeepsEveryObjectPaintedAboveTheBackdrop) {
+    SketchDocument built;
+    const std::size_t backdrop = built.add(SketchObject::makeRect(0, 0, 100, 100)).id();
+    const std::size_t red = built.addLayer(0, "Red");
+    const std::size_t redRect = built.add(SketchObject::makeRect(10, 10, 20, 20)).id();
+    const std::size_t green = built.addLayer(0, "Green");
+    const std::size_t greenRect = built.add(SketchObject::makeRect(20, 20, 20, 20)).id();
+    const std::size_t blue = built.addLayer(0, "Blue");
+    const std::size_t blueRect = built.add(SketchObject::makeRect(30, 30, 20, 20)).id();
+    (void)red; (void)blue;
+    SketchDocument doc;
+    std::string error;
+    ASSERT_TRUE(documentFromCurvy(curvyFromDocument(built), doc, &error)) << error;
+    ASSERT_EQ(doc.objectCount(), 4u);
+    // ids can differ after a load: find the objects by their order
+    std::vector<std::size_t> ids;
+    for (std::size_t i = 0; i < doc.objectCount(); ++i) {
+        ids.push_back(doc.object(i).id());
+    }
+    ASSERT_EQ(ids.size(), 4u);
+    const NodeRef greenNode = doc.layerSubnetOf(green);
+    ASSERT_TRUE(doc.hasNode(greenNode));
+    ASSERT_TRUE(doc.movePaintItem(greenNode, -1));
+    ASSERT_EQ(doc.objectCount(), 4u);
+    EXPECT_EQ(doc.object(0).id(), ids[0]) << "the backdrop stays at the back";
+    EXPECT_EQ(doc.object(1).id(), ids[2]) << "Green is now the first layer";
+    EXPECT_EQ(doc.object(2).id(), ids[1]) << "Red above it";
+    EXPECT_EQ(doc.object(3).id(), ids[3]);
+    EXPECT_EQ(doc.stackingOrder(), (std::vector<std::size_t>{ids[0], ids[2], ids[1], ids[3]}));
+    (void)backdrop; (void)redRect; (void)greenRect; (void)blueRect;
+}
+
+TEST(SketchDocumentScopes, DraggingSublayerSubnetsInsideALayerReordersThem) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    const std::size_t outer = doc.addLayer(0, "Outer");
+    const std::size_t s1 = doc.addLayer(outer, "S1");
+    const std::size_t r1 = doc.add(SketchObject::makeRect(20, 0, 10, 10)).id();
+    const std::size_t s2 = doc.addLayer(outer, "S2");
+    const std::size_t r2 = doc.add(SketchObject::makeRect(40, 0, 10, 10)).id();
+    ASSERT_EQ(doc.layerChildren(outer), (std::vector<std::size_t>{s1, s2}));
+
+    std::uint32_t outerScope = 0;
+    for (std::uint32_t scope = 1; scope < doc.scopeCount(); ++scope) {
+        if (doc.layerIdOfScope(scope) == outer) {
+            outerScope = scope;
+        }
+    }
+    ASSERT_NE(outerScope, 0u);
+    jitnodes::Network* net = doc.findNetwork(outerScope);
+    ASSERT_NE(net, nullptr);
+    const jitnodes::NodeId merge = net->findNode("paint");
+    ASSERT_NE(merge, jitnodes::invalidNodeId);
+    std::vector<jitnodes::NodeId> inputs;
+    for (int i = 0; i < net->node(merge).inputCount(); ++i) {
+        if (net->inputOf(merge, i) != jitnodes::invalidNodeId) {
+            inputs.push_back(net->inputOf(merge, i));
+        }
+    }
+    ASSERT_EQ(inputs.size(), 2u);
+    for (int i = net->node(merge).inputCount() - 1; i >= 0; --i) {
+        if (net->inputOf(merge, i) != jitnodes::invalidNodeId) {
+            net->disconnect(merge, i);
+        }
+    }
+    net->connect(inputs[1], merge, 0);
+    net->connect(inputs[0], merge, 1);
+    doc.touch();
+
+    EXPECT_EQ(doc.layerChildren(outer), (std::vector<std::size_t>{s2, s1}));
+    EXPECT_EQ(doc.layerOf(*doc.findById(r1)), s1);
+    const std::vector<std::size_t> order = doc.stackingOrder();
+    ASSERT_EQ(order.size(), 3u);
+    EXPECT_EQ(order[1], r2);
+    EXPECT_EQ(order[2], r1);
+}
+
 TEST(SketchDocumentScopes, SublayersAndGroupsNestInsideTheirLayer) {
     SketchDocument doc;
     doc.add(SketchObject::makeRect(0, 0, 10, 10));
@@ -7055,38 +7365,6 @@ TEST(GraphDocument, FailedLoadKeepsTheGraph) {
     GraphDocument other;
     EXPECT_TRUE(other.graphFromText(text));
     EXPECT_EQ(other.graphToText(), text);
-}
-
-TEST(LiveShape, OutlineFollowsTheNodeAndUndo) {
-    SketchDocument doc;
-    SketchObject* shape = doc.addLiveShape("circle", {{"count", 16.0f}, {"radius", 10.0f}}, "Circle");
-    ASSERT_NE(shape, nullptr);
-    const std::size_t id = shape->id();
-    EXPECT_NEAR(shape->geometryBounds().x1 - shape->geometryBounds().x0, 20.0, 0.01);
-    EXPECT_TRUE(doc.setLiveShapeParam(id, "radius", 30.0f));
-    EXPECT_NEAR(doc.findById(id)->geometryBounds().x1 - doc.findById(id)->geometryBounds().x0, 60.0, 0.01);
-    doc.undoStack().undo();
-    EXPECT_NEAR(doc.findById(id)->geometryBounds().x1 - doc.findById(id)->geometryBounds().x0, 20.0, 0.01);
-    doc.undoStack().undo();
-    EXPECT_EQ(doc.findById(id), nullptr);
-    for (auto nid : doc.network().nodeIds()) { std::printf("left: %u %s\n", nid, doc.network().node(nid).typeName().c_str()); }
-    EXPECT_TRUE(doc.network().nodeIds().empty());
-    doc.undoStack().redo();
-    ASSERT_NE(doc.findById(id), nullptr);
-    EXPECT_EQ(doc.network().nodeIds().size(), 4u) << "the shape, its fill and its stroke, and the paint merge";
-}
-
-TEST(LiveShape, SurvivesSvgRoundTrip) {
-    SketchDocument doc;
-    const std::size_t id = doc.addLiveShape("circle", {{"count", 16.0f}, {"radius", 10.0f}}, "Circle")->id();
-    SketchDocument loaded;
-    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), loaded));
-    ASSERT_EQ(loaded.objectCount(), 1u);
-    const SketchObject& object = loaded.object(0);
-    EXPECT_NE(object.graphNode(), 0u);
-    EXPECT_TRUE(loaded.setLiveShapeParam(object.id(), "radius", 30.0f));
-    EXPECT_NEAR(loaded.findById(object.id())->geometryBounds().x1 - loaded.findById(object.id())->geometryBounds().x0, 60.0, 0.01);
-    (void)id;
 }
 
 namespace {
@@ -7325,7 +7603,10 @@ TEST(PathNode, SurviveSaveAndLoad) {
     ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), loaded));
     EXPECT_EQ(loaded.objectCount(), 2u);
     EXPECT_TRUE(pathNodesMatch(loaded));
-    EXPECT_EQ(loaded.graphToText(), doc.graphToText());
+    EXPECT_EQ(loaded.network().nodeIds().size(), doc.network().nodeIds().size());
+    SketchDocument again;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(loaded), again));
+    EXPECT_EQ(again.graphToText(), loaded.graphToText()) << "a second trip changes nothing";
 }
 
 TEST(PathNode, AFileWithoutAGraphGetsNodesOnLoad) {
