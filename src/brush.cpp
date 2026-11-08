@@ -197,7 +197,7 @@ namespace curvy {
     }
 
     bool BrushDef::sameLook(const BrushDef& o) const {
-        return kind == o.kind && params() == o.params();
+        return kind == o.kind && params() == o.params() && graphType == o.graphType;
     }
 
     const std::vector<BrushPart>& BrushDef::parts() const {

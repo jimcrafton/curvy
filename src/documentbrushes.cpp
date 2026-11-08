@@ -292,6 +292,7 @@ namespace curvy {
             }
             options.brush = def;
             options.brushRef = 0;
+            options.graphSettings.clear();   // the settings belong to the asset of the brush they were made for
             object->setStrokeOptions(options);
             if (def && object->stroke().isNone()) {
                 object->setStroke(defaultStroke().isNone() ? SketchPaint::solid(SketchColor::gray(0.0f)) : defaultStroke());

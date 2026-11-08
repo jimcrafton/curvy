@@ -306,6 +306,138 @@ namespace curvy {
         updating_ = false;
     }
 
+    void BrushPanel::showSettingRows(const BrushDef* def, const GraphBrushInfo* info) {
+        auto* body = dynamic_cast<newui::SubView*>(root_.findView("brushPanelBody"));
+        if (body == nullptr) {
+            return;   // the older sidebar layout has no room for them
+        }
+        for (auto& entry : settingRows_) {
+            for (SettingRow& row : entry.second) {
+                row.row->setVisible(false);
+            }
+        }
+        if (def == nullptr || info == nullptr || info->settings.empty()) {
+            return;
+        }
+        auto found = settingRows_.find(info->type);
+        if (found == settingRows_.end()) {
+            std::vector<SettingRow> rows;
+            auto makeRow = [body]() {
+                auto* row = new newui::SubView();
+                row->setDesiredSize(newui::Size(0, 24));
+                auto layout = std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal);
+                layout->setSpacing(6);
+                layout->setCrossAxisAlignment(newui::CrossAxisAlignment::Center);
+                row->setLayout(std::move(layout));
+                body->addChild(row);
+                return row;
+            };
+            for (const GraphBrushSetting& setting : info->settings) {
+                SettingRow made;
+                made.name = setting.name;
+                made.defaultValue = setting.defaultValue;
+                made.row = makeRow();
+                auto* label = new newui::Label();
+                label->setText(setting.label);
+                label->setTextAlignment(newui::TextAlignment::Left);
+                label->setDesiredSize(newui::Size(100, 17));
+                made.row->addChild(label);
+                made.field = new newui::TextField();
+                made.field->setName("brushSetting_" + setting.name);
+                made.field->setDesiredSize(newui::Size(0, 20));
+                made.field->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
+                made.field->onReturnPressed += [this](newui::TextField&) {
+                    applyFields();
+                    return newui::SyncReturn::Handled;
+                };
+                made.row->addChild(made.field);
+                rows.push_back(made);
+            }
+            SettingRow reset;
+            reset.row = makeRow();
+            auto* button = new newui::Button();
+            button->setText("Reset settings");
+            button->setDesiredSize(newui::Size(0, 22));
+            button->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
+            button->onClick += [this](newui::Control&) {
+                if (std::shared_ptr<const BrushDef> current = document_.findBrush(document_.activeBrush())) {
+                    const std::size_t id = current->id;
+                    document_.changeSelectionStrokeOptions([id](StrokeOptions& options) {
+                        if (options.brush && options.brush->id == id) {
+                            options.graphSettings.clear();
+                        }
+                    });
+                }
+                return newui::SyncReturn::Handled;
+            };
+            reset.button = button;
+            reset.row->addChild(button);
+            rows.push_back(reset);
+            found = settingRows_.emplace(info->type, std::move(rows)).first;
+        }
+        // The values are the selected stroke's own; with no stroke of this brush selected the asset's values are shown and cannot be edited.
+        const StrokeOptions* mine = selectedGraphOptions(*def);
+        for (SettingRow& row : found->second) {
+            row.row->setVisible(true);
+            if (row.button != nullptr) {
+                row.button->setEnabled(mine != nullptr);
+            }
+            if (row.field != nullptr) {
+                double value = row.defaultValue;
+                for (const auto& [name, changed] : mine != nullptr ? mine->graphSettings : GraphBrushSettings{}) {
+                    if (name == row.name) {
+                        value = changed;
+                    }
+                }
+                row.field->setText(numberText(value));
+                row.field->setEnabled(mine != nullptr);
+            }
+        }
+    }
+
+    const StrokeOptions* BrushPanel::selectedGraphOptions(const BrushDef& def) const {
+        if (def.kind != BrushKind::Graph) {
+            return nullptr;
+        }
+        for (std::size_t id : document_.selection()) {
+            const SketchObject* object = document_.findById(id);
+            if (object != nullptr && !object->isSymbol() && object->strokeOptions().brush && object->strokeOptions().brush->id == def.id) {
+                return &object->strokeOptions();
+            }
+        }
+        return nullptr;
+    }
+
+    void BrushPanel::applySettingRows(const BrushDef& def, const GraphBrushInfo& info) {
+        auto found = settingRows_.find(info.type);
+        const StrokeOptions* mine = selectedGraphOptions(def);
+        if (found == settingRows_.end() || mine == nullptr) {
+            return;
+        }
+        GraphBrushSettings next;
+        for (const SettingRow& row : found->second) {
+            if (row.field == nullptr) {
+                continue;
+            }
+            double value = row.defaultValue;
+            for (const auto& [name, changed] : mine->graphSettings) {
+                if (name == row.name) {
+                    value = changed;
+                }
+            }
+            parseNumber(row.field, value);   // an unreadable entry keeps the value the stroke had
+            if (std::fabs(value - row.defaultValue) > 1e-9) {
+                next.emplace_back(row.name, value);
+            }
+        }
+        const std::size_t id = def.id;
+        document_.changeSelectionStrokeOptions([&next, id](StrokeOptions& options) {
+            if (options.brush && options.brush->id == id) {
+                options.graphSettings = next;
+            }
+        });
+    }
+
     void BrushPanel::fitRows(const BrushDef* def) {
         auto* body = dynamic_cast<newui::SubView*>(root_.findView("brushPanelBody"));
         auto* panel = dynamic_cast<newui::SubView*>(root_.findView("brushPanel"));
@@ -314,6 +446,8 @@ namespace curvy {
         }
         const bool nib = def != nullptr && def->kind == BrushKind::Calligraphic, scatter = def != nullptr && def->kind == BrushKind::Scatter,
                    art = def != nullptr && def->kind == BrushKind::Art;
+        const GraphBrushInfo* graph = def != nullptr && def->kind == BrushKind::Graph ? findGraphBrush(def->graphType) : nullptr;
+        showSettingRows(def, graph);
         struct Row { const char* name; bool shown; float height; };
         const Row rows[] = {
             {"brushList", true, 170.0f}, {"brushActions", true, 26.0f}, {"brushNameRow", def != nullptr, 24.0f},
@@ -323,6 +457,9 @@ namespace curvy {
             {"brushFlipRow", art, 26.0f}, {"brushLinkRow", art || scatter, 24.0f}};
         float height = 16.0f;   // the body's padding
         int shown = 0;
+        if (graph != nullptr && !graph->settings.empty()) {
+            height += float(graph->settings.size()) * 30.0f + 30.0f;   // a 24 high row and its gap each, then the Reset button
+        }
         for (const Row& row : rows) {
             if (auto* view = root_.findView(row.name)) {
                 view->setVisible(row.shown);
@@ -368,6 +505,11 @@ namespace curvy {
             }
             edited.setParams(edited.params());   // into range
             document_.changeBrush(def->id, edited);
+            if (def->kind == BrushKind::Graph) {
+                if (const GraphBrushInfo* info = findGraphBrush(def->graphType)) {
+                    applySettingRows(*def, *info);
+                }
+            }
         }
         refresh();
     }

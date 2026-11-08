@@ -28,6 +28,10 @@ namespace curvy {
     // Registers the three node types with jitnodes' registry (registerCurvyNodes() calls it).
     void registerAppearanceNodes();
 
+    // A stroke whose brush is a graph brush has its changed settings in the params as `brush.<name>` numbers. They are held by the stroke's brush
+    // node (an instance of the asset, wired to the stroke node), so paramsOf(Node) of the stroke node itself never has them.
+    inline constexpr const char* kBrushSettingPrefix = "brush.";
+
     // What a node holds for an item, as plain values: every float parameter that applies to the item (a solid paint has no gradient
     // parameters) and the tables, whose rows are the columns of the table in order. Two items are the same look exactly when their params
     // are equal, which is how the document tells which of the object and its node changed.

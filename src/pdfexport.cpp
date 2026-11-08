@@ -387,8 +387,8 @@ namespace curvy {
                 return drawParts(brush.bendAlong(shown, item.strokeWidth, item.strokeOptions.widths), item.opacity);
             }
             if (brush.kind == BrushKind::Graph) {
-                const auto cooked = cookGraphBrush(brush.graphType, shown, item.strokeWidth, item.strokeOptions.widths);
-                return cooked ? drawParts(graphBrushParts(cooked), item.opacity) : std::string();
+                const auto cooked = cookGraphBrush(brush.graphType, shown, item.strokeWidth, item.strokeOptions.widths, item.strokeOptions.graphSettings);
+                return cooked ? drawParts(graphBrushParts(cooked, item.strokeOptions, item.paint), item.opacity) : std::string();
             }
             std::string out;
             for (const BLMatrix2D& matrix : brush.placements(shown, item.strokeWidth, item.strokeOptions.widths)) {

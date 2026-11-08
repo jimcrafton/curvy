@@ -208,6 +208,36 @@ namespace curvy {
                         list->setScroll(0.0f);
                     }
                 }
+                {
+                    // A graph brush lists the settings of its asset as rows built at run time; Enter in a field stores a changed value.
+                    std::size_t oil = 0;
+                    for (const auto& entry : doc_->brushes()) {
+                        oil = entry->graphType == "brush_oil" ? entry->id : oil;
+                    }
+                    expect(oil != 0, "the oil graph brush is in the library");
+                    if (oil != 0) {
+                        doc_->clearSelection();
+                        doc_->setActiveBrush(oil);
+                        auto* field = dynamic_cast<newui::TextField*>(dock->propertyDock()->findView("brushSetting_dryStart"));
+                        expect(field != nullptr && field->isVisible() && field->text() == L"50" && !field->isEnabled(),
+                            "a graph brush shows the asset's values, read-only while no stroke with it is selected");
+                        const std::size_t line = doc_->add(SketchObject::makeLine(10, 10, 60, 10)).id();
+                        doc_->setSelection({line});
+                        doc_->applyBrush(oil);
+                        if (field != nullptr) {
+                            expect(field->isEnabled(), "the fields are editable with a stroke of that brush selected");
+                            field->setText(L"20");
+                            field->onReturnPressed(*field);
+                            const auto& tuned = doc_->findById(line)->strokeOptions().graphSettings;
+                            expect(tuned.size() == 1 && tuned[0].first == "dryStart" && tuned[0].second == 20.0, "Enter in a setting field changes that stroke");
+                            expect(doc_->findBrush(oil) != nullptr, "the brush in the library is not changed");
+                            field->setText(L"50");
+                            field->onReturnPressed(*field);
+                            expect(doc_->findById(line)->strokeOptions().graphSettings.empty(), "a value back at the asset's own is not stored");
+                        }
+                        doc_->deleteSelection();
+                    }
+                }
                 canvas_->setTool(SketchTool::Select);
                 key(newui::vkLetterE);
                 key(newui::vkLetterV);

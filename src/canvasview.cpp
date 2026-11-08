@@ -1,5 +1,6 @@
 #include "curvy/canvasview.h"
 #include "curvy/theme.h"
+#include "curvy/graphbrush.h"
 
 #include <newui/bundle.h>
 
@@ -37,6 +38,7 @@ namespace curvy {
     void CanvasView::repaintAll() {
         for (CanvasView* canvas : canvases()) {
             canvas->style().markDirty();
+            canvas->refreshCursor(canvas->lastPointer_, 0);   // the busy cursor comes and goes with the background cooks
         }
     }
 
@@ -856,6 +858,7 @@ namespace curvy {
         // The system cursor that stands in when a cursor image cannot be loaded.
         CursorKind fallbackFor(const std::string& name) {
             if (name == "crosshair" || name == "gradient" || name == "pen" || name == "pencil" || name == "scissors" || name == "knife" || name == "eraser") return CursorKind::Cross;
+            if (name == "busy") return CursorKind::AppStarting;
             if (name == "text") return CursorKind::IBeam;
             if (name == "hand" || name == "hand-grab" || name == "rotate") return CursorKind::Hand;
             if (name == "resize-ns") return CursorKind::SizeNS;
@@ -987,6 +990,9 @@ namespace curvy {
                     name = document_->guides()[std::size_t(guide)].vertical ? "resize-we" : "resize-ns";
                 }
             }
+        }
+        if (drag_ == Drag::None && !panning_ && graphBrushProgress().busy()) {
+            name = "busy";   // the arrow with a spinner: the editor still works while a brush stroke is drawn
         }
         setCanvasCursor(name);
     }

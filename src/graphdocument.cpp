@@ -1,5 +1,6 @@
 #include "curvy/graphdocument.h"
 
+#include "curvy/graphbrush.h"
 #include "curvy/pathnode.h"
 
 #include <algorithm>
@@ -276,6 +277,7 @@ namespace curvy {
         } catch (const std::exception&) {
             return false;
         }
+        registerEmbeddedBrushes();
         graphChanged();
         return true;
     }
@@ -286,6 +288,7 @@ namespace curvy {
         } catch (const std::exception&) {
             return false;
         }
+        registerEmbeddedBrushes();
         return true;
     }
 

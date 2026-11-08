@@ -1,0 +1,42 @@
+// Flow hair: seeds scattered along the stroke each start a trail through a curl-noise field, so the stroke begins as a tight band and fans out into
+// curling filaments. Input 0 is the guide. density is the number of hairs per guide unit (at most 6000 in all), curl the size of the curls, alpha the
+// opacity of a hair at its root. The hairs ignore pen pressure. A hair is about 70 dots and the host stops at 400000 shapes per stroke, so
+// density * 70 * stroke length (guide units) must stay under that, or the end of a long stroke is left empty.
+{
+  format: "jitnodes-asset",
+  version: 1,
+  assetVersion: 1,
+  type: "brush_flowhair",
+  inputs: 1,
+  promote: { referenceWidth: 1.4, guideLength: 14, density: 45, curl: 0.22, alpha: 0.4 },
+  graph: {
+    fps: 24,
+    display: 7,
+    nodes: [
+      { id: 1, type: "subnetInput", name: "guide", floats: { index: 0 }, inputs: [] },
+      { id: 2, type: "resample", name: "even", floats: { spacing: 0.1 }, inputs: [1] },
+      { id: 3, type: "smooth", name: "clean", floats: { iterations: 4, strength: 0.5, preserve: 1 }, inputs: [2] },
+      {
+        id: 4, type: "scatter", name: "seeds", floats: { count: 0, lineCount: 1800, spread: 0.3, seed: 11 },
+        expressions: { lineCount: "min(6000, parent.guideLength * parent.density)", spread: "parent.referenceWidth * 0.2" },
+        inputs: [3]
+      },
+      {
+        id: 5, type: "flow", name: "hairs",
+        floats: { steps: 70, stepLength: 0.07, scale: 0.22, octaves: 2, seed: 5, bothWays: 0 },
+        strings: { mode: "curl" },
+        expressions: { scale: "parent.curl" },
+        inputs: [4]
+      },
+      { id: 6, type: "curveSample", name: "dots", floats: { count: 0, spacing: 0.07 }, inputs: [5] },
+      {
+        id: 7, type: "wrangle", name: "look",
+        strings: {
+          code: "fade = 1 - u; Cd.x = lerp(0.05, 0.6, rand); Cd.y = lerp(0.25, 0.1, rand) * (0.6 + 0.4 * fade); Cd.z = lerp(0.35, 0.45, rand); radius = 0.018 + 0.028 * fade; alpha = a * fade * fade; softness = 1;"
+        },
+        expressions: { a: "parent.alpha" },
+        inputs: [6]
+      }
+    ]
+  }
+}

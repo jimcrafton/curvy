@@ -1,6 +1,7 @@
 #pragma once
 
 #include "curvy/brushlist.h"
+#include "curvy/graphbrush.h"
 #include "curvy/sketchdocument.h"
 
 #include <newui/controllers.h>
@@ -8,6 +9,7 @@
 #include <newui/rootview.h>
 
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -40,6 +42,22 @@ namespace curvy {
         void applyFields();
         // In the dock only: shows the rows of the active brush's kind and sizes the box to them.
         void fitRows(const BrushDef* def);
+        // Graph brush: one label and field per setting of the asset, made the first time that asset is shown (and then kept, hidden when
+        // another brush is active) as children of the panel body. Shows the rows of `info` (null: none) with the brush's values.
+        void showSettingRows(const BrushDef* def, const GraphBrushInfo* info);
+        // Writes the fields into the selected strokes that have this brush (their own settings, one undo step); the brush itself is not changed.
+        void applySettingRows(const BrushDef& def, const GraphBrushInfo& info);
+        // The stroke options of the first selected object drawn with `def`, or null.
+        const StrokeOptions* selectedGraphOptions(const BrushDef& def) const;
+
+        struct SettingRow {
+            std::string name;
+            double defaultValue = 0.0;
+            newui::SubView* row = nullptr;
+            newui::TextField* field = nullptr;   // null for the last row of an asset: the Reset button
+            newui::Button* button = nullptr;
+        };
+        std::map<std::string, std::vector<SettingRow>> settingRows_;   // by asset type
 
         newui::RootView& root_;
         SketchDocument& document_;

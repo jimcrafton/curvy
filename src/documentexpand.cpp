@@ -108,8 +108,8 @@ namespace curvy {
                         } else if (brush.kind == BrushKind::Art) {
                             artwork(brush.bendAlong(shown, item.strokeWidth, item.strokeOptions.widths));
                         } else if (brush.kind == BrushKind::Graph) {
-                            if (const auto cooked = cookGraphBrush(brush.graphType, shown, item.strokeWidth, item.strokeOptions.widths)) {
-                                artwork(graphBrushParts(cooked));
+                            if (const auto cooked = cookGraphBrush(brush.graphType, shown, item.strokeWidth, item.strokeOptions.widths, item.strokeOptions.graphSettings)) {
+                                artwork(graphBrushParts(cooked, item.strokeOptions, item.paint));
                             }
                         } else {
                             for (const BLMatrix2D& matrix : brush.placements(shown, item.strokeWidth, item.strokeOptions.widths)) {

@@ -1,0 +1,8 @@
+﻿# App-side CMake for a newui app that tests can drive. Gate it so a shipping build has none of the automation server.
+# The tests are Python (D:\code\newui\tools\guitest): there is nothing to build for the driver.
+option(MYAPP_GUI_AUTOMATION "Build with newui's automation server" ON)
+if(MYAPP_GUI_AUTOMATION)
+    target_link_libraries(myapp PRIVATE newui_automation)
+    target_compile_definitions(myapp PRIVATE MYAPP_GUI_AUTOMATION)
+endif()
+# Run the GUI tests directly (needs an idle desktop):  python test_myapp_gui.py --exe <path to myapp.exe>

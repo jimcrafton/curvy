@@ -6,7 +6,7 @@
   assetVersion: 1,
   type: "brush_leaves",
   inputs: 1,
-  promote: { referenceWidth: 1.6, guideLength: 14, guideStart: 0, strokeLength: 0, stampSpacing: 0.064, driftLength: 40 },
+  promote: { referenceWidth: 1.6, guideLength: 14, guideStart: 0, strokeLength: 0, stampSpacing: 0.064, driftLength: 40, tailTaper: 0 },
   graph: {
     fps: 24,
     display: 9,

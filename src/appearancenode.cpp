@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <initializer_list>
 #include <memory>
 
@@ -104,6 +105,9 @@ namespace curvy {
                 n["arrowEnd"] = float(int(o.arrowEnd));
                 n["arrowScale"] = float(o.arrowScale);
                 n["brush"] = float(o.brush ? o.brush->id : o.brushRef);
+                for (const auto& [name, value] : o.graphSettings) {
+                    n[kBrushSettingPrefix + name] = float(value);   // held by the stroke's brush node (an instance of the asset), not by this one
+                }
                 std::vector<std::vector<float>>& dashes = p.tables[kDashes.name];
                 for (double dash : o.dashes) {
                     dashes.push_back({float(dash)});
@@ -410,6 +414,21 @@ namespace curvy {
                 const std::size_t id = std::size_t(std::lround(params.numbers.at("brush")));
                 o.brush = id != 0 && library.brush ? library.brush(id) : nullptr;
                 o.brushRef = o.brush ? 0 : id;
+            }
+            {
+                // The settings are all the brush.* numbers; they are replaced as a whole when the set differs (a value put back is gone from it).
+                auto settingsOf = [](const AppearanceParams& q) {
+                    std::vector<std::pair<std::string, double>> found;
+                    for (const auto& [name, value] : q.numbers) {
+                        if (name.compare(0, std::strlen(kBrushSettingPrefix), kBrushSettingPrefix) == 0 && name.size() > std::strlen(kBrushSettingPrefix)) {
+                            found.emplace_back(name.substr(std::strlen(kBrushSettingPrefix)), double(value));
+                        }
+                    }
+                    return found;
+                };
+                if (settingsOf(params) != settingsOf(baseParams)) {
+                    o.graphSettings = settingsOf(params);
+                }
             }
             if (tableDiffers(kDashes)) {
                 o.dashes.clear();

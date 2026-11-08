@@ -1,6 +1,7 @@
 #include "curvy/sketchdocument.h"
 
 #include "curvy/appearancenode.h"
+#include "curvy/graphbrush.h"
 #include "curvy/pathnode.h"
 #include "curvy/shapenode.h"
 
@@ -13,6 +14,33 @@
 namespace curvy {
 
     namespace {
+        // The brush node of a stroke node: an instance of a graph brush asset that takes its input from the stroke node.
+        jitnodes::NodeId brushInstanceOf(const jitnodes::Network& net, jitnodes::NodeId stroke) {
+            for (jitnodes::NodeId consumer : net.consumersOf(stroke)) {
+                if (net.hasNode(consumer) && net.node(consumer).isAssetInstance() && findGraphBrush(net.node(consumer).typeName()) != nullptr) {
+                    return consumer;
+                }
+            }
+            return jitnodes::invalidNodeId;
+        }
+
+        // paramsOf(node) plus, for a stroke node, the brush.* numbers of its brush node: the settings that differ from the asset's own value.
+        AppearanceParams paramsWithBrush(const jitnodes::Network& net, jitnodes::NodeId id) {
+            AppearanceParams params = paramsOf(net.node(id));
+            if (net.node(id).typeName() != kStrokeNodeType) {
+                return params;
+            }
+            const jitnodes::NodeId instance = brushInstanceOf(net, id);
+            const GraphBrushInfo* info = instance != jitnodes::invalidNodeId ? findGraphBrush(net.node(instance).typeName()) : nullptr;
+            for (const GraphBrushSetting& setting : info != nullptr ? info->settings : std::vector<GraphBrushSetting>{}) {
+                const jitnodes::Node& node = net.node(instance);
+                if (node.hasFloat(setting.name) && node.baseFloat(setting.name) != float(setting.defaultValue)) {
+                    params.numbers[kBrushSettingPrefix + setting.name] = node.baseFloat(setting.name);
+                }
+            }
+            return params;
+        }
+
         bool hasNode(const jitnodes::Network& net, jitnodes::NodeId id) {
             const std::vector<jitnodes::NodeId> ids = net.nodeIds();
             return std::find(ids.begin(), ids.end(), id) != ids.end();
@@ -500,7 +528,9 @@ namespace curvy {
             d.all = false;
             for (jitnodes::NodeId id : touched) {
                 for (int guard = 0; id != jitnodes::invalidNodeId && net->hasNode(id) && guard < 1000; ++guard) {
-                    const jitnodes::NodeId up = isAppearanceNodeType(net->node(id).typeName()) ? net->inputOf(id, 0) : jitnodes::invalidNodeId;
+                    // A brush node hangs off its stroke node, so an edit of it is an edit of the stroke's look.
+                    const bool brushNode = net->node(id).isAssetInstance() && findGraphBrush(net->node(id).typeName()) != nullptr;
+                    const jitnodes::NodeId up = isAppearanceNodeType(net->node(id).typeName()) || brushNode ? net->inputOf(id, 0) : jitnodes::invalidNodeId;
                     if (up == jitnodes::invalidNodeId) {
                         // The chain hangs off the shape's placement node, so the shape is the one behind it.
                         d.shapes.insert(id);
@@ -549,7 +579,7 @@ namespace curvy {
                 if (held == appearanceSynced_.end() || node.typeName() != appearanceNodeType(items[i].kind)) {
                     continue;
                 }
-                const AppearanceParams have = paramsOf(node), want = paramsOf(items[i]);
+                const AppearanceParams have = paramsWithBrush(net, chain[i]), want = paramsOf(items[i]);
                 if (have != held->second && want == held->second) {
                     items[i] = itemFrom(have, want, items[i], library);
                     held->second = paramsOf(items[i]);
@@ -589,6 +619,9 @@ namespace curvy {
                 ++keep;
             }
             while (chain.size() > keep) {
+                if (const jitnodes::NodeId brush = brushInstanceOf(net, chain.back()); brush != jitnodes::invalidNodeId) {
+                    net.removeNode(brush);
+                }
                 net.removeNode(chain.back());
                 appearanceSynced_.erase(NodeRef(scope, chain.back()));
                 chain.pop_back();
@@ -610,6 +643,33 @@ namespace curvy {
                         store(node, want);
                     }
                     appearanceSynced_[NodeRef(scope, chain[i])] = want;
+                }
+                // While a file is being read a brush is only an id, bound to the library afterwards; its node (from the file's graph) stays as it is.
+                if (items[i].kind == AppearanceKind::Stroke && !(items[i].strokeOptions.brushRef != 0 && !items[i].strokeOptions.brush)) {
+                    // A graph brush is an instance of its asset, wired to the stroke node; its parameters are this stroke's settings.
+                    const StrokeOptions& options = items[i].strokeOptions;
+                    const GraphBrushInfo* info = options.brush && options.brush->kind == BrushKind::Graph ? findGraphBrush(options.brush->graphType) : nullptr;
+                    jitnodes::NodeId instance = brushInstanceOf(net, chain[i]);
+                    if (instance != jitnodes::invalidNodeId && (info == nullptr || net.node(instance).typeName() != info->type)) {
+                        net.removeNode(instance);
+                        instance = jitnodes::invalidNodeId;
+                    }
+                    if (info != nullptr) {
+                        if (instance == jitnodes::invalidNodeId) {
+                            instance = addOwnedNode(net, scope, shape, std::uint32_t(0x1000 + i), info->type, net.uniqueName("brush"));
+                            net.connect(chain[i], instance, 0);
+                        }
+                        for (const GraphBrushSetting& setting : info->settings) {
+                            double value = setting.defaultValue;
+                            for (const auto& [name, changed] : options.graphSettings) {
+                                value = name == setting.name ? changed : value;
+                            }
+                            jitnodes::Node& brushNode = net.node(instance);
+                            if (brushNode.hasFloat(setting.name) && brushNode.baseFloat(setting.name) != float(value)) {
+                                brushNode.setFloat(setting.name, float(value));
+                            }
+                        }
+                    }
                 }
             }
             appearanceChains_[object->graphRef()] = AppearanceChain{chain, items};
@@ -641,6 +701,15 @@ namespace curvy {
                 if (used.count(NodeRef(scope, id)) == 0 && isAppearanceNodeType(net->node(id).typeName())) {
                     net->removeNode(id);
                     appearanceSynced_.erase(NodeRef(scope, id));
+                }
+            }
+            // A brush node whose stroke node is gone (or never was a look node of an object) goes with it.
+            for (jitnodes::NodeId id : net->nodeIds()) {
+                if (net->hasNode(id) && net->node(id).isAssetInstance() && findGraphBrush(net->node(id).typeName()) != nullptr) {
+                    const jitnodes::NodeId input = net->inputOf(id, 0);
+                    if (input == jitnodes::invalidNodeId || !net->hasNode(input) || net->node(input).typeName() != kStrokeNodeType) {
+                        net->removeNode(id);
+                    }
                 }
             }
         }

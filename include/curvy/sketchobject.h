@@ -241,6 +241,9 @@ namespace curvy {
         // is being read, before the library is in.
         std::shared_ptr<const BrushDef> brush;
         std::size_t brushRef = 0;
+        // Graph brush: the asset settings this stroke changed (promoted float name, value); the others have the asset's own value. Each stroke
+        // has its own, and the stroke's brush node in the document graph shows the same values.
+        std::vector<std::pair<std::string, double>> graphSettings;
         // Inside / outside applies to closed outlines (an open path stays centred). Arrowheads go on the first and last end of the open
         // paths; `arrowScale` is a percentage of the default size (four stroke weights long). Both are drawn as one filled outline.
         StrokeAlign align = StrokeAlign::Center;
@@ -252,7 +255,7 @@ namespace curvy {
 
         bool operator==(const StrokeOptions& other) const {
             return cap == other.cap && join == other.join && miterLimit == other.miterLimit && dashes == other.dashes && widths == other.widths &&
-                brush == other.brush && brushRef == other.brushRef && align == other.align && arrowStart == other.arrowStart &&
+                brush == other.brush && brushRef == other.brushRef && graphSettings == other.graphSettings && align == other.align && arrowStart == other.arrowStart &&
                 arrowEnd == other.arrowEnd && arrowScale == other.arrowScale;
         }
         bool operator!=(const StrokeOptions& other) const { return !(*this == other); }

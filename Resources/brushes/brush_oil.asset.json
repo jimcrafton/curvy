@@ -6,7 +6,7 @@
   assetVersion: 1,
   type: "brush_oil",
   inputs: 1,
-  promote: { referenceWidth: 1.7, guideLength: 14, guideStart: 0, strokeLength: 0, bristles: 34, dryStart: 50, dryRange: 30 },
+  promote: { referenceWidth: 1.7, guideLength: 14, guideStart: 0, strokeLength: 0, bristles: 34, dryStart: 50, dryRange: 30, tintable: 1, tailTaper: 0 },
   graph: {
     fps: 24,
     display: 7,
@@ -25,9 +25,9 @@
       {
         id: 7, type: "wrangle", name: "paint",
         strings: {
-          code: "k = floor(u * b); h = sin(k * 12.9898 + 78.233) * 43758.5453; h = h - floor(h); g = sin(k * 39.346 + 11.135) * 24634.6345; g = g - floor(g); t = clamp(h * 0.8 + 0.2 * sin(along * 0.786 + g * 6.28), 0, 1); e = abs(u - 0.5) * 2; e = e * e * e; t = clamp(t + e * 0.35, 0, 1); Cd.x = lerp(0.42, 0.98, t); Cd.y = lerp(0.07, 0.62, t * t); Cd.z = lerp(0.1, 0.3, t * t); cr = h > 0.88 ? 0.75 : 0; Cd.x = lerp(Cd.x, 0.98, cr); Cd.y = lerp(Cd.y, 0.88, cr); Cd.z = lerp(Cd.z, 0.62, cr); radius = 0.05; softness = 0.3; alpha = along < c + d * g ? 1 : 0;"
+          code: "k = floor(u * b); h = sin(k * 12.9898 + 78.233) * 43758.5453; h = h - floor(h); g = sin(k * 39.346 + 11.135) * 24634.6345; g = g - floor(g); t = clamp(h * 0.8 + 0.2 * sin(along * 0.786 + g * 6.28), 0, 1); e = abs(u - 0.5) * 2; e = e * e * e; t = clamp(t + e * 0.35, 0, 1); Cd.x = lerp(0.42, 0.98, t); Cd.y = lerp(0.07, 0.62, t * t); Cd.z = lerp(0.1, 0.3, t * t); cr = h > 0.88 ? 0.75 : 0; Cd.x = lerp(Cd.x, 0.98, cr); Cd.y = lerp(Cd.y, 0.88, cr); Cd.z = lerp(Cd.z, 0.62, cr); s = lerp(0.5, 1, t); Cd.x = lerp(Cd.x, s, a); Cd.y = lerp(Cd.y, s, a); Cd.z = lerp(Cd.z, s, a); radius = 0.05; softness = 0.3; alpha = along < c + d * g ? 1 : 0;"
         },
-        expressions: { b: "parent.bristles", c: "parent.dryStart", d: "parent.dryRange" },
+        expressions: { a: "parent.tintable", b: "parent.bristles", c: "parent.dryStart", d: "parent.dryRange" },
         inputs: [6]
       }
     ]

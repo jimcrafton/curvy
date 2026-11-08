@@ -174,6 +174,13 @@ int main(int argc, char** argv) {
         return curvy::runWorkspaceChecks(window);
     }
     window.start(options.startupPath);
+    // From here the hint bar follows the cooks too; the handler is cleared again before the window goes.
+    curvy::setGraphBrushReadyHandler([&window] {
+        newui::Application::instance().runLoop().post([&window] {
+            curvy::CanvasView::repaintAll();
+            window.brushProgressChanged();
+        });
+    });
     app.runLoop().onStart.add([&window, &options](newui::RunLoop& loop) {
         window.startAutosave();
         // The recovery question and the welcome card wait until the window is on screen, so the question has a window behind it.
@@ -192,6 +199,7 @@ int main(int argc, char** argv) {
     }
 #endif
     app.run();
+    curvy::setGraphBrushReadyHandler([] {});
 #ifdef CURVY_GUI_AUTOMATION
     newui::Automation::stop();
 #endif

@@ -9,14 +9,17 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cmath>
 #include <condition_variable>
 #include <cstring>
 #include <exception>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -31,6 +34,84 @@ namespace curvy {
 
         bool endsWith(const std::string& text, const std::string& tail) {
             return text.size() >= tail.size() && text.compare(text.size() - tail.size(), tail.size(), tail) == 0;
+        }
+    }
+
+    bool isHostBrushParam(const std::string& name) {
+        for (const char* host : {kBrushReferenceWidthParam, kBrushGuideLengthParam, kBrushGuideStartParam, kBrushStrokeLengthParam,
+                 kBrushGuideMinXParam, kBrushGuideMinYParam, kBrushGuideMaxXParam, kBrushGuideMaxYParam, kBrushSettleTimeParam}) {
+            if (name == host) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    namespace {
+        // "dryStart" -> "Dry start"
+        std::string settingLabel(const std::string& name) {
+            std::string label;
+            for (char c : name) {
+                if (std::isupper(static_cast<unsigned char>(c)) && !label.empty()) {
+                    label += ' ';
+                    label += char(std::tolower(static_cast<unsigned char>(c)));
+                } else {
+                    label += label.empty() ? char(std::toupper(static_cast<unsigned char>(c))) : c;
+                }
+            }
+            return label;
+        }
+
+        // What a registered asset type is as a brush; nothing for a plain asset (no problem text) or one that cannot be a brush (with the reason).
+        std::optional<GraphBrushInfo> brushInfoOf(const std::string& type, const std::string& path, std::string* problem) {
+            const std::unique_ptr<jitnodes::Node> probe = jitnodes::NodeRegistry::instance().create(type);
+            if (!probe || !probe->hasFloat(kBrushReferenceWidthParam) || !probe->hasFloat(kBrushGuideLengthParam)) {
+                return std::nullopt;
+            }
+            GraphBrushInfo info;
+            info.type = type;
+            info.path = path;
+            info.referenceWidth = double(probe->baseFloat(kBrushReferenceWidthParam));
+            info.hasTintable = probe->hasFloat(kBrushTintableParam);
+            info.tintableDefault = info.hasTintable ? double(probe->baseFloat(kBrushTintableParam)) : 0.0;
+            info.simulation = probe->hasFloat(kBrushSettleTimeParam);
+            info.settleTime = info.simulation ? double(probe->baseFloat(kBrushSettleTimeParam)) : 0.0;
+            for (const std::string& name : probe->spareNames()) {
+                if (!isHostBrushParam(name)) {
+                    info.settings.push_back({name, settingLabel(name), double(probe->baseFloat(name))});
+                }
+            }
+            if (!(info.referenceWidth > 0.0)) {
+                if (problem != nullptr) {
+                    *problem = "referenceWidth must be above 0";
+                }
+                return std::nullopt;
+            }
+            return info;
+        }
+
+        // Brushes that came with a document's graph and are not in the brush folder. A map, so a pointer from findGraphBrush stays valid when
+        // another is added while the cook threads work.
+        std::mutex& embeddedMutex() {
+            static std::mutex m;
+            return m;
+        }
+
+        std::map<std::string, GraphBrushInfo>& embeddedBrushes() {
+            static std::map<std::string, GraphBrushInfo> brushes;
+            return brushes;
+        }
+    }
+
+    void registerEmbeddedBrushes() {
+        for (const std::string& type : jitnodes::NodeRegistry::instance().assetNames()) {
+            if (findGraphBrush(type) != nullptr) {
+                continue;
+            }
+            if (std::optional<GraphBrushInfo> info = brushInfoOf(type, std::string(), nullptr)) {
+                std::lock_guard<std::mutex> guard(embeddedMutex());
+                embeddedBrushes().emplace(type, std::move(*info));
+            }
         }
     }
 
@@ -50,23 +131,12 @@ namespace curvy {
             const std::string type = file.filename().string().substr(0, file.filename().string().find('.'));
             try {
                 jitnodes::registerAssetFromFile(file.string());
-                const std::unique_ptr<jitnodes::Node> probe = jitnodes::NodeRegistry::instance().create(type);
-                if (!probe || !probe->hasFloat(kBrushReferenceWidthParam) || !probe->hasFloat(kBrushGuideLengthParam)) {
-                    continue;   // a plain asset, not a brush
+                std::string problem;
+                if (std::optional<GraphBrushInfo> info = brushInfoOf(type, file.string(), &problem)) {
+                    found.push_back(std::move(*info));
+                } else if (!problem.empty() && problems) {
+                    problems->push_back(file.filename().string() + ": " + problem);
                 }
-                GraphBrushInfo info;
-                info.type = type;
-                info.path = file.string();
-                info.referenceWidth = double(probe->baseFloat(kBrushReferenceWidthParam));
-                info.simulation = probe->hasFloat(kBrushSettleTimeParam);
-                info.settleTime = info.simulation ? double(probe->baseFloat(kBrushSettleTimeParam)) : 0.0;
-                if (!(info.referenceWidth > 0.0)) {
-                    if (problems) {
-                        problems->push_back(file.filename().string() + ": referenceWidth must be above 0");
-                    }
-                    continue;
-                }
-                found.push_back(std::move(info));
             } catch (const std::exception& e) {
                 if (problems) {
                     problems->push_back(file.filename().string() + ": " + e.what());
@@ -87,7 +157,9 @@ namespace curvy {
                 return &info;
             }
         }
-        return nullptr;
+        std::lock_guard<std::mutex> guard(embeddedMutex());
+        const auto found = embeddedBrushes().find(type);
+        return found != embeddedBrushes().end() ? &found->second : nullptr;
     }
 
     namespace {
@@ -125,6 +197,33 @@ namespace curvy {
             return widths.empty() ? 1.0 : 0.5 * (widthScaleAt(widths, t, true) + widthScaleAt(widths, t, false));
         }
 
+        // The tailTaper setting of a stroke: its own value, else the asset's default; 0 when the asset has none.
+        double tailTaperOf(const std::string& type, const GraphBrushSettings& settings) {
+            for (const auto& [name, value] : settings) {
+                if (name == kBrushTailTaperParam) {
+                    return std::clamp(value, 0.0, 1.0);
+                }
+            }
+            const GraphBrushInfo* info = findGraphBrush(type);
+            if (info != nullptr) {
+                for (const GraphBrushSetting& s : info->settings) {
+                    if (s.name == kBrushTailTaperParam) {
+                        return std::clamp(s.defaultValue, 0.0, 1.0);
+                    }
+                }
+            }
+            return 0.0;
+        }
+
+        // 1 until the last `taper` of the stroke, then a smooth fall to a tenth at the end.
+        double tailScale(double t, double taper) {
+            if (!(taper > 0.0) || t <= 1.0 - taper) {
+                return 1.0;
+            }
+            const double u = std::min(1.0, (t - (1.0 - taper)) / taper);
+            return 1.0 - 0.9 * u * u * (3.0 - 2.0 * u);
+        }
+
         // Points first..last of a subpath: a chunk of a long stroke. Neighbours share their end point.
         struct ChunkSpec {
             std::size_t piece = 0;
@@ -132,11 +231,21 @@ namespace curvy {
             std::size_t last = 0;
         };
 
+        // What a worker thread shows about the chunk it is cooking: how far the cook has got (0..1) and whether it was told to stop.
+        struct RunningChunk {
+            std::atomic<float> fraction{0.0f};
+            std::atomic<bool> cancel{false};
+            std::uint64_t key = 0;   // the stroke it belongs to
+        };
+
+        // Called by a cook thread whenever its cook reports; about every 150 ms it drops the strokes nobody asks for any more and tells the UI.
+        void graphBrushTick();
+
         // The chunk of a subpath through the asset; the result is added to `into` relative to `global`, where the whole stroke starts.
         // The asset is told how far along the stroke the chunk begins (`guideStart`, when it has one) so what depends on the distance travelled
         // (running dry, the colour drift) carries on across chunks.
         void cookOne(const std::string& type, const MeasuredPath& m, const ChunkSpec& chunk, const BLPoint& global, double k,
-            const std::vector<WidthPoint>& widths, GraphBrushResult& into) {
+            const std::vector<WidthPoint>& widths, const GraphBrushSettings& settings, GraphBrushResult& into, RunningChunk* run = nullptr) {
             const std::size_t n = chunk.last - chunk.first + 1;
             const double startLength = m.at[chunk.first];
             const double length = m.at[chunk.last] - startLength;
@@ -146,11 +255,13 @@ namespace curvy {
             float* gy = guide.y();
             float* gw = guide.pointAttrib("w").data();
             const BLPoint origin = m.points[chunk.first];   // the guide starts at the origin, so a brush looks the same wherever it is drawn
+            const double taper = widths.empty() ? tailTaperOf(type, settings) : 0.0;
             for (std::size_t i = 0; i < n; ++i) {
                 const std::size_t at = chunk.first + i;
                 gx[i] = float((m.points[at].x - origin.x) / k);
                 gy[i] = float((m.points[at].y - origin.y) / k);
-                gw[i] = float(pressureAt(widths, m.at[at] / m.total));
+                const double t = m.at[at] / m.total;
+                gw[i] = float(pressureAt(widths, t) * tailScale(t, taper));
             }
             jitnodes::Primitive line;
             line.start = 0;
@@ -161,6 +272,11 @@ namespace curvy {
             const jitnodes::NodeId source = net.addNode("geometry");
             net.node(source).setGeometryParam("geometry", std::make_shared<const jitnodes::Geometry>(std::move(guide)));
             const jitnodes::NodeId brush = net.addNode(type);
+            for (const auto& [name, value] : settings) {
+                if (!isHostBrushParam(name) && net.node(brush).hasFloat(name)) {
+                    net.node(brush).setFloat(name, float(value));
+                }
+            }
             net.node(brush).setFloat(kBrushGuideLengthParam, float(length / k));
             if (net.node(brush).hasFloat(kBrushGuideMinXParam)) {
                 float x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f;
@@ -186,6 +302,20 @@ namespace curvy {
             if (const GraphBrushInfo* info = findGraphBrush(type); info != nullptr && info->simulation) {
                 net.setTime(info->settleTime);
             }
+            if (run != nullptr) {
+                if (run->cancel) {
+                    throw jitnodes::CookCancelled();
+                }
+                // Called on this thread at every node start and finish and at every simulation step; the cancel takes effect at the next one.
+                net.setProgressCallback([run, &net](const jitnodes::Network::CookProgress& p) {
+                    const double inNode = p.fraction < 1.0 ? p.fraction : 0.0;
+                    run->fraction = float(std::min(1.0, (double(p.nodesDone) + inNode) / double(std::max<std::size_t>(1, p.nodesTotal))));
+                    if (run->cancel) {
+                        net.cancel();
+                    }
+                    graphBrushTick();
+                });
+            }
             const jitnodes::GeometryHandle out = net.cookDisplay();
             if (!out || out->pointCount() == 0 || !out->hasPointAttrib("x") || !out->hasPointAttrib("y")) {
                 return;
@@ -194,6 +324,7 @@ namespace curvy {
             const float* y = out->y();
             auto channel = [&](const char* name) { const auto* a = out->findPointAttrib(name); return a ? a->data() : nullptr; };
             const float *cr = channel("Cd.x"), *cg = channel("Cd.y"), *cb = channel("Cd.z"), *alpha = channel("alpha"), *radius = channel("radius");
+            const float* softness = channel("softness");
             auto colorAt = [&](std::size_t i) {
                 return colorOf(cr ? cr[i] : 0.0f, cg ? cg[i] : 0.0f, cb ? cb[i] : 0.0f, alpha ? alpha[i] : 1.0f);
             };
@@ -207,6 +338,7 @@ namespace curvy {
                     dot.y = origin.y - global.y + double(y[i]) * k;
                     dot.radius = double(radius[i]) * k;
                     dot.color = colorAt(i);
+                    dot.softness = softness ? std::clamp(softness[i], 0.0f, 1.0f) : 0.0f;
                     into.dots.push_back(dot);
                 }
                 return;
@@ -238,6 +370,7 @@ namespace curvy {
         struct Plan {
             std::string type;
             std::vector<WidthPoint> widths;
+            GraphBrushSettings settings;
             std::vector<MeasuredPath> pieces;
             std::vector<ChunkSpec> chunks;
             BLPoint global = BLPoint(0, 0);
@@ -277,13 +410,20 @@ namespace curvy {
             return chunks;
         }
 
-        bool makePlan(const std::string& type, const BLPath& path, double strokeWidth, const std::vector<WidthPoint>& widths, Plan& plan) {
+        bool makePlan(const std::string& type, const BLPath& path, double strokeWidth, const std::vector<WidthPoint>& widths,
+            const GraphBrushSettings& settings, Plan& plan) {
             const GraphBrushInfo* info = findGraphBrush(type);
             if (info == nullptr || !(strokeWidth > 0.0) || !std::isfinite(strokeWidth)) {
                 return false;
             }
             plan.type = type;
             plan.widths = widths;
+            for (const auto& [name, value] : settings) {   // only the asset's own settings count, so a stray name does not split the cache
+                const auto known = std::find_if(info->settings.begin(), info->settings.end(), [&](const GraphBrushSetting& s) { return s.name == name; });
+                if (known != info->settings.end()) {
+                    plan.settings.emplace_back(name, value);
+                }
+            }
             plan.pieces = measurePath(path);
             plan.k = strokeWidth / info->referenceWidth;
             plan.chunks = chunksOf(plan.pieces, plan.k, info->simulation);
@@ -297,11 +437,14 @@ namespace curvy {
             return true;
         }
 
-        std::shared_ptr<const GraphBrushResult> cookChunk(const Plan& plan, std::size_t index) {
+        // Null when the cook was cancelled: the caller must not keep that as the chunk's paint.
+        std::shared_ptr<const GraphBrushResult> cookChunk(const Plan& plan, std::size_t index, RunningChunk* run = nullptr) {
             auto fragment = std::make_shared<GraphBrushResult>();
             try {
                 const ChunkSpec& chunk = plan.chunks[index];
-                cookOne(plan.type, plan.pieces[chunk.piece], chunk, plan.global, plan.k, plan.widths, *fragment);
+                cookOne(plan.type, plan.pieces[chunk.piece], chunk, plan.global, plan.k, plan.widths, plan.settings, *fragment, run);
+            } catch (const jitnodes::CookCancelled&) {
+                return nullptr;
             } catch (const std::exception&) {
                 // a brush that fails to cook draws nothing for that chunk
             }
@@ -368,7 +511,14 @@ namespace curvy {
         struct Pool {
             std::condition_variable wake;
             std::vector<Task> queue;
-            std::unordered_set<std::uint64_t> pending;
+            // The strokes being cooked, with when a paint last asked for each. A stroke nobody asks for within kLease is stale (deleted, moved off
+            // screen, or drawn with another weight since): its queued chunks are dropped and its running ones stopped.
+            std::unordered_map<std::uint64_t, std::chrono::steady_clock::time_point> pending;
+            static constexpr std::chrono::milliseconds kLease{3000};
+            std::atomic<std::int64_t> lastTickMs{0};
+            std::size_t chunksTotal = 0, chunksDone = 0;   // since pending was last empty
+            std::vector<std::shared_ptr<RunningChunk>> running;
+            std::unordered_set<std::uint64_t> cancelled;   // strokes the user stopped: a hairline until they are edited (a new key)
             std::vector<std::thread> threads;
             std::function<void()> ready;
             bool stop = false;
@@ -378,6 +528,9 @@ namespace curvy {
                     std::lock_guard<std::mutex> guard(lock());
                     stop = true;
                     queue.clear();
+                    for (const auto& chunk : running) {
+                        chunk->cancel = true;   // a long simulation must not hold up the exit
+                    }
                 }
                 wake.notify_all();
                 for (std::thread& t : threads) {
@@ -394,6 +547,42 @@ namespace curvy {
                 for (unsigned i = 0; i < count; ++i) {
                     threads.emplace_back([this] { run(); });
                 }
+            }
+
+            // Caller holds lock().
+            void expireStaleLocked() {
+                const auto now = std::chrono::steady_clock::now();
+                for (auto it = pending.begin(); it != pending.end();) {
+                    if (now - it->second <= kLease) {
+                        ++it;
+                        continue;
+                    }
+                    const std::uint64_t key = it->first;
+                    it = pending.erase(it);
+                    const std::size_t before = queue.size();
+                    queue.erase(std::remove_if(queue.begin(), queue.end(), [key](const Task& t) { return t.plan->key == key; }), queue.end());
+                    std::size_t gone = before - queue.size();
+                    for (const auto& chunk : running) {
+                        if (chunk->key == key && !chunk->cancel) {
+                            chunk->cancel = true;
+                            ++gone;
+                        }
+                    }
+                    chunksTotal = chunksTotal > gone ? chunksTotal - gone : 0;
+                }
+            }
+
+            void tick() {
+                const std::int64_t ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+                std::int64_t last = lastTickMs.load();
+                if (ms - last < 150 || !lastTickMs.compare_exchange_strong(last, ms)) {
+                    return;
+                }
+                {
+                    std::lock_guard<std::mutex> guard(lock());
+                    expireStaleLocked();
+                }
+                notifyReady();
             }
 
             void notifyReady() {
@@ -419,16 +608,35 @@ namespace curvy {
                         task = std::move(queue.back());
                         queue.pop_back();
                     }
-                    (*task.fragments)[task.index] = cookChunk(*task.plan, task.index);
-                    if (task.remaining->fetch_sub(1) == 1) {
-                        auto result = joinChunks(*task.fragments);
-                        {
-                            std::lock_guard<std::mutex> guard(lock());
+                    auto chunk = std::make_shared<RunningChunk>();
+                    chunk->key = task.plan->key;
+                    {
+                        std::lock_guard<std::mutex> guard(lock());
+                        running.push_back(chunk);
+                    }
+                    auto fragment = cookChunk(*task.plan, task.index, chunk.get());
+                    {
+                        std::lock_guard<std::mutex> guard(lock());
+                        running.erase(std::find(running.begin(), running.end(), chunk));
+                    }
+                    if (!fragment || chunk->cancel) {
+                        continue;   // stopped: cancelGraphBrushCooks already forgot the stroke
+                    }
+                    (*task.fragments)[task.index] = std::move(fragment);
+                    const bool last = task.remaining->fetch_sub(1) == 1;
+                    std::shared_ptr<const GraphBrushResult> result;
+                    if (last) {
+                        result = joinChunks(*task.fragments);
+                    }
+                    {
+                        std::lock_guard<std::mutex> guard(lock());
+                        ++chunksDone;
+                        if (last) {
                             storeLocked(task.plan->key, std::move(result));
                             pending.erase(task.plan->key);
                         }
-                        notifyReady();
                     }
+                    notifyReady();
                 }
             }
         };
@@ -436,6 +644,10 @@ namespace curvy {
         Pool& pool() {
             static Pool instance;
             return instance;
+        }
+
+        void graphBrushTick() {
+            pool().tick();
         }
     }
 
@@ -456,16 +668,53 @@ namespace curvy {
         pool().ready = std::move(handler);
     }
 
+    GraphBrushProgress graphBrushProgress() {
+        std::lock_guard<std::mutex> guard(lock());
+        const Pool& p = pool();
+        GraphBrushProgress progress;
+        progress.strokes = p.pending.size();
+        progress.total = p.chunksTotal;
+        progress.done = std::min(p.chunksDone, p.chunksTotal);
+        double sum = double(progress.done);
+        for (const auto& chunk : p.running) {
+            if (!chunk->cancel) {
+                sum += chunk->fraction.load();
+            }
+        }
+        progress.fraction = progress.total > 0 ? std::min(1.0, sum / double(progress.total)) : 0.0;
+        return progress;
+    }
+
+    void cancelGraphBrushCooks() {
+        {
+            std::lock_guard<std::mutex> guard(lock());
+            Pool& p = pool();
+            p.queue.clear();
+            for (const auto& entry : p.pending) {
+                p.cancelled.insert(entry.first);
+            }
+            p.pending.clear();
+            p.chunksTotal = p.chunksDone = 0;
+            for (const auto& chunk : p.running) {
+                chunk->cancel = true;
+            }
+            if (p.cancelled.size() > 1024) {
+                p.cancelled.clear();
+            }
+        }
+        pool().notifyReady();
+    }
+
     GraphBrushCook cookGraphBrushLater(const std::string& type, const BLPath& path, double strokeWidth, const std::vector<WidthPoint>& widths,
-        bool* pending) {
+        bool* pending, const GraphBrushSettings& settings) {
         if (pending) {
             *pending = false;
         }
         auto plan = std::make_shared<Plan>();
-        if (!makePlan(type, path, strokeWidth, widths, *plan)) {
+        if (!makePlan(type, path, strokeWidth, widths, settings, *plan)) {
             return {};
         }
-        bool dropped = false;
+        bool dropped = false, queued = false;
         {
             std::lock_guard<std::mutex> guard(lock());
             auto found = cache().find(plan->key);
@@ -475,6 +724,8 @@ namespace curvy {
             Pool& p = pool();
             if (p.ready == nullptr || blockingDepth > 0) {
                 dropped = true;   // nobody to tell when it is done: the caller has to wait for it
+            } else if (p.cancelled.count(plan->key) != 0) {
+                return {};   // stopped by the user: a hairline until the stroke is edited, and nothing is coming
             } else if (p.pending.count(plan->key) == 0) {
                 if (p.pending.size() >= kMaxJobs) {
                     // far more strokes than can be cooked soon: forget the queue, the ones still on screen ask again when the repaint comes
@@ -483,7 +734,11 @@ namespace curvy {
                     dropped = true;
                 }
                 p.start();
-                p.pending.insert(plan->key);
+                if (p.pending.empty()) {
+                    p.chunksTotal = p.chunksDone = 0;
+                }
+                p.chunksTotal += plan->chunks.size();
+                p.pending[plan->key] = std::chrono::steady_clock::now();
                 auto fragments = std::make_shared<std::vector<std::shared_ptr<const GraphBrushResult>>>(plan->chunks.size());
                 auto remaining = std::make_shared<std::atomic<std::size_t>>(plan->chunks.size());
                 if (plan->chunks.empty()) {
@@ -495,20 +750,27 @@ namespace curvy {
                     p.queue.push_back(Task{plan, fragments, remaining, i});
                 }
                 p.wake.notify_all();
+                queued = true;
+            } else {
+                p.pending[plan->key] = std::chrono::steady_clock::now();   // asked again: still wanted
             }
             if (pending) {
                 *pending = !dropped;
             }
         }
+        if (queued) {
+            pool().notifyReady();   // a status display shows the new work
+        }
         if (dropped) {
-            return cookGraphBrush(type, path, strokeWidth, widths);
+            return cookGraphBrush(type, path, strokeWidth, widths, settings);
         }
         return {};
     }
 
-    GraphBrushCook cookGraphBrush(const std::string& type, const BLPath& path, double strokeWidth, const std::vector<WidthPoint>& widths) {
+    GraphBrushCook cookGraphBrush(const std::string& type, const BLPath& path, double strokeWidth, const std::vector<WidthPoint>& widths,
+        const GraphBrushSettings& settings) {
         Plan plan;
-        if (!makePlan(type, path, strokeWidth, widths, plan)) {
+        if (!makePlan(type, path, strokeWidth, widths, settings, plan)) {
             return {};
         }
         {
@@ -541,6 +803,10 @@ namespace curvy {
         const std::size_t revision = jitnodes::NodeRegistry::instance().assetRevision(type);
         key = mix(key, &revision, sizeof revision);
         key = mix(key, &strokeWidth, sizeof strokeWidth);
+        for (const auto& [name, value] : plan.settings) {
+            key = mix(key, name.data(), name.size());
+            key = mix(key, &value, sizeof value);
+        }
         for (const WidthPoint& w : widths) {
             key = mix(key, &w.t, sizeof w.t);
             key = mix(key, &w.left, sizeof w.left);
@@ -590,8 +856,23 @@ namespace curvy {
                 c.set_fill_style(BLRgba32(polygon.color));
                 c.fill_path(polygon.path);
             }
+            // The stops follow jitnodes' splat profile (smooth falloff over the outer `softness` of the radius).
+            static const float kFall[] = {1.0f, 0.84375f, 0.5f, 0.15625f, 0.0f};
             for (const GraphDot& dot : result.dots) {
-                c.set_fill_style(BLRgba32(dot.color));
+                if (dot.softness < 0.01f) {
+                    c.set_fill_style(BLRgba32(dot.color));
+                    c.fill_circle(BLCircle(dot.x, dot.y, dot.radius));
+                    continue;
+                }
+                BLGradient gradient(BLRadialGradientValues(dot.x, dot.y, dot.x, dot.y, dot.radius));
+                const std::uint32_t alpha = dot.color >> 24;
+                const double inner = 1.0 - double(dot.softness);
+                gradient.add_stop(0.0, BLRgba32((dot.color & 0x00FFFFFFu) | (alpha << 24)));
+                for (int s = 0; s < 5; ++s) {
+                    const std::uint32_t a = std::uint32_t(std::lround(double(alpha) * kFall[s]));
+                    gradient.add_stop(inner + double(dot.softness) * (s / 4.0), BLRgba32((dot.color & 0x00FFFFFFu) | (a << 24)));
+                }
+                c.set_fill_style(gradient);
                 c.fill_circle(BLCircle(dot.x, dot.y, dot.radius));
             }
             c.end();
@@ -606,16 +887,65 @@ namespace curvy {
         ctx.restore();
     }
 
+    std::vector<BrushPart> graphBrushPartsTinted(const GraphBrushCook& cook, float tr, float tg, float tb, float ta);
+
+    bool graphBrushTinted(const std::string& type, const GraphBrushSettings& settings) {
+        const GraphBrushInfo* info = findGraphBrush(type);
+        if (info == nullptr || !info->hasTintable) {
+            return false;
+        }
+        double value = info->tintableDefault;
+        for (const auto& [name, changed] : settings) {
+            if (name == kBrushTintableParam) {
+                value = changed;
+            }
+        }
+        return value >= 0.5;
+    }
+
+    void paintGraphBrushTinted(BLContext& ctx, const GraphBrushCook& cook, const std::function<bool(BLContext&)>& applyPaint) {
+        if (!cook) {
+            return;
+        }
+        paintGraphBrush(ctx, cook);
+        const GraphBrushResult::Raster& raster = cook.shapes->raster;
+        if (raster.scale <= 0.0) {
+            return;
+        }
+        // Multiply fills the whole box (also where nothing was drawn), so the shapes' own alpha is put back over it afterwards.
+        ctx.set_comp_op(BL_COMP_OP_MULTIPLY);
+        if (applyPaint(ctx)) {
+            ctx.fill_rect(BLRect(raster.box.x0 + cook.origin.x, raster.box.y0 + cook.origin.y, raster.box.x1 - raster.box.x0, raster.box.y1 - raster.box.y0));
+        }
+        ctx.set_comp_op(BL_COMP_OP_DST_IN);
+        paintGraphBrush(ctx, cook);
+        ctx.set_comp_op(BL_COMP_OP_SRC_OVER);
+    }
+
+    std::vector<BrushPart> graphBrushParts(const GraphBrushCook& cook, const StrokeOptions& options, const SketchPaint& paint) {
+        const bool solid = !paint.isNone() && !paint.isGradient() && !paint.isPattern() && !paint.isPoints();
+        if (!solid || !options.brush || !graphBrushTinted(options.brush->graphType, options.graphSettings)) {
+            return graphBrushParts(cook);
+        }
+        float tr = 1.0f, tg = 1.0f, tb = 1.0f;
+        paint.color().toRgb(tr, tg, tb);
+        return graphBrushPartsTinted(cook, tr, tg, tb, paint.color().alpha());
+    }
+
     std::vector<BrushPart> graphBrushParts(const GraphBrushCook& cook) {
+        return graphBrushPartsTinted(cook, 1.0f, 1.0f, 1.0f, 1.0f);
+    }
+
+    std::vector<BrushPart> graphBrushPartsTinted(const GraphBrushCook& cook, float tr, float tg, float tb, float ta) {
         std::vector<BrushPart> parts;
         if (!cook) {
             return parts;
         }
         const GraphBrushResult& result = *cook.shapes;
         const BLMatrix2D place = BLMatrix2D::make_translation(cook.origin.x, cook.origin.y);
-        auto fillOf = [](std::uint32_t argb) {
-            return SketchPaint::solid(SketchColor::rgb(float((argb >> 16) & 255u) / 255.0f, float((argb >> 8) & 255u) / 255.0f,
-                float(argb & 255u) / 255.0f, float(argb >> 24) / 255.0f));
+        auto fillOf = [&](std::uint32_t argb) {
+            return SketchPaint::solid(SketchColor::rgb(float((argb >> 16) & 255u) / 255.0f * tr, float((argb >> 8) & 255u) / 255.0f * tg,
+                float(argb & 255u) / 255.0f * tb, float(argb >> 24) / 255.0f * ta));
         };
         parts.reserve(result.polygons.size() + result.dots.size());
         for (const GraphPolygon& polygon : result.polygons) {

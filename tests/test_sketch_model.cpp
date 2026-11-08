@@ -10112,27 +10112,59 @@ namespace {
     };
 }
 
+TEST(GraphBrushAssets, ASoftDotFadesAtItsEdgeAndAHardDotDoesNot) {
+    auto edgeAlpha = [](float softness) {
+        auto result = std::make_shared<curvy::GraphBrushResult>();
+        curvy::GraphDot dot;
+        dot.x = 20.0;
+        dot.y = 20.0;
+        dot.radius = 15.0;
+        dot.color = 0xFF2040C0u;
+        dot.softness = softness;
+        result->dots.push_back(dot);
+        result->bounds = BLBox(0, 0, 40, 40);
+        curvy::GraphBrushCook cook;
+        cook.shapes = result;
+        BLImage target(40, 40, BL_FORMAT_PRGB32);
+        BLContext ctx(target);
+        ctx.clear_all();
+        curvy::paintGraphBrush(ctx, cook);
+        ctx.end();
+        BLImageData data;
+        target.get_data(&data);
+        const auto* px = static_cast<const std::uint8_t*>(data.pixel_data);
+        const auto alphaAt = [&](int x, int y) { return int(px[std::size_t(y) * std::size_t(data.stride) + std::size_t(x) * 4 + 3]); };
+        EXPECT_GT(alphaAt(20, 20), 235);
+        return alphaAt(20 + 13, 20);
+    };
+    EXPECT_GT(edgeAlpha(0.0f), 250);
+    EXPECT_LT(edgeAlpha(1.0f), 60);
+}
+
 TEST(GraphBrushAssets, TheShippedBrushesLoadAndAreRecognisedAsBrushes) {
     BrushAssetsGuard guard;
     std::vector<std::string> problems;
     const std::vector<curvy::GraphBrushInfo> brushes = curvy::loadBrushAssets(CURVY_BRUSH_ASSETS_DIR, &problems);
     EXPECT_TRUE(problems.empty());
-    ASSERT_EQ(brushes.size(), 5u);
-    EXPECT_EQ(brushes[0].type, "brush_gas");   // sorted by file name
-    EXPECT_EQ(brushes[1].type, "brush_ink");
-    EXPECT_EQ(brushes[2].type, "brush_leaves");
-    EXPECT_EQ(brushes[3].type, "brush_light");
-    EXPECT_EQ(brushes[4].type, "brush_oil");
-    EXPECT_TRUE(brushes[0].simulation);
-    EXPECT_NEAR(brushes[0].settleTime, 2.5, 1e-6);
-    EXPECT_TRUE(brushes[3].simulation);
-    EXPECT_FALSE(brushes[1].simulation);
-    EXPECT_NEAR(brushes[1].referenceWidth, 1.3, 1e-6);
-    EXPECT_NEAR(brushes[2].referenceWidth, 1.6, 1e-6);
-    EXPECT_NEAR(brushes[4].referenceWidth, 1.7, 1e-6);
+    ASSERT_EQ(brushes.size(), 7u);
+    EXPECT_EQ(brushes[0].type, "brush_flowhair");   // sorted by file name
+    EXPECT_EQ(brushes[1].type, "brush_gas");
+    EXPECT_EQ(brushes[2].type, "brush_ink");
+    EXPECT_EQ(brushes[3].type, "brush_leaves");
+    EXPECT_EQ(brushes[4].type, "brush_light");
+    EXPECT_EQ(brushes[5].type, "brush_oil");
+    EXPECT_EQ(brushes[6].type, "brush_watercolor");
+    EXPECT_FALSE(brushes[0].simulation);
+    EXPECT_TRUE(brushes[1].simulation);
+    EXPECT_NEAR(brushes[1].settleTime, 2.5, 1e-6);
+    EXPECT_TRUE(brushes[4].simulation);
+    EXPECT_FALSE(brushes[2].simulation);
+    EXPECT_NEAR(brushes[2].referenceWidth, 1.3, 1e-6);
+    EXPECT_NEAR(brushes[3].referenceWidth, 1.6, 1e-6);
+    EXPECT_NEAR(brushes[5].referenceWidth, 1.7, 1e-6);
     ASSERT_NE(curvy::findGraphBrush("brush_oil"), nullptr);
     EXPECT_EQ(curvy::findGraphBrush("wobbleAsset"), nullptr);
-    EXPECT_EQ(curvy::graphBrushes().size(), 5u);
+    EXPECT_EQ(curvy::graphBrushes().size(), 7u);
 }
 
 TEST(GraphBrushAssets, AFolderWithPlainAssetsAndBrokenFilesGivesOnlyTheBrushes) {
@@ -10157,7 +10189,7 @@ TEST(GraphBrushAssets, AFolderWithPlainAssetsAndBrokenFilesGivesOnlyTheBrushes) 
 
 TEST(GraphBrushAssets, ABrushInstanceCooksTheGuideIntoDotsOrPolygons) {
     BrushAssetsGuard guard;
-    for (const char* type : {"brush_oil", "brush_ink", "brush_leaves"}) {
+    for (const char* type : {"brush_oil", "brush_ink", "brush_leaves", "brush_flowhair", "brush_watercolor"}) {
         SCOPED_TRACE(type);
         jitnodes::Network net;
         const jitnodes::NodeId line = net.addNode("line");
@@ -10365,6 +10397,115 @@ TEST(GraphBrushAssets, ASimulationBrushIsSettledOverTheWholeStrokeInOneCook) {
     }
 }
 
+TEST(GraphBrushAssets, FlowHairAndWatercolourPaintAStrokeToItsEnd) {
+    BrushAssetsGuard guard;
+    BLPath curve;
+    curve.move_to(20, 120);
+    curve.cubic_to(80, 20, 160, 220, 260, 100);
+    for (const char* type : {"brush_flowhair", "brush_watercolor"}) {
+        SCOPED_TRACE(type);
+        const auto cooked = curvy::cookGraphBrush(type, curve, 12.0, {});
+        ASSERT_TRUE(cooked);
+        EXPECT_GT(cooked.shapes->dots.size(), 1000u);
+        EXPECT_GT(cooked.shapes->bounds.x1 + cooked.origin.x, 200.0);
+        if (const char* dir = std::getenv("CURVY_DUMP_DIR")) {   // look at it: set the folder and open <brush>.png
+            BLImage image(340, 300, BL_FORMAT_PRGB32);
+            BLContext ctx(image);
+            ctx.fill_all(BLRgba32(0xFFFFFFFFu));
+            curvy::paintGraphBrush(ctx, cooked);
+            ctx.end();
+            image.write_to_file((std::string(dir) + "/" + type + ".png").c_str());
+        }
+    }
+}
+
+TEST(WorkspaceModelBrushStatus, TheInfoSlotShowsBrushProgressInPlaceOfThePointer) {
+    curvy::WorkspaceModel model;
+    model.setDocument(true, "Untitled - A4");
+    model.setPointer(true, 10, 20, 100);
+    EXPECT_EQ(model.hintInfo(), "x 10  y 20  100%");
+    model.setBrushProgress(25);
+    EXPECT_EQ(model.hintInfo(), "Brush 25% - Esc stops");
+    model.setBrushProgress(-1);
+    EXPECT_EQ(model.hintInfo(), "x 10  y 20  100%");
+}
+
+TEST(GraphBrushAssets, ASimulationCookReportsProgressAndCanBeStopped) {
+    BrushAssetsGuard guard;
+    curvy::setGraphBrushReadyHandler([] {});
+    BLPath curve;
+    curve.move_to(20, 120);
+    curve.cubic_to(80, 20, 160, 220, 260, 100);
+    bool pending = false;
+    EXPECT_FALSE(curvy::cookGraphBrushLater("brush_gas", curve, 6.5, {}, &pending));   // a weight no other test cooks, so it is not cached
+    ASSERT_TRUE(pending);
+    double seen = 0.0;
+    for (int i = 0; i < 4000 && seen < 0.1 && curvy::graphBrushProgress().busy(); ++i) {
+        seen = std::max(seen, curvy::graphBrushProgress().fraction);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    EXPECT_GT(seen, 0.05) << "the simulation steps report how far it has got";
+    EXPECT_LT(seen, 1.0);
+
+    curvy::cancelGraphBrushCooks();
+    EXPECT_FALSE(curvy::graphBrushProgress().busy());
+    EXPECT_FALSE(curvy::cookGraphBrushLater("brush_gas", curve, 6.5, {}, &pending));   // stays a hairline: nothing is queued again
+    EXPECT_FALSE(pending);
+    EXPECT_FALSE(curvy::graphBrushProgress().busy());
+
+    // an edit (another weight) is a new stroke and cooks as usual
+    EXPECT_FALSE(curvy::cookGraphBrushLater("brush_ink", curve, 6.0, {}, &pending));
+    EXPECT_TRUE(pending);
+    for (int i = 0; i < 1000 && curvy::graphBrushProgress().busy(); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_TRUE(curvy::cookGraphBrushLater("brush_ink", curve, 6.0, {}, &pending));
+    curvy::setGraphBrushReadyHandler(nullptr);
+}
+
+TEST(GraphBrushAssets, AStrokeNobodyAsksForAnyMoreIsDroppedButOneThatIsAskedForStays) {
+    BrushAssetsGuard guard;
+    curvy::setGraphBrushReadyHandler([] {});
+    BLPath curve;
+    curve.move_to(20, 120);
+    curve.cubic_to(80, 20, 160, 220, 260, 100);
+    BLPath other;
+    other.move_to(20, 300);
+    other.cubic_to(90, 230, 150, 380, 240, 330);   // another shape, not a moved copy: a moved stroke shares its cook
+    bool pending = false;
+    // two long simulations: the first is "deleted" (never asked for again), the second is repainted like a stroke on screen
+    curvy::cookGraphBrushLater("brush_gas", curve, 7.0, {}, &pending);
+    ASSERT_TRUE(pending);
+    curvy::cookGraphBrushLater("brush_gas", other, 7.0, {}, &pending);
+    ASSERT_TRUE(pending);
+    EXPECT_EQ(curvy::graphBrushProgress().strokes, 2u);
+    const auto start = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - start < std::chrono::milliseconds(4500) && curvy::graphBrushProgress().strokes == 2) {
+        curvy::cookGraphBrushLater("brush_gas", other, 7.0, {}, &pending);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    EXPECT_EQ(curvy::graphBrushProgress().strokes, 1u) << "the stroke nobody asked for was dropped";
+    EXPECT_TRUE(curvy::cookGraphBrushLater("brush_gas", other, 7.0, {}, &pending) || pending) << "the one still asked for goes on";
+    curvy::cancelGraphBrushCooks();
+    curvy::setGraphBrushReadyHandler(nullptr);
+}
+
+TEST(GraphBrushAssets, FlowHairOfALongStrokeReachesItsEnd) {
+    BrushAssetsGuard guard;
+    // 900 long at weight 16: about 65 guide units, the length of a long stroke on a page.
+    BLPath line;
+    line.move_to(10, 10);
+    line.line_to(910, 10);
+    const auto cooked = curvy::cookGraphBrush("brush_flowhair", line, 16.0, {});
+    ASSERT_TRUE(cooked);
+    double endX = -1e9;
+    for (const curvy::GraphDot& dot : cooked.shapes->dots) {
+        endX = std::max(endX, dot.x + cooked.origin.x);
+    }
+    EXPECT_GT(endX, 850.0);
+    EXPECT_LT(cooked.shapes->dots.size(), 380000u);
+}
+
 TEST(GraphBrushAssets, ABackgroundCookIsQueuedThenFoundInTheCache) {
     BrushAssetsGuard guard;
     std::atomic<int> ready{0};
@@ -10376,10 +10517,12 @@ TEST(GraphBrushAssets, ABackgroundCookIsQueuedThenFoundInTheCache) {
     auto cooked = curvy::cookGraphBrushLater("brush_ink", line, 5.0, {}, &pending);
     EXPECT_FALSE(cooked);
     EXPECT_TRUE(pending);
-    for (int i = 0; i < 1000 && ready.load() == 0; ++i) {
+    EXPECT_TRUE(curvy::graphBrushProgress().busy() || ready.load() > 1);   // queued: the handler was told
+    for (int i = 0; i < 1000 && curvy::graphBrushProgress().busy(); ++i) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    EXPECT_EQ(ready.load(), 1);
+    EXPECT_FALSE(curvy::graphBrushProgress().busy());
+    EXPECT_GE(ready.load(), 2);   // once for the queueing and once for each chunk
     cooked = curvy::cookGraphBrushLater("brush_ink", line, 5.0, {}, &pending);
     EXPECT_TRUE(cooked);
     EXPECT_FALSE(pending);
@@ -10415,6 +10558,92 @@ TEST(GraphBrushAssets, PenPressureNarrowsTheCookedStroke) {
     EXPECT_NE(full.shapes, eased.shapes);
 }
 
+TEST(GraphBrushAssets, TheTailTaperThinsTheEndOfAStrokeWithoutPressureOnly) {
+    BrushAssetsGuard guard;
+    BLPath line;
+    line.move_to(10, 50);
+    line.line_to(90, 50);
+    const curvy::GraphBrushSettings taper{{"tailTaper", 0.4}};
+    const auto blunt = curvy::cookGraphBrush("brush_ink", line, 20.0, {});
+    const auto tapered = curvy::cookGraphBrush("brush_ink", line, 20.0, {}, taper);
+    ASSERT_TRUE(blunt);
+    ASSERT_TRUE(tapered);
+    EXPECT_NEAR(acrossExtent(*tapered.shapes), acrossExtent(*blunt.shapes), 1.0);
+    EXPECT_LT(acrossExtent(*tapered.shapes, 78.0), acrossExtent(*blunt.shapes, 78.0) * 0.5);
+
+    WidthPoint a, b;
+    a.t = 0.0;
+    a.left = a.right = 1.0;
+    b.t = 1.0;
+    b.left = b.right = 1.0;
+    const auto profiled = curvy::cookGraphBrush("brush_ink", line, 20.0, {a, b}, taper);
+    const auto profiledPlain = curvy::cookGraphBrush("brush_ink", line, 20.0, {a, b});
+    EXPECT_NEAR(acrossExtent(*profiled.shapes, 78.0), acrossExtent(*profiledPlain.shapes, 78.0), 0.01);
+}
+
+TEST(GraphBrushAssets, TheSettingsOfABrushAreListedChangeTheCookAndSurviveTheFileFormat) {
+    BrushAssetsGuard guard;
+    const curvy::GraphBrushInfo* info = curvy::findGraphBrush("brush_oil");
+    ASSERT_NE(info, nullptr);
+    std::vector<std::string> names;
+    for (const curvy::GraphBrushSetting& setting : info->settings) {
+        names.push_back(setting.name);
+    }
+    EXPECT_NE(std::find(names.begin(), names.end(), "bristles"), names.end());
+    EXPECT_NE(std::find(names.begin(), names.end(), "dryStart"), names.end());
+    EXPECT_EQ(std::find(names.begin(), names.end(), "referenceWidth"), names.end());   // set by the host
+    EXPECT_EQ(std::find(names.begin(), names.end(), "guideLength"), names.end());
+    for (const curvy::GraphBrushSetting& setting : info->settings) {
+        if (setting.name == "dryStart") {
+            EXPECT_EQ(setting.label, "Dry start");
+            EXPECT_NEAR(setting.defaultValue, 50.0, 1e-6);
+        }
+    }
+
+    BLPath line;
+    line.move_to(0, 0);
+    line.line_to(120, 0);
+    const auto plain = curvy::cookGraphBrush("brush_oil", line, 12.0, {});
+    const auto sparse = curvy::cookGraphBrush("brush_oil", line, 12.0, {}, {{"dryStart", 2.0}, {"dryRange", 3.0}});   // runs dry early
+    ASSERT_TRUE(plain);
+    ASSERT_TRUE(sparse);
+    EXPECT_NE(plain.shapes->dots.size(), sparse.shapes->dots.size());
+    EXPECT_EQ(curvy::cookGraphBrush("brush_oil", line, 12.0, {}, {{"noSuchSetting", 1.0}}).shapes, plain.shapes);   // ignored, same cache entry
+
+    SketchDocument doc;
+    doc.addBrushPresets();
+    std::size_t oil = 0;
+    for (const auto& entry : doc.brushes()) {
+        if (entry->graphType == "brush_oil") {
+            oil = entry->id;
+        }
+    }
+    ASSERT_NE(oil, 0u);
+    // The settings belong to the stroke, not to the brush in the library.
+    const std::size_t first = doc.add(SketchObject::makeLine(10, 50, 190, 50)).id();
+    const std::size_t second = doc.add(SketchObject::makeLine(10, 90, 190, 90)).id();
+    doc.setSelection({first, second});
+    ASSERT_TRUE(doc.applyBrush(oil));
+    doc.setSelection({first});
+    const curvy::GraphBrushSettings tuned = {{"bristles", 6.0}, {"dryStart", 20.0}};
+    doc.changeSelectionStrokeOptions([&](StrokeOptions& options) { options.graphSettings = tuned; });
+    EXPECT_EQ(doc.findById(first)->strokeOptions().graphSettings, tuned);
+    EXPECT_TRUE(doc.findById(second)->strokeOptions().graphSettings.empty());
+    EXPECT_TRUE(doc.findBrush(oil) != nullptr);
+
+    SketchDocument back;
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc, true), back));
+    EXPECT_EQ(back.findById(first)->strokeOptions().graphSettings, tuned);
+    EXPECT_TRUE(back.findById(second)->strokeOptions().graphSettings.empty());
+    doc.setSelection({first});
+    doc.duplicateSelection(5, 5);
+    std::size_t withSettings = 0;
+    for (std::size_t i = 0; i < doc.objectCount(); ++i) {
+        withSettings += doc.object(i).strokeOptions().graphSettings == tuned ? 1 : 0;
+    }
+    EXPECT_EQ(withSettings, 2u);   // the copy carries the stroke's settings
+}
+
 TEST(GraphBrushAssets, AStrokeWithAGraphBrushPaintsAndSurvivesTheFileFormat) {
     BrushAssetsGuard guard;
     const std::shared_ptr<BrushDef> brush = graphBrushOf("brush_oil");
@@ -10433,7 +10662,7 @@ TEST(GraphBrushAssets, AStrokeWithAGraphBrushPaintsAndSurvivesTheFileFormat) {
             EXPECT_EQ(entry->graphType.rfind("brush_", 0), 0u);
         }
     }
-    EXPECT_EQ(graphBrushes, 5u);
+    EXPECT_EQ(graphBrushes, 7u);
     SketchDocument back;
     ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc, true), back));
     ASSERT_EQ(back.brushes().size(), doc.brushes().size());
@@ -10441,4 +10670,183 @@ TEST(GraphBrushAssets, AStrokeWithAGraphBrushPaintsAndSurvivesTheFileFormat) {
         EXPECT_EQ(back.brushes()[i]->kind, doc.brushes()[i]->kind);
         EXPECT_EQ(back.brushes()[i]->graphType, doc.brushes()[i]->graphType);
     }
+}
+
+TEST(GraphBrushAssets, ATintableBrushTakesTheStrokeColourAndTintableZeroKeepsItsOwn) {
+    BrushAssetsGuard guard;
+    ASSERT_TRUE(curvy::graphBrushTinted("brush_oil", {}));
+    EXPECT_FALSE(curvy::graphBrushTinted("brush_oil", {{"tintable", 0.0}}));
+    EXPECT_FALSE(curvy::graphBrushTinted("brush_watercolor", {}));   // no tintable: its own colours
+
+    auto average = [](const char* type, const curvy::GraphBrushSettings& settings, SketchColor color) {
+        auto brush = graphBrushOf(type);
+        std::unique_ptr<SketchObject> line = brushedLine(brush, 12.0);
+        line->setStroke(SketchPaint::solid(color));
+        StrokeOptions options = line->strokeOptions();
+        options.graphSettings = settings;
+        line->setStrokeOptions(options);
+        const std::vector<std::uint32_t> px = render(*line, 100, 100);
+        double r = 0, g = 0, b = 0, n = 0;
+        for (const std::uint32_t p : px) {
+            if ((p >> 24) > 200u) {   // premultiplied, so only the nearly opaque pixels are read straight
+                r += (p >> 16) & 255u;
+                g += (p >> 8) & 255u;
+                b += p & 255u;
+                ++n;
+            }
+        }
+        EXPECT_GT(n, 50.0);
+        return std::array<double, 3>{r / std::max(n, 1.0), g / std::max(n, 1.0), b / std::max(n, 1.0)};
+    };
+    const auto tintedBlue = average("brush_oil", {}, SketchColor::rgb(0.0f, 0.0f, 1.0f));
+    EXPECT_GT(tintedBlue[2], 100.0);                       // follows the stroke colour
+    EXPECT_GT(tintedBlue[2], tintedBlue[0] * 3.0);
+    const auto own = average("brush_oil", {{"tintable", 0.0}}, SketchColor::rgb(0.0f, 0.0f, 1.0f));
+    EXPECT_GT(own[0], own[2] * 2.0);                       // its own red and orange, the stroke colour ignored
+    const auto red = average("brush_ink", {}, SketchColor::rgb(1.0f, 0.0f, 0.0f));
+    EXPECT_GT(red[0], 150.0);                              // ink is no longer always black
+    EXPECT_LT(red[2], 60.0);
+    const auto black = average("brush_ink", {{"tintable", 0.0}}, SketchColor::rgb(1.0f, 0.0f, 0.0f));
+    EXPECT_LT(black[0], 60.0);
+}
+
+namespace {
+    std::vector<jitnodes::NodeId> brushNodesOf(const jitnodes::Network& net, const char* type) {
+        std::vector<jitnodes::NodeId> found;
+        for (const jitnodes::NodeId id : net.nodeIds()) {
+            if (net.node(id).typeName() == type) {
+                found.push_back(id);
+            }
+        }
+        return found;
+    }
+}
+
+// A graph brush on a stroke is an instance of its asset in the document's graph, wired to the stroke node, with the stroke's own settings.
+TEST(GraphBrushAssets, AStrokeWithAGraphBrushHasABrushNodeThatFollowsIt) {
+    BrushAssetsGuard guard;
+    SketchDocument doc;
+    doc.setPageSize(200, 200);
+    doc.addBrushPresets();
+    std::size_t oil = 0;
+    for (const auto& entry : doc.brushes()) {
+        oil = entry->graphType == "brush_oil" ? entry->id : oil;
+    }
+    ASSERT_NE(oil, 0u);
+    const std::size_t first = doc.add(SketchObject::makeLine(10, 50, 190, 50)).id();
+    doc.setSelection({first});
+    ASSERT_TRUE(doc.applyBrush(oil));
+    const jitnodes::Network& net = doc.network();
+    ASSERT_EQ(brushNodesOf(net, "brush_oil").size(), 1u);
+    const jitnodes::NodeId node = brushNodesOf(net, "brush_oil")[0];
+    ASSERT_NE(net.inputOf(node, 0), jitnodes::invalidNodeId);
+    EXPECT_EQ(net.node(net.inputOf(node, 0)).typeName(), "curvyStroke");   // hangs off the stroke node
+    EXPECT_FLOAT_EQ(net.node(node).getFloat("dryStart"), 50.0f);           // the asset's own value
+
+    doc.changeSelectionStrokeOptions([](StrokeOptions& options) { options.graphSettings = {{"dryStart", 20.0}}; });
+    EXPECT_FLOAT_EQ(net.node(node).getFloat("dryStart"), 20.0f);   // the item writes the node
+    EXPECT_EQ(brushNodesOf(net, "brush_oil").size(), 1u);
+
+    doc.duplicateSelection(5, 5);
+    EXPECT_EQ(brushNodesOf(net, "brush_oil").size(), 2u);           // each stroke has its own
+    std::size_t at20 = 0;
+    for (const jitnodes::NodeId id : brushNodesOf(net, "brush_oil")) {
+        at20 += net.node(id).getFloat("dryStart") == 20.0f ? 1 : 0;
+    }
+    EXPECT_EQ(at20, 2u);
+
+    // An edit of the node in the graph is adopted by that stroke only.
+    const jitnodes::NodeId other = brushNodesOf(net, "brush_oil")[0] == node ? brushNodesOf(net, "brush_oil")[1] : brushNodesOf(net, "brush_oil")[0];
+    doc.setGraphParam(other, "dryStart", 35.0f);
+    std::size_t adopted = 0;
+    for (std::size_t i = 0; i < doc.objectCount(); ++i) {
+        const auto& settings = doc.object(i).strokeOptions().graphSettings;
+        adopted += settings.size() == 1 && settings[0].first == "dryStart" && settings[0].second == 35.0 ? 1 : 0;
+    }
+    EXPECT_EQ(adopted, 1u);
+
+    SketchDocument back;   // the graph carries the instances and their values through a file
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc, true), back));
+    EXPECT_EQ(brushNodesOf(back.network(), "brush_oil").size(), 2u);
+    EXPECT_EQ(back.findById(first)->strokeOptions().graphSettings, doc.findById(first)->strokeOptions().graphSettings);
+
+    doc.setSelection({first});
+    doc.deleteSelection();
+    EXPECT_EQ(brushNodesOf(net, "brush_oil").size(), 1u);   // goes with its stroke
+    doc.undoStack().undo();
+    EXPECT_EQ(brushNodesOf(net, "brush_oil").size(), 2u);
+
+    doc.setSelection({first});
+    ASSERT_TRUE(doc.applyBrush(0));
+    EXPECT_EQ(brushNodesOf(net, "brush_oil").size(), 1u);   // a plain stroke has none
+}
+
+// An asset a document brings along (registered from its graph, not in the brush folder) is a usable brush once the graph is read.
+TEST(GraphBrushAssets, AnAssetRegisteredFromADocumentGraphBecomesABrush) {
+    BrushAssetsGuard guard;
+    std::ifstream in(std::string(CURVY_BRUSH_ASSETS_DIR) + "/brush_ink.asset.json", std::ios::binary);
+    ASSERT_TRUE(in.good());
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const std::size_t at = text.find("\"brush_ink\"");
+    ASSERT_NE(at, std::string::npos);
+    text.replace(at, std::string("\"brush_ink\"").size(), "\"brush_carried\"");
+    jitnodes::registerAsset(text);   // as jitnodes does for the definitions embedded in a graph: in the registry, not in the folder's list
+
+    EXPECT_EQ(curvy::findGraphBrush("brush_carried"), nullptr);
+    SketchDocument doc;
+    jitnodes::Network empty(1);
+    ASSERT_TRUE(doc.graphFromText(jitnodes::saveNetwork(empty, false, true)));   // reading a graph registers what it carries
+    const curvy::GraphBrushInfo* info = curvy::findGraphBrush("brush_carried");
+    ASSERT_NE(info, nullptr);
+    EXPECT_TRUE(info->hasTintable);
+    EXPECT_FALSE(info->settings.empty());
+    for (const curvy::GraphBrushInfo& listed : curvy::graphBrushes()) {
+        EXPECT_NE(listed.type, "brush_carried");   // the folder's list is unchanged
+    }
+
+    BLPath line;
+    line.move_to(0, 0);
+    line.line_to(120, 0);
+    EXPECT_TRUE(curvy::cookGraphBrush("brush_carried", line, 12.0, {}));
+    EXPECT_EQ(curvy::findGraphBrush("wobbleAsset"), nullptr);   // a name nothing registered stays unknown
+}
+
+// Prints the whole graph of a document with one four-point stroke and the Tapered brush on it, to see which nodes a brushed stroke has.
+TEST(SketchBrushes, PrintTheGraphOfAStrokeWithTheTaperedBrush) {
+    SketchDocument doc;
+    doc.setPageSize(200, 200);
+    doc.addBrushPresets();
+    std::size_t tapered = 0;
+    for (const auto& entry : doc.brushes()) {
+        tapered = entry->name == "Tapered" ? entry->id : tapered;
+    }
+    ASSERT_NE(tapered, 0u);
+
+    BLPath path;
+    path.move_to(20, 150);
+    path.line_to(70, 60);
+    path.line_to(130, 140);
+    path.line_to(180, 50);
+    const std::size_t stroke = doc.add(SketchObject::makePath(path)).id();
+    doc.setSelection({stroke});
+    ASSERT_TRUE(doc.applyBrush(tapered));
+
+    const jitnodes::Network& net = doc.network();
+    std::printf("---- nodes ----\n");
+    for (const jitnodes::NodeId id : net.nodeIds()) {
+        std::printf("%u  %s  \"%s\"\n", unsigned(id), net.node(id).typeName().c_str(), net.node(id).name().c_str());
+    }
+    std::printf("---- graph ----\n%s\n", jitnodes::saveNetwork(net, false, false).c_str());
+    EXPECT_FALSE(net.nodeIds().empty());
+}
+
+// The chunk tags are 32-bit values in the code, but the file still has the four letters in reading order.
+TEST(SketchBinary, ChunkTagsAreStoredAsTheirFourLetters) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    const std::string file = binaryFromDocument(doc, false);
+    ASSERT_GT(file.size(), 16u);
+    EXPECT_EQ(file.substr(0, 4), "SKB1");
+    EXPECT_EQ(file.substr(8, 4), "PAGE");   // the header is magic, version u16 and flags u16; the first chunk follows
+    EXPECT_NE(file.find("OBJS"), std::string::npos);
 }

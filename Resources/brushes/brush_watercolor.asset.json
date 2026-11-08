@@ -1,0 +1,37 @@
+// Watercolour: a wet wash of large, soft, nearly transparent dots that pool into a stroke. Pigment gathers at the edge of the stroke, the edge
+// wobbles like a wet one, a position hash adds granulation, the colour drifts from blue to violet along the stroke and the wash fades out over its last
+// sixth. Input 0 is the guide (pen pressure in `w` widens the wash). wash scales the opacity, granulation the grain (0 is smooth).
+{
+  format: "jitnodes-asset",
+  version: 1,
+  assetVersion: 1,
+  type: "brush_watercolor",
+  inputs: 1,
+  promote: { referenceWidth: 2, guideLength: 14, guideStart: 0, strokeLength: 0, wash: 1, granulation: 1, tailTaper: 0 },
+  graph: {
+    fps: 24,
+    display: 8,
+    nodes: [
+      { id: 1, type: "subnetInput", name: "guide", floats: { index: 0 }, inputs: [] },
+      { id: 2, type: "resample", name: "even", floats: { spacing: 0.06 }, inputs: [1] },
+      { id: 3, type: "smooth", name: "clean", floats: { iterations: 4, strength: 0.5, preserve: 1 }, inputs: [2] },
+      { id: 4, type: "wrangle", name: "wobble", strings: { code: "w = w * (1 + 0.08 * sin(x * 3.1 + y * 2.3) + 0.05 * sin(x * 7.3 - y * 5.1 + 2));" }, inputs: [3] },
+      {
+        id: 5, type: "ribbon", name: "brush", floats: { width: 2, widthEnd: 2 }, strings: { widthAttrib: "w", output: "rungs" },
+        expressions: { width: "parent.referenceWidth", widthEnd: "parent.referenceWidth" },
+        inputs: [4]
+      },
+      { id: 6, type: "wrangle", name: "keepAlong", strings: { code: "along = (b + u * a) / max(a, c);" },
+        expressions: { a: "parent.guideLength", b: "parent.guideStart", c: "parent.strokeLength" }, inputs: [5] },
+      { id: 7, type: "curveSample", name: "wash", floats: { count: 0, spacing: 0.07 }, inputs: [6] },
+      {
+        id: 8, type: "wrangle", name: "pigment",
+        strings: {
+          code: "e = abs(u - 0.5) * 2; e = e * e * e * e; g = sin(x * 57.3 + y * 131.7) * 43758.5453; g = g - floor(g); m = clamp(along * 1.2 - 0.1, 0, 1); Cd.x = lerp(0.12, 0.45, m); Cd.y = lerp(0.35, 0.2, m); Cd.z = lerp(0.75, 0.7, m); radius = 0.17; softness = 1; alpha = a * (0.045 + 0.1 * e) * (1 - 0.4 * b + 0.8 * b * g) * clamp((1 - along) * 6, 0, 1);"
+        },
+        expressions: { a: "parent.wash", b: "parent.granulation" },
+        inputs: [7]
+      }
+    ]
+  }
+}

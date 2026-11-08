@@ -61,6 +61,9 @@ namespace curvy {
         // Opens the file at `path`; with none the workspace starts empty ("Nothing open").
         void start(const std::string& path);
 
+        // Shows how far the background graph brush cooks have got in the hint bar; call on the loop thread.
+        void brushProgressChanged();
+
         newui::Frame& frame() { return frame_; }
         WorkspaceModel& workspace() { return *model_; }
         CanvasView& canvas() { return *canvas_; }

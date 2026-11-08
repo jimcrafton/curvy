@@ -32,6 +32,33 @@ image (no soft edges yet); chunking and live preview are not built.
 - File format: the brush is written as a nib in `BRSH` plus a `BGRF` chunk (brush id, asset type), so an older reader still opens the file and sees a
   nib. The asset itself is not stored in the file: opening a file on a machine without the asset draws the hairline.
 
+## Status while a stroke cooks
+
+`graphBrushProgress()` gives chunks done of chunks queued (since the queue was last empty) and how many strokes are waiting. The ready handler is
+called when a stroke is queued and after every chunk, so the UI can follow it. While `busy()`: the canvas shows the arrow-with-spinner cursor
+(`"busy"`, system `AppStarting`, so it is clear the editor still works) and the hint bar's right slot reads "Rendering brush 3/8" in place of the
+pointer position (`WorkspaceModel::setBrushProgress`, `WorkspaceController::brushProgressChanged`).
+
+`GraphBrushProgress::fraction` is chunks done plus how far each running chunk has got. A running chunk reports through jitnodes' progress
+callback (`Network::setProgressCallback`: nodes done of nodes planned, and `gasField` and `particles` report every simulation step), so a
+simulation brush moves smoothly instead of jumping from 0 to done; the hint bar shows it as "Brush 45% - Esc stops".
+
+Esc while it is busy calls `cancelGraphBrushCooks()`: queued chunks are dropped and a running one stops at its next node or simulation step
+(`CookCancelled`; nothing partial is kept or cached). Those strokes stay hairlines until they are edited, because asking again for the same
+stroke would only restart what the user stopped. Quitting stops running cooks the same way, so a long simulation does not delay the exit.
+
+Stale cooks are dropped on their own. Every paint that needs a stroke asks `cookGraphBrushLater` again, and a stroke being cooked remembers when it
+was last asked for. While cooks run, the cook threads tick about every 150 ms (from the jitnodes progress callback): a stroke nobody has asked for in
+3 s (deleted, scrolled off screen, or redrawn with another weight, which is a new stroke to the cache) has its queued chunks removed and its running
+ones stopped, and the same tick tells the UI so the percent moves during a long chunk and the canvas repaints (which asks again for what is still on
+screen). Unlike a stop with Esc, a dropped stroke is cooked again if it is asked for later (undo, scrolling back). A stroke in a view that is not
+repainted during the cook (a thumbnail painted elsewhere) is dropped too and shows a hairline until that view paints again.
+This needs the jitnodes progress hook, which the `3rdparty/jitnodes` submodule gets once the jitnodes change is committed and the submodule
+is moved to it.
+
+There is a limit of 400,000 shapes per stroke (`kMaxShapes`): a brush must keep dots per guide unit
+low enough to reach the end of a long stroke (flow hair had run into it).
+
 ## Where they live
 
 - Source: `Resources/brushes/*.asset.json`.
@@ -55,9 +82,55 @@ An asset is a brush when it promotes both `referenceWidth` and `guideLength`.
 | `guideMinX`, `guideMinY`, `guideMaxX`, `guideMaxY` (optional) | The box of the scaled guide, set by the host, for a brush that needs room around the stroke. `brush_gas` places its grid with them (`spread` units of room around the stroke, `cell` the cell size, at most 256 cells along the longer side). |
 | `strokeLength` (optional) | The whole stroke's length in guide units. The shipped brushes divide `along` by `max(1, strokeLength / load)`, so a stroke longer than the paint load stretches the load over the whole stroke and runs dry only at its end instead of halfway. |
 | Other promoted floats | The brush settings (bristles, dry length, spacing, ...). Only floats can be promoted, and they are read through expressions (`parent.<name>`) on a wrangle's `a` to `d` parameters, not inside wrangle code. |
-| Output (the `display` node) | Dots with `radius`, `Cd`, `alpha`, `softness` (rasterised by the host with `renderSplats`), or closed polygons with `Cd` and `alpha` (drawn as vector fills). There is no `render` node inside. |
+| Output (the `display` node) | Dots with `radius`, `Cd`, `alpha`, `softness` (soft edges are drawn by the host), or closed polygons with `Cd` and `alpha` (drawn as vector fills). There is no `render` node inside. |
 
 The stroke's opacity is not part of the graph: the host composites the whole stroke at the object's opacity, as for the art brushes.
+
+## Brushes a document brings along
+
+A saved graph embeds the definition of every asset it uses, and reading the graph registers them with jitnodes. `GraphDocument::graphFromText` and
+`readFromFile` then call `registerEmbeddedBrushes()`, which adds every registered asset type that is a brush but is not in the brush folder to a
+side list. `findGraphBrush` finds those too (so the strokes cook and the settings rows work), while `graphBrushes()`, the folder's list that feeds
+the picker presets, is unchanged. Limits: if the folder has the same type, the folder's info is used even when the document's embedded copy is a
+newer version (jitnodes registers the newer definition, so it cooks, but the cached `referenceWidth` and settings list come from the folder's
+file); the side list is kept for the life of the process.
+
+## Editing a brush's settings
+
+Every promoted float that the host does not set itself (not `referenceWidth`, `guideLength`, `guideStart`, `strokeLength`, the `guide*` box or
+`settleTime`) is a setting. `loadBrushAssets` lists them in `GraphBrushInfo::settings` (name, a label made from the name, the asset's value).
+Promoted values are always floats, so the panel has number fields only; a colour is three separate floats, and there is no range or unit
+information yet (that would need optional metadata in the asset format).
+
+- The library brush ("Oil") only names the asset. The settings belong to each stroke: `StrokeOptions::graphSettings` (only the values that differ from
+  the asset), so two strokes with the same brush can differ, and a duplicate carries its stroke's values.
+- The Brushes panel builds one label and field per setting when a graph brush is chosen (as many rows as the asset has; the first time an asset
+  is shown, the rows are made and kept, hidden for other brushes), plus a "Reset settings" button. They edit the selected strokes that have that
+  brush (one undo step) and are read-only while none is selected.
+- **The brush node.** A stroke with a graph brush has an instance of the asset in the document's graph, wired to its `curvyStroke` node (a leaf, so
+  the look chain is unchanged), with the stroke's settings as its parameters. `syncAppearanceNodes` creates it (an owned node, role `0x1000 + item
+  index`, so undo keeps its id), replaces it when the stroke gets another asset, writes the item's settings to it, and removes it with the stroke
+  or when the stroke goes back to a plain one. An edit of its parameters in the graph (the graph dock, `setGraphParam`, undo) is adopted by the
+  stroke through the same "node wins if it changed since the last sync" rule as the other look nodes: the settings are `brush.<name>` numbers in
+  `AppearanceParams`, the changed ones only. Painting still reads the stroke's settings and cooks in the background; the node in the graph is not
+  cooked by the document (a plain graph cook would use the unscaled path and no chunking).
+- Values go into `cookGraphBrush`/`cookGraphBrushLater` and into the cache key, so changing one recooks that stroke. A name the asset does not have is
+  ignored.
+- The binary format keeps them in the stroke's record (bit 5 of the cap byte, then count, names and values) and in the graph. SVG does not carry
+  them yet: that waits for the move of the whole document into the graph on main, where the brush node holds them.
+
+## Colour: `tintable`
+
+An asset may promote `tintable` (a setting like the others, read by the host and by the asset through an expression).
+
+- 1 or more: the asset outputs shading, with white as full colour and darker as shade, and the host multiplies it by the stroke's paint. On the
+  canvas this is `paintGraphBrushTinted`: the stroke is drawn in an isolated layer, the paint (solid, gradient or pattern, as for any stroke) is
+  multiplied over the box, and the shapes' own alpha is put back over it. A colour change repaints and needs no recook. Where a dot is
+  translucent the paint shows through a little, because multiply fills the whole box before the alpha is restored.
+- 0, or no `tintable`: the asset paints in its own colours and the stroke's colour is ignored. The asset can expose its own colour floats.
+- Expand and PDF multiply a solid paint's colour and opacity into each shape; a gradient or pattern is not applied there yet.
+- `brush_ink` (flat white shading) and `brush_oil` (grey shading from the bristle value) are tintable by default; the other brushes keep their colours.
+  An asset does this in its last wrangle with `lerp(ownColour, shading, parent.tintable)`.
 
 ## The shipped brushes
 
@@ -91,11 +164,28 @@ stroke (`density` per guide unit, at most 6000), has them follow it for 1.6 s wh
 cyan, magenta, amber along the stroke (darker than the additive original so it reads on white). A 300 px stroke took about 25 s in Debug. Cost grows with the grid, which is capped at 256 cells on the longer side:
 a 300 px stroke took about 6 s in a Debug build, so expect roughly a tenth of that in Release (not measured). Settings: `flow` (how hard the
 stroke is blown along itself), `inkAmount`, `vorticity` (the curls), `spread`, `cell`. The picture is deterministic. Not built: a live-stepping
-gas that follows the pen (jitnodes' own note 4), flow hair and watercolour (the other examples).
+gas that follows the pen (jitnodes' own note 4).
+
+## Flow hair and watercolour
+
+| Asset | Look | Settings (promoted) |
+|---|---|---|
+| `brush_flowhair` | Seeds scattered along the stroke each start a trail through a curl-noise field (`flow`): a tight band that fans out into curling filaments, colour from teal to purple. Dots; ignores pen pressure; hairs are cooked per 24-unit chunk, so check long strokes for a visible join (not looked at yet). | `referenceWidth` 1.4, `density` 130 hairs per guide unit (at most 6000 per cook), `curl` 0.22 (field scale), `alpha` 0.3 |
+| `brush_watercolor` | A wet wash: large soft transparent dots pool into the stroke, pigment gathers at the edge, the edge wobbles, a position hash grains it, colour drifts blue to violet and the wash fades over the last sixth. Dots; pressure widens it. | `referenceWidth` 2, `wash` 1 (opacity), `granulation` 1 (0 is smooth) |
+
+Both are the jitnodes examples (`brushFlowHair.json`, `brushWatercolor.json`) with the demo guide removed and colours darkened for white paper. Watercolour
+uses `strokeLength` for the colour drift and the fade, so they follow the whole stroke, not each chunk. Dots take their `softness` (0 hard, 1 fading from the
+centre) into the cached image as a radial gradient that follows jitnodes' `renderSplats` falloff. Expand and PDF still write hard circles.
 
 ## Not built yet
 
-Cancelling a chunk that is already cooking (queued jobs are dropped only when more than 256 are waiting); rasterising dots with soft edges into a
-cache per zoom (`renderSplats`); the `curvyGraphBrush` graph node (a graph brush is a brush on a stroke today, not a node); simulation brushes (settle,
+Cancelling a chunk that is already cooking (queued jobs are dropped only when more than 256 are waiting); soft dots in Expand and PDF; the `curvyGraphBrush` graph node (a graph brush is a brush on a stroke today, not a node); simulation brushes (settle,
 then bake at pen up); a live preview of the real brush while drawing (the proxy band is shown); embedding the asset in the document; colour tint floats
-for single-colour brushes; a tail taper for strokes without pen pressure.
+for single-colour brushes.
+
+## Tail taper
+
+A stroke without a width profile (a mouse stroke) has pressure 1 all along, so its tail ends bluntly. An asset that promotes `tailTaper` (a
+fraction of the stroke, 0 is off, default 0) gets the end of the guide's pressure thinned by the host, smoothly down to a tenth, over that fraction.
+It is an ordinary setting, so it shows in the panel and is saved per stroke; the asset only has to promote it, it need not read it. A stroke with a
+width profile (pressure, Taper, Swell) is left alone. Oil, ink, leaves and watercolour promote it.

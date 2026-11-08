@@ -1,6 +1,7 @@
 #include "curvy/graphdock.h"
 
 #include "curvy/appearancenode.h"
+#include "curvy/graphbrush.h"
 #include "curvy/numberscrubber.h"
 #include "curvy/pathnode.h"
 #include "curvy/stylepanel.h"
@@ -1632,8 +1633,12 @@ namespace curvy {
                 if (type == kTransformNodeType) {
                     names = {"translateX", "translateY", "rotation", "scaleX", "scaleY", "shear", "pivotX", "pivotY"};
                 }
+                const bool graphBrush = findGraphBrush(type) != nullptr;
+                if (graphBrush) {
+                    names.erase(std::remove_if(names.begin(), names.end(), isHostBrushParam), names.end());
+                }
                 for (const std::string& name : names) {
-                    if (at >= (type == kTransformNodeType ? kDetailRows : 4)) {
+                    if (at >= (type == kTransformNodeType || graphBrush ? kDetailRows : 4)) {
                         break;
                     }
                     setRow(at++, name, numberText(shownParam(node, name)), [this, id, name](const std::string& value) {
