@@ -1,0 +1,263 @@
+{
+  meta: {
+    author: "",
+    date: "2026-11-10",
+    copyright: "",
+    version: "0.1.0.900"
+  },
+  type: "SubView",
+  bounds: {
+    type: "Rect",
+    pos: { type: "Point", x: 0, y: 0 },
+    size: { type: "Size", width: 640, height: 440 }
+  },
+  visible: true,
+  name: "pointTable",
+  childViews: [
+    {
+      type: "SubView",
+      bounds: {
+        type: "Rect",
+        pos: { type: "Point", x: 0, y: 0 },
+        size: { type: "Size", width: 640, height: 394 }
+      },
+      visible: true,
+      name: "pointTableBox",
+      layout: { type: "FlexLayout", orientation: "Vertical" },
+      style: {
+        type: "ViewStyle",
+        backgroundFill: { type: "Fill", kind: "Color", color: "#1e1e1e" },
+        borderWidth: 1,
+        borderFill: "#4a4a4a"
+      },
+      childViews: [
+        {
+          type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 0 },
+            size: { type: "Size", width: 640, height: 28 }
+          },
+          visible: true,
+          name: "pointTableHeaderBar",
+          layout: {
+            type: "FlexLayout",
+            orientation: "Horizontal",
+            crossAxisAlignment: "Center",
+            spacing: 6,
+            padding: 4
+          },
+          style: {
+            type: "ViewStyle",
+            backgroundFill: { type: "Fill", kind: "Color", color: "#2e2e2e" }
+          },
+          desiredSize: { type: "Size", width: 640, height: 28 },
+          desiredSizeOverride: true,
+          childViews: [
+            {
+              type: "Label",
+              text: "Data",
+              textAlignment: "Left",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 4, y: 5 },
+                size: { type: "Size", width: 406, height: 17 }
+              },
+              name: "pointTableTitle",
+              layoutParams: { type: "FlexLayoutParams", weight: 1 },
+              style: {
+                type: "LabelStyle",
+                text: "Data",
+                wordWrap: true,
+                font: { type: "Font", name: "Segoe UI", size: 12, bold: true, italic: false, strikeThrough: false, underlined: false },
+                textColor: "#f0f0f0",
+                textAlignment: "Left"
+              }
+            },
+            {
+              type: "Label",
+              text: "circle1 · 96 points, 1 primitive",
+              textAlignment: "Right",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 416, y: 5 },
+                size: { type: "Size", width: 220, height: 17 }
+              },
+              name: "pointTableInfo",
+              style: {
+                type: "LabelStyle",
+                text: "circle1 · 96 points, 1 primitive",
+                wordWrap: true,
+                font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                textColor: "#a0a0a0",
+                textAlignment: "Right"
+              },
+              desiredSize: { type: "Size", width: 220, height: 17 },
+              desiredSizeOverride: true
+            }
+          ]
+        },
+        {
+          type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 28 },
+            size: { type: "Size", width: 640, height: 34 }
+          },
+          visible: true,
+          name: "pointTableControls",
+          layout: {
+            type: "FlexLayout",
+            orientation: "Horizontal",
+            crossAxisAlignment: "Center",
+            spacing: 8,
+            padding: 4
+          },
+          desiredSize: { type: "Size", width: 640, height: 34 },
+          desiredSizeOverride: true,
+          childViews: [
+            {
+              type: "SegmentedControl",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 4, y: 5 },
+                size: { type: "Size", width: 230, height: 24 }
+              },
+              name: "pointTableTabs",
+              desiredSize: { type: "Size", width: 230, height: 24 },
+              desiredSizeOverride: true
+            },
+            {
+              type: "DropDownList",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 242, y: 5 },
+                size: { type: "Size", width: 120, height: 24 }
+              },
+              name: "pointTableSource",
+              desiredSize: { type: "Size", width: 120, height: 24 },
+              desiredSizeOverride: true
+            },
+            {
+              type: "TextField",
+              placeholder: "Show attributes matching...",
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+              textColor: "#f0f0f0",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 370, y: 6 },
+                size: { type: "Size", width: 266, height: 22 }
+              },
+              name: "pointTableFilter",
+              layoutParams: { type: "FlexLayoutParams", weight: 1 },
+              desiredSize: { type: "Size", width: 266, height: 22 },
+              desiredSizeOverride: true
+            }
+          ]
+        },
+        {
+          type: "ScrollView",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 62 },
+            size: { type: "Size", width: 640, height: 300 }
+          },
+          name: "pointTableScroll",
+          layoutParams: { type: "FlexLayoutParams", weight: 1 },
+          style: {
+            type: "ViewStyle",
+            backgroundFill: { type: "Fill", kind: "Color", color: "#121212" }
+          },
+          childViews: [
+            {
+              type: "SubView",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 0, y: 0 },
+                size: { type: "Size", width: 620, height: 300 }
+              },
+              visible: true,
+              name: "pointTableViewport",
+              desiredSize: { type: "Size", width: 620, height: 300 },
+              desiredSizeOverride: true,
+              childViews: [
+                {
+                  type: "TableView",
+                  bounds: {
+                    type: "Rect",
+                    pos: { type: "Point", x: 0, y: 0 },
+                    size: { type: "Size", width: 620, height: 300 }
+                  },
+                  name: "pointTableGrid",
+                  desiredSize: { type: "Size", width: 620, height: 300 },
+                  desiredSizeOverride: true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 362 },
+            size: { type: "Size", width: 640, height: 32 }
+          },
+          visible: true,
+          name: "pointTableFooter",
+          layout: {
+            type: "FlexLayout",
+            orientation: "Horizontal",
+            crossAxisAlignment: "Center",
+            spacing: 8,
+            padding: 4
+          },
+          style: {
+            type: "ViewStyle",
+            backgroundFill: { type: "Fill", kind: "Color", color: "#2e2e2e" }
+          },
+          desiredSize: { type: "Size", width: 640, height: 32 },
+          desiredSizeOverride: true,
+          childViews: [
+            {
+              type: "Label",
+              text: "Row 2, width = 2.000",
+              textAlignment: "Left",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 4, y: 7 },
+                size: { type: "Size", width: 534, height: 17 }
+              },
+              name: "pointTableStatus",
+              layoutParams: { type: "FlexLayoutParams", weight: 1 },
+              style: {
+                type: "LabelStyle",
+                text: "Row 2, width = 2.000",
+                wordWrap: true,
+                font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                textColor: "#a0a0a0",
+                textAlignment: "Left"
+              }
+            },
+            {
+              type: "Button",
+              text: "Copy cells",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 546, y: 5 },
+                size: { type: "Size", width: 90, height: 22 }
+              },
+              name: "pointTableCopyButton",
+              style: {
+                type: "ThemedButtonStyle",
+                font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+              },
+              desiredSize: { type: "Size", width: 90, height: 22 },
+              desiredSizeOverride: true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

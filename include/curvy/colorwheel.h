@@ -23,6 +23,10 @@ namespace curvy {
         void setHsb(double hue, double saturation, double brightness, bool hueDefined = true);
         bool isDragging() const { return drag_ != Drag::None; }
 
+        // Hue, saturation and brightness (all 0..1) to red, green and blue (0..1), and back; hueDefined is false for a grey (no hue to speak of).
+        static void hsbToRgb(double hue, double saturation, double brightness, double& red, double& green, double& blue);
+        static void rgbToHsb(double red, double green, double blue, double& hue, double& saturation, double& brightness, bool& hueDefined);
+
         // Fired on every change the user makes, between onDragStarted and onDragFinished.
         newui::Delegate<ColorWheel> onChanged;
         newui::Delegate<ColorWheel> onDragStarted;

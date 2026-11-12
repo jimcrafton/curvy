@@ -19,8 +19,7 @@ namespace curvy {
     // The keys can be pressed or let go in the middle of a drag; it carries on from where the value is.
     //
     // The scrubber only turns mouse movement into numbers. What the numbers do - and how a whole drag becomes one undo step - is the
-    // caller's business, through the delegates below. attach() hangs a scrubber on a view and returns it (the view's handlers keep it alive);
-    // a view that scrubs several captions itself (a painted grid of rows) owns one and calls press / move / release.
+    // caller's business, through the delegates below. attach() hangs a scrubber on a view and returns it (the view's handlers keep it alive).
     // @reflect ignore=true
     class NumberScrubber {
     public:

@@ -1,2026 +1,846 @@
 #include "curvy/sketchdocument.h"
-#include "curvy/curvyfile.h"
-#include "curvy/gzip.h"
-#include "curvy/pathnode.h"
-#include "curvy/sketchbin.h"
-#include "curvy/io/pdf/pdfimport.h"
-#include "curvy/io/svg/sketchsvg.h"
+
+#include "curvy/objectnode.h"
+
+#include <jitnodes/graph/serializeValue.h>
+#include <json5/json5.hpp>
+#include <json5/json5_builder.hpp>
+#include <json5/json5_input.hpp>
+#include <json5/json5_output.hpp>
 
 #include <algorithm>
-#include <cctype>
+#include <charconv>
+#include <chrono>
 #include <cmath>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
-#include <map>
+#include <iomanip>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
-#include <utility>
+
+#ifndef CURVY_VERSION
+#define CURVY_VERSION "0"
+#endif
 
 namespace curvy {
 
     namespace {
-        // True when `path` ends with `extension` (a dot and letters), ignoring case.
-        bool hasExtension(const std::string& path, const std::string& extension) {
-            if (path.size() < extension.size()) {
+
+        constexpr int kFileVersion = 3;
+
+        void step(TaskProgress* progress, float fraction) {
+            if (progress != nullptr) {
+                progress->check();
+                progress->set(fraction);
+            }
+        }
+
+        // A float as the shortest decimal that reads back to the same float, so 0.1f is written 0.1 and not 0.10000000149011612.
+        json5::value real(float value) {
+            char buffer[32];
+            const auto written = std::to_chars(buffer, buffer + sizeof(buffer), value);
+            double widened = double(value);
+            std::from_chars(buffer, written.ptr, widened);
+            return json5::value(widened);
+        }
+
+        std::string utcNow() {
+            const std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+            std::tm parts{};
+            gmtime_s(&parts, &now);
+            char buffer[32];
+            std::strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%SZ", &parts);
+            return buffer;
+        }
+
+        struct Bad : std::runtime_error {
+            using std::runtime_error::runtime_error;
+        };
+
+        [[noreturn]] void fail(const std::string& what) { throw Bad(what); }
+
+        bool find(const json5::value& object, const char* key, json5::value& out) {
+            if (!object.is_object()) {
                 return false;
             }
-            for (std::size_t i = 0; i < extension.size(); ++i) {
-                char c = path[path.size() - extension.size() + i];
-                if (std::tolower(static_cast<unsigned char>(c)) != extension[i]) {
+            for (auto [name, child] : json5::object_view(object)) {
+                if (std::string_view(name) == key) {
+                    out = child;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        json5::value need(const json5::value& object, const char* key, const std::string& where) {
+            json5::value out;
+            if (!find(object, key, out)) {
+                fail(where + ": missing \"" + key + "\"");
+            }
+            return out;
+        }
+
+        double number(const json5::value& value, const std::string& where) {
+            if (!value.is_number() || !std::isfinite(value.get<double>())) {
+                fail(where + " must be a number");
+            }
+            return value.get<double>();
+        }
+
+        double numberOr(const json5::value& object, const char* key, double fallback, const std::string& where) {
+            json5::value v;
+            return find(object, key, v) ? number(v, where + "." + key) : fallback;
+        }
+
+        std::string stringOr(const json5::value& object, const char* key, const std::string& fallback, const std::string& where) {
+            json5::value v;
+            if (!find(object, key, v)) {
+                return fallback;
+            }
+            if (!v.is_string()) {
+                fail(where + "." + key + " must be a string");
+            }
+            return v.get_c_str();
+        }
+
+        newui::Color colorOf(const json5::value& value, const std::string& where) {
+            const json5::array_view list(value);
+            if (!list.is_valid() || list.size() != 4) {
+                fail(where + " must be a colour: [r, g, b, alpha]");
+            }
+            float c[4];
+            for (std::size_t i = 0; i < 4; ++i) {
+                c[i] = float(number(list[i], where));
+                if (!(c[i] >= 0.0f && c[i] <= 1.0f)) {
+                    fail(where + " components must be between 0 and 1");
+                }
+            }
+            return newui::Color(c[0], c[1], c[2], c[3]);
+        }
+
+        // The optional "view" section. Reading is lenient: a view is a convenience, so a part that is missing or malformed is dropped and the
+        // file still opens (the page is then fitted as for any file without a view).
+        class ViewFile {
+        public:
+            static void write(json5::builder& b, const ViewState& view) {
+                b.push_object();
+                if (view.canvas) {
+                    b.push_object();
+                    b["zoom"] = real(view.canvas->zoom);
+                    b.push_array();
+                    b += real(view.canvas->panX);
+                    b += real(view.canvas->panY);
+                    b["pan"] = b.pop();
+                    b["canvas"] = b.pop();
+                }
+                if (view.graph) {
+                    const GraphViewState& graph = *view.graph;
+                    b.push_object();
+                    b["open"] = json5::value(graph.open ? 1.0 : 0.0);
+                    writeIds(b, "level", graph.level);
+                    if (graph.placed) {
+                        b["zoom"] = json5::value(graph.zoom);
+                        b.push_array();
+                        b += json5::value(graph.panX);
+                        b += json5::value(graph.panY);
+                        b["pan"] = b.pop();
+                    }
+                    writeIds(b, "selected", graph.selected);
+                    b["graph"] = b.pop();
+                }
+                b["view"] = b.pop();
+            }
+
+            static ViewState read(const json5::value& root) {
+                ViewState view;
+                json5::value part;
+                if (!find(root, "view", part) || !part.is_object()) {
+                    return view;
+                }
+                json5::value canvasPart;
+                if (find(part, "canvas", canvasPart)) {
+                    double zoom = 0.0;
+                    double pan[2] = {0.0, 0.0};
+                    if (readNumber(canvasPart, "zoom", zoom) && zoom > 0.0 && readPair(canvasPart, "pan", pan)) {
+                        view.canvas = CanvasViewState{float(zoom), float(pan[0]), float(pan[1])};
+                    }
+                }
+                json5::value graphPart;
+                if (find(part, "graph", graphPart) && graphPart.is_object()) {
+                    GraphViewState graph;
+                    double open = 0.0;
+                    graph.open = readNumber(graphPart, "open", open) && open != 0.0;
+                    graph.level = readIds(graphPart, "level");
+                    graph.selected = readIds(graphPart, "selected");
+                    double pan[2] = {0.0, 0.0};
+                    if (readNumber(graphPart, "zoom", graph.zoom) && graph.zoom > 0.0 && readPair(graphPart, "pan", pan)) {
+                        graph.placed = true;
+                        graph.panX = pan[0];
+                        graph.panY = pan[1];
+                    }
+                    view.graph = std::move(graph);
+                }
+                return view;
+            }
+
+        private:
+            static void writeIds(json5::builder& b, const char* key, const std::vector<jitnodes::NodeId>& ids) {
+                if (ids.empty()) {
+                    return;
+                }
+                b.push_array();
+                for (jitnodes::NodeId id : ids) {
+                    b += json5::value(double(id));
+                }
+                b[key] = b.pop();
+            }
+
+            static bool readNumber(const json5::value& object, const char* key, double& out) {
+                json5::value v;
+                if (!find(object, key, v) || !v.is_number() || !std::isfinite(v.get<double>())) {
                     return false;
                 }
+                out = v.get<double>();
+                return true;
+            }
+
+            static bool readPair(const json5::value& object, const char* key, double (&out)[2]) {
+                json5::value v;
+                if (!find(object, key, v)) {
+                    return false;
+                }
+                const json5::array_view list(v);
+                if (!list.is_valid() || list.size() != 2 || !list[0].is_number() || !list[1].is_number()) {
+                    return false;
+                }
+                out[0] = list[0].get<double>();
+                out[1] = list[1].get<double>();
+                return std::isfinite(out[0]) && std::isfinite(out[1]);
+            }
+
+            static std::vector<jitnodes::NodeId> readIds(const json5::value& object, const char* key) {
+                std::vector<jitnodes::NodeId> ids;
+                json5::value v;
+                if (!find(object, key, v)) {
+                    return ids;
+                }
+                const json5::array_view list(v);
+                if (!list.is_valid()) {
+                    return ids;
+                }
+                for (std::size_t i = 0; i < list.size(); ++i) {
+                    if (!list[i].is_number() || !(list[i].get<double>() >= 0.0 && list[i].get<double>() < 4e9)) {
+                        return {};
+                    }
+                    ids.push_back(jitnodes::NodeId(list[i].get<double>()));
+                }
+                return ids;
+            }
+        };
+
+        // Written beside the target and renamed over it, so a crash or a full disk leaves the previous version whole.
+        bool writeAtomically(const std::string& path, const std::string& text) {
+            const std::filesystem::path target = std::filesystem::u8path(path);
+            std::filesystem::path temporary = target;
+            temporary += ".tmp";
+            std::error_code error;
+            {
+                std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+                if (!out) {
+                    return false;
+                }
+                out << text;
+                out.flush();
+                if (!out) {
+                    out.close();
+                    std::filesystem::remove(temporary, error);
+                    return false;
+                }
+            }
+            std::filesystem::rename(temporary, target, error);
+            if (error) {
+                std::filesystem::remove(temporary, error);
+                return false;
             }
             return true;
         }
     }
 
-    void SketchDocument::setPageSize(float width, float height) {
-        if (width <= 0.0f || height <= 0.0f) {
-            throw std::runtime_error("SketchDocument::setPageSize: width and height must be positive");
+    void SketchDocument::requireUnlocked() const {
+        if (isLocked()) {
+            throw std::runtime_error("the document is locked while it loads or saves");
         }
-        artboards_[activeArtboard_].width = width;
-        artboards_[activeArtboard_].height = height;
+    }
+
+    void SketchDocument::changed() {
+        markModified();
+        updateAllViews();
+    }
+
+    void SketchDocument::setPageSize(float width, float height) {
+        requireUnlocked();
+        width = (std::max)(width, 1.0f);
+        height = (std::max)(height, 1.0f);
+        if (width == pageWidth_ && height == pageHeight_) {
+            return;
+        }
+        pageWidth_ = width;
+        pageHeight_ = height;
         changed();
     }
 
     void SketchDocument::setPpi(float ppi) {
-        if (ppi <= 0.0f) {
-            throw std::runtime_error("SketchDocument::setPpi: ppi must be positive");
-        }
-        ppi_ = ppi;
-        changed();
-    }
-
-    void SketchDocument::setPageBackground(const std::optional<SketchColor>& color) {
-        pageBackground_ = color;
-        changed();
-    }
-
-    SketchObject& SketchDocument::object(std::size_t index) const {
-        if (index >= objects_.size()) {
-            throw std::runtime_error("SketchDocument::object: index out of range");
-        }
-        return *objects_[index];
-    }
-
-    SketchObject& SketchDocument::add(SketchObject* object) {
-        if (object == nullptr) {
-            throw std::runtime_error("SketchDocument::add: object is null");
-        }
-        std::unique_ptr<SketchObject> owned(object);
-        owned->setId(nextId_++);
-        SketchObject* raw = owned.get();   // changed() may move it down the stack (into its layer), so keep hold of it here
-        objects_.push_back(std::move(owned));
-        changed();
-        return *raw;
-    }
-
-    bool SketchDocument::remove(std::size_t id) {
-        for (std::size_t i = 0; i < objects_.size(); ++i) {
-            if (objects_[i]->id() == id) {
-                objects_.erase(objects_.begin() + std::ptrdiff_t(i));
-                pruneSelection();
-                changed();
-                return true;
-            }
-        }
-        return false;
-    }
-
-    SketchObject* SketchDocument::findById(std::size_t id) const {
-        const auto known = indexOfId_.find(id);
-        if (known != indexOfId_.end() && known->second < objects_.size() && objects_[known->second]->id() == id) {
-            return objects_[known->second].get();
-        }
-        // Not where it was (or never seen): index them all, so a run of lookups scans once.
-        indexOfId_.clear();
-        SketchObject* found = nullptr;
-        for (std::size_t i = 0; i < objects_.size(); ++i) {
-            indexOfId_[objects_[i]->id()] = i;
-            if (objects_[i]->id() == id) {
-                found = objects_[i].get();
-            }
-        }
-        return found;
-    }
-
-    SketchObject* SketchDocument::hitTest(const BLPoint& point, double tolerance) const {
-        for (std::size_t i = objects_.size(); i > 0; --i) {
-            SketchObject* object = objects_[i - 1].get();
-            if (!object->isVisible() || object->isLocked() || !inEnteredScope(*object)) {
-                continue;
-            }
-            // The object's cached bounds only rule out the far ones; the nodes' outline decides.
-            const BLBox cached = object->bounds();
-            if (point.x < cached.x0 - tolerance || point.x > cached.x1 + tolerance || point.y < cached.y0 - tolerance || point.y > cached.y1 + tolerance) {
-                continue;
-            }
-            const BLPath outline = placedOutline(*object);
-            if (object->hitTest(point, tolerance, &outline)) {
-                // Inside a clipping group only what shows through the mask can be hit.
-                bool cutAway = false;
-                for (std::size_t group : groupsOf(*object)) {
-                    const SketchObject* mask = clipMaskOf(group);
-                    if (mask != nullptr && mask != object && mask->geometry().hit_test(point, BL_FILL_RULE_NON_ZERO) != BL_HIT_TEST_IN) {
-                        cutAway = true;
-                    }
-                }
-                if (!cutAway) {
-                    return object;
-                }
-            }
-        }
-        return nullptr;
-    }
-
-    void SketchDocument::clearObjects() {
-        objects_.clear();
-        outlineCache_.clear();   // ids start again from 1
-        parametric_.clear();
-        reservedIds_.clear();
-        clearGraph();
-        drivenDirty_ = true;
-        nextId_ = 1;
-        enteredScope_ = 0;
-        selection_.clear();
-        guides_.clear();
-        {
-            // One artboard again, of the same size (a new or opened document sets the size next).
-            Artboard first = artboards_[activeArtboard_];
-            first.name = "Artboard 1";
-            first.x = first.y = 0.0;
-            artboards_.assign(1, first);
-            activeArtboard_ = 0;
-        }
-        resetLayers();
-        swatches_ = defaultSwatches();
-        toolDefaults_ = ToolDefaults();
-        symbols_.clear();
-        patterns_.clear();
-        brushes_.clear();
-        activeBrush_ = 0;
-        nextBrushId_ = 1;
-        nextSymbolId_ = 1;
-        undoStack_.clear();
-        updateAllViews();
-        // Panels that show the selection or the document follow (this is not an edit: the document is not marked modified).
-        onSelectionChanged(*this);
-        onChanged(*this);
-    }
-
-    std::uint32_t SketchDocument::enteredScope() const {
-        if (enteredScope_ >= scopeCount() || findNetwork(enteredScope_) == nullptr) {
-            return 0;
-        }
-        return enteredScope_;
-    }
-
-    void SketchDocument::setEnteredScope(std::uint32_t scope) {
-        if (scope >= scopeCount() || findNetwork(scope) == nullptr) {
-            scope = 0;
-        }
-        if (scope == enteredScope_) {
-            return;
-        }
-        enteredScope_ = scope;
-        std::vector<std::size_t> kept;
-        for (std::size_t id : selection_) {
-            const SketchObject* object = findById(id);
-            if (object != nullptr && inEnteredScope(*object)) {
-                kept.push_back(id);
-            }
-        }
-        if (kept.size() != selection_.size()) {
-            setSelection(kept);
-        }
-        updateAllViews();
-    }
-
-    bool SketchDocument::inEnteredScope(const SketchObject& object) const {
-        const std::uint32_t entered = enteredScope();
-        if (entered == 0) {
-            return true;
-        }
-        for (std::uint32_t scope = object.graphScope(); scope != 0 && scope < scopeCount(); scope = parentOfScope(scope).scope) {
-            if (scope == entered) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    std::size_t SketchDocument::outermostGroupBelowEntered(const SketchObject& object) const {
-        const std::size_t entered = groupIdOfScope(enteredScope());
-        if (entered == 0) {
-            return outermostGroupOf(object);
-        }
-        const std::vector<std::size_t>& chain = groupsOf(object);
-        const auto at = std::find(chain.begin(), chain.end(), entered);
-        return at == chain.end() || at + 1 == chain.end() ? 0 : *(at + 1);
-    }
-
-    void SketchDocument::paint(BLContext& ctx, bool dimOutsideEntered) const {
-        paintRange(ctx, 0, objects_.size(), 0, dimOutsideEntered && enteredScope() != 0);
-    }
-
-    void SketchDocument::paintRange(BLContext& ctx, std::size_t begin, std::size_t end, std::size_t depth, bool dim) const {
-        std::size_t i = begin;
-        while (i < end) {
-            const SketchObject& object = *objects_[i];
-            if (groupsOf(object).size() <= depth) {
-                if (dim && !inEnteredScope(object)) {
-                    paintIsolated(ctx, object.paintBounds(), 0.25, BlendMode::Normal, [&object](BLContext& layer) { object.paint(layer); });
-                } else {
-                    object.paint(ctx);
-                }
-                ++i;
-                continue;
-            }
-            std::size_t group = groupsOf(object)[depth];
-            std::size_t j = i + 1;
-            while (j < end && groupsOf(*objects_[j]).size() > depth && groupsOf(*objects_[j])[depth] == group) {
-                ++j;
-            }
-            GroupProps props = groupProps(group);
-            const bool clipped = props.clip && j - i >= 2;
-            if (props.isDefault() || (!clipped && props.opacity >= 1.0 && props.blendMode == BlendMode::Normal)) {
-                paintRange(ctx, i, j, depth + 1, dim);
-            } else {
-                bool any = false;
-                BLBox box(0, 0, 0, 0);
-                for (std::size_t k = i; k < j; ++k) {
-                    if (!objects_[k]->isVisible()) {
-                        continue;
-                    }
-                    BLBox b = objects_[k]->bounds();
-                    box = any ? BLBox(std::min(box.x0, b.x0), std::min(box.y0, b.y0), std::max(box.x1, b.x1), std::max(box.y1, b.y1)) : b;
-                    any = true;
-                }
-                if (any) {
-                    auto paintBody = [this, i, j, depth, clipped, dim](BLContext& target) {
-                        if (!clipped) {
-                            paintRange(target, i, j, depth + 1, dim);
-                            return;
-                        }
-                        // The mask is the topmost member: the others draw into a layer that is cut to its outline.
-                        const SketchObject& mask = *objects_[j - 1];
-                        BLBox m = mask.geometryBounds(), area(0, 0, 0, 0);
-                        bool first = true;
-                        for (std::size_t k = i; k + 1 < j; ++k) {
-                            if (objects_[k]->isVisible()) {
-                                BLBox b = objects_[k]->bounds();
-                                area = first ? b : BLBox(std::min(area.x0, b.x0), std::min(area.y0, b.y0), std::max(area.x1, b.x1), std::max(area.y1, b.y1));
-                                first = false;
-                            }
-                        }
-                        if (first) {
-                            return;
-                        }
-                        BLBox cut(std::max(area.x0, m.x0), std::max(area.y0, m.y0), std::min(area.x1, m.x1), std::min(area.y1, m.y1));
-                        if (cut.x1 <= cut.x0 || cut.y1 <= cut.y0) {
-                            return;
-                        }
-                        paintClipped(target, cut, mask.geometry(), [this, i, j, depth, dim](BLContext& inner) { paintRange(inner, i, j - 1, depth + 1, dim); });
-                    };
-                    if (props.opacity < 1.0 || props.blendMode != BlendMode::Normal) {
-                        paintIsolated(ctx, box, props.opacity, props.blendMode, paintBody);
-                    } else {
-                        paintBody(ctx);
-                    }
-                }
-            }
-            i = j;
-        }
-    }
-
-    bool SketchDocument::inGroup(const SketchObject& object, std::size_t group) const {
-        const std::vector<std::size_t>& chain = object.groups();
-        return std::find(chain.begin(), chain.end(), group) != chain.end();
-    }
-
-    GroupProps SketchDocument::groupProps(std::size_t groupId) const {
-        if (const NodeRef subnet = groupId != 0 ? groupSubnetOf(groupId) : NodeRef(); subnet.valid()) {
-            const jitnodes::Node& held = node(subnet);
-            GroupProps props;
-            props.opacity = held.getFloat("opacity");
-            props.blendMode = blendModeFromCss(held.getString("blend"));
-            props.clip = held.getFloat("clip") != 0.0f;
-            return props;
-        }
-        auto it = groupProps_.find(groupId);
-        return it != groupProps_.end() ? it->second : GroupProps();
-    }
-
-    void SketchDocument::setGroupProps(std::size_t groupId, const GroupProps& props) {
-        putGroupProps(groupId, props);
-        changed();
-    }
-
-    std::size_t SketchDocument::selectedGroup() const {
-        if (selection_.empty()) {
-            return 0;
-        }
-        const SketchObject* first = findById(selection_.front());
-        if (first == nullptr || !isGrouped(*first)) {
-            return 0;
-        }
-        std::size_t group = outermostGroupOf(*first);
-        std::size_t members = 0;
-        for (const std::unique_ptr<SketchObject>& object : objects_) {
-            members += outermostGroupOf(*object) == group ? 1 : 0;
-        }
-        for (std::size_t id : selection_) {
-            const SketchObject* object = findById(id);
-            if (object == nullptr || outermostGroupOf(*object) != group) {
-                return 0;
-            }
-        }
-        return members == selection_.size() ? group : 0;
-    }
-
-    void SketchDocument::setSelectionGroupOpacity(double opacity) {
-        if (std::size_t group = selectedGroup()) {
-            GroupProps props = groupProps(group);
-            props.opacity = std::min(1.0, std::max(0.0, opacity));
-            setGroupProps(group, props);
-        }
-    }
-
-    void SketchDocument::setSelectionGroupBlendMode(BlendMode mode) {
-        if (std::size_t group = selectedGroup()) {
-            GroupProps props = groupProps(group);
-            props.blendMode = mode;
-            setGroupProps(group, props);
-        }
-    }
-
-    // ---- Selection ----
-
-    bool SketchDocument::isSelected(std::size_t id) const {
-        return std::find(selection_.begin(), selection_.end(), id) != selection_.end();
-    }
-
-    void SketchDocument::setSelection(const std::vector<std::size_t>& ids) {
-        std::vector<std::size_t> valid;
-        for (std::size_t id : ids) {
-            if (findById(id) != nullptr && std::find(valid.begin(), valid.end(), id) == valid.end()) {
-                valid.push_back(id);
-            }
-        }
-        if (valid == selection_) {
-            return;
-        }
-        selection_ = valid;
-        groupAngle_.reset();
-        quadFrame_.reset();
-        originU_ = originV_ = 0.5;
-        onSelectionChanged(*this);
-        updateAllViews();
-    }
-
-    void SketchDocument::selectAll() {
-        std::vector<std::size_t> ids;
-        for (const std::unique_ptr<SketchObject>& object : objects_) {
-            if (object->isVisible() && !object->isLocked() && inEnteredScope(*object)) {
-                ids.push_back(object->id());
-            }
-        }
-        setSelection(ids);
-    }
-
-    BLBox SketchDocument::outlineBounds(const SketchObject& object) const {
-        BLBox box(0, 0, 0, 0);
-        placedOutline(object).get_bounding_box(&box);
-        return box;
-    }
-
-    bool SketchDocument::selectionBounds(BLBox& out) const {
-        bool any = false;
-        for (std::size_t id : selection_) {
-            const SketchObject* object = findById(id);
-            if (object == nullptr) {
-                continue;
-            }
-            BLBox box = outlineBounds(*object);
-            for (std::size_t group : groupsOf(*object)) {
-                const SketchObject* mask = clipMaskOf(group);
-                if (mask != nullptr && mask != object) {
-                    BLBox m = outlineBounds(*mask);
-                    BLBox cut(std::max(box.x0, m.x0), std::max(box.y0, m.y0), std::min(box.x1, m.x1), std::min(box.y1, m.y1));
-                    box = cut.x1 >= cut.x0 && cut.y1 >= cut.y0 ? cut : m;
-                }
-            }
-            if (!any) {
-                out = box;
-                any = true;
-            } else {
-                out.x0 = std::min(out.x0, box.x0);
-                out.y0 = std::min(out.y0, box.y0);
-                out.x1 = std::max(out.x1, box.x1);
-                out.y1 = std::max(out.y1, box.y1);
-            }
-        }
-        return any;
-    }
-
-    namespace {
-        // Heckbert's unit-square -> quad coefficients: X = (a u + b v + c) / (g u + h v + 1), Y likewise with d, e, f.
-        struct Projective {
-            double a, b, c, d, e, f, g, h;
-        };
-
-        Projective projectiveFor(const BLPoint* q) {
-            double dx1 = q[1].x - q[2].x, dx2 = q[3].x - q[2].x, dx3 = q[0].x - q[1].x + q[2].x - q[3].x;
-            double dy1 = q[1].y - q[2].y, dy2 = q[3].y - q[2].y, dy3 = q[0].y - q[1].y + q[2].y - q[3].y;
-            double g = 0.0, h = 0.0;
-            double den = dx1 * dy2 - dx2 * dy1;
-            if ((std::fabs(dx3) > 1e-12 || std::fabs(dy3) > 1e-12) && std::fabs(den) > 1e-12) {
-                g = (dx3 * dy2 - dx2 * dy3) / den;
-                h = (dx1 * dy3 - dx3 * dy1) / den;
-            }
-            return Projective{q[1].x - q[0].x + g * q[1].x, q[3].x - q[0].x + h * q[3].x, q[0].x,
-                q[1].y - q[0].y + g * q[1].y, q[3].y - q[0].y + h * q[3].y, q[0].y, g, h};
-        }
-    }
-
-    BLPoint QuadFrame::map(double u, double v) const {
-        Projective m = projectiveFor(p);
-        double denom = m.g * u + m.h * v + 1.0;
-        if (std::fabs(denom) < 1e-9) {
-            denom = denom < 0 ? -1e-9 : 1e-9;
-        }
-        return BLPoint((m.a * u + m.b * v + m.c) / denom, (m.d * u + m.e * v + m.f) / denom);
-    }
-
-    bool QuadFrame::unmap(const BLPoint& world, double& u, double& v) const {
-        Projective m = projectiveFor(p);
-        // Invert the 3x3 [[a b c] [d e f] [g h 1]] with the adjugate.
-        double A = m.e - m.f * m.h, B = m.c * m.h - m.b, C = m.b * m.f - m.c * m.e;
-        double D = m.f * m.g - m.d, E = m.a - m.c * m.g, F = m.c * m.d - m.a * m.f;
-        double G = m.d * m.h - m.e * m.g, H = m.b * m.g - m.a * m.h, I = m.a * m.e - m.b * m.d;
-        double det = m.a * A + m.b * D + m.c * G;
-        if (std::fabs(det) < 1e-12) {
-            return false;
-        }
-        double uu = A * world.x + B * world.y + C;
-        double vv = D * world.x + E * world.y + F;
-        double ww = G * world.x + H * world.y + I;
-        if (std::fabs(ww) < 1e-12) {
-            return false;
-        }
-        u = uu / ww;
-        v = vv / ww;
-        return true;
-    }
-
-    QuadFrame QuadFrame::transformed(const BLMatrix2D& matrix) const {
-        QuadFrame result;
-        for (int i = 0; i < 4; ++i) {
-            result.p[i] = matrix.map_point(p[i]);
-        }
-        return result;
-    }
-
-    QuadFrame SelectionFrame::asQuad() const {
-        if (quad.has_value()) {
-            return *quad;
-        }
-        QuadFrame result;
-        result.p[0] = toWorld(local.x0, local.y0);
-        result.p[1] = toWorld(local.x1, local.y0);
-        result.p[2] = toWorld(local.x1, local.y1);
-        result.p[3] = toWorld(local.x0, local.y1);
-        return result;
-    }
-
-    BLPoint SelectionFrame::toWorld(double lx, double ly) const {
-        double c = std::cos(angle), s = std::sin(angle);
-        return BLPoint(lx * c - ly * s, lx * s + ly * c);
-    }
-
-    BLPoint SelectionFrame::toLocal(const BLPoint& world) const {
-        double c = std::cos(angle), s = std::sin(angle);
-        return BLPoint(world.x * c + world.y * s, -world.x * s + world.y * c);
-    }
-
-    bool SketchDocument::selectionFrame(SelectionFrame& out) const {
-        double angle = 0.0;
-        bool any = false;
-        for (std::size_t id : selection_) {
-            const SketchObject* object = findById(id);
-            if (object == nullptr) {
-                continue;
-            }
-            if (!any) {
-                angle = object->frameAngle();
-                any = true;
-            } else if (std::fabs(object->frameAngle() - angle) > 1e-9) {
-                angle = groupAngle_.value_or(0.0);  // mixed orientations: the group's own angle
-                break;
-            }
-        }
-        if (!any) {
-            return false;
-        }
-        out.angle = angle;
-        out.quad = quadFrame_;
-        bool first = true;
-        for (std::size_t id : selection_) {
-            const SketchObject* object = findById(id);
-            if (object == nullptr) {
-                continue;
-            }
-            BLPath path = placedOutline(*object);
-            if (angle != 0.0) {
-                path.transform(BLMatrix2D::make_rotation(-angle));
-            }
-            BLBox box(0, 0, 0, 0);
-            path.get_bounding_box(&box);
-            if (first) {
-                out.local = box;
-                first = false;
-            } else {
-                out.local.x0 = std::min(out.local.x0, box.x0);
-                out.local.y0 = std::min(out.local.y0, box.y0);
-                out.local.x1 = std::max(out.local.x1, box.x1);
-                out.local.y1 = std::max(out.local.y1, box.y1);
-            }
-        }
-        return true;
-    }
-
-    SelectionFrame SketchDocument::objectFrame(const SketchObject& object) const {
-        SelectionFrame frame;
-        frame.angle = object.frameAngle();
-        BLPath path = placedOutline(object);
-        if (frame.angle != 0.0) {
-            path.transform(BLMatrix2D::make_rotation(-frame.angle));
-        }
-        path.get_bounding_box(&frame.local);
-        return frame;
-    }
-
-    BLPoint SketchDocument::selectionOrigin(const SelectionFrame& frame) const {
-        if (selection_.size() == 1) {
-            const NodeRef place = transformRefOf(selection_.front());
-            if (place.valid()) {
-                const jitnodes::Node& node = this->node(place);
-                return findById(selection_.front())->paintToPage().map_point(node.baseFloat("pivotX"), node.baseFloat("pivotY"));
-            }
-        }
-        return frame.pointAt(originU_, originV_);
-    }
-
-    void SketchDocument::finishSelectionOrigin() {
-        if (pivotBefore_ != nullptr) {
-            commitGraphEdit(*pivotBefore_, "Move Pivot");
-            pivotBefore_.reset();
-        }
-    }
-
-    void SketchDocument::setSelectionOrigin(const SelectionFrame& frame, const BLPoint& world, bool live) {
-        if (selection_.size() == 1) {
-            const NodeRef place = transformRefOf(selection_.front());
-            BLMatrix2D back = findById(selection_.front())->paintToPage();
-            if (place.valid() && back.invert() == BL_SUCCESS) {
-                const BLPoint local = back.map_point(world.x, world.y);
-                if (live) {
-                    if (pivotBefore_ == nullptr) {
-                        pivotBefore_ = std::make_shared<jitnodes::GraphSnapshot>(snapshotGraph());
-                    }
-                    setTransformPivot(node(place), local.x, local.y);
-                    changed();
-                    return;
-                }
-                const jitnodes::GraphSnapshot before = snapshotGraph();
-                setTransformPivot(node(place), local.x, local.y);
-                commitGraphEdit(before, "Move Pivot");
-                return;
-            }
-        }
-        double u = 0.5, v = 0.5;
-        if (frame.unmapPoint(world, u, v)) {
-            originU_ = u;
-            originV_ = v;
-        }
-        updateAllViews();
-    }
-
-    void SketchDocument::pruneSelection() {
-        std::size_t before = selection_.size();
-        selection_.erase(std::remove_if(selection_.begin(), selection_.end(),
-            [this](std::size_t id) { return findById(id) == nullptr; }), selection_.end());
-        if (selection_.size() != before) {
-            groupAngle_.reset();
-            quadFrame_.reset();
-            originU_ = originV_ = 0.5;
-            onSelectionChanged(*this);
-        }
-    }
-
-    // ---- Ownership moves used by undo ----
-
-    std::unique_ptr<SketchObject> SketchDocument::detach(std::size_t id, std::size_t* index) {
-        for (std::size_t i = 0; i < objects_.size(); ++i) {
-            if (objects_[i]->id() == id) {
-                std::unique_ptr<SketchObject> taken = std::move(objects_[i]);
-                objects_.erase(objects_.begin() + std::ptrdiff_t(i));
-                if (index != nullptr) {
-                    *index = i;
-                }
-                pruneSelection();
-                changed();
-                return taken;
-            }
-        }
-        return nullptr;
-    }
-
-    void SketchDocument::attach(std::unique_ptr<SketchObject> object, std::size_t index) {
-        if (index > objects_.size()) {
-            index = objects_.size();
-        }
-        objects_.insert(objects_.begin() + std::ptrdiff_t(index), std::move(object));
-        changed();
-    }
-
-    // ---- Undoable edits ----
-
-    namespace {
-        // std::function needs a copyable callable, so an object that undo/redo hands back and forth
-        // lives in a shared slot.
-        struct Slot {
-            std::unique_ptr<SketchObject> object;
-            std::size_t id = 0;
-            std::size_t index = 0;
-        };
-    }
-
-    SketchObject& SketchDocument::addUndoable(SketchObject* object, const std::string& description) {
-        if (object == nullptr) {
-            throw std::runtime_error("SketchDocument::addUndoable: object is null");
-        }
-        auto slot = std::make_shared<Slot>();
-        slot->object.reset(object);
-        slot->index = objects_.size();
-        slot->object->setId(nextId_++);
-        slot->id = slot->object->id();
-        SketchObject* raw = object;
-        // The sync prunes the shape chain of an object that leaves (a hand-edited shape keeps a frozen path node and its shape upstream), so
-        // redo puts the graph back as it was after the add rather than building a plain node again.
-        auto after = std::make_shared<std::shared_ptr<const jitnodes::GraphSnapshot>>();   // taken when the add is undone, so adding stays cheap
-        undoStack_.push({description,
-            [this, slot, after]() {
-                const bool redo = bool(*after);
-                if (redo) {
-                    const jitnodes::GraphSnapshot live = snapshotGraph();
-                    jitnodes::restoreSnapshot(network(), **after, &live);
-                }
-                {
-                    // One sync for the object coming back and the nodes restored with it.
-                    Batch batch(*this);
-                    attach(std::move(slot->object), slot->index);
-                    if (redo) {
-                        graphChanged();
-                    }
-                }
-                setSelection({slot->id});
-            },
-            [this, slot, after]() {
-                *after = std::make_shared<const jitnodes::GraphSnapshot>(snapshotGraph());
-                slot->object = detach(slot->id, &slot->index);
-            }});
-        return *raw;
-    }
-
-    void SketchDocument::deleteSelection() {
-        if (selection_.empty()) {
-            return;
-        }
-        std::vector<std::shared_ptr<Slot>> slots;
-        for (std::size_t id : selection_) {
-            auto slot = std::make_shared<Slot>();
-            slot->id = id;
-            slots.push_back(slot);
-        }
-        std::vector<std::size_t> ids = selection_;
-        // Same reason as in addUndoable: undo puts back the graph as it was before the delete, shape chains and frozen edits included.
-        auto before = std::make_shared<std::shared_ptr<const jitnodes::GraphSnapshot>>();
-        undoStack_.push({"Delete",
-            [this, slots, before]() {
-                *before = std::make_shared<const jitnodes::GraphSnapshot>(snapshotGraph());
-                // Highest stack position first, so every recorded index is its original one.
-                for (std::size_t i = objects_.size(); i > 0; --i) {
-                    std::size_t id = objects_[i - 1]->id();
-                    for (const std::shared_ptr<Slot>& slot : slots) {
-                        if (slot->id == id) {
-                            slot->object = detach(id, &slot->index);
-                            break;
-                        }
-                    }
-                }
-            },
-            [this, slots, ids, before]() {
-                const jitnodes::GraphSnapshot live = snapshotGraph();
-                jitnodes::restoreSnapshot(network(), **before, &live);
-                // Reinsert lowest index first so each stored index is valid again.
-                std::vector<std::shared_ptr<Slot>> ordered = slots;
-                std::sort(ordered.begin(), ordered.end(),
-                    [](const std::shared_ptr<Slot>& a, const std::shared_ptr<Slot>& b) { return a->index < b->index; });
-                {
-                    // One sync after all are back: between two, the nodes of the objects not yet attached would be pruned.
-                    Batch batch(*this);
-                    for (const std::shared_ptr<Slot>& slot : ordered) {
-                        if (slot->object) {
-                            attach(std::move(slot->object), slot->index);
-                        }
-                    }
-                }
-                graphChanged();
-                setSelection(ids);
-            }});
-    }
-
-    void SketchDocument::duplicateSelection(double dx, double dy) {
-        std::vector<std::unique_ptr<SketchObject>> copies;
-        for (std::size_t id : selection_) {
-            if (const SketchObject* source = findById(id)) {
-                copies.emplace_back(source->clone());
-                copies.back()->transform(BLMatrix2D::make_translation(dx, dy));
-            }
-        }
-        addObjectsUndoable(std::move(copies), "Duplicate");
-    }
-
-    std::vector<std::size_t> SketchDocument::addObjectsUndoable(std::vector<std::unique_ptr<SketchObject>> objects, const std::string& description,
-        const SketchDocument* groupsFrom) {
-        std::vector<std::shared_ptr<Slot>> slots;
-        std::vector<std::size_t> ids;
-        std::size_t index = objects_.size();
-        // Groups come along, but as new groups of their own (copies must not share a group with the originals).
-        std::map<std::size_t, std::size_t> freshGroups;
-        for (std::unique_ptr<SketchObject>& object : objects) {
-            std::vector<std::size_t> groups = groupsOf(*object);
-            for (std::size_t& g : groups) {
-                auto it = freshGroups.find(g);
-                if (it == freshGroups.end()) {
-                    std::size_t fresh = nextGroupId_++;
-                    GroupProps props = (groupsFrom != nullptr ? groupsFrom : this)->groupProps(g);
-                    if (!props.isDefault()) {
-                        putGroupProps(fresh, props);
-                    }
-                    it = freshGroups.emplace(g, fresh).first;
-                }
-                g = it->second;
-            }
-            setGroupsOf(*object, groups);
-            auto slot = std::make_shared<Slot>();
-            slot->object = std::move(object);
-            slot->object->setId(nextId_++);
-            slot->id = slot->object->id();
-            slot->index = index++;
-            ids.push_back(slot->id);
-            slots.push_back(slot);
-        }
-        if (slots.empty()) {
-            return ids;
-        }
-        undoStack_.push({description,
-            [this, slots, ids]() {
-                for (const std::shared_ptr<Slot>& slot : slots) {
-                    attach(std::move(slot->object), slot->index);
-                }
-                setSelection(ids);
-            },
-            [this, slots]() {
-                for (std::size_t i = slots.size(); i > 0; --i) {
-                    slots[i - 1]->object = detach(slots[i - 1]->id, &slots[i - 1]->index);
-                }
-            }});
-        return ids;
-    }
-
-    std::string SketchDocument::selectionToSvg() const {
-        SketchDocument scratch;
-        scratch.setPageSize(pageWidth(), pageHeight());
-        scratch.setColorMode(colorMode_);
-        scratch.setSymbols(symbols_);
-        scratch.setPatterns(patterns_);
-        scratch.setBrushes(brushes_);
-        for (const std::unique_ptr<SketchObject>& object : objects_) {  // stacking order, so groups stay adjacent
-            if (isSelected(object->id())) {
-                scratch.add(object->clone());
-            }
-        }
-        return scratch.objects_.empty() ? std::string() : svgFromDocument(scratch);
-    }
-
-    bool SketchDocument::pasteSvg(const std::string& svg, double dx, double dy) {
-        SketchDocument scratch;
-        if (!documentFromSvg(svg, scratch) || scratch.objectCount() == 0) {
-            return false;
-        }
-        std::vector<std::unique_ptr<SketchObject>> objects;
-        for (std::size_t i = 0; i < scratch.objectCount(); ++i) {
-            objects.emplace_back(scratch.object(i).clone());
-            objects.back()->transform(BLMatrix2D::make_translation(dx, dy));
-            if (objects.back()->isSymbol()) {
-                objects.back()->setSymbol(importSymbol(objects.back()->symbol()));
-            }
-            std::vector<AppearanceItem> items = objects.back()->appearance();
-            bool rebound = false;
-            for (AppearanceItem& item : items) {
-                if (item.strokeOptions.brush) {
-                    item.strokeOptions.brush = importBrush(item.strokeOptions.brush);
-                    rebound = true;
-                }
-                if (item.paint.isPattern() && item.paint.patternDef()) {
-                    item.paint = SketchPaint::pattern(importPattern(item.paint.patternDef()), item.paint.patternScale(), item.paint.patternAngle());
-                    rebound = true;
-                }
-            }
-            if (rebound) {
-                objects.back()->setAppearance(items);
-            }
-        }
-        addObjectsUndoable(std::move(objects), "Paste", &scratch);
-        return true;
-    }
-
-    bool SketchDocument::resetBoundingBox() {
-        std::vector<GeometryState> before = snapshotSelection();
-        if (before.empty()) {
-            return false;
-        }
-        FrameState frameBefore = frameState();
-        bool needed = groupAngle_.has_value() || quadFrame_.has_value();
-        for (const GeometryState& entry : before) {
-            needed = needed || std::fabs(entry.angle) > 1e-12;
-        }
-        if (!needed) {
-            return false;
-        }
-        for (const GeometryState& entry : before) {
-            if (SketchObject* object = findById(entry.id)) {
-                object->setFrameAngle(0.0);
-            }
-        }
-        groupAngle_.reset();
-        quadFrame_.reset();
-        originU_ = originV_ = 0.5;
-        commitPlacement(before, "Reset Bounding Box", frameBefore);
-        return true;
-    }
-
-    std::vector<GeometryState> SketchDocument::snapshotSelection(bool withChildren) const {
-        std::vector<GeometryState> result;
-        for (std::size_t id : withChildren ? withDescendants(selection_) : selection_) {
-            if (const SketchObject* object = findById(id)) {
-                result.push_back({id, object->geometry(), object->frameAngle(), object->textMatrix(), object->paintToPage(), object->paintWarp()});
-            }
-        }
-        return result;
-    }
-
-    void SketchDocument::commitGeometry(const std::vector<GeometryState>& before, const std::string& description,
-        const FrameState& frameBefore) {
-        FrameState frameAfter = frameState();
-        std::vector<GeometryState> after;
-        for (const GeometryState& entry : before) {
-            if (const SketchObject* object = findById(entry.id)) {
-                after.push_back({entry.id, object->geometry(), object->frameAngle(), object->textMatrix(), object->paintToPage(), object->paintWarp()});
-            }
-        }
-        auto apply = [this](const std::vector<GeometryState>& state, const FrameState& frame) {
-            for (const GeometryState& entry : state) {
-                if (SketchObject* object = findById(entry.id)) {
-                    object->setGeometry(entry.path);
-                    object->setPaintMatrix(entry.paintMatrix);
-                    object->setPaintWarp(entry.paintWarp);
-                    object->setTextMatrix(entry.textMatrix);
-                    object->setFrameAngle(entry.angle);
-                    syncObject(*object);
-                }
-            }
-            groupAngle_ = frame.groupAngle;
-            quadFrame_ = frame.quad;
+        requireUnlocked();
+        ppi = (std::max)(ppi, 1.0f);
+        if (ppi != ppi_) {
+            ppi_ = ppi;
             changed();
-        };
-        undoStack_.push({description,
-            [apply, after, frameAfter]() { apply(after, frameAfter); },
-            [apply, before, frameBefore]() { apply(before, frameBefore); }});
+        }
     }
 
-    void SketchDocument::commitPlacement(const std::vector<GeometryState>& before, const std::string& description, const FrameState& frameBefore) {
-        FrameState frameAfter = frameState();
-        std::vector<GeometryState> after;
-        for (const GeometryState& entry : before) {
-            if (const SketchObject* object = findById(entry.id)) {
-                after.push_back({entry.id, object->geometry(), object->frameAngle(), object->textMatrix(), object->paintToPage(), object->paintWarp()});
-            }
-        }
-        // Undo and redo are placement edits too: the transform nodes get the old (or new) numbers and the objects follow.
-        auto apply = [this](const std::vector<GeometryState>& state, const FrameState& frame) {
-            placeObjects(state, BLMatrix2D::make_identity());
-            groupAngle_ = frame.groupAngle;
-            quadFrame_ = frame.quad;
+    void SketchDocument::setPageColor(const newui::Color& color) {
+        requireUnlocked();
+        if (!(color == pageColor_)) {
+            pageColor_ = color;
             changed();
-        };
-        undoStack_.push({description,
-            [apply, after, frameAfter]() { apply(after, frameAfter); },
-            [apply, before, frameBefore]() { apply(before, frameBefore); }});
-    }
-
-    void SketchDocument::transformObjects(const std::vector<std::size_t>& ids, const BLMatrix2D& matrix, const std::string& description) {
-        std::vector<GeometryState> before;
-        FrameState frameBefore = frameState();
-        for (std::size_t id : withDescendants(ids)) {
-            if (const SketchObject* object = findById(id)) {
-                before.push_back({id, object->geometry(), object->frameAngle(), object->textMatrix(), object->paintToPage(), object->paintWarp()});
-            }
-        }
-        if (!before.empty()) {
-            placeObjects(before, matrix);
-            if (quadFrame_.has_value()) {
-                quadFrame_ = quadFrame_->transformed(matrix);
-            }
-            noteTransform(matrix, 0.0);
-            commitPlacement(before, description, frameBefore);
         }
     }
 
-    // ---- Arrange / align / transform / lock / hide ----
-
-    void SketchDocument::reorder(const std::vector<std::size_t>& ids) {
-        std::vector<std::unique_ptr<SketchObject>> sorted;
-        for (std::size_t id : ids) {
-            for (std::unique_ptr<SketchObject>& object : objects_) {
-                if (object != nullptr && object->id() == id) {
-                    sorted.push_back(std::move(object));
-                    break;
-                }
-            }
-        }
-        // Anything the list did not name (cannot happen for our own orders) keeps its place at the front.
-        std::vector<std::unique_ptr<SketchObject>> rest;
-        for (std::unique_ptr<SketchObject>& object : objects_) {
-            if (object != nullptr) {
-                rest.push_back(std::move(object));
-            }
-        }
-        objects_ = std::move(rest);
-        for (std::unique_ptr<SketchObject>& object : sorted) {
-            objects_.push_back(std::move(object));
-        }
-        changed();
-    }
-
-    std::vector<std::size_t> SketchDocument::withGroupMembers(const std::vector<std::size_t>& ids) const {
-        std::vector<std::size_t> out = ids;
-        std::vector<std::size_t> outer;
-        for (std::size_t id : ids) {
-            const SketchObject* object = findById(id);
-            if (object != nullptr && outermostGroupBelowEntered(*object) != 0) {
-                outer.push_back(outermostGroupBelowEntered(*object));
-            }
-        }
-        if (outer.empty()) {
-            return out;
-        }
-        for (const std::unique_ptr<SketchObject>& object : objects_) {
-            if (!object->isVisible() || object->isLocked() || !inEnteredScope(*object) ||
-                std::find(outer.begin(), outer.end(), outermostGroupBelowEntered(*object)) == outer.end() ||
-                std::find(out.begin(), out.end(), object->id()) != out.end()) {
-                continue;
-            }
-            out.push_back(object->id());
-        }
-        return out;
-    }
-
-    bool SketchDocument::canUngroup() const {
-        for (std::size_t id : selection_) {
-            const SketchObject* object = findById(id);
-            if (object != nullptr && isGrouped(*object)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    void SketchDocument::applyGroups(const std::vector<GroupState>& states) {
-        for (const GroupState& state : states) {
-            if (SketchObject* object = findById(state.id)) {
-                setGroupsOf(*object, state.groups);
-            }
-        }
-    }
-
-    bool SketchDocument::groupSelection(bool clip) {
-        if (selection_.size() < 2) {
-            return false;
-        }
-        std::vector<std::size_t> orderBefore;
-        std::vector<GroupState> groupsBefore;
-        std::size_t top = 0;
-        for (std::size_t i = 0; i < objects_.size(); ++i) {
-            orderBefore.push_back(objects_[i]->id());
-            groupsBefore.push_back({objects_[i]->id(), groupsOf(*objects_[i])});
-            if (isSelected(objects_[i]->id())) {
-                top = i;
-            }
-        }
-        // The members keep their relative order and take the place of the topmost one.
-        std::vector<std::size_t> lower, picked, upper;
-        for (std::size_t i = 0; i < objects_.size(); ++i) {
-            std::size_t id = objects_[i]->id();
-            (isSelected(id) ? picked : (i < top ? lower : upper)).push_back(id);
-        }
-        std::vector<std::size_t> orderAfter = lower;
-        orderAfter.insert(orderAfter.end(), picked.begin(), picked.end());
-        orderAfter.insert(orderAfter.end(), upper.begin(), upper.end());
-
-        // Members from different layers all move to the layer of the topmost one.
-        std::vector<std::pair<std::size_t, std::size_t>> layersBefore, layersAfter;
-        for (const std::unique_ptr<SketchObject>& object : objects_) {
-            layersBefore.push_back({object->id(), layerOf(*object)});
-            layersAfter.push_back({object->id(), isSelected(object->id()) ? layerOf(*objects_[top]) : layerOf(*object)});
-        }
-        auto applyObjectLayers = [this](const std::vector<std::pair<std::size_t, std::size_t>>& states) {
-            for (const auto& [id, layer] : states) {
-                if (SketchObject* object = findById(id)) {
-                    setLayerOf(*object, layer);
-                }
-            }
-        };
-        applyObjectLayers(layersAfter);
-        orderAfter = layerSorted(orderAfter);
-        std::size_t group = nextGroupId_++;
-        std::vector<GroupState> groupsAfter = groupsBefore;
-        for (GroupState& state : groupsAfter) {
-            if (isSelected(state.id)) {
-                state.groups.insert(state.groups.begin(), group);
-            }
-        }
-        GroupProps clipProps;
-        clipProps.clip = clip;
-        auto applyProps = [this, group, clipProps](bool on) {
-            putGroupProps(group, on && clipProps.clip ? clipProps : GroupProps());
-        };
-        applyProps(true);
-        applyGroups(groupsAfter);
-        reorder(orderAfter);
-        undoStack_.push({clip ? "Make Clipping Mask" : "Group",
-            [this, orderAfter, groupsAfter, layersAfter, applyObjectLayers, applyProps]() { applyProps(true); applyObjectLayers(layersAfter); applyGroups(groupsAfter); reorder(orderAfter); },
-            [this, orderBefore, groupsBefore, layersBefore, applyObjectLayers, applyProps]() { applyProps(false); applyObjectLayers(layersBefore); applyGroups(groupsBefore); reorder(orderBefore); }});
-        return true;
-    }
-
-    bool SketchDocument::ungroupSelection() {
-        std::vector<GroupState> before, after;
-        for (std::size_t id : selection_) {
-            const SketchObject* object = findById(id);
-            if (object == nullptr || !isGrouped(*object)) {
-                continue;
-            }
-            const std::vector<std::size_t>& chain = groupsOf(*object);
-            before.push_back({id, chain});
-            std::vector<std::size_t> rest(chain.begin() + 1, chain.end());
-            after.push_back({id, rest});
-        }
-        if (before.empty()) {
-            return false;
-        }
-        applyGroups(after);
-        changed();
-        undoStack_.push({"Ungroup",
-            [this, after]() { applyGroups(after); changed(); },
-            [this, before]() { applyGroups(before); changed(); }});
-        return true;
-    }
-
-    bool SketchDocument::arrangeSelection(ArrangeOp op) {
-        if (selection_.empty()) {
-            return false;
-        }
-        std::vector<std::size_t> before;
-        std::vector<bool> chosen;
-        for (const std::unique_ptr<SketchObject>& object : objects_) {
-            before.push_back(object->id());
-            chosen.push_back(isSelected(object->id()));
-        }
-        std::vector<std::size_t> after = before;
-        std::vector<bool> flags = chosen;
-        std::size_t n = after.size();
-        switch (op) {
-            case ArrangeOp::BringToFront:
-            case ArrangeOp::SendToBack: {
-                std::vector<std::size_t> picked, others;
-                for (std::size_t i = 0; i < n; ++i) {
-                    (flags[i] ? picked : others).push_back(after[i]);
-                }
-                after = op == ArrangeOp::BringToFront ? others : picked;
-                after.insert(after.end(), op == ArrangeOp::BringToFront ? picked.begin() : others.begin(),
-                    op == ArrangeOp::BringToFront ? picked.end() : others.end());
-                break;
-            }
-            case ArrangeOp::BringForward:
-            case ArrangeOp::SendBackward: {
-                // Step by whole units: a group moves past a neighbor (or a neighboring group) as one.
-                std::vector<std::vector<std::size_t>> units;
-                std::vector<bool> unitFlags;
-                for (std::size_t i = 0; i < n; ++i) {
-                    const std::size_t outer = outermostGroupOf(*objects_[i]);
-                    bool joins = i > 0 && outer != 0 && outer == outermostGroupOf(*objects_[i - 1]);
-                    if (joins) {
-                        units.back().push_back(after[i]);
-                        unitFlags.back() = unitFlags.back() || flags[i];
-                    } else {
-                        units.push_back({after[i]});
-                        unitFlags.push_back(flags[i]);
-                    }
-                }
-                std::size_t m = units.size();
-                if (op == ArrangeOp::BringForward) {
-                    for (std::size_t i = m; i-- > 1;) {
-                        if (unitFlags[i - 1] && !unitFlags[i]) {
-                            std::swap(units[i - 1], units[i]);
-                            std::swap(unitFlags[i - 1], unitFlags[i]);
-                        }
-                    }
-                } else {
-                    for (std::size_t i = 1; i < m; ++i) {
-                        if (unitFlags[i] && !unitFlags[i - 1]) {
-                            std::swap(units[i - 1], units[i]);
-                            std::swap(unitFlags[i - 1], unitFlags[i]);
-                        }
-                    }
-                }
-                after.clear();
-                for (const std::vector<std::size_t>& unit : units) {
-                    after.insert(after.end(), unit.begin(), unit.end());
-                }
-                break;
-            }
-        }
-        after = layerSorted(after);   // an object stays inside its layer
-        if (after == before) {
-            return false;
-        }
-        const char* what = op == ArrangeOp::BringToFront ? "Bring to Front" : (op == ArrangeOp::BringForward ? "Bring Forward"
-            : (op == ArrangeOp::SendBackward ? "Send Backward" : "Send to Back"));
-        reorder(after);
-        undoStack_.push({what, [this, after]() { reorder(after); }, [this, before]() { reorder(before); }});
-        return true;
-    }
-
-    bool SketchDocument::alignSelection(AlignMode mode) {
-        std::vector<GeometryState> before = snapshotSelection();
-        if (before.empty()) {
-            return false;
-        }
-        FrameState frameBefore = frameState();
-        BLBox target = artboards_[activeArtboard_].box();  // one object (or one group) lines up with the active artboard
-        // A group aligns as one piece: its members share the group's bounds.
-        auto unitKey = [this](const SketchObject& o) { return !isGrouped(o) ? o.id() * 2 : outermostGroupOf(o) * 2 + 1; };
-        std::map<std::size_t, BLBox> unitBounds;
-        for (const GeometryState& entry : before) {
-            if (const SketchObject* object = findById(entry.id)) {
-                BLBox b = object->geometryBounds();
-                auto [it, fresh] = unitBounds.emplace(unitKey(*object), b);
-                if (!fresh) {
-                    it->second = BLBox(std::min(it->second.x0, b.x0), std::min(it->second.y0, b.y0),
-                        std::max(it->second.x1, b.x1), std::max(it->second.y1, b.y1));
-                }
-            }
-        }
-        if (unitBounds.size() > 1) {
-            selectionBounds(target);
-        }
-        std::vector<ObjectPlacement> placements;
-        for (const GeometryState& entry : before) {
-            const SketchObject* object = findById(entry.id);
-            if (object == nullptr) {
-                continue;
-            }
-            BLBox b = unitBounds[unitKey(*object)];
-            double dx = 0.0, dy = 0.0;
-            switch (mode) {
-                case AlignMode::Left: dx = target.x0 - b.x0; break;
-                case AlignMode::Center: dx = (target.x0 + target.x1) * 0.5 - (b.x0 + b.x1) * 0.5; break;
-                case AlignMode::Right: dx = target.x1 - b.x1; break;
-                case AlignMode::Top: dy = target.y0 - b.y0; break;
-                case AlignMode::Middle: dy = (target.y0 + target.y1) * 0.5 - (b.y0 + b.y1) * 0.5; break;
-                case AlignMode::Bottom: dy = target.y1 - b.y1; break;
-            }
-            if (std::fabs(dx) > 1e-9 || std::fabs(dy) > 1e-9) {
-                placements.push_back({&entry, BLMatrix2D::make_translation(dx, dy)});
-            }
-        }
-        if (placements.empty()) {
-            return false;
-        }
-        placeObjects(placements);
-        quadFrame_.reset();
-        static const char* kNames[] = {"Align Left", "Align Center", "Align Right", "Align Top", "Align Middle", "Align Bottom"};
-        commitPlacement(before, kNames[int(mode)], frameBefore);
-        return true;
-    }
-
-    bool SketchDocument::rotateSelection90(bool clockwise) {
-        BLBox box;
-        std::vector<GeometryState> before = snapshotSelection(true);
-        if (before.empty() || !selectionBounds(box)) {
-            return false;
-        }
-        FrameState frameBefore = frameState();
-        double angle = clockwise ? 3.14159265358979323846 * 0.5 : -3.14159265358979323846 * 0.5;
-        double cx = (box.x0 + box.x1) * 0.5, cy = (box.y0 + box.y1) * 0.5;
-        BLMatrix2D m = BLMatrix2D::make_translation(-cx, -cy);
-        m.post_rotate(angle);
-        m.post_translate(cx, cy);
-        placeObjects(before, m, 1.0, angle);
-        quadFrame_.reset();
-        groupAngle_.reset();
-        commitPlacement(before, clockwise ? "Rotate 90 CW" : "Rotate 90 CCW", frameBefore);
-        return true;
-    }
-
-    bool SketchDocument::flipSelection(bool horizontal) {
-        BLBox box;
-        std::vector<GeometryState> before = snapshotSelection(true);
-        if (before.empty() || !selectionBounds(box)) {
-            return false;
-        }
-        FrameState frameBefore = frameState();
-        double cx = (box.x0 + box.x1) * 0.5, cy = (box.y0 + box.y1) * 0.5;
-        BLMatrix2D m = BLMatrix2D::make_translation(-cx, -cy);
-        m.post_scale(horizontal ? -1.0 : 1.0, horizontal ? 1.0 : -1.0);
-        m.post_translate(cx, cy);
-        placeObjects(before, m, -1.0, 0.0);   // a mirrored turned box is the box turned the other way
-        quadFrame_.reset();
-        groupAngle_.reset();
-        commitPlacement(before, horizontal ? "Flip Horizontal" : "Flip Vertical", frameBefore);
-        return true;
-    }
-
-    bool SketchDocument::applyFlags(const std::vector<FlagState>& before, const std::vector<FlagState>& after, const std::string& description) {
-        if (before.empty()) {
-            return false;
-        }
-        auto apply = [this](const std::vector<FlagState>& states) {
-            for (const FlagState& state : states) {
-                if (SketchObject* object = findById(state.id)) {
-                    object->setVisible(state.visible);
-                    object->setLocked(state.locked);
-                }
-            }
-            // A hidden or locked object cannot stay selected.
-            std::vector<std::size_t> keep;
-            for (std::size_t id : selection_) {
-                const SketchObject* object = findById(id);
-                if (object != nullptr && object->isVisible() && !object->isLocked()) {
-                    keep.push_back(id);
-                }
-            }
-            if (keep.size() != selection_.size()) {
-                setSelection(keep);
-            }
+    void SketchDocument::setName(const std::string& name) {
+        requireUnlocked();
+        if (name != name_) {
+            name_ = name;
             changed();
-        };
-        apply(after);
-        undoStack_.push({description, [apply, after]() { apply(after); }, [apply, before]() { apply(before); }});
-        return true;
-    }
-
-    TextState SketchDocument::textStateOf(const SketchObject& object) {
-        TextState state;
-        state.text = object.text();
-        state.font = object.fontName();
-        state.size = object.fontSize();
-        state.style = object.textStyle();
-        return state;
-    }
-
-    void SketchDocument::setObjectText(std::size_t id, const TextState& state) {
-        SketchObject* object = findById(id);
-        if (object == nullptr || !object->isText()) {
-            return;
-        }
-        if (state.matrix) {
-            object->setTextMatrix(*state.matrix);
-        }
-        object->setTextAll(state.text, state.font, state.size, state.style);
-        syncObject(*object);
-    }
-
-    bool SketchDocument::changeSelectionText(const std::function<void(TextState&)>& change, const std::string& description) {
-        struct Snap {
-            std::size_t id;
-            TextState state;
-        };
-        std::vector<Snap> before, after;
-        for (std::size_t id : selection_) {
-            const SketchObject* object = findById(id);
-            if (object == nullptr || !object->isText()) {
-                continue;
-            }
-            before.push_back({id, textStateOf(*object)});
-            TextState edited = before.back().state;
-            change(edited);
-            after.push_back({id, edited});
-        }
-        bool differs = false;
-        for (std::size_t i = 0; i < before.size(); ++i) {
-            differs = differs || !before[i].state.sameWords(after[i].state);
-        }
-        if (!differs) {
-            return false;
-        }
-        auto apply = [this](const std::vector<Snap>& snaps) {
-            for (const Snap& snap : snaps) {
-                setObjectText(snap.id, snap.state);
-            }
-            changed();
-        };
-        apply(after);
-        undoStack_.push({description, [apply, after]() { apply(after); }, [apply, before]() { apply(before); }});
-        return true;
-    }
-
-    bool SketchDocument::lockSelection() {
-        std::vector<FlagState> before, after;
-        for (std::size_t id : selection_) {
-            if (const SketchObject* object = findById(id)) {
-                before.push_back({id, object->ownVisible(), object->ownLocked()});
-                after.push_back({id, object->ownVisible(), true});
-            }
-        }
-        return applyFlags(before, after, "Lock");
-    }
-
-    bool SketchDocument::hideSelection() {
-        std::vector<FlagState> before, after;
-        for (std::size_t id : selection_) {
-            if (const SketchObject* object = findById(id)) {
-                before.push_back({id, object->ownVisible(), object->ownLocked()});
-                after.push_back({id, false, object->ownLocked()});
-            }
-        }
-        return applyFlags(before, after, "Hide");
-    }
-
-    bool SketchDocument::unlockAll() {
-        std::vector<FlagState> before, after;
-        for (const std::unique_ptr<SketchObject>& object : objects_) {
-            if (object->ownLocked()) {
-                before.push_back({object->id(), object->ownVisible(), true});
-                after.push_back({object->id(), object->ownVisible(), false});
-            }
-        }
-        return applyFlags(before, after, "Unlock All");
-    }
-
-    bool SketchDocument::showAll() {
-        std::vector<FlagState> before, after;
-        for (const std::unique_ptr<SketchObject>& object : objects_) {
-            if (!object->ownVisible()) {
-                before.push_back({object->id(), false, object->ownLocked()});
-                after.push_back({object->id(), true, object->ownLocked()});
-            }
-        }
-        return applyFlags(before, after, "Show All");
-    }
-
-    bool SketchDocument::readFromFile(const std::string& path) {
-        std::ifstream in(path, std::ios::binary);
-        if (!in) {
-            return false;
-        }
-        std::ostringstream buffer;
-        buffer << in.rdbuf();
-        std::string text = buffer.str();
-        lastError_.clear();
-        // The readers build into this document, so a read that fails or is cancelled halfway has already replaced what was open: the
-        // document is written out first and put back then (inside load(), so the modified flag and the path stay as they were).
-        const std::string before = svgFromDocument(*this);
-        const bool ok = [&]() {
-            if (isBinaryDocument(text)) {   // .skb: told by its first bytes, not its name
-                return documentFromBinary(text, *this);
-            }
-            if (isGzip(text)) {   // .svgz or a compressed .curvy: told by its first bytes, not its name
-                std::string inflated;
-                if (!gzipDecompress(text, inflated)) {
-                    return false;
-                }
-                text = std::move(inflated);
-            }
-            if (isCurvyDocument(text)) {
-                return documentFromCurvy(text, *this);
-            }
-            if (isPdfDocument(text)) {   // PDF / Illustrator: told by its first bytes, not its name (the controller makes it an untitled import)
-                PdfImportOptions options;
-                options.progress = taskProgress_;
-                options.pages = std::move(pdfPages_);
-                pdfPages_.clear();
-                return documentFromPdf(text, *this, options, &lastError_);
-            }
-            return documentFromSvg(text, *this, taskProgress_);
-        }();
-        if (!ok) {
-            documentFromSvg(before, *this);
-        }
-        return ok;
-    }
-
-    bool SketchDocument::writeToFile(const std::string& path) {
-        // The text is made before the file is opened: a cancelled save must leave the old file as it was.
-        std::string text;
-        if (hasExtension(path, ".curvy") || hasExtension(path, ".curvyz")) {
-            if (!curvyFileSupports(*this)) {   // refuse rather than save a file that silently drops text, symbols, brushes or images
-                return false;
-            }
-            syncPathNodes();   // the file is the graph: a document just opened from SVG may not have written every object's state into its node yet
-            text = curvyFromDocument(*this);
-            if (hasExtension(path, ".curvyz")) {
-                text = gzipCompress(text);
-            }
-        } else {
-            text = hasExtension(path, ".skb") ? binaryFromDocument(*this) : svgFromDocument(*this, taskProgress_);
-            if (taskProgress_ != nullptr && taskProgress_->cancelled()) {
-                return false;
-            }
-            if (hasExtension(path, ".svgz")) {
-                text = gzipCompress(text);
-            }
-        }
-        // Written beside the target and renamed over it, so a crash or a full disk leaves the previous version whole.
-        const std::filesystem::path target = std::filesystem::u8path(path);
-        std::filesystem::path temporary = target;
-        temporary += ".tmp";
-        {
-            std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-            if (!out) {
-                return false;
-            }
-            out << text;
-            out.flush();
-            if (!out) {
-                out.close();
-                std::error_code ignored;
-                std::filesystem::remove(temporary, ignored);
-                return false;
-            }
-        }
-        std::error_code error;
-        std::filesystem::rename(temporary, target, error);
-        if (error) {
-            std::filesystem::remove(temporary, error);
-            return false;
-        }
-        return true;
-    }
-
-    void SketchDocument::changed() {
-        if (batchDepth_ > 0) {
-            batchPending_ = true;
-            return;
-        }
-        pullLayerOrderFromPaint();
-        pullLayerNodes();
-        pullPaintOrder();
-        syncLayers();   // new objects find their layer, layer state reaches the objects, the stack follows the layers
-        syncGroupScopes();
-        syncPathNodes();
-        pruneGroupScopes();
-        putBaseLayer();
-        layersEdited_ = false;
-        syncPaintOrder();
-        markModified();
-        updateAllViews();
-        onChanged(*this);
-    }
-
-    // ---- Style ----
-
-    StyleState SketchDocument::withGroup(StyleState state) const {
-        const SketchObject* object = findById(state.id);
-        if (object != nullptr && isGrouped(*object)) {
-            state.group = outermostGroupOf(*object);
-            state.groupProps = groupProps(state.group);
-        }
-        return state;
-    }
-
-    std::vector<StyleState> SketchDocument::snapshotStyle() const {
-        std::vector<StyleState> result;
-        for (std::size_t id : selection_) {
-            if (const SketchObject* object = findById(id)) {
-                result.push_back(withGroup(StyleState::of(*object)));
-            }
-        }
-        return result;
-    }
-
-    void SketchDocument::setSelectionFill(const SketchPaint& paint) {
-        for (std::size_t id : selection_) {
-            if (SketchObject* object = findById(id)) {
-                object->setFill(paint);
-            }
-        }
-        changed();
-    }
-
-    void SketchDocument::setSelectionStroke(const SketchPaint& paint) {
-        for (std::size_t id : selection_) {
-            if (SketchObject* object = findById(id)) {
-                object->setStroke(paint);
-            }
-        }
-        changed();
-    }
-
-    void SketchDocument::setSelectionStrokeWidth(double width) {
-        for (std::size_t id : selection_) {
-            if (SketchObject* object = findById(id)) {
-                object->setStrokeWidth(width);
-            }
-        }
-        changed();
-    }
-
-    void SketchDocument::setSelectionOpacity(double opacity) {
-        for (std::size_t id : selection_) {
-            if (SketchObject* object = findById(id)) {
-                object->setOpacity(opacity);
-            }
-        }
-        changed();
-    }
-
-    void SketchDocument::setSelectionBlendMode(BlendMode mode) {
-        for (std::size_t id : selection_) {
-            if (SketchObject* object = findById(id)) {
-                object->setBlendMode(mode);
-            }
-        }
-        changed();
-    }
-
-    void SketchDocument::setActiveItem(AppearanceKind kind, std::size_t index) {
-        (void)kind;
-        for (std::size_t id : selection_) {
-            if (SketchObject* object = findById(id)) {
-                object->setActiveIndex(index);
-            }
-        }
-        onChanged(*this);
-    }
-
-    void SketchDocument::setSelectionItemOpacity(AppearanceKind kind, double opacity) {
-        for (std::size_t id : selection_) {
-            if (SketchObject* object = findById(id)) {
-                if (AppearanceItem* item = object->activeItemPtr(kind)) { item->opacity = std::min(1.0, std::max(0.0, opacity)); }
-            }
-        }
-        changed();
-    }
-
-    void SketchDocument::setSelectionItemBlendMode(AppearanceKind kind, BlendMode mode) {
-        for (std::size_t id : selection_) {
-            if (SketchObject* object = findById(id)) {
-                if (AppearanceItem* item = object->activeItemPtr(kind)) { item->blendMode = mode; }
-            }
-        }
-        changed();
-    }
-
-    void SketchDocument::setSelectionItemVisible(AppearanceKind kind, bool visible) {
-        for (std::size_t id : selection_) {
-            if (SketchObject* object = findById(id)) {
-                if (AppearanceItem* item = object->activeItemPtr(kind)) { item->visible = visible; }
-            }
-        }
-        changed();
-    }
-
-    void SketchDocument::setSelectionFillEvenOdd(bool evenOdd) {
-        for (std::size_t id : selection_) {
-            if (SketchObject* object = findById(id)) {
-                if (AppearanceItem* item = object->activeItemPtr(AppearanceKind::Fill)) { item->evenOdd = evenOdd; }
-            }
-        }
-        changed();
-    }
-
-    bool SketchDocument::addAppearanceItem(AppearanceKind kind) {
-        std::vector<StyleState> before = snapshotStyle();
-        if (before.empty()) {
-            return false;
-        }
-        for (std::size_t id : selection_) {
-            if (SketchObject* object = findById(id)) {
-                std::vector<AppearanceItem> items = object->appearance();
-                if (kind == AppearanceKind::Stroke) {
-                    SketchPaint paint = defaultStroke_.isNone() ? SketchPaint::solid(SketchColor::gray(0.0f)) : defaultStroke_;
-                    items.push_back(AppearanceItem::makeStroke(paint, defaultStrokeWidth_ > 0.0 ? defaultStrokeWidth_ : 1.0, defaultStrokeOptions_));
-                } else {
-                    items.push_back(AppearanceItem::makeFill(defaultFill_.isNone() ? SketchPaint::solid(SketchColor::gray(0.85f)) : defaultFill_));
-                }
-                object->setAppearance(items);
-                object->setActiveIndex(items.size() - 1);
-            }
-        }
-        changed();
-        return commitStyle(before, kind == AppearanceKind::Stroke ? "Add Stroke" : "Add Fill");
-    }
-
-    std::vector<GraphicStyle> defaultGraphicStyles() {
-        auto style = [](const char* name, std::vector<AppearanceItem> items, double opacity = 1.0) {
-            GraphicStyle s;
-            s.name = name;
-            s.items = std::move(items);
-            s.opacity = opacity;
-            return s;
-        };
-        auto solid = [](const char* hex) { return SketchPaint::solid(SketchColor::fromHex(hex)); };
-        auto gradient = [](const char* from, const char* to, double angle) {
-            SketchGradient g;
-            g.stops = {GradientStop{0.0, SketchColor::fromHex(from)}, GradientStop{1.0, SketchColor::fromHex(to)}};
-            g.angleDegrees = angle;
-            return g;
-        };
-        std::vector<GraphicStyle> styles;
-        styles.push_back(style("Default", {AppearanceItem::makeFill(solid("#ffffff")), AppearanceItem::makeStroke(solid("#000000"), 1.0)}));
-        AppearanceItem shadow = AppearanceItem::makeEffect(EffectKind::DropShadow);
-        styles.push_back(style("Sunset + shadow", {AppearanceItem::makeFill(SketchPaint::linear(gradient("#f2b824", "#e8452c", 45.0))),
-            AppearanceItem::makeStroke(SketchPaint::none(), 1.0), shadow}));
-        styles.push_back(style("Blue card", {AppearanceItem::makeFill(solid("#0078d4")), AppearanceItem::makeStroke(solid("#1b3a6b"), 3.0)}));
-        SketchGradient glowFill = gradient("#ffffff", "#00aeef", 0.0);
-        styles.push_back(style("Glow", {AppearanceItem::makeFill(SketchPaint::radial(glowFill)), AppearanceItem::makeStroke(SketchPaint::none(), 1.0),
-            AppearanceItem::makeEffect(EffectKind::OuterGlow)}));
-        StrokeOptions dashed;
-        dashed.dashes = {8.0, 4.0};
-        styles.push_back(style("Dashed red", {AppearanceItem::makeFill(solid("#ffffff")), AppearanceItem::makeStroke(solid("#c0392b"), 3.0, dashed)}));
-        styles.push_back(style("Ghost", {AppearanceItem::makeFill(solid("#6a4fc7")), AppearanceItem::makeStroke(SketchPaint::none(), 1.0)}, 0.55));
-        return styles;
-    }
-
-    bool SketchDocument::addGraphicStyleFromSelection() {
-        const SketchObject* source = selection_.empty() ? nullptr : findById(selection_.front());
-        if (source == nullptr) {
-            return false;
-        }
-        std::vector<GraphicStyle> before = graphicStyles_;
-        GraphicStyle style;
-        style.items = source->appearance();
-        style.opacity = source->opacity();
-        style.blendMode = source->blendMode();
-        for (std::size_t number = before.size() + 1;; ++number) {
-            style.name = "Style " + std::to_string(number);
-            bool taken = false;
-            for (const GraphicStyle& existing : before) {
-                taken = taken || existing.name == style.name;
-            }
-            if (!taken) {
-                break;
-            }
-        }
-        std::vector<GraphicStyle> after = before;
-        after.push_back(style);
-        graphicStyles_ = after;
-        changed();
-        undoStack_.push({"New Graphic Style", [this, after]() { graphicStyles_ = after; changed(); }, [this, before]() { graphicStyles_ = before; changed(); }});
-        return true;
-    }
-
-    bool SketchDocument::deleteGraphicStyle(std::size_t index) {
-        if (index >= graphicStyles_.size()) {
-            return false;
-        }
-        std::vector<GraphicStyle> before = graphicStyles_;
-        std::vector<GraphicStyle> after = before;
-        after.erase(after.begin() + std::ptrdiff_t(index));
-        graphicStyles_ = after;
-        changed();
-        undoStack_.push({"Delete Graphic Style", [this, after]() { graphicStyles_ = after; changed(); }, [this, before]() { graphicStyles_ = before; changed(); }});
-        return true;
-    }
-
-    bool SketchDocument::applyGraphicStyle(std::size_t index) {
-        std::vector<StyleState> before = snapshotStyle();
-        if (before.empty() || index >= graphicStyles_.size()) {
-            return false;
-        }
-        const GraphicStyle& style = graphicStyles_[index];
-        for (std::size_t id : selection_) {
-            if (SketchObject* object = findById(id)) {
-                object->setAppearance(style.items);
-                // The active rows are the top-most fill and stroke (what the panels then edit).
-                std::size_t fill = 0, stroke = 0, effect = 0;
-                const std::vector<AppearanceItem>& items = object->appearance();
-                for (std::size_t i = 0; i < items.size(); ++i) {
-                    (items[i].kind == AppearanceKind::Fill ? fill : (items[i].kind == AppearanceKind::Stroke ? stroke : effect)) = i;
-                }
-                object->setActiveIndices(fill, stroke, effect);
-                object->setOpacity(style.opacity);
-                object->setBlendMode(style.blendMode);
-            }
-        }
-        changed();
-        return commitStyle(before, "Apply " + style.name);
-    }
-
-    bool SketchDocument::addEffect(EffectKind kind) {
-        std::vector<StyleState> before = snapshotStyle();
-        if (before.empty()) {
-            return false;
-        }
-        for (std::size_t id : selection_) {
-            if (SketchObject* object = findById(id)) {
-                std::vector<AppearanceItem> items = object->appearance();
-                items.push_back(AppearanceItem::makeEffect(kind));
-                object->setAppearance(items);
-                object->setActiveIndex(items.size() - 1);
-            }
-        }
-        changed();
-        return commitStyle(before, std::string("Add ") + effectName(kind));
-    }
-
-    bool SketchDocument::changeActiveEffect(const std::function<void(AppearanceItem&)>& change, const std::string& description) {
-        std::vector<StyleState> before = snapshotStyle();
-        if (before.empty()) {
-            return false;
-        }
-        for (std::size_t id : selection_) {
-            if (SketchObject* object = findById(id)) {
-                if (AppearanceItem* item = object->activeItemPtr(AppearanceKind::Effect)) {
-                    change(*item);
-                }
-            }
-        }
-        changed();
-        return commitStyle(before, description);
-    }
-
-    bool SketchDocument::duplicateActiveItem(AppearanceKind kind) {
-        std::vector<StyleState> before = snapshotStyle();
-        if (before.empty()) {
-            return false;
-        }
-        for (std::size_t id : selection_) {
-            if (SketchObject* object = findById(id)) {
-                std::vector<AppearanceItem> items = object->appearance();
-                std::size_t index = object->activeIndex(kind);
-                if (index >= items.size()) {
-                    continue;
-                }
-                items.insert(items.begin() + std::ptrdiff_t(index) + 1, items[index]);
-                object->setAppearance(items);
-                object->setActiveIndex(index + 1);
-            }
-        }
-        changed();
-        return commitStyle(before, "Duplicate Item");
-    }
-
-    bool SketchDocument::deleteActiveItem(AppearanceKind kind) {
-        std::vector<StyleState> before = snapshotStyle();
-        if (before.empty()) {
-            return false;
-        }
-        for (std::size_t id : selection_) {
-            if (SketchObject* object = findById(id)) {
-                std::vector<AppearanceItem> items = object->appearance();
-                std::size_t index = object->activeIndex(kind);
-                if (index >= items.size()) {
-                    continue;
-                }
-                std::size_t sameKind = 0;
-                for (const AppearanceItem& item : items) {
-                    sameKind += item.kind == kind ? 1 : 0;
-                }
-                if (sameKind <= 1 && kind != AppearanceKind::Effect) {
-                    items[index].paint = SketchPaint::none();  // there is always one fill and one stroke
-                    object->setAppearance(items);
-                    continue;
-                }
-                items.erase(items.begin() + std::ptrdiff_t(index));
-                object->setAppearance(items);
-                // The nearest item of the same kind below (else above) takes over as the active one.
-                std::size_t next = items.size();
-                for (std::size_t i = std::min(index, items.size()); i-- > 0;) {
-                    if (items[i].kind == kind) { next = i; break; }
-                }
-                for (std::size_t i = index; next == items.size() && i < items.size(); ++i) {
-                    if (items[i].kind == kind) { next = i; }
-                }
-                object->setActiveIndex(next);
-            }
-        }
-        changed();
-        return commitStyle(before, "Delete Item");
-    }
-
-    bool SketchDocument::moveActiveItem(AppearanceKind kind, int delta) {
-        std::vector<StyleState> before = snapshotStyle();
-        if (before.empty() || delta == 0) {
-            return false;
-        }
-        for (std::size_t id : selection_) {
-            if (SketchObject* object = findById(id)) {
-                std::vector<AppearanceItem> items = object->appearance();
-                std::size_t index = object->activeIndex(kind);
-                long target = long(index) + (delta > 0 ? 1 : -1);
-                if (index >= items.size() || target < 0 || target >= long(items.size())) {
-                    continue;
-                }
-                std::swap(items[index], items[std::size_t(target)]);
-                object->setAppearance(items);
-                object->setActiveIndex(std::size_t(target));
-            }
-        }
-        changed();
-        return commitStyle(before, delta > 0 ? "Move Item Up" : "Move Item Down");
-    }
-
-    bool SketchDocument::clearAppearance() {
-        std::vector<StyleState> before = snapshotStyle();
-        if (before.empty()) {
-            return false;
-        }
-        for (std::size_t id : selection_) {
-            if (SketchObject* object = findById(id)) {
-                AppearanceItem fill = AppearanceItem::makeFill(SketchPaint::none());
-                AppearanceItem stroke = AppearanceItem::makeStroke(SketchPaint::none(), 1.0);
-                object->setAppearance({fill, stroke});
-                object->setActiveIndices(0, 1);
-                object->setOpacity(1.0);
-                object->setBlendMode(BlendMode::Normal);
-            }
-        }
-        changed();
-        return commitStyle(before, "Clear Appearance");
-    }
-
-    void SketchDocument::changeSelectionStrokeOptions(const std::function<void(StrokeOptions&)>& change) {
-        for (std::size_t id : selection_) {
-            if (SketchObject* object = findById(id)) {
-                StrokeOptions options = object->strokeOptions();
-                change(options);
-                object->setStrokeOptions(options);
-                syncDeformWidths(id);
-            }
-        }
-        changed();
-    }
-
-    void SketchDocument::setDefaultStrokeOptions(const StrokeOptions& options) {
-        defaultStrokeOptions_ = options;
-        onChanged(*this);
-    }
-
-    bool SketchDocument::commitStyle(const std::vector<StyleState>& before, const std::string& description) {
-        std::vector<StyleState> after;
-        bool differs = false;
-        for (const StyleState& old : before) {
-            const SketchObject* object = findById(old.id);
-            if (object == nullptr) {
-                continue;
-            }
-            StyleState now = withGroup(StyleState::of(*object));
-            differs = differs || now != old;
-            after.push_back(now);
-        }
-        if (!differs) {
-            return false;
-        }
-        auto apply = [this](const std::vector<StyleState>& states) {
-            for (const StyleState& state : states) {
-                if (SketchObject* object = findById(state.id)) {
-                    state.applyTo(*object);
-                }
-                if (state.group != 0) {
-                    putGroupProps(state.group, state.groupProps);
-                }
-            }
-            changed();
-        };
-        undoStack_.push({description,
-            [apply, after]() { apply(after); },
-            [apply, before]() { apply(before); }});
-        return true;
-    }
-
-    namespace {
-        SketchPaint paintInSpace(const SketchPaint& paint, ColorSpace space) {
-            if (paint.isNone()) {
-                return paint;
-            }
-            if (paint.isPoints()) {
-                SketchGradient gradient = paint.gradient();
-                for (GradientPoint& point : gradient.points) {
-                    point.color = point.color.convertedTo(space);
-                }
-                return SketchPaint::points(gradient);
-            }
-            if (!paint.isGradient()) {
-                return SketchPaint::solid(paint.color().convertedTo(space));
-            }
-            SketchGradient gradient = paint.gradient();
-            for (GradientStop& stop : gradient.stops) {
-                stop.color = stop.color.convertedTo(space);
-            }
-            return paint.kind() == SketchPaint::Kind::Radial ? SketchPaint::radial(gradient) : SketchPaint::linear(gradient);
         }
     }
 
     void SketchDocument::setColorMode(ColorSpace mode) {
-        if (mode != ColorSpace::RGB && mode != ColorSpace::CMYK) {
-            throw std::runtime_error("SketchDocument::setColorMode: a document is RGB or CMYK");
+        requireUnlocked();
+        if ((mode == ColorSpace::RGB || mode == ColorSpace::CMYK) && mode != colorMode_) {
+            colorMode_ = mode;
+            changed();
         }
-        colorMode_ = mode;
-        defaultFill_ = paintInSpace(defaultFill_, mode);
-        defaultStroke_ = paintInSpace(defaultStroke_, mode);
-        for (GraphicStyle& style : graphicStyles_) {
-            for (AppearanceItem& item : style.items) {
-                item.paint = paintInSpace(item.paint, mode);
-            }
-        }
-        changed();
     }
 
-    bool SketchDocument::convertToColorMode(ColorSpace mode) {
-        if (mode != ColorSpace::RGB && mode != ColorSpace::CMYK) {
-            throw std::runtime_error("SketchDocument::convertToColorMode: a document is RGB or CMYK");
+    // ---- Swatches and palettes ----
+
+    void SketchDocument::clampActivePalette() {
+        if (activePalette_ >= palettes_.size()) {
+            activePalette_ = palettes_.empty() ? 0 : palettes_.size() - 1;
         }
-        if (mode == colorMode_) {
-            return false;
+    }
+
+    Palette& SketchDocument::paletteAt(std::size_t index) {
+        if (index >= palettes_.size()) {
+            throw std::runtime_error("there is no palette " + std::to_string(index));
         }
-        // Everything the conversion touches, before and after.
-        struct State {
-            ColorSpace mode;
-            SketchPaint defaultFill, defaultStroke;
-            std::vector<StyleState> styles;
-            std::vector<GraphicStyle> graphicStyles;
-        };
-        auto capture = [this]() {
-            State state{colorMode_, defaultFill_, defaultStroke_, {}, graphicStyles_};
-            for (const std::unique_ptr<SketchObject>& object : objects_) {
-                state.styles.push_back(StyleState::of(*object));
-            }
-            return state;
-        };
-        State before = capture();
-        colorMode_ = mode;
-        defaultFill_ = paintInSpace(defaultFill_, mode);
-        defaultStroke_ = paintInSpace(defaultStroke_, mode);
-        for (GraphicStyle& style : graphicStyles_) {
-            for (AppearanceItem& item : style.items) {
-                item.paint = paintInSpace(item.paint, mode);
-            }
+        return palettes_[index];
+    }
+
+    Swatch& SketchDocument::swatchAt(std::size_t palette, std::size_t index) {
+        Palette& list = paletteAt(palette);
+        if (index >= list.swatches.size()) {
+            throw std::runtime_error("palette \"" + list.name + "\" has no swatch " + std::to_string(index));
         }
-        for (const std::unique_ptr<SketchObject>& object : objects_) {
-            std::vector<AppearanceItem> items = object->appearance();
-            for (AppearanceItem& item : items) {
-                item.paint = paintInSpace(item.paint, mode);
-            }
-            object->setAppearance(items);
+        return list.swatches[index];
+    }
+
+    void SketchDocument::editPalettes(const std::string& description, const std::function<void()>& edit, bool withGraph) {
+        requireUnlocked();
+        auto before = std::make_shared<const std::vector<Palette>>(palettes_);
+        std::shared_ptr<const jitnodes::GraphSnapshot> graphBefore, graphAfter;
+        if (withGraph) {
+            graphBefore = std::make_shared<const jitnodes::GraphSnapshot>(snapshotGraph());
         }
-        State after = capture();
-        auto apply = [this](const State& state) {
-            colorMode_ = state.mode;
-            defaultFill_ = state.defaultFill;
-            defaultStroke_ = state.defaultStroke;
-            graphicStyles_ = state.graphicStyles;
-            for (const StyleState& style : state.styles) {
-                if (SketchObject* object = findById(style.id)) {
-                    style.applyTo(*object);
+        edit();
+        auto after = std::make_shared<const std::vector<Palette>>(palettes_);
+        bool graphSame = true;
+        if (withGraph) {
+            graphAfter = std::make_shared<const jitnodes::GraphSnapshot>(snapshotGraph());
+            graphSame = jitnodes::sameGraph(*graphBefore, *graphAfter);
+        }
+        if (*before == *after && graphSame) {
+            return;
+        }
+        auto applied = std::make_shared<bool>(true);   // push() runs doIt at once, and the edit is already made
+        undoStack_.push({description,
+            [this, after, graphAfter, applied]() {
+                if (*applied) {
+                    *applied = false;
+                } else {
+                    palettes_ = *after;
+                    clampActivePalette();
+                    if (graphAfter) {
+                        restoreGraph(*graphAfter);
+                    }
+                    changed();
+                    palettesChanged();
+                }
+            },
+            [this, before, graphBefore]() {
+                palettes_ = *before;
+                clampActivePalette();
+                if (graphBefore) {
+                    restoreGraph(*graphBefore);
+                }
+                changed();
+                palettesChanged();
+            }});
+        changed();
+        palettesChanged();
+    }
+
+    void SketchDocument::forEachNode(const std::function<void(jitnodes::Network&, jitnodes::NodeId)>& visit) {
+        const std::function<void(jitnodes::Network&)> walk = [&](jitnodes::Network& net) {
+            for (const jitnodes::NodeId id : net.nodeIds()) {
+                visit(net, id);
+                if (jitnodes::Network* inner = net.node(id).childNetwork()) {
+                    walk(*inner);
                 }
             }
-            changed();
         };
-        undoStack_.push({mode == ColorSpace::CMYK ? "Convert to CMYK" : "Convert to RGB",
-            [apply, after]() { apply(after); },
-            [apply, before]() { apply(before); }});
-        changed();
-        return true;
+        walk(network());
     }
 
-    void SketchDocument::setDefaultFill(const SketchPaint& paint) {
-        defaultFill_ = paint;
-        onChanged(*this);
+    void SketchDocument::applyLink(std::uint32_t link, const Swatch* color) {
+        forEachNode([&](jitnodes::Network& net, jitnodes::NodeId id) {
+            jitnodes::Node& node = net.node(id);
+            const std::vector<std::string> tags = node.tags();
+            for (const std::string& tag : tags) {
+                std::uint32_t tied = 0;
+                std::string group;
+                if (!SwatchLinks::parse(tag, tied, group) || tied != link) {
+                    continue;
+                }
+                if (color == nullptr) {
+                    node.removeTag(tag);
+                    continue;
+                }
+                SwatchLinks::Channels channels;
+                if (!SwatchLinks::channels(node, group, channels)) {
+                    continue;
+                }
+                node.setFloat(channels.r, color->r);
+                node.setFloat(channels.g, color->g);
+                node.setFloat(channels.b, color->b);
+                if (!channels.a.empty()) {
+                    node.setFloat(channels.a, color->a);
+                }
+                net.markDirty(id);
+            }
+        });
     }
 
-    void SketchDocument::setDefaultStroke(const SketchPaint& paint) {
-        defaultStroke_ = paint;
-        onChanged(*this);
+    void SketchDocument::setActivePalette(std::size_t index) {
+        requireUnlocked();
+        if (index >= palettes_.size()) {
+            throw std::runtime_error("there is no palette " + std::to_string(index));
+        }
+        activePalette_ = index;
+        palettesChanged();
     }
 
-    void SketchDocument::setDefaultStrokeWidth(double width) {
-        defaultStrokeWidth_ = width < 0.0 ? 0.0 : width;
-        onChanged(*this);
+    namespace {
+        std::string uniqueName(const std::vector<Palette>& palettes, const std::string& wanted) {
+            const auto taken = [&](const std::string& name) {
+                return std::any_of(palettes.begin(), palettes.end(), [&](const Palette& p) { return p.name == name; });
+            };
+            std::string name = wanted;
+            for (int n = 2; taken(name); ++n) {
+                name = wanted + " " + std::to_string(n);
+            }
+            return name;
+        }
+    }
+
+    std::size_t SketchDocument::addPalette(const std::string& name) {
+        if (name.empty()) {
+            throw std::runtime_error("a palette needs a name");
+        }
+        std::size_t index = 0;
+        editPalettes("Add Palette", [&]() {
+            palettes_.push_back(Palette{uniqueName(palettes_, name), {}});
+            index = palettes_.size() - 1;
+        });
+        return index;
+    }
+
+    std::size_t SketchDocument::duplicatePalette(std::size_t index) {
+        Palette copy = paletteAt(index);
+        for (Swatch& swatch : copy.swatches) {
+            swatch.link = 0;   // a copy is plain: only the original is tied to colour rows
+        }
+        std::size_t result = 0;
+        editPalettes("Duplicate Palette", [&]() {
+            copy.name = uniqueName(palettes_, copy.name + " copy");
+            palettes_.insert(palettes_.begin() + std::ptrdiff_t(index) + 1, copy);
+            result = index + 1;
+        });
+        return result;
+    }
+
+    void SketchDocument::renamePalette(std::size_t index, const std::string& name) {
+        Palette& palette = paletteAt(index);
+        if (name.empty()) {
+            throw std::runtime_error("a palette needs a name");
+        }
+        if (name == palette.name) {
+            return;
+        }
+        for (std::size_t i = 0; i < palettes_.size(); ++i) {
+            if (i != index && palettes_[i].name == name) {
+                throw std::runtime_error("there is already a palette called \"" + name + "\"");
+            }
+        }
+        editPalettes("Rename Palette", [&]() { palette.name = name; });
+    }
+
+    void SketchDocument::deletePalette(std::size_t index) {
+        paletteAt(index);
+        if (palettes_.size() < 2) {
+            throw std::runtime_error("a document keeps at least one palette");
+        }
+        std::vector<std::uint32_t> links;
+        for (const Swatch& swatch : palettes_[index].swatches) {
+            if (swatch.link != 0) {
+                links.push_back(swatch.link);
+            }
+        }
+        editPalettes("Delete Palette", [&]() {
+            for (const std::uint32_t link : links) {
+                applyLink(link, nullptr);
+            }
+            palettes_.erase(palettes_.begin() + std::ptrdiff_t(index));
+            if (activePalette_ > index || activePalette_ >= palettes_.size()) {
+                activePalette_ = activePalette_ > 0 ? activePalette_ - 1 : 0;
+            }
+        }, !links.empty());
+    }
+
+    std::size_t SketchDocument::addSwatch(std::size_t palette, const Swatch& swatch) {
+        Palette& list = paletteAt(palette);
+        std::size_t index = 0;
+        editPalettes("Add Swatch", [&]() {
+            list.swatches.push_back(swatch);
+            list.swatches.back().link = 0;
+            index = list.swatches.size() - 1;
+        });
+        return index;
+    }
+
+    void SketchDocument::replaceSwatch(std::size_t palette, std::size_t index, const Swatch& swatch) {
+        Swatch& target = swatchAt(palette, index);
+        const std::uint32_t link = target.link;
+        editPalettes("Replace Swatch", [&]() {
+            const std::string name = swatch.name.empty() ? target.name : swatch.name;
+            target = swatch;
+            target.name = name;
+            target.link = link;
+            if (link != 0) {
+                applyLink(link, &target);
+            }
+        }, link != 0);
+    }
+
+    void SketchDocument::setSwatchLinked(std::size_t palette, std::size_t index, bool linked) {
+        Swatch& target = swatchAt(palette, index);
+        const std::uint32_t old = target.link;
+        if (linked == (old != 0)) {
+            return;
+        }
+        std::uint32_t next = 1;
+        for (const Palette& list : palettes_) {
+            for (const Swatch& swatch : list.swatches) {
+                next = (std::max)(next, swatch.link + 1);
+            }
+        }
+        editPalettes(linked ? "Link Swatch" : "Unlink Swatch", [&]() {
+            if (linked) {
+                target.link = next;
+            } else {
+                applyLink(old, nullptr);
+                target.link = 0;
+            }
+        }, !linked);
+    }
+
+    void SketchDocument::renameSwatch(std::size_t palette, std::size_t index, const std::string& name) {
+        Swatch& target = swatchAt(palette, index);
+        editPalettes("Rename Swatch", [&]() { target.name = name; });
+    }
+
+    void SketchDocument::deleteSwatch(std::size_t palette, std::size_t index) {
+        const std::uint32_t link = swatchAt(palette, index).link;
+        editPalettes("Delete Swatch", [&]() {
+            if (link != 0) {
+                applyLink(link, nullptr);
+            }
+            std::vector<Swatch>& list = palettes_[palette].swatches;
+            list.erase(list.begin() + std::ptrdiff_t(index));
+        }, link != 0);
+    }
+
+    void SketchDocument::moveSwatch(std::size_t palette, std::size_t from, std::size_t to) {
+        swatchAt(palette, from);
+        editPalettes("Move Swatch", [&]() {
+            std::vector<Swatch>& list = palettes_[palette].swatches;
+            const Swatch moved = list[from];
+            list.erase(list.begin() + std::ptrdiff_t(from));
+            list.insert(list.begin() + std::ptrdiff_t((std::min)(to, list.size())), moved);
+        });
+    }
+
+    void SketchDocument::noteRecentColor(const Swatch& color) {
+        Swatch plain = color;
+        plain.name.clear();
+        plain.link = 0;
+        recent_.erase(std::remove_if(recent_.begin(), recent_.end(), [&](const Swatch& s) { return s.sameColor(plain); }), recent_.end());
+        recent_.insert(recent_.begin(), plain);
+        if (recent_.size() > kRecentLimit) {
+            recent_.resize(kRecentLimit);
+        }
+        palettesChanged();
+    }
+
+    void SketchDocument::install(const std::string& name, float width, float height, float ppi, ColorSpace colorMode, const newui::Color& pageColor) {
+        clearGraph();
+        objectProblems_.clear();
+        undoStack_.clear();
+        reset();
+        name_ = name;
+        pageWidth_ = (std::max)(width, 1.0f);
+        pageHeight_ = (std::max)(height, 1.0f);
+        ppi_ = (std::max)(ppi, 1.0f);
+        colorMode_ = colorMode == ColorSpace::CMYK ? ColorSpace::CMYK : ColorSpace::RGB;
+        pageColor_ = pageColor;
+        palettes_ = {DefaultPalette::make()};
+        activePalette_ = 0;
+        recent_.clear();
+        viewState_ = ViewState();
+        updateAllViews();
+    }
+
+    void SketchDocument::newBlank(const std::string& name, float width, float height, float ppi, ColorSpace colorMode, const newui::Color& pageColor) {
+        requireUnlocked();
+        install(name, width, height, ppi, colorMode, pageColor);
+    }
+
+    // ---- The .curvy file ----
+
+    bool SketchDocument::writeToFile(const std::string& path) {
+        LockGuard lock(*this);
+        lastError_.clear();
+        try {
+            step(taskProgress_, 0.02f);
+            json5::document out;
+            json5::builder b(out);
+            b.push_object();
+            b["format"] = b.new_string("curvy");
+            b["version"] = json5::value(double(kFileVersion));
+
+            b.push_object();
+            b["app"] = b.new_string("curvy");
+            b["appVersion"] = b.new_string(CURVY_VERSION);
+            b["saved"] = b.new_string(utcNow());
+            b["meta"] = b.pop();
+
+            b.push_object();
+            b["name"] = b.new_string(name_);
+            b.push_object();
+            b["width"] = real(pageWidth_);
+            b["height"] = real(pageHeight_);
+            b["ppi"] = real(ppi_);
+            b["colorMode"] = b.new_string(colorMode_ == ColorSpace::CMYK ? "cmyk" : "rgb");
+            b.push_array();
+            b += real(pageColor_.r);
+            b += real(pageColor_.g);
+            b += real(pageColor_.b);
+            b += real(pageColor_.a);
+            b["background"] = b.pop();
+            b["page"] = b.pop();
+
+            b.push_object();
+            b["active"] = json5::value(double(activePalette_));
+            b.push_array();
+            for (const Palette& palette : palettes_) {
+                b.push_object();
+                b["name"] = b.new_string(palette.name);
+                b.push_array();
+                for (const Swatch& swatch : palette.swatches) {
+                    b.push_object();
+                    b.push_array();
+                    b += real(swatch.r);
+                    b += real(swatch.g);
+                    b += real(swatch.b);
+                    b += real(swatch.a);
+                    b["color"] = b.pop();
+                    if (!swatch.name.empty()) {
+                        b["name"] = b.new_string(swatch.name);
+                    }
+                    if (swatch.link != 0) {
+                        b["link"] = json5::value(double(swatch.link));
+                    }
+                    b += b.pop();
+                }
+                b["swatches"] = b.pop();
+                b += b.pop();
+            }
+            b["list"] = b.pop();
+            b["palettes"] = b.pop();
+            b["document"] = b.pop();
+            if (viewState_.canvas || viewState_.graph) {
+                ViewFile::write(b, viewState_);
+            }
+            step(taskProgress_, 0.05f);
+
+            b["graph"] = jitnodes::saveNetworkValue(b, network(), true, true);
+            b.pop();
+            step(taskProgress_, 0.5f);
+
+            json5::writer_params params;
+            std::ostringstream os;
+            os << std::setprecision(9);
+            json5::to_stream(os, out, params);
+            step(taskProgress_, 0.85f);
+
+            if (!writeAtomically(path, os.str())) {
+                lastError_ = "the file could not be written";
+                return false;
+            }
+            step(taskProgress_, 1.0f);
+            return true;
+        } catch (const TaskCancelled&) {
+            return false;   // nothing was written: the old file stays as it was
+        } catch (const std::exception& problem) {
+            lastError_ = problem.what();
+            return false;
+        }
+    }
+
+    bool SketchDocument::readFromFile(const std::string& path) {
+        LockGuard lock(*this);
+        lastError_.clear();
+        try {
+            step(taskProgress_, 0.02f);
+            std::string text;
+            {
+                std::ifstream in(std::filesystem::u8path(path), std::ios::binary);
+                if (!in) {
+                    fail("the file could not be opened");
+                }
+                std::ostringstream buffer;
+                buffer << in.rdbuf();
+                text = buffer.str();
+            }
+            step(taskProgress_, 0.2f);
+
+            json5::document parsed;
+            if (const json5::error problem = json5::from_string(text, parsed)) {
+                fail(std::string("parse error at line ") + std::to_string(problem.line) + ", column " + std::to_string(problem.column) + ": " +
+                     json5::error::type_string[problem.type]);
+            }
+            const json5::value root = parsed;
+            step(taskProgress_, 0.4f);
+            if (!root.is_object() || stringOr(root, "format", "", "file") != "curvy") {
+                fail("not a curvy file (format is not \"curvy\")");
+            }
+            const int version = int(number(need(root, "version", "file"), "version"));
+            if (version != kFileVersion) {
+                fail("unsupported version " + std::to_string(version) + " (this build reads version " + std::to_string(kFileVersion) + ")");
+            }
+
+            const json5::value info = need(root, "document", "file");
+            const std::string name = stringOr(info, "name", "Untitled", "document");
+            const json5::value page = need(info, "page", "document");
+            const float width = float(numberOr(page, "width", 612.0, "page"));
+            const float height = float(numberOr(page, "height", 792.0, "page"));
+            const float ppi = float(numberOr(page, "ppi", 72.0, "page"));
+            if (!(width > 0.0f) || !(height > 0.0f) || !(ppi > 0.0f)) {
+                fail("page: the size and ppi must be positive");
+            }
+            const std::string mode = stringOr(page, "colorMode", "rgb", "page");
+            if (mode != "rgb" && mode != "cmyk") {
+                fail("page: colorMode must be \"rgb\" or \"cmyk\"");
+            }
+            newui::Color background(1.0f, 1.0f, 1.0f, 1.0f);
+            json5::value part;
+            if (find(page, "background", part)) {
+                background = colorOf(part, "page.background");
+            }
+            // The palettes are optional (files from before swatches have none and get the default palette).
+            std::vector<Palette> palettes = {DefaultPalette::make()};
+            std::size_t active = 0;
+            json5::value palettePart;
+            if (find(info, "palettes", palettePart)) {
+                const json5::value listPart = need(palettePart, "list", "palettes");
+                const json5::array_view list(listPart);
+                if (!list.is_valid() || list.size() == 0) {
+                    fail("palettes.list must be a list with at least one palette");
+                }
+                palettes.clear();
+                for (std::size_t p = 0; p < list.size(); ++p) {
+                    const std::string where = "palettes.list[" + std::to_string(p) + "]";
+                    Palette palette;
+                    palette.name = stringOr(list[p], "name", "", where);
+                    if (palette.name.empty()) {
+                        fail(where + " needs a name");
+                    }
+                    if (std::any_of(palettes.begin(), palettes.end(), [&](const Palette& other) { return other.name == palette.name; })) {
+                        fail(where + ": the palette name \"" + palette.name + "\" is used twice");
+                    }
+                    json5::value swatchesPart;
+                    if (find(list[p], "swatches", swatchesPart)) {
+                        const json5::array_view swatches(swatchesPart);
+                        if (!swatches.is_valid()) {
+                            fail(where + ".swatches must be a list");
+                        }
+                        for (std::size_t s = 0; s < swatches.size(); ++s) {
+                            const std::string swatchWhere = where + ".swatches[" + std::to_string(s) + "]";
+                            const newui::Color color = colorOf(need(swatches[s], "color", swatchWhere), swatchWhere + ".color");
+                            const double link = numberOr(swatches[s], "link", 0.0, swatchWhere);
+                            palette.swatches.push_back(Swatch{color.r, color.g, color.b, color.a, stringOr(swatches[s], "name", "", swatchWhere),
+                                                              link >= 1.0 && link < 1e9 ? std::uint32_t(link) : 0u});
+                        }
+                    }
+                    palettes.push_back(std::move(palette));
+                }
+                active = std::size_t((std::max)(0.0, numberOr(palettePart, "active", 0.0, "palettes")));
+                if (active >= palettes.size()) {
+                    active = 0;
+                }
+            }
+            step(taskProgress_, 0.5f);
+
+            // The graph is checked on a scratch network first, so a bad one refuses the file before this document is touched.
+            const json5::value graph = need(root, "graph", "file");
+            try {
+                jitnodes::Network scratch(1);
+                jitnodes::loadNetworkValue(scratch, graph);
+            } catch (const std::exception& problem) {
+                fail(std::string("graph: ") + problem.what());
+            }
+            step(taskProgress_, 0.9f);   // the last point a cancel is honoured: from here the document changes
+
+            install(name, width, height, ppi, mode == "cmyk" ? ColorSpace::CMYK : ColorSpace::RGB, background);
+            palettes_ = std::move(palettes);
+            activePalette_ = active;
+            viewState_ = ViewFile::read(root);
+            jitnodes::loadNetworkValue(network(), graph);
+            std::vector<jitnodes::NodeId> path;
+            findObjectProblems(network(), path);
+            graphReplaced();
+            if (taskProgress_ != nullptr) {
+                taskProgress_->set(1.0f);
+            }
+            return true;
+        } catch (const TaskCancelled&) {
+            return false;
+        } catch (const std::exception& problem) {
+            lastError_ = problem.what();
+            return false;
+        }
     }
 
 }

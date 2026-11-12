@@ -20,10 +20,6 @@ namespace curvy {
         // button says OK, and the name and the starting shapes are disabled (they only make sense for a new one).
         // The name box is editable only when `nameEditable` (an unsaved document; a saved one is named by its file).
         static bool runSetup(newui::Frame& owner, NewDocumentModel& model, bool nameEditable);
-
-        // Headless self-test (sketch.exe --check-newdoc): loads the dialog without showing it and drives the
-        // controls like a user would. Returns the number of failed checks.
-        static int check();
     };
 
 }

@@ -1,0 +1,107 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>curvy graph view</title>
+<!-- The full node graph view (docs/v2-objects-plan.md "UI"; the behaviour at scale is shown in nodes-girl.html). It takes the place of the canvas in the
+     canvas area while it is open (Graph button or Tab), so the bottom dock stays free for the timeline. Layout: a toolbar over the node area, the
+     properties of the selected node on the right, and inside the node area two small overlays - the document preview at the top left (what the
+     canvas shows, with the selection highlighted) and the minimap at the lower right (drag to move around the graph; the amber box is the view).
+     The node area, the preview and the minimap are drawn in code: GraphView (nodes and wires), DocumentPreview, MiniMap. The overlays are children of
+     the node area and GraphView anchors them to its corners when it is resized.
+     Theme tokens (include/curvy/theme.h): bgCanvas behind the nodes, bgSurface at 60% for the overlays, bgApp for the fields, textMuted for captions.
+     Convert: python _____.claude/skills/html-mockup-to-newui/scripts/html2newui.py docs/mockups/graphView.html -o Resources/graphView.newui --name graphView --fragment -->
+<link rel="stylesheet" href="preview.css">
+<style>
+  body { width: 1360px; height: 790px; margin: 0; font-family: "Segoe UI", sans-serif; font-size: 12px; color: #F0F0F0; }
+  #graphViewBox { display: flex; flex-direction: row; background: #2A2A2A; }
+  #graphMain { display: flex; flex-direction: column; flex-grow: 1; }
+  #graphToolbar { display: flex; flex-direction: row; align-items: center; gap: 8px; height: 30px; padding: 0 8px; background: #2E2E2E; }
+  #graphCrumbs { display: flex; flex-direction: row; align-items: center; gap: 4px; width: 420px; height: 22px; }
+  #graphCrumb { color: #F0F0F0; font-weight: 700; width: 60px; white-space: nowrap; }
+  #graphCrumbs a { color: #A0A0A0; font-weight: 700; cursor: pointer; }
+  #graphCrumbs a:hover { color: #FFB454; }
+  #graphCrumbs .sep { color: #A0A0A0; font-weight: 700; }
+  #graphToolbarSpace { flex-grow: 1; }
+  #graphFilterField { width: 200px; height: 22px; background: #121212; color: #F0F0F0; }
+  #graphFitButton { width: 50px; height: 22px; }
+  #graphZoom { width: 50px; color: #A0A0A0; text-align: right; }
+  #graphNodes { position: relative; flex-grow: 1; background: #2A2A2A; }
+  #graphPreview { position: absolute; left: 10px; top: 10px; width: 170px; height: 130px; background: #1E1E1E99; border: 1px solid #4A4A4A; }
+  #graphMiniMap { position: absolute; left: 1000px; top: 640px; width: 190px; height: 120px; background: #1E1E1E99; border: 1px solid #4A4A4A; }
+  #graphProps { display: flex; flex-direction: column; width: 260px; background: #1E1E1E; border-left: 1px solid #4A4A4A; }
+  .head { display: flex; flex-direction: row; align-items: center; gap: 6px; height: 28px; padding: 0 8px; background: #2E2E2E; }
+  .head .title { font-weight: 700; flex-grow: 1; }
+  .head .info { color: #A0A0A0; width: 110px; text-align: right; }
+  .section { color: #A0A0A0; height: 22px; padding: 4px 8px 0 8px; }
+  .prow { display: flex; flex-direction: row; align-items: center; gap: 6px; height: 24px; padding: 0 8px; }
+  .prow .cap { width: 90px; color: #A0A0A0; }
+  .prow input { flex-grow: 1; height: 20px; background: #121212; color: #F0F0F0; }
+  #graphParamScroll { position: relative; flex-grow: 1; overflow: auto; background: #1E1E1E; }
+  #graphParamViewport { position: relative; width: 244px; height: 24px; }
+  #graphFlags { display: flex; flex-direction: row; gap: 6px; height: 30px; padding: 4px 8px; }
+  #graphFlags button { flex-grow: 1; height: 22px; }
+  .link { color: #A0A0A0; height: 20px; padding: 0 8px; }
+  #graphHint { color: #A0A0A0; height: 36px; padding: 6px 8px; }
+  /* Illustration only (data-newui-skip: the converter ignores it). The node ring is drawn by RadialMenu in code; see "Node ring" in docs/ui-design.md. */
+  #nodeRingDemo { position: absolute; left: 330px; top: 250px; width: 0; height: 0; }
+  #nodeRingDemo .hub { position: absolute; left: -34px; top: -34px; width: 68px; height: 68px; border-radius: 50%; background: #1E1E1EF0; border: 1px solid #4A4A4A; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #FFB454; line-height: 1.2; text-align: center; }
+  #nodeRingDemo .hub small { color: #A0A0A0; }
+  #nodeRingDemo .slot { position: absolute; transform: translate(-50%, -50%); min-width: 96px; height: 28px; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 10px; border-radius: 14px; background: #1E1E1EF0; border: 1px solid #4A4A4A; white-space: nowrap; }
+  #nodeRingDemo .slot small { color: #A0A0A0; }
+  #nodeRingDemo .slot.off { opacity: .35; }
+  #selectedNodeDemo { position: absolute; left: 255px; top: 232px; width: 150px; height: 40px; border-radius: 5px; background: #1E1E1E; border: 2px solid #FFB454; padding: 4px 10px; }
+  #selectedNodeDemo small { display: block; color: #A0A0A0; font-size: 10px; }
+</style>
+</head>
+<body>
+  <div id="graphViewBox">
+    <div id="graphMain">
+      <div id="graphToolbar">
+        <!-- The links (every level above the current one) are made in code (GraphCrumbs): a hot-link label per level with a hand cursor and amber
+             on hover, then a ">" label. The current level is the label below. -->
+        <div id="graphCrumbs"><span id="graphCrumb">Layer1</span></div>
+        <span id="graphToolbarSpace"></span>
+        <input id="graphFilterField" type="text" placeholder="Filter by name, type or tag" value="">
+        <button id="graphFitButton">Fit</button>
+        <span id="graphZoom">100%</span>
+      </div>
+      <div id="graphNodes" data-newui-type="GraphView">
+        <canvas id="graphPreview" data-newui-type="GraphPreview"></canvas>
+        <canvas id="graphMiniMap" data-newui-type="GraphMiniMap"></canvas>
+        <div id="selectedNodeDemo" data-newui-skip>Group1<small>curvyObject</small></div>
+        <div id="nodeRingDemo" data-newui-skip>
+          <div class="hub">Group1<small>Data...</small></div>
+          <div class="slot" style="left:0;top:-92px">Display <small>D</small></div>
+          <div class="slot" style="left:92px;top:-62px">Bypass <small>B</small></div>
+          <div class="slot" style="left:120px;top:0">Freeze <small>F</small></div>
+          <div class="slot" style="left:92px;top:62px">Rename <small>R</small></div>
+          <div class="slot" style="left:0;top:92px">Group <small>G</small></div>
+          <div class="slot" style="left:-92px;top:62px">Ungroup <small>U</small></div>
+          <div class="slot" style="left:-120px;top:0">Enter <small>E</small></div>
+          <div class="slot off" style="left:-92px;top:-62px">Exit <small>X</small></div>
+        </div>
+      </div>
+    </div>
+    <div id="graphProps">
+      <div id="graphPropsHeader" class="head"><span id="graphPropsTitle" class="title">Group1</span><span id="graphPropsKind" class="info">curvyObject</span></div>
+      <div class="section">Node</div>
+      <div class="prow"><span class="cap">Name</span><input id="graphNameField" type="text" value="Group1"></div>
+      <div class="prow"><span class="cap">Tags</span><input id="graphTagsField" type="text" value="group"></div>
+      <div id="graphFlags"><button id="graphDisplayButton">Display</button><button id="graphBypassButton">Bypass</button><button id="graphFreezeButton">Freeze</button></div>
+      <div id="graphDataRow" class="prow"><button id="graphDataButton" style="flex-grow:1;height:22px">View points and attributes...</button></div>
+      <div class="section">Parameters</div>
+      <!-- The rows are made in code (GraphPanel): one per parameter of the selected node, a colour swatch and hex field for r/g/b, captions scrub. -->
+      <div id="graphParamScroll">
+        <div id="graphParamViewport"></div>
+      </div>
+      <div class="section">Inputs</div>
+      <span class="link" id="graphInput0">0  circle1</span>
+      <span class="link" id="graphInput1">1  circle2</span>
+      <div class="section">Used by</div>
+      <span class="link" id="graphUsed0">0  xform</span>
+      <span id="graphHint">Double-click a layer or group to enter it. Backspace goes back up. Tab returns to the canvas.</span>
+    </div>
+  </div>
+</body>
+</html>

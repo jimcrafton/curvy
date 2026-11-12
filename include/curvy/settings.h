@@ -1,7 +1,5 @@
 #pragma once
 
-#include "curvy/workspacemodel.h"
-
 #include <cstdint>
 #include <string>
 
@@ -9,31 +7,52 @@ namespace curvy {
 
     enum class SettingsPage { Appearance, Workspace, Pen, Drawing, Files };
 
-    // The per-user preferences behind the settings dialog (docs/ui-design.md "Settings / Preferences dialog"). Plain values; the
-    // dialog edits a copy and the workspace applies it. Stored as key=value lines.
+    // The per-user preferences and the state the app keeps between sessions, in one json5 file (<local app data>/curvy/settings.json5, or
+    // the path given with --settings). The window and the dock areas are kept here too, so a session starts as the last one ended. Unknown
+    // keys and unparsable or out-of-range values are skipped, so a hand-edited or newer file still loads.
     // @reflect ignore=true
     struct Settings {
         enum class ThemeChoice { Dark, Light, FollowWindows };
+        enum class ScrubAxis { Vertical, Horizontal };
         enum class PenButton { Rings, Pan, Nothing };
         enum class EraserAction { Erase, Undo, Nothing };
 
+        // The window as the user left it, in screen pixels (the normal rectangle when maximized); known() is false until a session has
+        // saved it. `monitor` is the screen it was on (its device name, such as \\.\DISPLAY2); empty when not known.
+        struct WindowPlacement {
+            int x = 0, y = 0, width = 0, height = 0;
+            bool maximized = false;
+            std::string monitor;
+            bool known() const { return width > 0 && height > 0; }
+        };
+        // One dock area (top, left, right, bottom): the size it opens at, and whether it is hidden.
+        struct DockArea {
+            float size = 240.0f;
+            bool collapsed = true;
+        };
+        static constexpr int dockCount = 4;
+        static constexpr float minDockSize = 60.0f;
+        static const char* dockName(int index);   // "top", "left", "right", "bottom"
+
+        // Appearance
         ThemeChoice theme = ThemeChoice::Dark;
         std::uint32_t canvasBackground = 0x2A2A2A;
         bool canvasFollowsTheme = true;
         int propertyTextSize = 11;
 
-        bool toolbarVisible = false;
-        bool propertiesVisible = false;
+        // Workspace
         bool rulersVisible = true;
         bool hintsFade = true;
         int recentLength = 10;
 
-        WorkspaceModel::ScrubAxis scrubAxis = WorkspaceModel::ScrubAxis::Vertical;
+        // Pen
+        ScrubAxis scrubAxis = ScrubAxis::Vertical;
         int scrubSensitivity = 100;
         int spaceTapMs = 300;
         PenButton barrelButton = PenButton::Rings;
         EraserAction eraserEnd = EraserAction::Erase;
 
+        // Drawing
         bool snapGrid = false;
         double gridSize = 10.0;
         bool snapGuides = true;
@@ -44,10 +63,16 @@ namespace curvy {
         int starInner = 50;
         int pencilSmoothing = 40;
 
-        bool welcomeShown = false;   // the first-run overlay has been shown
+        // Files
         bool autosave = true;
         int autosaveMinutes = 5;
         std::string exportFolder;
+
+        // State
+        WindowPlacement window;
+        DockArea docks[dockCount];
+
+        Settings();
 
         // Puts one page back to the defaults.
         void resetPage(SettingsPage page);
@@ -56,10 +81,9 @@ namespace curvy {
         bool darkTheme() const;
 
         std::string toText() const;
-        // Unknown keys and unparsable or out-of-range values are skipped, so a hand-edited or newer file still loads.
         void fromText(const std::string& text);
 
-        static std::string defaultPath();  // %APPDATA%\curvy\settings.ini
+        static std::string defaultPath();
         static Settings load(const std::string& path);
         bool save(const std::string& path) const;
     };

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <newui/color.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -23,6 +25,11 @@ namespace curvy {
         std::uint32_t onAccent;      // text on an accent fill
         std::uint32_t highlight;     // same amber as accent (kept as its own token for text and the ring hub)
         bool isDark;
+
+        // textPrimary as a newui colour; a text field's caret defaults to black, which is invisible on the dark fields.
+        newui::Color textColor() const {
+            return newui::Color(float((textPrimary >> 16) & 0xFFu) / 255.0f, float((textPrimary >> 8) & 0xFFu) / 255.0f, float(textPrimary & 0xFFu) / 255.0f);
+        }
 
         static const Theme& dark() {
             static const Theme theme{0x121212, 0x1E1E1E, 0x2A2A2A, 0x2E2E2E, 0x4A4A4A, 0xF0F0F0, 0xA0A0A0, 0xC5C5C5, 0xFFB454, 0xFFC77A, 0x101010, 0xFFB454, true};

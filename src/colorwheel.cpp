@@ -15,22 +15,40 @@ namespace curvy {
         constexpr double kGap = 6.0;   // between the ring and the square
 
         BLRgba32 fromHsb(double h, double s, double b) {
-            h = h - std::floor(h);
-            const double sector = h * 6.0;
-            const int i = int(std::floor(sector));
-            const double f = sector - double(i);
-            const double p = b * (1.0 - s), q = b * (1.0 - s * f), t = b * (1.0 - s * (1.0 - f));
-            double r = b, g = t, bl = p;
-            switch (i % 6) {
-                case 0: r = b; g = t; bl = p; break;
-                case 1: r = q; g = b; bl = p; break;
-                case 2: r = p; g = b; bl = t; break;
-                case 3: r = p; g = q; bl = b; break;
-                case 4: r = t; g = p; bl = b; break;
-                default: r = b; g = p; bl = q; break;
-            }
+            double r = 0.0, g = 0.0, bl = 0.0;
+            ColorWheel::hsbToRgb(h, s, b, r, g, bl);
             return BLRgba32(std::uint32_t(r * 255.0 + 0.5), std::uint32_t(g * 255.0 + 0.5), std::uint32_t(bl * 255.0 + 0.5));
         }
+    }
+
+    void ColorWheel::hsbToRgb(double h, double s, double b, double& r, double& g, double& blue) {
+        h = h - std::floor(h);
+        const double sector = h * 6.0;
+        const int i = int(std::floor(sector));
+        const double f = sector - double(i);
+        const double p = b * (1.0 - s), q = b * (1.0 - s * f), t = b * (1.0 - s * (1.0 - f));
+        switch (i % 6) {
+            case 0: r = b; g = t; blue = p; break;
+            case 1: r = q; g = b; blue = p; break;
+            case 2: r = p; g = b; blue = t; break;
+            case 3: r = p; g = q; blue = b; break;
+            case 4: r = t; g = p; blue = b; break;
+            default: r = b; g = p; blue = q; break;
+        }
+    }
+
+    void ColorWheel::rgbToHsb(double r, double g, double b, double& hue, double& saturation, double& brightness, bool& hueDefined) {
+        const double high = std::max({r, g, b}), low = std::min({r, g, b}), span = high - low;
+        brightness = high;
+        saturation = high > 0.0 ? span / high : 0.0;
+        hueDefined = span > 1e-9;
+        if (!hueDefined) {
+            hue = 0.0;
+            return;
+        }
+        double sector = high == r ? (g - b) / span : high == g ? 2.0 + (b - r) / span : 4.0 + (r - g) / span;
+        sector = sector / 6.0;
+        hue = sector - std::floor(sector);
     }
 
     ColorWheel::ColorWheel() {

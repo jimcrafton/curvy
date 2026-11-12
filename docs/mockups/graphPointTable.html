@@ -1,0 +1,70 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>curvy point table</title>
+<!-- The data popup of the graph view: the geometry a node cooks, as a table (Points, Primitives, Detail). Opened from the node ring's hub ("Data...")
+     or the "View points and attributes" button of the property panel; a floating popup over the graph, read-only. The table is a newui TableView
+     (virtualized in both directions, hosted in a ScrollView through a viewport SubView as in the manyrows demo, with its own column header strip and row-number gutter, so 10,000 or a million points cost the same to show),
+     fed by a TableModel over the node's output Geometry: one row per point (or primitive), a column for x, y and every point (or primitive)
+     attribute, the vector ones as name.x, name.y. A click on a column header can sort later; drag a header edge to resize. Selection and Ctrl+C copy
+     as tab separated text. "Source" picks the node's output or one of its inputs.
+     The grid drawn here is an illustration (data-newui-skip: the converter ignores it); the real cells are painted by the TableView.
+     Convert: python _____.claude/skills/html-mockup-to-newui/scripts/html2newui.py docs/mockups/graphPointTable.html -o Resources/pointTable.newui --name pointTable --fragment -->
+<link rel="stylesheet" href="preview.css">
+<style>
+  body { width: 640px; height: 440px; margin: 0; font-family: "Segoe UI", sans-serif; font-size: 12px; color: #F0F0F0; }
+  #pointTableBox { display: flex; flex-direction: column; background: #1E1E1E; border: 1px solid #4A4A4A; }
+  .head { display: flex; flex-direction: row; align-items: center; gap: 6px; height: 28px; padding: 0 8px; background: #2E2E2E; }
+  .head .title { font-weight: 700; flex-grow: 1; }
+  .head .info { color: #A0A0A0; width: 220px; text-align: right; }
+  #pointTableControls { display: flex; flex-direction: row; align-items: center; gap: 8px; height: 34px; padding: 0 8px; }
+  #pointTableTabs { width: 230px; height: 24px; }
+  #pointTableSource { width: 120px; height: 24px; }
+  #pointTableFilter { flex-grow: 1; height: 22px; background: #121212; color: #F0F0F0; }
+  #pointTableScroll { position: relative; flex-grow: 1; overflow: auto; background: #121212; }
+  #pointTableViewport { position: relative; width: 620px; height: 300px; }
+  #pointTableGrid { width: 620px; height: 300px; }
+  #pointTableFooter { display: flex; flex-direction: row; align-items: center; gap: 8px; height: 32px; padding: 0 8px; background: #2E2E2E; }
+  #pointTableStatus { flex-grow: 1; color: #A0A0A0; }
+  #pointTableCopyButton { width: 90px; height: 22px; }
+  /* Illustration only. */
+  #gridDemo { position: absolute; left: 0; top: 0; width: 620px; height: 300px; font-variant-numeric: tabular-nums; }
+  #gridDemo .hdr, #gridDemo .row { display: flex; flex-direction: row; height: 22px; line-height: 22px; border-bottom: 1px solid #2E2E2E; }
+  #gridDemo .hdr { background: #2E2E2E; font-weight: 700; }
+  #gridDemo .c { width: 120px; padding: 0 8px; text-align: right; border-right: 1px solid #2E2E2E; }
+  #gridDemo .n { width: 46px; padding: 0 6px; text-align: right; color: #A0A0A0; background: #1E1E1E; border-right: 1px solid #4A4A4A; }
+  #gridDemo .sel .c { background: #FFB45433; }
+  #gridDemo .sel .c.active { background: #FFB454; color: #101010; }
+</style>
+</head>
+<body>
+  <div id="pointTableBox">
+    <div id="pointTableHeaderBar" class="head"><span id="pointTableTitle" class="title">Data</span><span id="pointTableInfo" class="info">circle1 &middot; 96 points, 1 primitive</span></div>
+    <div id="pointTableControls">
+      <canvas id="pointTableTabs" data-newui-type="SegmentedControl"></canvas>
+      <select id="pointTableSource"><option>Output</option><option>Input 0</option></select>
+      <input id="pointTableFilter" type="text" placeholder="Show attributes matching..." value="">
+    </div>
+    <div id="pointTableScroll">
+      <div id="pointTableViewport">
+      <canvas id="pointTableGrid" data-newui-type="TableView"></canvas>
+      <div id="gridDemo" data-newui-skip>
+        <div class="hdr"><div class="n"></div><div class="c">x</div><div class="c">y</div><div class="c">width</div><div class="c">taper</div></div>
+        <div class="row"><div class="n">0</div><div class="c">240.000</div><div class="c">200.000</div><div class="c">2.000</div><div class="c">1.000</div></div>
+        <div class="row"><div class="n">1</div><div class="c">239.647</div><div class="c">205.887</div><div class="c">2.000</div><div class="c">0.990</div></div>
+        <div class="row sel"><div class="n">2</div><div class="c">238.590</div><div class="c">211.683</div><div class="c active">2.000</div><div class="c">0.980</div></div>
+        <div class="row"><div class="n">3</div><div class="c">236.842</div><div class="c">217.323</div><div class="c">2.000</div><div class="c">0.970</div></div>
+        <div class="row"><div class="n">4</div><div class="c">234.419</div><div class="c">222.717</div><div class="c">2.000</div><div class="c">0.960</div></div>
+        <div class="row"><div class="n">5</div><div class="c">231.348</div><div class="c">227.789</div><div class="c">2.000</div><div class="c">0.950</div></div>
+        <div class="row"><div class="n">6</div><div class="c">227.670</div><div class="c">232.426</div><div class="c">2.000</div><div class="c">0.940</div></div>
+      </div>
+      </div>
+    </div>
+    <div id="pointTableFooter">
+      <span id="pointTableStatus">Row 2, width = 2.000</span>
+      <button id="pointTableCopyButton">Copy cells</button>
+    </div>
+  </div>
+</body>
+</html>

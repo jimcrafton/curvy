@@ -1,5 +1,27 @@
 # Native file format: `.curvy` (design note, 2026-11-06)
 
+**View and parameter tags (2026-11-11, additive, file version stays 3).** Two optional pieces; a file without them opens as before.
+
+- **`view`** (root level, between `document` and `graph`) is where the user was looking:
+  `view: { canvas: { zoom, pan: [x, y] }, graph: { open, level: [ids], zoom, pan: [x, y], selected: [ids] } }`. `canvas` is left out while the page is still centred (a file
+  opens fitted). In `graph`, `open` is 1 when the graph view covered the canvas, `level` lists the subnet node ids entered from the root (empty is the root), `zoom` and `pan`
+  appear only once the view was zoomed, panned or fitted (otherwise it fits itself), and `selected` lists the selected node ids of that level, the one the panel shows last. The
+  reader is lenient: a part that is missing or malformed is dropped and the file still opens; a level or node the graph no longer has falls back to the root and no selection. A view
+  is not an edit: it is not undoable and does not mark the document modified. Code: `ViewState` (`include/curvy/viewstate.h`), `SketchDocument::viewState()` (set by
+  `WorkspaceController::captureView` just before a save, applied by `applyView` after an open), `GraphView::state()` / `restore()`, `CanvasView::centered()`. Tests: `NativeFile.*View*`,
+  the GUI test `GraphEditing.test_the_graph_view_comes_back_when_the_file_is_opened_again`.
+- **`ptags`** (in a graph node, jitnodes): `ptags: { paramName: [tags] }` holds the tags a person added to a float parameter (`Node::setParamTags` / `addParamTag`); it is what keeps the
+  tags of a spare parameter. The tags a node type declares in code (`tagParam`) are not written. A missing `ptags` means none, so restoring a snapshot drops tags added since;
+  a name that is not a parameter of the node refuses the file. Snapshots, copy and paste and asset updates carry them. Tests: jitnodes `parameterTagsAPersonAdded...`,
+  `NativeFile.TheParameterTagsAPersonAddedAreSaved...`.
+- **Node positions** were already saved (`pos`, only for nodes the user has placed by dragging; the rest are laid out each time).
+
+**Palettes (2026-11-10, additive, file version stays 3).** `document.palettes` is `{ active: n, list: [ { name, swatches: [ { color: [r, g, b, alpha], name? } ] } ] }`: one or
+more named palettes of plain swatches (a copy of a colour, 0..1 floats, optional name) and the index of the active one. The key is optional: a file without it opens with the
+default palette ("Swatches", 13 colours). A palette with no name, two palettes of one name, an empty list or a colour outside 0..1 refuses the file and leaves the open document
+untouched. The automatic Recent palette is not saved. **Linked swatches (2026-11-11, additive):** a swatch may carry `link: n` (a whole number from 1, unique in the document); the colour
+rows tied to it are the nodes tagged `swatch:<n>:<group>` in the graph. A missing or invalid `link` is a plain swatch. Code: `SketchDocument::palettes()`, `include/curvy/swatchpalettes.h`; tests `tests/test_swatchpalettes.cpp`.
+
 **Version 2 (2026-11-08, N3): the file has no `objects` section.** The writer emits `document` (page, guides, layers, artboards, swatches, graphicStyles), `resources`
 (symbols, patterns, brushes, and `images` each with `name`, `key` = `ImageData::key`, and base64 `data`) and `graph`; the reader builds the objects from the graph with
 `SketchDocument::objectsFromGraph`, finding pictures by `key`. Group opacity, blend and clip live on the group subnets, so there is no `groups` section either. Version 1

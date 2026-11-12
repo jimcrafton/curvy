@@ -42,15 +42,26 @@ namespace curvy {
 
         // Each of these is one undo step. New nodes go into `scope`.
         NodeRef addGraphNode(const std::string& type, const std::string& name = {}, std::uint32_t scope = 0);
+        // Each of the three throws std::runtime_error when the document refuses it (see refuseGraphEdit), and changes nothing then.
         void removeGraphNode(const NodeRef& ref);
+        // Deletes all of them as one undo step; when the document refuses any of them, none is deleted.
+        void removeGraphNodes(const std::vector<NodeRef>& refs);
+        // Takes the wire that feeds input `oldIndex` of `oldTo` and feeds input `newIndex` of `newTo` with it instead: one undo step. The
+        // nodes are in one scope.
+        void moveGraphWire(const NodeRef& oldTo, int oldIndex, const NodeRef& newTo, int newIndex);
         // Both ends are in one scope.
         void connectGraphNodes(const NodeRef& from, const NodeRef& to, int inputIndex = 0);
+        // Unwires input `inputIndex` of `to`; nothing happens (and no undo step is made) when it was not wired.
+        void disconnectGraphNode(const NodeRef& to, int inputIndex);
         void setGraphParam(const NodeRef& ref, const std::string& name, float value);
         // Several float parameters of a node as one undo step.
         void setGraphFloats(const NodeRef& ref, const std::map<std::string, float>& values, const std::string& description);
         void setGraphString(const NodeRef& ref, const std::string& name, const std::string& value);
         void setGraphGeometry(const NodeRef& ref, const std::string& name, jitnodes::GeometryHandle geometry);
         void renameGraphNode(const NodeRef& ref, const std::string& name);
+        // Replaces the node's tags as one undo step (nothing happens, and no step is made, when they are the same). Throws std::runtime_error
+        // when the document refuses (see refuseTagEdit).
+        void setGraphTags(const NodeRef& ref, const std::vector<std::string>& tags);
         // Gives a float parameter an expression (empty text clears it, back to its stored value) as one undo step. Returns the parser's message
         // when the expression is not valid, and changes nothing then.
         std::string setGraphExpression(const NodeRef& ref, const std::string& name, const std::string& expression);
@@ -87,6 +98,10 @@ namespace curvy {
         // One step of such a drag: sets the parameter and lets everything that depends on the graph follow, without an undo step.
         void setGraphFloatLive(const NodeRef& ref, const std::string& name, float value);
 
+        // One step of a node drag in the graph view: places these nodes of `scope` (editor positions only, nothing is cooked) without an undo
+        // step. The view records the finished drag with commitGraphEdit("Move Node") from the snapshot it took before the first step.
+        void setGraphPositionsLive(std::uint32_t scope, const std::map<jitnodes::NodeId, std::pair<float, float>>& positions);
+
         // Makes the graph match `target` with no undo step, for derived documents that fold graph changes into their own steps.
         void restoreGraph(const jitnodes::GraphSnapshot& target);
 
@@ -102,6 +117,19 @@ namespace curvy {
         void clearGraph();
 
     protected:
+        // Why the document will not delete `node` (`removing`) or change what feeds it (not `removing`); empty when it is allowed. A derived
+        // document protects the nodes it relies on.
+        virtual std::string refuseGraphEdit(const NodeRef& node, bool removing) const {
+            (void)node;
+            (void)removing;
+            return {};
+        }
+        // Why the document will not give `node` these tags; empty when it is allowed. A derived document protects the tags it relies on.
+        virtual std::string refuseTagEdit(const NodeRef& node, const std::vector<std::string>& tags) const {
+            (void)node;
+            (void)tags;
+            return {};
+        }
         // The graph changed (an edit, undo or redo); derived documents refresh what depends on it.
         virtual void graphChanged();
         // The time moved; derived documents refresh what shows time-dependent values. `graphAffected`: some node depends on time.

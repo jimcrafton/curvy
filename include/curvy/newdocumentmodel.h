@@ -1,6 +1,6 @@
 #pragma once
 
-#include "curvy/sketchcolor.h"
+#include "curvy/colorspace.h"
 
 #include <string>
 #include <vector>

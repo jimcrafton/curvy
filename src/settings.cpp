@@ -1,8 +1,22 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include "curvy/settings.h"
 
+#include <newui/utils.h>
+
+#include <json5/json5.hpp>
+#include <json5/json5_builder.hpp>
+#include <json5/json5_input.hpp>
+#include <json5/json5_output.hpp>
+
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
-#include <map>
+#include <iomanip>
 #include <sstream>
 
 #ifdef _WIN32
@@ -10,6 +24,101 @@
 #endif
 
 namespace curvy {
+
+    namespace {
+
+        constexpr const char* themeNames[] = {"dark", "light", "system"};
+        constexpr const char* axisNames[] = {"vertical", "horizontal"};
+        constexpr const char* buttonNames[] = {"rings", "pan", "nothing"};
+        constexpr const char* eraserNames[] = {"erase", "undo", "nothing"};
+        constexpr float defaultDockSize[Settings::dockCount] = {64.0f, 220.0f, 268.0f, 120.0f};
+
+        bool find(const json5::value& object, const char* key, json5::value& out) {
+            if (!object.is_object()) {
+                return false;
+            }
+            for (auto [name, child] : json5::object_view(object)) {
+                if (std::string_view(name) == key) {
+                    out = child;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        bool group(const json5::value& root, const char* key, json5::value& out) {
+            return find(root, key, out) && out.is_object();
+        }
+
+        void readInt(const json5::value& from, const char* key, int& field, int low, int high) {
+            json5::value v;
+            if (find(from, key, v) && v.is_number()) {
+                const double value = v.get<double>();
+                if (std::isfinite(value) && value >= low && value <= high) {
+                    field = int(std::lround(value));
+                }
+            }
+        }
+
+        void readReal(const json5::value& from, const char* key, double& field, double low, double high) {
+            json5::value v;
+            if (find(from, key, v) && v.is_number()) {
+                const double value = v.get<double>();
+                if (std::isfinite(value) && value >= low && value <= high) {
+                    field = value;
+                }
+            }
+        }
+
+        void readBool(const json5::value& from, const char* key, bool& field) {
+            json5::value v;
+            if (find(from, key, v) && v.is_boolean()) {
+                field = v.get_bool();
+            }
+        }
+
+        template <std::size_t N>
+        void readChoice(const json5::value& from, const char* key, int& field, const char* const (&names)[N]) {
+            json5::value v;
+            if (find(from, key, v) && v.is_string()) {
+                for (std::size_t i = 0; i < N; ++i) {
+                    if (std::string_view(v.get_c_str()) == names[i]) {
+                        field = int(i);
+                        return;
+                    }
+                }
+            }
+        }
+
+        std::string hexColor(std::uint32_t rgb) {
+            char buffer[16];
+            std::snprintf(buffer, sizeof(buffer), "#%06X", rgb & 0xFFFFFFu);
+            return buffer;
+        }
+
+        void readColor(const json5::value& from, const char* key, std::uint32_t& field) {
+            json5::value v;
+            if (find(from, key, v) && v.is_string()) {
+                const std::string text = v.get_c_str();
+                char* end = nullptr;
+                const unsigned long parsed = text.size() == 7 && text[0] == '#' ? std::strtoul(text.c_str() + 1, &end, 16) : 0;
+                if (end != nullptr && *end == '\0') {
+                    field = std::uint32_t(parsed);
+                }
+            }
+        }
+    }
+
+    Settings::Settings() {
+        for (int i = 0; i < dockCount; ++i) {
+            docks[i].size = defaultDockSize[i];
+        }
+    }
+
+    const char* Settings::dockName(int index) {
+        static constexpr const char* names[dockCount] = {"top", "left", "right", "bottom"};
+        return names[index];
+    }
 
     void Settings::resetPage(SettingsPage page) {
         const Settings defaults;
@@ -21,11 +130,12 @@ namespace curvy {
                 propertyTextSize = defaults.propertyTextSize;
                 break;
             case SettingsPage::Workspace:
-                toolbarVisible = defaults.toolbarVisible;
-                propertiesVisible = defaults.propertiesVisible;
                 rulersVisible = defaults.rulersVisible;
                 hintsFade = defaults.hintsFade;
                 recentLength = defaults.recentLength;
+                for (int i = 0; i < dockCount; ++i) {
+                    docks[i] = defaults.docks[i];
+                }
                 break;
             case SettingsPage::Pen:
                 scrubAxis = defaults.scrubAxis;
@@ -68,136 +178,178 @@ namespace curvy {
     }
 
     std::string Settings::toText() const {
-        std::ostringstream out;
-        out << "theme=" << int(theme) << "\n"
-            << "canvasBackground=" << canvasBackground << "\n"
-            << "canvasFollowsTheme=" << canvasFollowsTheme << "\n"
-            << "propertyTextSize=" << propertyTextSize << "\n"
-            << "toolbarVisible=" << toolbarVisible << "\n"
-            << "propertiesVisible=" << propertiesVisible << "\n"
-            << "rulersVisible=" << rulersVisible << "\n"
-            << "hintsFade=" << hintsFade << "\n"
-            << "recentLength=" << recentLength << "\n"
-            << "scrubAxis=" << int(scrubAxis) << "\n"
-            << "scrubSensitivity=" << scrubSensitivity << "\n"
-            << "spaceTapMs=" << spaceTapMs << "\n"
-            << "barrelButton=" << int(barrelButton) << "\n"
-            << "eraserEnd=" << int(eraserEnd) << "\n"
-            << "snapGrid=" << snapGrid << "\n"
-            << "gridSize=" << gridSize << "\n"
-            << "snapGuides=" << snapGuides << "\n"
-            << "toolDefaultsInDocument=" << toolDefaultsInDocument << "\n"
-            << "polygonSides=" << polygonSides << "\n"
-            << "starPoints=" << starPoints << "\n"
-            << "cornerRadius=" << cornerRadius << "\n"
-            << "starInner=" << starInner << "\n"
-            << "pencilSmoothing=" << pencilSmoothing << "\n"
-            << "welcomeShown=" << welcomeShown << "\n"
-            << "autosave=" << autosave << "\n"
-            << "autosaveMinutes=" << autosaveMinutes << "\n"
-            << "exportFolder=" << exportFolder << "\n";
-        return out.str();
+        json5::document out;
+        json5::builder b(out);
+        auto number = [&b](const char* key, double value) { b[key] = json5::value(value); };
+        auto flag = [&b](const char* key, bool value) { b[key] = json5::value(value); };
+        auto text = [&b](const char* key, const std::string& value) { b[key] = b.new_string(value); };
+
+        b.push_object();
+        b.push_object();
+        text("theme", themeNames[int(theme)]);
+        text("canvasBackground", hexColor(canvasBackground));
+        flag("canvasFollowsTheme", canvasFollowsTheme);
+        number("propertyTextSize", propertyTextSize);
+        b["appearance"] = b.pop();
+
+        b.push_object();
+        flag("rulersVisible", rulersVisible);
+        flag("hintsFade", hintsFade);
+        number("recentLength", recentLength);
+        b["workspace"] = b.pop();
+
+        b.push_object();
+        text("scrubAxis", axisNames[int(scrubAxis)]);
+        number("scrubSensitivity", scrubSensitivity);
+        number("spaceTapMs", spaceTapMs);
+        text("barrelButton", buttonNames[int(barrelButton)]);
+        text("eraserEnd", eraserNames[int(eraserEnd)]);
+        b["pen"] = b.pop();
+
+        b.push_object();
+        flag("snapGrid", snapGrid);
+        number("gridSize", gridSize);
+        flag("snapGuides", snapGuides);
+        flag("toolDefaultsInDocument", toolDefaultsInDocument);
+        number("polygonSides", polygonSides);
+        number("starPoints", starPoints);
+        number("cornerRadius", cornerRadius);
+        number("starInner", starInner);
+        number("pencilSmoothing", pencilSmoothing);
+        b["drawing"] = b.pop();
+
+        b.push_object();
+        flag("autosave", autosave);
+        number("autosaveMinutes", autosaveMinutes);
+        text("exportFolder", exportFolder);
+        b["files"] = b.pop();
+
+        if (window.known()) {
+            b.push_object();
+            number("x", window.x);
+            number("y", window.y);
+            number("width", window.width);
+            number("height", window.height);
+            flag("maximized", window.maximized);
+            text("monitor", window.monitor);
+            b["window"] = b.pop();
+        }
+
+        b.push_object();
+        for (int i = 0; i < dockCount; ++i) {
+            b.push_object();
+            number("size", docks[i].size);
+            flag("collapsed", docks[i].collapsed);
+            b[dockName(i)] = b.pop();
+        }
+        b["docks"] = b.pop();
+        b.pop();
+
+        json5::writer_params params;
+        std::ostringstream os;
+        os << std::setprecision(9);
+        json5::to_stream(os, out, params);
+        return os.str();
     }
 
     void Settings::fromText(const std::string& text) {
-        std::map<std::string, std::string> values;
-        std::istringstream in(text);
-        std::string line;
-        while (std::getline(in, line)) {
-            if (!line.empty() && line.back() == '\r') {
-                line.pop_back();
-            }
-            const std::size_t eq = line.find('=');
-            if (eq != std::string::npos && eq > 0) {
-                values[line.substr(0, eq)] = line.substr(eq + 1);
-            }
+        json5::document parsed;
+        if (json5::from_string(text, parsed)) {
+            return;
         }
+        const json5::value root = parsed;
+        if (!root.is_object()) {
+            return;
+        }
+        json5::value g;
+        int choice = 0;
 
-        auto number = [&values](const char* key, long& out) {
-            auto it = values.find(key);
-            if (it == values.end() || it->second.empty()) {
-                return false;
-            }
-            char* end = nullptr;
-            const long parsed = std::strtol(it->second.c_str(), &end, 10);
-            if (*end != '\0') {
-                return false;
-            }
-            out = parsed;
-            return true;
-        };
-        auto integer = [&number](const char* key, int& field, int low, int high) {
-            long value = 0;
-            if (number(key, value) && value >= low && value <= high) {
-                field = int(value);
-            }
-        };
-        auto flag = [&number](const char* key, bool& field) {
-            long value = 0;
-            if (number(key, value) && (value == 0 || value == 1)) {
-                field = value == 1;
-            }
-        };
-
-        int choice = int(theme);
-        integer("theme", choice, 0, 2);
-        theme = ThemeChoice(choice);
-        long color = 0;
-        if (number("canvasBackground", color) && color >= 0 && color <= 0xFFFFFF) {
-            canvasBackground = std::uint32_t(color);
+        if (group(root, "appearance", g)) {
+            choice = int(theme);
+            readChoice(g, "theme", choice, themeNames);
+            theme = ThemeChoice(choice);
+            readColor(g, "canvasBackground", canvasBackground);
+            readBool(g, "canvasFollowsTheme", canvasFollowsTheme);
+            readInt(g, "propertyTextSize", propertyTextSize, 10, 20);
         }
-        flag("canvasFollowsTheme", canvasFollowsTheme);
-        integer("propertyTextSize", propertyTextSize, 10, 20);
-        flag("toolbarVisible", toolbarVisible);
-        flag("propertiesVisible", propertiesVisible);
-        flag("rulersVisible", rulersVisible);
-        flag("hintsFade", hintsFade);
-        integer("recentLength", recentLength, 0, 50);
-        choice = int(scrubAxis);
-        integer("scrubAxis", choice, 0, 1);
-        scrubAxis = WorkspaceModel::ScrubAxis(choice);
-        integer("scrubSensitivity", scrubSensitivity, 25, 400);
-        integer("spaceTapMs", spaceTapMs, 100, 1000);
-        choice = int(barrelButton);
-        integer("barrelButton", choice, 0, 2);
-        barrelButton = PenButton(choice);
-        choice = int(eraserEnd);
-        integer("eraserEnd", choice, 0, 2);
-        eraserEnd = EraserAction(choice);
-        flag("snapGrid", snapGrid);
-        auto grid = values.find("gridSize");
-        if (grid != values.end()) {
-            const double parsed = std::atof(grid->second.c_str());
-            if (parsed > 0.0 && parsed <= 1000.0) {
-                gridSize = parsed;
+        if (group(root, "workspace", g)) {
+            readBool(g, "rulersVisible", rulersVisible);
+            readBool(g, "hintsFade", hintsFade);
+            readInt(g, "recentLength", recentLength, 0, 50);
+        }
+        if (group(root, "pen", g)) {
+            choice = int(scrubAxis);
+            readChoice(g, "scrubAxis", choice, axisNames);
+            scrubAxis = ScrubAxis(choice);
+            readInt(g, "scrubSensitivity", scrubSensitivity, 25, 400);
+            readInt(g, "spaceTapMs", spaceTapMs, 100, 1000);
+            choice = int(barrelButton);
+            readChoice(g, "barrelButton", choice, buttonNames);
+            barrelButton = PenButton(choice);
+            choice = int(eraserEnd);
+            readChoice(g, "eraserEnd", choice, eraserNames);
+            eraserEnd = EraserAction(choice);
+        }
+        if (group(root, "drawing", g)) {
+            readBool(g, "snapGrid", snapGrid);
+            readReal(g, "gridSize", gridSize, 0.001, 1000.0);
+            readBool(g, "snapGuides", snapGuides);
+            readBool(g, "toolDefaultsInDocument", toolDefaultsInDocument);
+            readInt(g, "polygonSides", polygonSides, 3, 60);
+            readInt(g, "starPoints", starPoints, 3, 40);
+            readInt(g, "cornerRadius", cornerRadius, 0, 200);
+            readInt(g, "starInner", starInner, 10, 90);
+            readInt(g, "pencilSmoothing", pencilSmoothing, 0, 100);
+        }
+        if (group(root, "files", g)) {
+            readBool(g, "autosave", autosave);
+            readInt(g, "autosaveMinutes", autosaveMinutes, 1, 120);
+            json5::value folder;
+            if (find(g, "exportFolder", folder) && folder.is_string()) {
+                exportFolder = folder.get_c_str();
             }
         }
-        flag("snapGuides", snapGuides);
-        integer("polygonSides", polygonSides, 3, 60);
-        integer("starPoints", starPoints, 3, 40);
-        integer("cornerRadius", cornerRadius, 0, 200);
-        integer("starInner", starInner, 10, 90);
-        integer("pencilSmoothing", pencilSmoothing, 0, 100);
-        flag("toolDefaultsInDocument", toolDefaultsInDocument);
-        flag("welcomeShown", welcomeShown);
-        flag("autosave", autosave);
-        integer("autosaveMinutes", autosaveMinutes, 1, 120);
-        auto folder = values.find("exportFolder");
-        if (folder != values.end()) {
-            exportFolder = folder->second;
+        if (group(root, "window", g)) {
+            WindowPlacement placed;
+            readInt(g, "x", placed.x, -32000, 32000);
+            readInt(g, "y", placed.y, -32000, 32000);
+            readInt(g, "width", placed.width, 200, 32000);
+            readInt(g, "height", placed.height, 150, 32000);
+            readBool(g, "maximized", placed.maximized);
+            json5::value monitor;
+            if (find(g, "monitor", monitor) && monitor.is_string()) {
+                placed.monitor = monitor.get_c_str();
+            }
+            if (placed.known()) {
+                window = placed;
+            }
+        }
+        json5::value docksGroup;
+        if (group(root, "docks", docksGroup)) {
+            for (int i = 0; i < dockCount; ++i) {
+                if (group(docksGroup, dockName(i), g)) {
+                    double size = docks[i].size;
+                    readReal(g, "size", size, minDockSize, 32000.0);
+                    docks[i].size = float(size);
+                    readBool(g, "collapsed", docks[i].collapsed);
+                }
+            }
         }
     }
 
     std::string Settings::defaultPath() {
-        const char* base = std::getenv("APPDATA");
-        return (base != nullptr ? std::string(base) + "\\curvy" : std::string(".")) + "\\settings.ini";
+        const std::string base = newui::SpecialFolders::localAppData();
+        return base.empty() ? std::string() : base + "/curvy/settings.json5";
     }
 
     Settings Settings::load(const std::string& path) {
         Settings settings;
-        std::ifstream in(path, std::ios::binary);
+        if (path.empty()) {
+            return settings;
+        }
+        std::ifstream in(std::filesystem::u8path(path), std::ios::binary);
         if (in) {
-            std::stringstream buffer;
+            std::ostringstream buffer;
             buffer << in.rdbuf();
             settings.fromText(buffer.str());
         }
@@ -205,15 +357,22 @@ namespace curvy {
     }
 
     bool Settings::save(const std::string& path) const {
-#ifdef _WIN32
-        const std::size_t slash = path.find_last_of("\\/");
-        if (slash != std::string::npos) {
-            CreateDirectoryA(path.substr(0, slash).c_str(), nullptr);
+        if (path.empty()) {
+            return false;
         }
-#endif
-        std::ofstream out(path, std::ios::binary | std::ios::trunc);
-        out << toText();
-        return bool(out);
+        const std::filesystem::path file = std::filesystem::u8path(path);
+        std::error_code problem;
+        std::filesystem::create_directories(file.parent_path(), problem);
+        const std::filesystem::path temp = file.u8string() + ".tmp";
+        {
+            std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+            out << toText();
+            if (!out) {
+                return false;
+            }
+        }
+        std::filesystem::rename(temp, file, problem);
+        return !problem;
     }
 
 }

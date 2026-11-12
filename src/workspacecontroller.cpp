@@ -1,18 +1,11 @@
 #include "curvy/workspacecontroller.h"
-#include "curvy/curvyfile.h"
-#include "curvy/theme.h"
-#include "curvy/dockcontroller.h"
-#include "curvy/graphbrush.h"
 #include "curvy/settingsdialog.h"
-#include "curvy/io/svg/sketchsvg.h"
-#include "curvy/welcomeoverlay.h"
-#include "curvy/loadingoverlay.h"
+#include "curvy/theme.h"
 
-#include <newui/application.h>
+#include <newui/automation.h>
 #include <newui/bundle.h>
 #include <newui/dialogs.h>
 #include <newui/font.h>
-#include <newui/runloop.h>
 #include <newui/fontmanager.h>
 #include <newui/keyboard_constants.h>
 #include <newui/mouse_constants.h>
@@ -21,38 +14,53 @@
 #include <newui/uicolormanager.h>
 #include <newui/uiinputmanager.h>
 
-#include <algorithm>
-#include <chrono>
-#include <cstdlib>
-#include <filesystem>
-#define NOMINMAX
 #include <windows.h>
+
+#include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <stdexcept>
 #include <vector>
 
 namespace curvy {
-
-    namespace {
-        std::filesystem::path recoveryFolder() {
-            const char* base = std::getenv("APPDATA");
-            return std::filesystem::path(base != nullptr ? base : ".") / "curvy" / "autosave";
-        }
-
-        // Test hook: CURVY_AUTOSAVE_SECONDS makes the autosave tick and the gap between copies that many seconds (the setting is in minutes, 1 at least).
-        std::chrono::seconds autosaveSecondsOverride() {
-            const char* text = std::getenv("CURVY_AUTOSAVE_SECONDS");
-            const int seconds = text != nullptr ? std::atoi(text) : 0;
-            return std::chrono::seconds(seconds > 0 ? seconds : 0);
-        }
-    }
 
     using namespace newui;
 
     namespace {
 
         BLRgba32 rgb(std::uint32_t value) { return BLRgba32(Theme::argb(value)); }
-        BLRgba32 card() { return BLRgba32(Theme::argb(Theme::current().bgSurface, 0xF2)); }
+
+        struct MonitorSearch {
+            const std::string* name;
+            MONITORINFOEXW* found;
+            bool hit;
+        };
+
+        BOOL CALLBACK checkMonitor(HMONITOR monitor, HDC, LPRECT, LPARAM data) {
+            auto* search = reinterpret_cast<MonitorSearch*>(data);
+            MONITORINFOEXW info = {};
+            info.cbSize = sizeof(info);
+            if (!::GetMonitorInfoW(monitor, &info)) {
+                return TRUE;
+            }
+            std::string device;
+            for (const wchar_t* c = info.szDevice; *c != 0; ++c) {
+                device.push_back(char(*c));
+            }
+            if (device == *search->name) {
+                *search->found = info;
+                search->hit = true;
+                return FALSE;
+            }
+            return TRUE;
+        }
+
+        // The screen with this device name, when it is still attached.
+        bool monitorNamed(const std::string& name, MONITORINFOEXW& out) {
+            MonitorSearch search{&name, &out, false};
+            ::EnumDisplayMonitors(nullptr, nullptr, checkMonitor, reinterpret_cast<LPARAM>(&search));
+            return search.hit;
+        }
 
         template <typename T>
         T* find(Frame& frame, const char* name) {
@@ -100,47 +108,22 @@ namespace curvy {
         struct PageSize {
             const char* command;
             const char* name;
-            double width, height;
+            float width, height;
         };
         const PageSize kPages[] = {
             {"new.letter", "Letter", 612, 792}, {"new.a4", "A4", 595, 842}, {"new.fullhd", "Full HD", 1920, 1080}, {"new.square", "Square 1080", 1080, 1080}};
 
-        struct ToolCommand {
+        struct RingEntry {
             const char* command;
-            SketchTool tool;
+            RadialRing (*make)();
         };
-        const ToolCommand kToolCommands[] = {
-            {"tool.select", SketchTool::Select}, {"tool.rect", SketchTool::Rectangle}, {"tool.ellipse", SketchTool::Ellipse}, {"tool.polygon", SketchTool::Polygon}, {"tool.star", SketchTool::Star},
-            {"tool.line", SketchTool::Line}, {"tool.pencil", SketchTool::Pencil}, {"tool.text", SketchTool::Text}};
-
-        // The keys held to draw: R E P S L.
-        struct HoldKey {
-            const char* key;
-            SketchTool tool;
-        };
-        const HoldKey kHoldKeys[] = {
-            {"R", SketchTool::Rectangle}, {"E", SketchTool::Ellipse}, {"P", SketchTool::Polygon}, {"S", SketchTool::Star}, {"L", SketchTool::Line}};
-
-        const char* toolName(SketchTool tool) {
-            switch (tool) {
-                case SketchTool::Select: return "Select";
-                case SketchTool::Rectangle: return "Rectangle";
-                case SketchTool::Ellipse: return "Ellipse";
-                case SketchTool::Polygon: return "Polygon";
-                case SketchTool::Star: return "Star";
-                case SketchTool::Line: return "Line";
-                case SketchTool::Pencil: return "Freehand";
-                case SketchTool::Text: return "Text";
-                case SketchTool::Hand: return "Hand";
-                case SketchTool::Gradient: return "Gradient";
-                default: return "Tool";
-            }
-        }
+        const RingEntry kRings[] = {
+            {"ring.new", newRing}, {"ring.create", createRing}, {"ring.document", documentRing}, {"ring.export", exportRing},
+            {"ring.import", importRing}, {"ring.view", viewRing}, {"ring.object", objectRing}, {"ring.arrange", arrangeRing}};
     }
 
     void WorkspaceController::applyTheme(bool dark) {
-        // The same route a host takes (cpp_codetools' ThemeChanged): the mode, then the roles the .theme file does not carry. The roles
-        // it does carry, and the control parts, come from Resources/Themes/{dark,light}.theme (tools/makeThemes.py).
+        // The mode first, then the roles the .theme file does not carry; the rest comes from Resources/Themes/{dark,light}.theme.
         const Theme& theme = dark ? Theme::dark() : Theme::light();
         Theme::setCurrent(theme);
         UIColorManager::setDarkModeOverride(dark);
@@ -152,7 +135,105 @@ namespace curvy {
 
     void WorkspaceController::setDarkTheme(bool dark) {
         applyTheme(dark);
+        settings_.theme = dark ? Settings::ThemeChoice::Dark : Settings::ThemeChoice::Light;
+        saveSettings();
         restyle();
+    }
+
+    void WorkspaceController::applySettings(const Settings& settings) {
+        const bool dark = settings.darkTheme();
+        const bool themeChanged = dark != Theme::current().isDark;
+        settings_ = settings;
+        if (themeChanged) {
+            applyTheme(dark);
+        }
+        restyle();
+        docks_->refresh();
+    }
+
+    bool WorkspaceController::settingsDialog() {
+        if (!SettingsDialog::run(frame_, settings_, [this](const Settings& settings) { applySettings(settings); })) {
+            return false;
+        }
+        applySettings(settings_);
+        saveSettings();
+        model_->say("Settings saved");
+        return true;
+    }
+
+    void WorkspaceController::saveSettings() const {
+        if (!settingsPath_.empty()) {
+            settings_.save(settingsPath_);
+        }
+    }
+
+    void WorkspaceController::restoreWindow() {
+        const Settings::WindowPlacement& placed = settings_.window;
+        if (!placed.known()) {
+            return;
+        }
+        int x = placed.x, y = placed.y, width = placed.width, height = placed.height;
+        const RECT where = {x, y, x + width, y + height};
+        MONITORINFOEXW screen = {};
+        if (!placed.monitor.empty() && monitorNamed(placed.monitor, screen)) {
+            // The screen it was on is still there: the window stays on it, moved in (and shrunk to fit) when that screen has changed since.
+            RECT overlap = {};
+            if (!::IntersectRect(&overlap, &where, &screen.rcWork)) {
+                const int workWidth = screen.rcWork.right - screen.rcWork.left, workHeight = screen.rcWork.bottom - screen.rcWork.top;
+                width = width < workWidth ? width : workWidth;
+                height = height < workHeight ? height : workHeight;
+                x = screen.rcWork.left + (workWidth - width) / 2;
+                y = screen.rcWork.top + (workHeight - height) / 2;
+            }
+        } else if (MonitorFromRect(&where, MONITOR_DEFAULTTONULL) == nullptr) {
+            return;   // that screen is gone and nothing else holds the window
+        }
+        frame_.setBounds(Rect(float(x), float(y), float(width), float(height)));
+        if (placed.maximized) {
+            loop_->post([this]() {
+                if (HWND handle = frame_.frameHandle()) {
+                    ::ShowWindow(handle, SW_MAXIMIZE);   // the window exists once the loop runs
+                }
+            });
+        }
+    }
+
+    void WorkspaceController::saveWindow() {
+        HWND handle = frame_.frameHandle();
+        WINDOWPLACEMENT placement = {};
+        placement.length = sizeof(placement);
+        if (handle == nullptr || !::GetWindowPlacement(handle, &placement)) {
+            return;
+        }
+        Settings::WindowPlacement placed;
+        RECT rect = {};
+        if (placement.showCmd == SW_SHOWNORMAL && ::GetWindowRect(handle, &rect)) {
+            placed.x = rect.left;
+            placed.y = rect.top;
+            placed.width = rect.right - rect.left;
+            placed.height = rect.bottom - rect.top;
+        } else {
+            // Maximized or minimized: the normal rectangle is in workspace coordinates, relative to the primary work area.
+            RECT work = {};
+            ::SystemParametersInfo(SPI_GETWORKAREA, 0, &work, 0);
+            rect = placement.rcNormalPosition;
+            placed.x = rect.left + work.left;
+            placed.y = rect.top + work.top;
+            placed.width = rect.right - rect.left;
+            placed.height = rect.bottom - rect.top;
+        }
+        placed.maximized = placement.showCmd == SW_SHOWMAXIMIZED || (placement.showCmd == SW_SHOWMINIMIZED && (placement.flags & WPF_RESTORETOMAXIMIZED) != 0);
+        MONITORINFOEXW screen = {};
+        screen.cbSize = sizeof(screen);
+        if (::GetMonitorInfoW(::MonitorFromWindow(handle, MONITOR_DEFAULTTONEAREST), &screen)) {
+            for (const wchar_t* c = screen.szDevice; *c != 0; ++c) {
+                placed.monitor.push_back(char(*c));   // device names are plain ASCII ("\\.\DISPLAY1")
+            }
+        }
+        if (placed.known()) {
+            settings_.window = placed;
+            saveSettings();
+        }
     }
 
     void WorkspaceController::restyle() {
@@ -170,6 +251,12 @@ namespace curvy {
         fill(&frame_.rootView(), theme.bgApp);
         fill(frame_.rootView().findView("topBar"), theme.bgSurface);
         fill(frame_.rootView().findView("hintBar"), theme.bgSurface);
+        for (const char* side : {"top", "left", "right", "bottom"}) {
+            const std::string area = std::string(side) + "Area";
+            fill(frame_.rootView().findView(area), theme.bgSurface);
+            fill(frame_.rootView().findView(area + "HeaderBar"), theme.slot);
+            text(find<Label>(frame_, (area + "Header").c_str()), theme.textPrimary);
+        }
         text(find<Label>(frame_, "appLogo"), theme.accent);
         text(find<Label>(frame_, "appName"), theme.textPrimary);
         text(documentName_, theme.textMuted);
@@ -177,24 +264,38 @@ namespace curvy {
         text(hintKeys_, theme.textMuted);
         text(hintInfo_, theme.textMuted);
         canvas_->setPasteboardColor(Theme::argb(settings_.canvasFollowsTheme ? theme.bgCanvas : settings_.canvasBackground));
-        if (dock_ != nullptr) {
-            dock_->restyle();
-        }
-        if (graph_ != nullptr) {
-            graph_->restyle();
-        }
-        if (timeline_ != nullptr) {
-            timeline_->restyle();
-        }
-        if (options_ != nullptr) {
-            options_->restyle();
-        }
         frame_.rootView().refreshThemes();
         frame_.rootView().style().markDirty();
         canvas_->style().markDirty();
     }
 
-    WorkspaceController::WorkspaceController(Frame& frame, SketchDocument& document) : frame_(frame), document_(document) {
+    WorkspaceController::WorkspaceController(Frame& frame, Settings& settings, const std::string& settingsPath) : FrameController(frame), frame_(frame), settings_(settings), settingsPath_(settingsPath), document_(*new SketchDocument()) {
+        documents_.addDocument(&document_);
+        loop_ = &RunLoop::current();
+    }
+
+    void WorkspaceController::frameShouldClose(bool& canClose) {
+        if (!confirmDiscard()) {
+            canClose = false;
+            return;
+        }
+        saveWindow();
+    }
+
+    void WorkspaceController::showTitle() {
+        const bool open = model_ != nullptr && model_->documentOpen();
+        frame_.setTitle(open ? "curvy - " + document_.name() + (document_.isModified() ? " *" : "") : "curvy");
+    }
+
+    bool WorkspaceController::confirmDiscard() {
+        if (model_ == nullptr || !model_->documentOpen() || !document_.isModified()) {
+            return true;
+        }
+        return documents_.confirmDiscardChanges(document_);
+    }
+
+    // The window exists now, so a window that must be owned by it (the data window) can be made.
+    void WorkspaceController::frameDidLoad() {
         canvas_ = find<CanvasView>(frame_, "canvas");
         if (canvas_ == nullptr) {
             throw std::runtime_error("WorkspaceController: workspace.newui has no view named \"canvas\"");
@@ -207,71 +308,554 @@ namespace curvy {
         setModel(std::make_unique<WorkspaceModel>());
         model_ = static_cast<WorkspaceModel*>(model());
         model_->addView(canvas_);
-
-        canvas_->setDocument(&document_);
-        canvas_->setShowGrid(false);
+        document_.addView(canvas_);   // the canvas shows no page until a document is started (newDocument)
         restyle();
-        files_ = std::make_unique<SketchDocumentController>(document_, frame_);
-        files_->setBackgroundIo(true);
-        files_->setAskPdfPages(true);
-        files_->onBusyStarted += [this](SketchDocumentController&) { showLoading(); return SyncReturn::Handled; };
-        files_->onBusyProgress += [this](SketchDocumentController&) { updateLoading(); return SyncReturn::Handled; };
-        files_->onBusyFinished += [this](SketchDocumentController&) { hideLoading(); return SyncReturn::Handled; };
-        files_->onStatus += [this](SketchDocumentController&, std::string text) { model_->say(text); return SyncReturn::Handled; };
-        commands_ = std::make_unique<SketchCommandController>(document_, *canvas_, *files_);
 
+        document_.onModifiedChanged += [this](newui::Document&) {
+            if (!busy_) {   // a save or load flips the flag on its worker thread; its completion callback sets the title
+                showTitle();
+            }
+            return SyncReturn::Handled;
+        };
+        documents_.setUnsavedChangesHandler([this](newui::Document& document) {
+            const DialogResult result = Dialog::showMessageBox(frame_.frameHandle(), "Save changes to " + document_.name() + "?", "Unsaved changes", MessageBoxButtons::YesNoCancel, MessageBoxIcon::Warning);
+            if (result == DialogResult::Yes) {
+                document_.setViewState(captureView());
+                return newui::UnsavedChangesChoice::Save;
+            }
+            return result == DialogResult::No ? newui::UnsavedChangesChoice::Discard : newui::UnsavedChangesChoice::Cancel;
+        });
+        documents_.setSavePathProvider([this](newui::Document&) {
+            FileDialogOptions options;
+            options.title = "Save As";
+            options.filters.push_back({"curvy documents", "*.curvy"});
+            options.defaultExtension = "curvy";
+            options.defaultFileName = document_.name() + ".curvy";
+            std::string file;
+            return Dialog::showSaveFile(frame_.frameHandle(), options, file) ? file : std::string();
+        });
+
+        buildGraphOverlay();
         menu_ = new RadialMenu();
         canvas_->addChild(menu_);
+        docks_ = std::make_unique<DockController>(frame_, settings_, [this]() { saveSettings(); });
         bindViews();
-        dock_ = std::make_unique<DockController>(frame_, *canvas_, *model_, document_);
-        graph_ = std::make_unique<GraphDock>(frame_, *canvas_, *model_, document_, *dock_);
-        timeline_ = std::make_unique<TimelineBar>(frame_, *canvas_, *model_, document_);
-        // The frame frees every view before the application returns from run(); the docks observe those views, so they go first.
-        connections_.add(frame_.onDestroyed, [this](Frame&) {
-            timeline_.reset();
-            graph_.reset();
-            dock_.reset();
+        start();
+    }
+
+    // Resources/graphView.newui (from docs/mockups/graphView.html) lies over the canvas, hidden until the Graph button or Tab shows it.
+    void WorkspaceController::buildGraphOverlay() {
+        View* loaded = Bundle::instance().loadView("graphView");
+        graphOverlay_ = dynamic_cast<SubView*>(loaded);
+        if (graphOverlay_ == nullptr) {
+            delete loaded;
+            throw std::runtime_error("WorkspaceController: Resources/graphView.newui did not load");
+        }
+        graphView_ = dynamic_cast<GraphView*>(graphOverlay_->findView("graphNodes"));
+        if (graphView_ == nullptr) {
+            throw std::runtime_error("WorkspaceController: graphView.newui has no GraphView named \"graphNodes\"");
+        }
+        graphOverlay_->setVisible(false);
+        canvas_->addChild(graphOverlay_);
+        document_.addView(graphView_);
+        canvas_->onSizeChanged.add(this, &WorkspaceController::handleCanvasSized);
+
+        graphView_->onSelectionChanged = [this]() {
+            graphPanel_->show(graphView_->selected());
+            model_->say(graphView_->hint());
+            graphCrumbs_->show(graphView_->levelNames());
+        };
+        graphView_->onViewChanged = [this]() {
+            if (auto* zoom = find<Label>(frame_, "graphZoom")) {
+                zoom->setText(std::to_string(int(std::lround(graphView_->zoom() * 100.0))) + "%");
+            }
+        };
+        graphView_->onCloseRequested = [this]() { showGraph(false); };
+        graphView_->onMessage = [this](const std::string& text) { model_->say(text); };
+        registerHistoryActions();
+        graphView_->onKeyFilter = [this](std::uint32_t mask, std::uint32_t vk) { return filterGraphKey(mask, vk); };
+        graphView_->onKeyUp.add(this, &WorkspaceController::handleKeyUp);
+        graphView_->onMouseDown.add(this, &WorkspaceController::handleGraphMouseDown);
+        graphView_->onMouseMove.add(this, &WorkspaceController::handleGraphMouseMove);
+        graphView_->onMouseUp.add(this, &WorkspaceController::handleGraphMouseUp);
+
+        auto* crumbBox = dynamic_cast<SubView*>(graphOverlay_->findView("graphCrumbs"));
+        auto* crumbCurrent = dynamic_cast<Label*>(graphOverlay_->findView("graphCrumb"));
+        if (crumbBox == nullptr || crumbCurrent == nullptr) {
+            throw std::runtime_error("WorkspaceController: graphView.newui has no graphCrumbs / graphCrumb");
+        }
+        graphCrumbs_ = std::make_unique<GraphCrumbs>(*crumbBox, *crumbCurrent);
+        graphCrumbs_->onNavigate = [this](std::size_t level) {
+            graphView_->goToLevel(level);
+            focusGraph();
+        };
+
+        graphPanel_ = std::make_unique<GraphPanel>(*graphOverlay_, document_);
+        graphPanel_->onCommand = [this](const std::string& command) {
+            runGraphCommand(command);
+            focusGraph();
+        };
+        graphPanel_->onRefused = [this](const std::string& message) { model_->say(message); };
+        graphPanel_->onEdited =[this]() { graphView_->style().markDirty(); };
+
+        View* popup = Bundle::instance().loadView("pointTable");
+        auto* popupView = dynamic_cast<SubView*>(popup);
+        if (popupView == nullptr) {
+            delete popup;
+            throw std::runtime_error("WorkspaceController: Resources/pointTable.newui did not load");
+        }
+        pointFrame_ = std::make_unique<ToolFrame>();
+        pointFrame_->setTitle("Data");
+        pointFrame_->setBounds(Rect(0.0f, 0.0f, 660.0f, 500.0f));
+        pointFrame_->setMinimumSize(Size(380.0f, 260.0f));
+        pointFrame_->setActivatesOnClick(true);   // its filter field takes keystrokes
+        if (frame_.frameHandle() == nullptr || !pointFrame_->initialize(frame_.frameHandle())) {
+            throw std::runtime_error("WorkspaceController: the data window could not be created (the main window does not exist yet)");
+        }
+#ifdef CURVY_GUI_AUTOMATION
+        pointFrame_->rootView().setName("dataRoot");   // the workspace's own root is "rootview" too, and the driver finds the first
+        Automation::expose(pointFrame_->rootView());
+#endif
+        pointFrame_->rootView().addChild(popupView);
+        pointFrame_->rootView().onSizeChanged += [popupView](View&, const Size& size) {
+            const Rect all(0.0f, 0.0f, size.width, size.height);
+            popupView->setBounds(all);
+            if (View* box = popupView->findView("pointTableBox")) {
+                box->setBounds(all);
+            }
+            popupView->updateLayout();
             return SyncReturn::Handled;
-        });
-        canvas_->onEnterGroup = [this](std::size_t group) { return graph_ != nullptr && graph_->enterSubnet(document_.groupSubnetOf(group)); };
-        options_= std::make_unique<ToolOptionsCard>(*canvas_, *canvas_);
-        dock_->onToolOptions = [this](SketchTool tool, const Point& at) { showToolOptions(tool, at); };
-        dock_->onToolPicked = [this](SketchTool tool) { armTool(tool, tool != SketchTool::Select, std::string()); };
-        dock_->onCardDismissed = [this] { focusCanvas(); };
-        if (StylePanel* style = dock_->stylePanel()) {
-            // A gradient fill is edited on the shape: the type buttons put the canvas on the Gradient tool, and the stop the panel and the canvas have
-            // selected stays the same one.
-            style->onGradientChosen += [this](StylePanel&) {
-                armTool(SketchTool::Gradient, true, std::string());
-                model_->say("Drag the line or a stop on the shape; click the line to add a stop");
-                return SyncReturn::Handled;
-            };
-            style->onStopSelected += [this](StylePanel& panel) {
-                canvas_->setSelectedGradientStop(panel.selectedStop());
-                return SyncReturn::Handled;
-            };
-            canvas_->onGradientStopSelected += [this](CanvasView& view) {
-                if (dock_ != nullptr) {
-                    dock_->stylePanel()->setSelectedStop(view.selectedGradientStop());
-                }
+        };
+        pointFrame_->onClosed += [this](ToolFrame&) {
+            pointTable_->hide();
+            return SyncReturn::Handled;
+        };
+        pointTable_ = std::make_unique<PointTable>(*popupView, document_);
+        pointTable_->onHidden = [this]() {
+            pointFrame_->hide();
+            focusGraph();
+        };
+        if (auto* data = dynamic_cast<Button*>(graphOverlay_->findView("graphDataButton"))) {
+            data->onClick += [this](Control&) {
+                showPointTable();
                 return SyncReturn::Handled;
             };
         }
-        options_->onDismissed = [this] { focusCanvas(); };
-        // Esc closes a card even while one of its controls has the keyboard focus (the canvas's own key filter would never see it then).
-        frame_.rootView().onKeyDown += [this](View&, std::uint32_t, int, int, std::uint32_t vk) {
-            const bool cardUp = (dock_ != nullptr && dock_->card() != DockController::Card::None) || (options_ != nullptr && options_->isOpen());
-            if (vk == vkEscape && cardUp && !menu_->isOpen()) {
-                if (dock_ != nullptr) {
-                    dock_->closeCard();
-                }
-                options_->close();
-                focusCanvas();
+        if (auto* fit = dynamic_cast<Button*>(graphOverlay_->findView("graphFitButton"))) {
+            fit->onClick += [this](Control&) {
+                graphView_->fit();
+                focusGraph();
                 return SyncReturn::Handled;
+            };
+        }
+    }
+
+    SyncReturn WorkspaceController::handleCanvasSized(View&, const Size&) {
+        layoutGraphOverlay();
+        return SyncReturn::Handled;
+    }
+
+    void WorkspaceController::layoutGraphOverlay() {
+        const Rect client = canvas_->getClientBounds();
+        const Rect all(0.0f, 0.0f, client.width(), client.height());
+        graphOverlay_->setBounds(all);
+        if (View* box = graphOverlay_->findView("graphViewBox")) {
+            box->setBounds(all);
+        }
+        graphOverlay_->updateLayout();
+    }
+
+    RadialRing WorkspaceController::nodeRing(const std::string& name) {
+        return {name, "Data...", "graph.data", {
+            {"Display", "D", "graph.display"}, {"Bypass", "B", "graph.bypass"}, {"Freeze", "F", "graph.freeze"}, {"Rename", "R", "graph.rename"},
+            {"Group", "G", "graph.group"}, {"Ungroup", "U", "graph.ungroup"}, {"Enter", "E", "graph.enter"}, {"Exit", "X", "graph.exit"}}};
+    }
+
+    bool WorkspaceController::filterGraphKey(std::uint32_t mask, std::uint32_t vk) {
+        if ((mask & (kmAlt | kmCtrl)) != 0) {
+            return false;
+        }
+        const bool shift = (mask & kmShift) != 0;
+        if (menu_->isOpen()) {
+            if (vk == vkEscape || vk == vkSpaceBar) {
+                menu_->handleEscape();
+                model_->setRing(std::string());
+                model_->say("Ring closed");
+                focusGraph();
+            } else {
+                menu_->handleKey(keyName(vk), shift);
             }
-            return SyncReturn::Ignored;
-        };
-        canvas_->reorderChild(menu_, canvas_->childViews().size());   // the ring stays above the docks and cards
+            return true;
+        }
+        if (vk == vkTab && !shift) {
+            toggleGraph();
+            return true;
+        }
+        if (vk == vkSpaceBar) {
+            if (!spaceDown_) {
+                spaceDown_ = true;
+                spaceUsed_ = false;
+                spaceStart_ = std::chrono::steady_clock::now();
+                model_->setSpaceDown(true);
+            }
+            return true;
+        }
+        if (!shift && vk >= vkNumber1 && vk <= vkNumber8 && graphPanel_->colorPickerOpen()) {
+            const std::size_t index = vk - vkNumber1;
+            if (graphPanel_->useRecentColor(index)) {
+                graphView_->style().markDirty();
+                canvas_->style().markDirty();
+                model_->say("Recent colour " + std::to_string(index + 1));
+            } else {
+                model_->say("No recent colour " + std::to_string(index + 1));
+            }
+            return true;
+        }
+        const std::string key = keyName(vk);
+        if (!key.empty() && !shift) {
+            for (const RadialSlot& slot : nodeRing("").slots) {
+                if (slot.key == key) {
+                    runGraphCommand(slot.command);
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    SyncReturn WorkspaceController::handleGraphMouseDown(View&, const Point& pt, std::uint32_t buttons, std::uint32_t) {
+        graphPanel_->closeColorPicker();
+        if ((buttons & mbmRightButton) != 0) {
+            pointer_ = graphView_->mapTo(*canvas_, pt);
+            pointerKnown_ = true;
+            openRing(true);
+        }
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn WorkspaceController::handleGraphMouseMove(View&, const Point& pt, std::uint32_t buttons, std::uint32_t keys) {
+        return handleMouseMove(*graphView_, graphView_->mapTo(*canvas_, pt), buttons, keys);
+    }
+
+    SyncReturn WorkspaceController::handleGraphMouseUp(View&, const Point& pt, std::uint32_t buttons, std::uint32_t keys) {
+        return handleMouseUp(*graphView_, graphView_->mapTo(*canvas_, pt), buttons, keys);
+    }
+
+    bool WorkspaceController::runGraphCommand(const std::string& command) {
+        if (command.rfind("graph.", 0) != 0) {
+            return false;
+        }
+        const NodeRef selected = graphView_->selected();
+        try {
+            if (command == "graph.exit") {
+                if (!graphView_->exit()) {
+                    model_->say("Already at the root");
+                }
+                return true;
+            }
+            if (!selected.valid() || !document_.hasNode(selected)) {
+                model_->say("Select a node first");
+                return true;
+            }
+            const std::string name = document_.node(selected).name();
+            if (command == "graph.display") {
+                document_.setNodeDisplayed(selected);
+                model_->say("Showing " + name + " on the canvas");
+            } else if (command == "graph.bypass") {
+                const bool now = !document_.node(selected).bypassed();
+                document_.setNodeBypassed(selected, now);
+                model_->say(name + (now ? " bypassed" : " enabled"));
+            } else if (command == "graph.freeze") {
+                const bool now = !document_.node(selected).frozen();
+                document_.setNodeFrozen(selected, now);
+                model_->say(name + (now ? " frozen" : " unfrozen"));
+            } else if (command == "graph.rename") {
+                graphPanel_->focusName();
+                model_->say("Type the new name and press Enter");
+                return true;
+            } else if (command == "graph.group") {
+                const NodeRef group = document_.groupNode(selected);
+                graphView_->select(NodeRef());
+                graphView_->select(group);
+                model_->say("Grouped " + name);
+            } else if (command == "graph.ungroup") {
+                const std::vector<NodeRef> out = document_.ungroup(selected);
+                graphView_->select(NodeRef());
+                if (!out.empty()) {
+                    graphView_->select(out.front());
+                }
+                model_->say("Ungrouped " + name);
+            } else if (command == "graph.enter") {
+                if (!graphView_->enter(selected)) {
+                    model_->say("Only a layer or group can be entered");
+                }
+                return true;
+            } else if (command == "graph.data") {
+                showPointTable();
+                return true;
+            } else {
+                model_->say("(" + command + " is not wired yet)");
+                return true;
+            }
+        } catch (const std::exception& error) {
+            model_->say(error.what());
+        }
+        graphPanel_->show(graphView_->selected());
+        graphView_->style().markDirty();
+        canvas_->style().markDirty();
+        return true;
+    }
+
+    void WorkspaceController::showPointTable() {
+        if (!graphOverlay_->isVisible()) {
+            return;
+        }
+        if (!graphView_->selected().valid()) {
+            model_->say("Select a node to see its data");
+            return;
+        }
+        if (!pointFrame_->isVisible()) {
+            const Rect screen = graphOverlay_->localToScreen(graphOverlay_->getClientBounds());
+            const float w = pointFrame_->getBounds().width(), h = pointFrame_->getBounds().height();
+            pointFrame_->moveTo(Rect(screen.left() + (screen.width() - w) * 0.5f, screen.top() + (screen.height() - h) * 0.5f, w, h));
+        }
+        pointTable_->show(graphView_->selected());
+        pointFrame_->show();
+        pointTable_->root()->updateLayout();
+    }
+
+    void WorkspaceController::focusGraph() {
+        if (RootView* root = graphView_->rootView()) {
+            root->setFocusedSubView(graphView_);
+        }
+    }
+
+    void WorkspaceController::showGraph(bool show) {
+        if (show && !model_->documentOpen()) {
+            model_->say("Open or start a document first");
+            return;
+        }
+        if (graphOverlay_->isVisible() == show) {
+            return;
+        }
+        if (show) {
+            layoutGraphOverlay();
+        }
+        if (!show) {
+            pointTable_->hide();
+        }
+        graphOverlay_->setVisible(show);
+        if (show) {
+            focusGraph();
+            graphView_->onSelectionChanged();
+        } else {
+            focusCanvas();
+        }
+        canvas_->style().markDirty();
+        model_->say(show ? graphView_->hint() : "Canvas");
+    }
+
+    WorkspaceController::~WorkspaceController() {
+        *alive_ = false;
+        for (Action& action : historyActions_) {
+            loop_->unregisterAction(&action);
+        }
+        task_.cancel();
+        task_.waitFor(std::chrono::seconds(30));   // the task's own destructor joins; this only bounds how long a stuck job is waited on first
+        if (timer_ != RunLoop::kInvalidTimerHandle) {
+            loop_->cancelDelayed(timer_);
+        }
+    }
+
+    // ---- Open and save, on a worker ----
+
+    std::string WorkspaceController::fileNameOf(const std::string& path) {
+        return std::filesystem::u8path(path).filename().u8string();
+    }
+
+    void WorkspaceController::runTask(const std::string& label, std::function<bool()> work, std::function<void(bool)> finish) {
+        busy_ = true;
+        taskLabel_ = label;
+        taskPercent_ = -1;
+        taskFinish_ = std::move(finish);
+        document_.setTaskProgress(&task_.progress());
+        model_->say(label + " - Esc cancels");
+        const bool started = task_.start([this, alive = alive_, work = std::move(work)](TaskProgress&) {
+            bool ok = false;
+            try {
+                ok = work();
+            } catch (...) {
+            }
+            loop_->post([this, alive, ok]() {
+                if (*alive) {
+                    finishTask(ok);
+                }
+            });
+        });
+        if (!started) {
+            busy_ = false;
+            document_.setTaskProgress(nullptr);
+            return;
+        }
+        timer_ = loop_->postDelayed(std::chrono::milliseconds(33), [this]() { return tickTask(); });
+    }
+
+    bool WorkspaceController::tickTask() {
+        if (!busy_) {
+            timer_ = RunLoop::kInvalidTimerHandle;
+            return true;
+        }
+        const float fraction = task_.progress().fraction();
+        const int percent = fraction < 0.0f ? -1 : int(fraction * 100.0f);
+        if (percent != taskPercent_) {
+            taskPercent_ = percent;
+            model_->say(taskLabel_ + (percent < 0 ? std::string() : " " + std::to_string(percent) + "%") + " - Esc cancels");
+        }
+        return false;
+    }
+
+    void WorkspaceController::finishTask(bool ok) {
+        task_.waitFor(std::chrono::seconds(10));   // the worker posted this as its last act: it is ending
+        if (timer_ != RunLoop::kInvalidTimerHandle) {
+            loop_->cancelDelayed(timer_);
+            timer_ = RunLoop::kInvalidTimerHandle;
+        }
+        busy_ = false;
+        document_.setTaskProgress(nullptr);
+        std::function<void(bool)> finish = std::move(taskFinish_);
+        taskFinish_ = nullptr;
+        if (finish) {
+            finish(ok);
+        }
+    }
+
+    void WorkspaceController::showDocument() {
+        canvas_->setDocument(&document_);
+        graphView_->setDocument(&document_);
+        model_->setDocument(true, document_.name());
+        showTitle();
+        applyView(document_.viewState());
+        canvas_->style().markDirty();
+    }
+
+    ViewState WorkspaceController::captureView() const {
+        ViewState view;
+        if (!model_->documentOpen()) {
+            return view;
+        }
+        if (!canvas_->centered()) {
+            view.canvas = CanvasViewState{canvas_->zoom(), canvas_->panX(), canvas_->panY()};
+        }
+        view.graph = graphView_->state();
+        view.graph->open = graphShown();
+        return view;
+    }
+
+    void WorkspaceController::applyView(const ViewState& view) {
+        if (view.canvas) {
+            canvas_->setZoom(view.canvas->zoom);
+            canvas_->setPan(view.canvas->panX, view.canvas->panY);
+        } else {
+            canvas_->zoomToFit(1.0f);
+        }
+        if (view.graph) {
+            graphView_->restore(*view.graph);
+        }
+        showGraph(view.graph && view.graph->open);
+    }
+
+    void WorkspaceController::openFile(const std::string& path) {
+        if (busy_) {
+            model_->say(taskLabel_ + " - wait for it to finish, or press Esc to cancel");
+            return;
+        }
+        std::string file = path;
+        if (file.empty()) {
+            FileDialogOptions options;
+            options.title = "Open";
+            options.filters.push_back({"curvy documents", "*.curvy"});
+            options.filters.push_back({"All Files", "*.*"});
+            if (!Dialog::showOpenFile(frame_.frameHandle(), options, file) || file.empty()) {
+                return;
+            }
+        }
+        if (!confirmDiscard()) {
+            return;
+        }
+        // The worker rewrites the document, so the canvas lets go of it until the load is over.
+        const bool wasOpen = model_->documentOpen();
+        const ViewState previousView = captureView();
+        document_.removeView(canvas_);
+        document_.removeView(graphView_);
+        canvas_->setDocument(nullptr);
+        graphView_->setDocument(nullptr);
+        runTask("Opening " + fileNameOf(file), [this, file]() { return document_.load(file); }, [this, file, wasOpen, previousView](bool ok) {
+            document_.addView(canvas_);
+            document_.addView(graphView_);
+            if (ok) {
+                showDocument();
+                model_->say("Opened " + fileNameOf(file));
+                offerObjectRepair();
+            } else {
+                if (wasOpen) {
+                    document_.setViewState(previousView);
+                    showDocument();   // a refused or cancelled load leaves the document as it was
+                }
+                model_->say(task_.progress().cancelled() ? std::string("Open cancelled") : "Could not open " + fileNameOf(file) + ": " + document_.lastError());
+            }
+        });
+    }
+
+    void WorkspaceController::offerObjectRepair() {
+        const auto& problems = document_.objectProblems();
+        if (problems.empty()) {
+            return;
+        }
+        std::string text = std::to_string(problems.size()) + (problems.size() == 1 ? " layer or group in this file is damaged:\n\n" : " layers and groups in this file are damaged:\n\n");
+        for (std::size_t i = 0; i < problems.size() && i < 5; ++i) {
+            text += problems[i].text + "\n";
+        }
+        if (problems.size() > 5) {
+            text += "and " + std::to_string(problems.size() - 5) + " more\n";
+        }
+        text += "\nRepair them? Repairing changes their structure, which may undo something that was done on purpose. You can undo it afterwards.";
+        if (Dialog::showMessageBox(frame_.frameHandle(), text, "Damaged objects", MessageBoxButtons::YesNo, MessageBoxIcon::Warning) == DialogResult::Yes) {
+            document_.repairObjectProblems();
+            model_->say("Repaired the damaged objects");
+        } else {
+            model_->say("Opened " + std::to_string(problems.size()) + " damaged object(s) without repairing them");
+        }
+    }
+
+    void WorkspaceController::saveFile(const std::string& path) {
+        if (busy_) {
+            model_->say(taskLabel_ + " - wait for it to finish, or press Esc to cancel");
+            return;
+        }
+        if (!model_->documentOpen()) {
+            model_->say("Nothing is open to save");
+            return;
+        }
+        std::string file = path;
+        if (file.empty() && document_.hasFilePath()) {
+            file = document_.filePath();
+        }
+        if (file.empty()) {
+            FileDialogOptions options;
+            options.title = "Save As";
+            options.filters.push_back({"curvy documents", "*.curvy"});
+            options.defaultExtension = "curvy";
+            options.defaultFileName = document_.name() + ".curvy";
+            if (!Dialog::showSaveFile(frame_.frameHandle(), options, file) || file.empty()) {
+                return;
+            }
+        }
+        document_.setViewState(captureView());
+        runTask("Saving " + fileNameOf(file), [this, file]() { return document_.save(file); }, [this, file](bool ok) {
+            showTitle();
+            model_->say(ok ? "Saved " + fileNameOf(file)
+                           : task_.progress().cancelled() ? std::string("Save cancelled") : "Could not save " + fileNameOf(file) + ": " + document_.lastError());
+        });
     }
 
     void WorkspaceController::bindViews() {
@@ -282,275 +866,57 @@ namespace curvy {
         menu_->setBounds(Rect(0.0f, 0.0f, canvas_->bounds().size().width, canvas_->bounds().size().height));
         menu_->onCommand.add(this, &WorkspaceController::handleRingCommand);
 
-        // The document and frame outlive this controller, so their handlers are disconnected with it.
-        connections_.add(document_.onModifiedChanged, [this](Document&) {
-            files_->onUiThread([this]() {   // a background Open / Save fires this on the worker thread
-                if (!document_.isModified()) {
-                    clearRecovery();
-                }
-            });
+        canvas_->onZoomChanged += [this](CanvasView&) {
+            model_->setZoom(double(canvas_->zoom()) * 100.0);
             return SyncReturn::Handled;
-        });
-        connections_.add(frame_.onClosed, [this](Frame&) {
-            clearRecovery();
-            return SyncReturn::Handled;
-        });
-        // Closing the window (X, Alt+F4) asks to save a modified document; Cancel keeps it open.
-        connections_.add(frame_.onClosing, [this](Frame&, bool& canClose) {
-            canClose = files_->canClose();
-            return SyncReturn::Handled;
-        });
+        };
         canvas_->onPressFilter = [this](const Point& pt, std::uint32_t buttons, std::uint32_t keys) { return filterPress(pt, buttons, keys); };
         canvas_->onKeyFilter = [this](std::uint32_t mask, std::uint32_t vk) { return filterKey(mask, vk); };
-        canvas_->onToolDefaultsChanged += [this](CanvasView&) { toolDefaultsChanged(); return SyncReturn::Handled; };
-        for (const char* name : {"topBar", "toolbarToggle", "propertiesToggle", "hintBar"}) {
-            if (View* chrome = frame_.rootView().findView(name)) {
-                chrome->onMouseDown += [this](View&, const Point&, std::uint32_t, std::uint32_t) {
-                    dismissWelcome();   // a press anywhere outside the canvas closes the first-run card too
-                    return SyncReturn::Ignored;
-                };
-            }
-        }
+        canvas_->onPaintTop = [this](BLContext& ctx) { paintTop(ctx); };
+        canvas_->onKeyUp.add(this, &WorkspaceController::handleKeyUp);
+        canvas_->onMouseMove.add(this, &WorkspaceController::handleMouseMove);
+        canvas_->onMouseUp.add(this, &WorkspaceController::handleMouseUp);
+
         // A button that was clicked keeps the keyboard focus and would take the next Space, which belongs to the canvas.
-        for (const char* name : {"toolbarToggle", "propertiesToggle", "graphToggle"}) {
-            if (auto* button = dynamic_cast<Button*>(frame_.rootView().findView(name))) {
-                button->onClick += [this](Control&) {
+        struct Toggle {
+            const char* button;
+            DockSide side;
+        };
+        for (const Toggle& toggle : {Toggle{"toolbarToggle", DockSide::Left}, Toggle{"propertiesToggle", DockSide::Right}}) {
+            if (auto* button = dynamic_cast<Button*>(frame_.rootView().findView(toggle.button))) {
+                button->onClick += [this, side = toggle.side](Control&) {
+                    toggleDock(side);
                     focusCanvas();
                     return SyncReturn::Handled;
                 };
             }
         }
-        canvas_->onPaintTop = [this](BLContext& ctx) { paintTop(ctx); };
-        canvas_->onKeyUp.add(this, &WorkspaceController::handleKeyUp);
-        canvas_->onMouseMove.add(this, &WorkspaceController::handleMouseMove);
-        canvas_->onMouseUp.add(this, &WorkspaceController::handleMouseUp);
-        canvas_->onToolChanged.add(this, &WorkspaceController::handleToolChanged);
-        connections_.add(document_.onSelectionChanged, [this](SketchDocument& sender) { return handleSelectionChanged(sender); });
-        files_->onDocumentReplaced.add(this, &WorkspaceController::handleDocumentReplaced);
-        files_->onStateChanged.add(this, &WorkspaceController::handleDocumentStateChanged);
-    }
-
-    // The autosave timer is not cancelled here: the run loop has already ended and kills its timers itself.
-    WorkspaceController::~WorkspaceController() = default;
-
-    void WorkspaceController::startAutosave() {
-        const std::chrono::seconds hook = autosaveSecondsOverride();
-        autosaveTimer_ = Application::instance().runLoop().postDelayed(hook.count() > 0 ? hook : std::chrono::seconds(30), [this] {
-            autosaveTick();
-            return false;
-        });
-    }
-
-    // The copy is only needed after a crash, so it goes as soon as the document is saved, replaced or the window closes.
-    void WorkspaceController::clearRecovery() {
-        if (!recoveryFile_.empty()) {
-            std::error_code ignored;
-            std::filesystem::remove(std::filesystem::u8path(recoveryFile_), ignored);
-            recoveryFile_.clear();
+        if (auto* button = dynamic_cast<Button*>(frame_.rootView().findView("graphToggle"))) {
+            button->onClick += [this](Control&) {
+                toggleGraph();
+                return SyncReturn::Handled;
+            };
         }
     }
 
-    bool WorkspaceController::offerRecovery() {
-        std::error_code ignored;
-        for (const std::string& found : recoveryCopies(recoveryFolder().string())) {
-            const std::filesystem::path entry = std::filesystem::u8path(found);
-            const std::string name = entry.stem().string();
-            const DialogResult answer = Dialog::showMessageBox(frame_.frameHandle(),
-                "curvy closed before \"" + name + "\" was saved. Recover the autosaved copy?\n\nYes recovers it, No throws it away, Cancel asks again next time.",
-                "curvy", MessageBoxButtons::YesNoCancel, MessageBoxIcon::Question);
-            if (answer == DialogResult::Cancel) {
-                return false;
-            }
-            if (answer == DialogResult::Yes && files_->recoverFrom(found, name)) {
-                std::filesystem::remove(entry, ignored);
-                return true;
-            }
-            std::filesystem::remove(entry, ignored);
-        }
-        return false;
+    void WorkspaceController::toggleGraph() {
+        showGraph(!graphOverlay_->isVisible());
     }
 
-    void WorkspaceController::showWelcomeOnce() {
-        if (settings_.welcomeShown || frame_.rootView().overlay() != nullptr) {
-            return;
-        }
-        frame_.rootView().setOverlay(std::make_unique<WelcomeOverlay>());
-        frame_.rootView().markDirty();
-        settings_.welcomeShown = true;
-        settings_.save(Settings::defaultPath());
+    void WorkspaceController::toggleDock(DockSide side) {
+        docks_->toggle(side);
+        std::string label = DockController::name(side);
+        label[0] = char(std::toupper(static_cast<unsigned char>(label[0])));
+        model_->say(label + " area " + (docks_->collapsed(side) ? "hidden" : "shown"));
     }
 
-    void WorkspaceController::showLoading() {
-        auto overlay = std::make_unique<LoadingOverlay>();
-        overlay->setTitle(files_->busyLabel());
-        loading_ = overlay.get();
-        frame_.rootView().setOverlay(std::move(overlay));   // replaces the welcome card, if it is still up
-        hiddenForLoad_.clear();
-        for (SubView* child : frame_.rootView().childViews()) {
-            if (child->isVisible()) {
-                hiddenForLoad_.push_back(child);
-                child->setVisible(false);
-            }
-        }
-        ::EnableWindow(frame_.frameHandle(), FALSE);
-        frame_.rootView().markDirty();
-    }
-
-    void WorkspaceController::updateLoading() {
-        if (loading_ == nullptr) {
-            return;
-        }
-        if ((::GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0 && ::GetForegroundWindow() == frame_.frameHandle()) {
-            files_->cancelBusy();
-            loading_->setCancelling();
-        }
-        loading_->update(files_->busyFraction());
-        frame_.rootView().markDirty();
-    }
-
-    void WorkspaceController::hideLoading() {
-        ::EnableWindow(frame_.frameHandle(), TRUE);
-        for (SubView* child : hiddenForLoad_) {
-            child->setVisible(true);
-        }
-        hiddenForLoad_.clear();
-        if (loading_ != nullptr) {
-            loading_ = nullptr;
-            frame_.rootView().setOverlay(nullptr);
-            frame_.rootView().markDirty();
-        }
-        focusCanvas();
-    }
-
-    void WorkspaceController::dismissWelcome() {
-        if (loading_ == nullptr && frame_.rootView().overlay() != nullptr) {
-            frame_.rootView().setOverlay(nullptr);
-            frame_.rootView().markDirty();
-            focusCanvas();
-        }
-    }
-
-    // A recovery copy beside the settings; the user's own file is only ever written by Save.
-    void WorkspaceController::autosaveTick() {
-        const auto now = std::chrono::steady_clock::now();
-        const std::chrono::seconds hook = autosaveSecondsOverride();
-        const std::chrono::seconds gap = hook.count() > 0 ? hook : std::chrono::seconds(std::chrono::minutes(settings_.autosaveMinutes));
-        if (document_.isBusy() || !settings_.autosave || !model_->documentOpen() || !document_.isModified() || now - lastAutosave_ < gap) {
-            return;
-        }
-        lastAutosave_ = now;
-        const std::string stem = document_.hasFilePath() ? std::filesystem::path(document_.filePath()).stem().string() : files_->untitledName();
-        const std::string written = writeRecoveryCopy(document_, recoveryFolder().string(), stem);
-        if (!written.empty()) {
-            recoveryFile_ = written;
-            model_->say("Autosaved " + stem);
-        }
-    }
-
-    void WorkspaceController::openSettings() {
-        Settings edited = settings_;
-        edited.toolbarVisible = model_->toolbarVisible();   // these three show how things are now, whatever was saved
-        edited.propertiesVisible = model_->propertiesVisible();
-        edited.rulersVisible = canvas_->showRulers();
-        const Settings before = edited;
-        if (SettingsDialog::run(frame_, edited, [this](const Settings& live) { applySettings(live); },
-                            [this] { model_->say("Settings cancelled"); })) {
-            applySettings(edited);
-            if (edited.toolbarVisible != before.toolbarVisible) {
-                model_->setToolbarVisible(edited.toolbarVisible);
-            }
-            if (edited.propertiesVisible != before.propertiesVisible) {
-                model_->setPropertiesVisible(edited.propertiesVisible);
-            }
-            if (edited.rulersVisible != before.rulersVisible) {
-                canvas_->setShowRulers(edited.rulersVisible);
-            }
-            if (edited.toolDefaultsInDocument && model_->documentOpen() && files_->document().toolDefaults().polygonSides <= 0) {
-                toolDefaultsChanged();   // switching to the document starts it off with the values in use
-            }
-            edited.save(Settings::defaultPath());
-            showWelcomeOnce();   // when the Welcome button asked for it
-            model_->say("Settings saved");
-        }
-        focusCanvas();
-    }
-
-    void WorkspaceController::applySettings(const Settings& settings) {
-        const bool themeChanged = settings.darkTheme() != Theme::current().isDark;
-        settings_ = settings;
-        model_->setScrubAxis(settings_.scrubAxis);
-        model_->setHintsFade(settings_.hintsFade);
-        if (dock_ != nullptr) {
-            dock_->setPropertyTextSize(settings_.propertyTextSize);
-        }
-        canvas_->setSnapToGrid(settings_.snapGrid);
-        canvas_->setGridSpacing(float(settings_.gridSize));
-        canvas_->setSmartGuides(settings_.snapGuides);
-        if (files_ != nullptr) {
-            files_->setMaxRecent(std::size_t(settings_.recentLength));
-            files_->setExportFolder(settings_.exportFolder);
-        }
-        applyToolDefaults();
-        if (themeChanged) {
-            setDarkTheme(settings_.darkTheme());
-        } else {
-            restyle();
-        }
-    }
-
-    // Polygon sides and star points: the document's when the user keeps tool defaults there and it has them, else the per-user ones.
-    void WorkspaceController::applyToolDefaults() {
-        int sides = settings_.polygonSides;
-        int points = settings_.starPoints;
-        if (settings_.toolDefaultsInDocument && files_ != nullptr && model_->documentOpen()) {
-            const SketchDocument::ToolDefaults& stored = files_->document().toolDefaults();
-            sides = stored.polygonSides > 0 ? stored.polygonSides : sides;
-            points = stored.starPoints > 0 ? stored.starPoints : points;
-        }
-        applyingToolDefaults_ = true;
-        canvas_->setPolygonSides(sides);
-        canvas_->setStarPoints(points);
-        canvas_->setCornerRadius(double(settings_.cornerRadius));
-        canvas_->setStarInnerPercent(settings_.starInner);
-        canvas_->setPencilSmoothing(settings_.pencilSmoothing);
-        applyingToolDefaults_ = false;
-    }
-
-    void WorkspaceController::toolDefaultsChanged() {
-        if (applyingToolDefaults_) {
-            return;
-        }
-        if (settings_.toolDefaultsInDocument && files_ != nullptr && model_->documentOpen()) {
-            files_->document().setToolDefaults({canvas_->polygonSides(), canvas_->starPointCount()});
-        } else {
-            settings_.polygonSides = canvas_->polygonSides();
-            settings_.starPoints = canvas_->starPointCount();
-        }
-        settings_.cornerRadius = int(std::lround(canvas_->cornerRadius()));
-        settings_.starInner = canvas_->starInnerPercent();
-        settings_.pencilSmoothing = canvas_->pencilSmoothing();
-        settings_.save(Settings::defaultPath());
-    }
-
-    void WorkspaceController::start(const std::string& path) {
-        applySettings(Settings::load(Settings::defaultPath()));
-        model_->setToolbarVisible(settings_.toolbarVisible);
-        model_->setPropertiesVisible(settings_.propertiesVisible);
+    void WorkspaceController::start() {
+        graphOverlay_->setVisible(false);
+        canvas_->setDocument(nullptr);
+        graphView_->setDocument(nullptr);
         model_->setDocument(false, std::string());
-        canvas_->setShowPages(false);
-        canvas_->setShowRulers(false);
-        startupPath_ = path;
-        if (path.empty()) {
-            frame_.setTitle("curvy");
-        }
+        showTitle();
         focusCanvas();
-    }
-
-    void WorkspaceController::openStartupFile() {
-        if (!startupPath_.empty()) {
-            files_->open(std::move(startupPath_));
-            startupPath_.clear();
-        }
     }
 
     void WorkspaceController::focusCanvas() {
@@ -561,15 +927,9 @@ namespace curvy {
         }
     }
 
-    void WorkspaceController::brushProgressChanged() {
-        const GraphBrushProgress progress = graphBrushProgress();
-        model_->setBrushProgress(progress.busy() ? int(progress.fraction * 100.0) : -1);
-    }
-
     SyncReturn WorkspaceController::modelChanged(Model&) {
-        // A label sizes itself when the bar is laid out, so new text needs a layout pass or it is clipped to the old width
-        // (the document name started empty and showed as a sliver beside the title).
-        std::vector<View*> bars;   // the bars whose layout has to run again
+        // A label sizes itself when the bar is laid out, so new text needs a layout pass or it is clipped to the old width.
+        std::vector<View*> bars;
         auto show = [&bars](Label* label, const std::string& text, bool fitWidth) {
             if (label != nullptr && label->text() != text) {
                 label->setText(text);
@@ -588,321 +948,269 @@ namespace curvy {
         show(hintInfo_, model_->hintInfo(), false);
         show(documentName_, model_->documentName(), true);
         for (View* bar : bars) {
-            if (bar != nullptr) {
-                bar->updateLayout();
-            }
+            bar->updateLayout();
         }
         return SyncReturn::Handled;
     }
 
     // ---- Rings ----
 
-    void WorkspaceController::openRing(bool byPress) {
+    Point WorkspaceController::ringPoint() const {
         const Rect client = canvas_->getClientBounds();
-        const Point at = pointerKnown_ ? pointer_ : Point(client.width() * 0.5f, client.height() * 0.5f);
-        const BLPoint world = canvas_->toDocument(at);
-        RadialRing ring;
-        if (!model_->documentOpen()) {
-            ring = newRing();
-        } else if (SketchObject* hit = document_.hitTest(world, 4.0 / double(canvas_->zoom()))) {
-            if (!document_.isSelected(hit->id())) {
-                document_.setSelection({hit->id()});   // a shape already in the selection leaves it whole, so Group and Arrange act on all of it
-            }
-            ring = objectRing();
-        } else if (std::any_of(document_.artboards().begin(), document_.artboards().end(), [&](const Artboard& board) { return board.contains(world); })) {
-            ring = createRing();
-        } else {
-            ring = documentRing();
-        }
-        model_->setHover(WorkspaceModel::Hover{});
-        model_->used("ring");
-        if (byPress) {
-            model_->used("rightClick");
-        }
+        return pointerKnown_ ? pointer_ : Point(client.width() * 0.5f, client.height() * 0.5f);
+    }
+
+    void WorkspaceController::showRing(const RadialRing& ring, const Point& at, bool byPress) {
         menu_->open(ring, at, byPress);
         model_->setRing(ring.title);
+    }
+
+    void WorkspaceController::openRing(bool byPress) {
+        if (graphOverlay_->isVisible()) {
+            const NodeRef selected = graphView_->selected();
+            if (!selected.valid() || !document_.hasNode(selected)) {
+                model_->say("Select a node first");
+                return;
+            }
+            showRing(nodeRing(document_.node(selected).name()), ringPoint(), byPress);
+            return;
+        }
+        showRing(model_->documentOpen() ? documentRing() : newRing(), ringPoint(), byPress);
+    }
+
+    void WorkspaceController::newDocument(const std::string& name, float width, float height) {
+        NewDocumentModel settings;
+        settings.loadSetup(double(width), double(height), 72.0, ColorSpace::RGB, PageBackground::White);
+        settings.setName(name);
+        startDocument(settings);
+    }
+
+    void WorkspaceController::startDocument(const NewDocumentModel& settings) {
+        if (!confirmDiscard()) {
+            return;
+        }
+        const newui::Color page = settings.background() == PageBackground::Transparent ? newui::Color(1.0f, 1.0f, 1.0f, 0.0f) : newui::Color(1.0f, 1.0f, 1.0f, 1.0f);
+        document_.newBlank(settings.name(), float(settings.widthPoints()), float(settings.heightPoints()), float(settings.ppi()), settings.colorMode(), page);
+        canvas_->setDocument(&document_);
+        graphView_->setDocument(&document_);
+        canvas_->zoomToFit(1.0f);
+        model_->setDocument(true, settings.name());
+        showTitle();
+        canvas_->style().markDirty();
+        model_->say("New " + settings.name());
+    }
+
+    bool WorkspaceController::newDocumentDialog() {
+        NewDocumentModel settings;
+        if (!NewDocumentDialog::run(frame_, settings)) {
+            return false;
+        }
+        startDocument(settings);
+        return true;
+    }
+
+    bool WorkspaceController::documentSetup() {
+        if (!model_->documentOpen()) {
+            model_->say("Nothing is open to set up");
+            return false;
+        }
+        const newui::Color white(1.0f, 1.0f, 1.0f, 1.0f);
+        PageBackground background = PageBackground::White;
+        if (document_.pageTransparent()) {
+            background = PageBackground::Transparent;
+        } else if (!(document_.pageColor() == white)) {
+            background = PageBackground::CurrentFill;
+        }
+        NewDocumentModel settings;
+        settings.loadSetup(double(document_.pageWidth()), double(document_.pageHeight()), double(document_.ppi()), document_.colorMode(), background);
+        settings.setName(document_.name());
+        if (!NewDocumentDialog::runSetup(frame_, settings, true)) {
+            return false;
+        }
+        if (!settings.name().empty()) {
+            document_.setName(settings.name());
+        }
+        document_.setPageSize(float(settings.widthPoints()), float(settings.heightPoints()));
+        canvas_->zoomToFit(1.0f);
+        document_.setPpi(float(settings.ppi()));
+        document_.setColorMode(settings.colorMode());
+        switch (settings.background()) {
+            case PageBackground::Transparent:
+                document_.setPageColor(newui::Color(1.0f, 1.0f, 1.0f, 0.0f));
+                break;
+            case PageBackground::CurrentFill:
+                if (background != PageBackground::CurrentFill) {   // an existing custom color stays when it is unchanged
+                    document_.setPageColor(white);
+                }
+                break;
+            default:
+                document_.setPageColor(white);
+                break;
+        }
+        model_->setDocument(true, document_.name());
+        showTitle();
+        canvas_->style().markDirty();
+        model_->say("Document setup changed");
+        return true;
     }
 
     SyncReturn WorkspaceController::handleRingCommand(RadialMenu&, const std::string& command) {
         model_->setRing(std::string());
         runCommand(command);
-        focusCanvas();
+        if (command == "graph.rename") {
+            return SyncReturn::Handled;   // the name field keeps the keyboard
+        }
+        if (graphOverlay_->isVisible()) {
+            focusGraph();
+        } else {
+            focusCanvas();
+        }
         return SyncReturn::Handled;
     }
 
-    void WorkspaceController::showToolOptions(SketchTool tool, const Point& at) {
-        if (options_ == nullptr || !ToolOptionsCard::hasOptions(tool)) {
-            return;
-        }
-        if (dock_ != nullptr) {
-            dock_->closeCard();
-        }
-        options_->show(tool, at);
-        model_->used("toolOptions");
-        model_->say("Defaults for the next shape; Esc closes");
-    }
-
-    void WorkspaceController::armTool(SketchTool tool, bool sticky, const std::string& heldKey) {
-        toolSticky_ = sticky;
-        heldToolKey_ = heldKey;
-        canvas_->setTool(tool);
-        model_->setTool(toolName(tool), heldKey);
-    }
-
     void WorkspaceController::runCommand(const std::string& command) {
-        if (document_.isBusy()) {
-            model_->say(files_->busyLabel() + " - wait for it to finish, or press Esc to cancel");
+        if (busy_ && command != "view.theme" && command.rfind("ring.", 0) != 0) {
+            model_->say(taskLabel_ + " - wait for it to finish, or press Esc to cancel");
             return;
         }
-        if (handlers_.empty()) {
-            buildCommandTable();
-        }
-        const Rect client = canvas_->getClientBounds();
-        const Point at = pointerKnown_ ? pointer_ : Point(client.width() * 0.5f, client.height() * 0.5f);
-        if (auto found = handlers_.find(command); found != handlers_.end()) {
-            found->second(at);
+        if (runGraphCommand(command)) {
             return;
         }
-        // Not in the table: the tool option boxes, then the "dialog.*" stubs, then whatever the shared command controller has.
-        if (SketchTool optionsTool = SketchTool::Select; ToolOptionsCard::toolFromCommand(command, optionsTool)) {
-            showToolOptions(optionsTool, Point(at.x + 28.0f, at.y - 40.0f));
-        } else if (command.compare(0, 7, "dialog.") == 0) {
-            model_->say("The " + command.substr(7) + " dialog is not built yet");
-        } else if (commands_->has(command)) {
-            commands_->run(command);
+        if (command == "file.open") {
+            openFile();
+            return;
+        }
+        if (command == "file.save") {
+            saveFile();
+            return;
+        }
+        for (const PageSize& page : kPages) {
+            if (command == page.command) {
+                newDocument(page.name, page.width, page.height);
+                return;
+            }
+        }
+        for (const RingEntry& ring : kRings) {
+            if (command == ring.command) {
+                const RadialRing made = ring.make();
+                showRing(made, ringPoint(), false);
+                return;
+            }
+        }
+        if (command == "dialog.new") {
+            newDocumentDialog();
+        } else if (command == "dialog.setup") {
+            documentSetup();
+        } else if (command == "view.fitPage") {
+            if (model_->documentOpen()) {
+                canvas_->zoomToFit();
+                model_->say("Fit page");
+            }
+        } else if (command == "dialog.settings") {
+            settingsDialog();
+        } else if (command == "view.toolbar") {
+            toggleDock(DockSide::Left);
+        } else if (command == "view.properties") {
+            toggleDock(DockSide::Right);
+        } else if (command == "view.graph") {
+            toggleGraph();
+        } else if (command == "view.theme") {
+            setDarkTheme(!Theme::current().isDark);
+            model_->say(Theme::current().isDark ? "Dark theme" : "Light theme");
         } else {
             model_->say("(" + command + " is not wired yet)");
         }
     }
 
-    void WorkspaceController::showAppearanceCard(bool fill, const Point& at) {
-        if (options_ != nullptr) {
-            options_->close();
-        }
-        if (dock_ == nullptr) {
-            return;
-        }
-        Rect selected;
-        bool haveSelected = false;
-        for (std::size_t id : document_.selection()) {
-            if (const SketchObject* object = document_.findById(id)) {
-                const BLBox box = object->bounds();
-                const BLPoint a = canvas_->toView(BLPoint(box.x0, box.y0)), b = canvas_->toView(BLPoint(box.x1, box.y1));
-                const Rect one(float(std::min(a.x, b.x)), float(std::min(a.y, b.y)), float(std::abs(b.x - a.x)), float(std::abs(b.y - a.y)));
-                selected = haveSelected ? selected.united(one) : one;
-                haveSelected = true;
-            }
-        }
-        dock_->showCard(fill ? DockController::Card::Fill : DockController::Card::Stroke, at, haveSelected ? &selected : nullptr);
-        if (fill && dock_->stylePanel() != nullptr) {
-            // An open path has nothing to fill, so its colour is the stroke's.
-            const SketchObject* shape = document_.selection().empty() ? nullptr : document_.findById(document_.selection().front());
-            const bool strokeOnly = shape != nullptr && (shape->fill().isNone() || !shape->isClosed());
-            dock_->stylePanel()->setTarget(strokeOnly ? StylePanel::Target::Stroke : StylePanel::Target::Fill);
-        }
-        model_->used("appearance");
-    }
-
-    void WorkspaceController::buildCommandTable() {
-        for (const PageSize& page : kPages) {
-            handlers_[page.command] = [this, &page](const Point&) {
-                if (files_->newDocument(page.name, page.width, page.height)) {
-                    model_->say(std::string("New ") + page.name);
-                }
-            };
-        }
-        for (const ToolCommand& tool : kToolCommands) {
-            handlers_[tool.command] = [this, &tool](const Point&) {
-                armTool(tool.tool, true, std::string());
-                model_->say(tool.tool == SketchTool::Select ? std::string("Select") : std::string(toolName(tool.tool)) + " tool armed");
-            };
-        }
-
-        auto ring = [this](RadialRing (*make)(), const char* name) {
-            return [this, make, name](const Point& at) { menu_->open(make(), at, false); model_->setRing(name); };
-        };
-        handlers_["ring.document"] = ring(documentRing, "Document");
-        handlers_["ring.new"] = ring(newRing, "New");
-        handlers_["ring.object"] = ring(objectRing, "Object");
-        handlers_["ring.export"] = ring(exportRing, "Export");
-        handlers_["ring.import"] = ring(importRing, "Import");
-        handlers_["ring.view"] = ring(viewRing, "View");
-        handlers_["ring.arrange"] = ring(arrangeRing, "Arrange");
-
-        handlers_["view.toolbar"] = [this](const Point&) { model_->setToolbarVisible(!model_->toolbarVisible()); model_->say(model_->toolbarVisible() ? "Toolbar on" : "Toolbar off"); };
-        handlers_["view.properties"] = [this](const Point&) { model_->setPropertiesVisible(!model_->propertiesVisible()); model_->say(model_->propertiesVisible() ? "Properties on" : "Properties off"); };
-        handlers_["view.graph"] = [this](const Point&) { model_->setGraphVisible(!model_->graphVisible()); model_->say(model_->graphVisible() ? "Graph on" : "Graph off"); };
-        handlers_["view.timeline"] = [this](const Point&) { model_->setTimelineVisible(!model_->timelineVisible()); model_->say(model_->timelineVisible() ? "Timeline on" : "Timeline off"); };
-        handlers_["view.theme"] = [this](const Point&) { setDarkTheme(!Theme::current().isDark); model_->say(Theme::current().isDark ? "Dark theme" : "Light theme"); };
-
-        handlers_["doc.newArtboard"] = [this](const Point& at) {
-            const BLPoint world = canvas_->toDocument(at);
-            Artboard board;
-            board.x = world.x;
-            board.y = world.y;
-            board.width = 400.0;
-            board.height = 300.0;
-            document_.addArtboard(board);
-            model_->say("New artboard at the pen");
-        };
-        handlers_["card.color"] = [this](const Point& at) { showAppearanceCard(true, at); };
-        handlers_["card.stroke"] = [this](const Point& at) { showAppearanceCard(false, at); };
-
-        handlers_["dialog.new"] = [this](const Point&) { files_->newDocument(); };
-        handlers_["dialog.settings"] = [this](const Point&) { openSettings(); };
-        handlers_["dialog.setup"] = [this](const Point&) { commands_->run("file.documentSetup"); };
-
-        handlers_["edit.duplicate"] = [this](const Point&) { model_->used("duplicate"); commands_->run("edit.duplicate"); };
-        handlers_["edit.delete"] = [this](const Point&) { model_->used("delete"); commands_->run("edit.delete"); };
-    }
-
-    // ---- Document state ----
-
-    SyncReturn WorkspaceController::handleDocumentReplaced(SketchDocumentController& controller) {
-        model_->setDocument(true, controller.displayName());
-        canvas_->setShowPages(true);
-        canvas_->setShowRulers(settings_.rulersVisible);
-        applyToolDefaults();
-        frame_.setTitle("curvy - " + controller.displayName());
-        canvas_->zoomToFit();
-        return SyncReturn::Handled;
-    }
-
-    SyncReturn WorkspaceController::handleDocumentStateChanged(SketchDocumentController& controller) {
-        if (model_->documentOpen() && model_->documentName() != controller.displayName()) {
-            model_->setDocument(true, controller.displayName());
-            frame_.setTitle("curvy - " + controller.displayName());
-        }
-        return SyncReturn::Handled;
-    }
-
-    SyncReturn WorkspaceController::handleSelectionChanged(SketchDocument&) {
-        model_->setSelectionCount(document_.selection().size());
-        return SyncReturn::Handled;
-    }
-
-    SyncReturn WorkspaceController::handleToolChanged(CanvasView&) {
-        model_->setTool(toolName(canvas_->tool()), heldToolKey_);
-        if (dock_ != nullptr) {
-            dock_->syncTool();
-        }
-        return SyncReturn::Handled;
-    }
-
     // ---- Pen and mouse ----
 
     bool WorkspaceController::filterPress(const Point& pt, std::uint32_t buttons, std::uint32_t keys) {
+        const RootView* root = canvas_->rootView();
+        return pressed(root != nullptr ? root->penState() : PenState(), pt, buttons, keys);
+    }
+
+    bool WorkspaceController::pressed(const PenState& pen, const Point& pt, std::uint32_t buttons, std::uint32_t keys) {
         pointer_ = pt;
         pointerKnown_ = true;
-        shiftDown_ = (keys & kmShift) != 0;
-        dismissWelcome();
-        // The Fill card stays up while the Gradient tool works the shape under it.
-        const bool gradientAtWork = dock_ != nullptr && dock_->card() == DockController::Card::Fill && canvas_->tool() == SketchTool::Gradient;
-        if (dock_ != nullptr && dock_->card() != DockController::Card::None && !dock_->cardContains(pt) && !gradientAtWork) {
-            dock_->closeCard();   // a press anywhere else puts the card away and carries on as usual
-        }
-        if (options_ != nullptr && options_->isOpen() && !options_->contains(pt)) {
-            options_->close();
-        }
-        const PenState& pen = frame_.rootView().penState();
+        panning_ = false;
+        zooming_ = false;
         if (pen.eraser && (buttons & mbmLeftButton) != 0) {
-            if (model_->documentOpen() && !menu_->isOpen()) {
-                if (settings_.eraserEnd == Settings::EraserAction::Erase) {
-                    if (SketchObject* hit = document_.hitTest(canvas_->toDocument(pt), 4.0 / double(canvas_->zoom()))) {
-                        document_.setSelection({hit->id()});
-                        model_->used("delete");
-                        commands_->run("edit.delete");
+            switch (settings_.eraserEnd) {
+                case Settings::EraserAction::Erase:
+                    model_->say("(erase is not wired yet)");
+                    break;
+                case Settings::EraserAction::Undo:
+                    if (document_.undoStack().canUndo()) {
+                        document_.undoStack().undo();
+                        model_->say("Undo");
+                    } else {
+                        model_->say("Nothing to undo");
                     }
-                } else if (settings_.eraserEnd == Settings::EraserAction::Undo) {
-                    commands_->run("edit.undo");
-                }
+                    break;
+                case Settings::EraserAction::Nothing:
+                    break;
             }
             return true;
         }
         if ((buttons & mbmRightButton) != 0) {
-            if (pen.barrel && !menu_->isOpen() && settings_.barrelButton != Settings::PenButton::Rings) {
-                if (settings_.barrelButton == Settings::PenButton::Pan && model_->documentOpen()) {
-                    panning_ = true;
-                    panFrom_ = pt;
-                    panStartX_ = canvas_->panX();
-                    panStartY_ = canvas_->panY();
-                    model_->used("pan");
-                }
-                return true;
+            const bool barrel = pen.barrel || pen.inRange;   // Windows reports the barrel button as a right click; a mouse is not in range
+            if (barrel && settings_.barrelButton == Settings::PenButton::Pan) {
+                panning_ = true;
+            } else if (!barrel || settings_.barrelButton == Settings::PenButton::Rings) {
+                openRing(true);
             }
-            openRing(true);
             return true;
         }
-        if ((buttons & mbmLeftButton) == 0) {
-            return false;
-        }
-        if (!model_->documentOpen()) {
+        if ((buttons & mbmLeftButton) != 0 && !model_->documentOpen()) {
             model_->say("Tap Space to start");
             return true;
         }
-        if (scrub_.active()) {
-            return true;   // the held key owns the pointer: a click must not start a move under the scrub
-        }
-        if (spaceDown_) {
+        if ((buttons & mbmLeftButton) != 0 && spaceDown_) {   // Space held, then a press and drag: pan, or with Ctrl zoom around the press
             spaceUsed_ = true;
-            panning_ = true;
-            panFrom_ = pt;
-            panStartX_ = canvas_->panX();
-            panStartY_ = canvas_->panY();
-            model_->used("pan");
+            if ((keys & kmCtrl) != 0) {
+                zooming_ = true;
+                zoomFrom_ = pt;
+                zoomStart_ = canvas_->zoom();
+            } else {
+                panning_ = true;
+            }
             return true;
         }
-        leftDown_ = true;
         return false;
     }
 
     SyncReturn WorkspaceController::handleMouseMove(View&, const Point& pt, std::uint32_t buttons, std::uint32_t keys) {
+        if (panning_) {
+            if ((buttons & (mbmRightButton | mbmLeftButton)) != 0) {
+                canvas_->panBy(pt.x - pointer_.x, pt.y - pointer_.y);
+            } else {
+                panning_ = false;
+            }
+        }
+        if (zooming_) {
+            if ((buttons & mbmLeftButton) != 0) {
+                // Up or right zooms in, down or left out; 200 pixels is one doubling, and the point pressed stays where it is.
+                const float travel = (pt.x - zoomFrom_.x) + (zoomFrom_.y - pt.y);
+                canvas_->zoomAt(zoomFrom_, zoomStart_ * std::pow(2.0f, travel / 200.0f));
+            } else {
+                zooming_ = false;
+            }
+        }
         pointer_ = pt;
         pointerKnown_ = true;
-        shiftDown_ = (keys & kmShift) != 0;
         if (menu_->isOpen()) {
             menu_->onMouseMove(*menu_, pt, buttons, keys);
-            return SyncReturn::Handled;
-        }
-        if (panning_) {
-            canvas_->setPan(panStartX_ + (pt.x - panFrom_.x), panStartY_ + (pt.y - panFrom_.y));
-        }
-        const BLPoint world = canvas_->toDocument(pt);
-        model_->setPointer(true, world.x, world.y, double(canvas_->zoom()) * 100.0);
-        if (scrub_.active()) {
-            const double value = scrub_.update(document_, scrubTravel(pt), shiftDown_);
-            model_->setScrub(true, scrub_.part(), &scrub_.prop(), value, model_->scrubAnchorX(), model_->scrubAnchorY());
-        } else {
-            updateHover(pt);
         }
         return SyncReturn::Handled;
     }
 
     SyncReturn WorkspaceController::handleMouseUp(View&, const Point& pt, std::uint32_t buttons, std::uint32_t keys) {
+        panning_ = false;
+        zooming_ = false;
         if (menu_->isOpen()) {
             menu_->onMouseUp(*menu_, pt, buttons, keys);
         }
-        panning_ = false;
-        if (leftDown_) {
-            leftDown_ = false;
-            if (!toolSticky_ && heldToolKey_.empty() && canvas_->tool() != SketchTool::Select) {
-                canvas_->setTool(SketchTool::Select);
-            }
-        }
         return SyncReturn::Handled;
-    }
-
-    void WorkspaceController::updateHover(const Point& pt) {
-        WorkspaceModel::Hover hover;
-        if (model_->documentOpen() && canvas_->tool() == SketchTool::Select && !leftDown_ && !panning_ && !spaceDown_) {
-            const double tolerance = 6.0 / double(canvas_->zoom());
-            const BLPoint world = canvas_->toDocument(pt);
-            if (const SketchObject* object = document_.hitTest(world, tolerance)) {
-                hover.object = object->id();
-                hover.part = HoldScrub::partAt(*object, world, tolerance);
-            }
-        }
-        model_->setHover(hover);
     }
 
     // ---- Keys ----
@@ -917,21 +1225,52 @@ namespace curvy {
         return std::string();
     }
 
-    bool WorkspaceController::filterKey(std::uint32_t mask, std::uint32_t vk) {
-        if (frame_.rootView().overlay() != nullptr) {
-            dismissWelcome();   // any key closes it; Space then carries on as usual and opens the ring
-            if (vk == vkEscape) {
-                return true;
-            }
+    void WorkspaceController::registerHistoryActions() {
+        struct Binding {
+            VirtualKeyCode key;
+            std::uint32_t mask;
+            bool forward;
+        };
+        const Binding bindings[] = {{vkLetterZ, kmCtrl, false}, {vkLetterY, kmCtrl, true}, {vkLetterZ, kmCtrl | kmShift, true}};
+        for (std::size_t i = 0; i < historyActions_.size(); ++i) {
+            Action& action = historyActions_[i];
+            action.text = bindings[i].forward ? "Redo" : "Undo";
+            action.setHotkey(bindings[i].key, bindings[i].mask);
+            action.onActionPerformed.add([this, forward = bindings[i].forward](Action&) {
+                stepHistory(forward);
+                return SyncReturn::Handled;
+            });
+            loop_->registerAction(&action);
         }
-        if ((mask & (kmCtrl | kmAlt)) != 0) {
+    }
+
+    bool WorkspaceController::stepHistory(bool forward) {
+        newui::UndoStack& stack = document_.undoStack();
+        if (!(forward ? stack.canRedo() : stack.canUndo())) {
+            model_->say(forward ? "Nothing to redo" : "Nothing to undo");
             return false;
         }
-        shiftDown_ = (mask & kmShift) != 0;
-        if (scrub_.active()) {
-            if (vk == vkEscape) {
-                endScrub(false);
-            }
+        const std::string what = forward ? stack.redoDescription() : stack.undoDescription();
+        if (forward) {
+            stack.redo();
+        } else {
+            stack.undo();
+        }
+        // The panel is not a view of the document: it shows the selected node again (a node an undo removed shows as an empty panel).
+        graphPanel_->show(graphView_->selected());
+        graphView_->style().markDirty();
+        canvas_->style().markDirty();
+        model_->say((forward ? "Redo " : "Undo ") + what);
+        return true;
+    }
+
+    bool WorkspaceController::filterKey(std::uint32_t mask, std::uint32_t vk) {
+        if ((mask & kmAlt) != 0 || ((mask & kmCtrl) != 0 && vk != vkSpaceBar)) {   // Ctrl+Space is the zoom drag
+            return false;
+        }
+        const bool shift = (mask & kmShift) != 0;
+        if (busy_ && vk == vkEscape && !menu_->isOpen()) {
+            task_.cancel();
             return true;
         }
         if (menu_->isOpen()) {
@@ -941,14 +1280,18 @@ namespace curvy {
                 model_->say("Ring closed");
                 focusCanvas();
             } else {
-                menu_->handleKey(keyName(vk), shiftDown_);
+                menu_->handleKey(keyName(vk), shift);
             }
+            return true;
+        }
+        if (vk == vkTab && !shift) {
+            toggleGraph();
             return true;
         }
         if (vk == vkSpaceBar) {
             if (!spaceDown_) {
                 spaceDown_ = true;
-                spaceUsed_ = false;
+                spaceUsed_ = (mask & kmCtrl) != 0;   // Ctrl+Space is not a tap for the rings
                 spaceStart_ = std::chrono::steady_clock::now();
                 model_->setSpaceDown(true);
             }
@@ -957,210 +1300,36 @@ namespace curvy {
         if (spaceDown_) {
             spaceUsed_ = true;
         }
-        if (!model_->documentOpen()) {
-            return false;
-        }
-        if (vk == vkEscape) {
-            if (graphBrushProgress().busy()) {   // the hint bar says Esc stops the rendering
-                cancelGraphBrushCooks();
-                model_->say("Brush rendering stopped - edit the stroke to try again");
-                return true;
-            }
-            if (dock_ != nullptr && dock_->card() != DockController::Card::None) {
-                dock_->closeCard();
-                return true;
-            }
-            if (options_ != nullptr && options_->isOpen()) {
-                options_->close();
-                return true;
-            }
-            armTool(SketchTool::Select, false, std::string());
-            model_->say("Select");
-            return false;   // the canvas also clears the selection
-        }
-        const std::string key = keyName(vk);
-        if (key.empty() || leftDown_) {
-            return false;
-        }
-        if (key == heldToolKey_) {
-            return true;   // auto-repeat of the key being held
-        }
-        if (key == "V") {
-            armTool(SketchTool::Select, false, std::string());
-            model_->say("Select");
-            return true;
-        }
-        if (canvas_->tool() == SketchTool::Select && model_->hover().part != ScrubPart::None && startScrub(key[0])) {
-            return true;
-        }
-        for (const HoldKey& hold : kHoldKeys) {
-            if (key == hold.key) {
-                armTool(hold.tool, false, key);
-                return true;
-            }
-        }
         return false;
     }
 
-    SyncReturn WorkspaceController::handleKeyUp(View&, std::uint32_t mask, int, int, std::uint32_t vk) {
-        shiftDown_ = (mask & kmShift) != 0;
-        const std::string key = keyName(vk);
-        if (scrub_.active()) {
-            if (key == scrubKey_) {
-                endScrub(true);
-            }
-            return SyncReturn::Handled;
-        }
+    SyncReturn WorkspaceController::handleKeyUp(View&, std::uint32_t, int, int, std::uint32_t vk) {
         if (vk == vkSpaceBar && spaceDown_) {
             spaceDown_ = false;
-            panning_ = false;
             model_->setSpaceDown(false);
             if (!spaceUsed_ && std::chrono::steady_clock::now() - spaceStart_ < std::chrono::milliseconds(settings_.spaceTapMs) && !menu_->isOpen()) {
                 openRing(false);
             }
-            return SyncReturn::Handled;
-        }
-        if (!key.empty() && key == heldToolKey_) {
-            heldToolKey_.clear();
-            if (!leftDown_ && !toolSticky_) {
-                canvas_->setTool(SketchTool::Select);
-            }
-            model_->setTool(toolName(canvas_->tool()), std::string());
         }
         return SyncReturn::Handled;
-    }
-
-    // ---- Scrubbing ----
-
-    double WorkspaceController::scrubTravel(const Point& pt) const {
-        const double sensitivity = double(settings_.scrubSensitivity) / 100.0;
-        return sensitivity * (model_->scrubAxis() == WorkspaceModel::ScrubAxis::Vertical ? -double(pt.y) : double(pt.x));
-    }
-
-    bool WorkspaceController::startScrub(char key) {
-        const WorkspaceModel::Hover hover = model_->hover();
-        if (!scrub_.begin(document_, hover.object, hover.part, key, scrubTravel(pointer_))) {
-            return false;
-        }
-        scrubKey_ = std::string(1, key);
-        // Hidden while the card is up; put back where it was so the pointer is not left wherever the scrub ended.
-        POINT cursor{};
-        cursorHidden_ = ::GetCursorPos(&cursor) != FALSE;
-        cursorBeforeX_ = cursor.x;
-        cursorBeforeY_ = cursor.y;
-        if (cursorHidden_) {
-            ::ShowCursor(FALSE);
-        }
-        model_->setScrub(true, hover.part, &scrub_.prop(), scrub_.value(), double(pointer_.x), double(pointer_.y));
-        return true;
-    }
-
-    void WorkspaceController::endScrub(bool keep) {
-        scrub_.finish(document_, keep);
-        if (cursorHidden_) {
-            ::SetCursorPos(cursorBeforeX_, cursorBeforeY_);
-            ::ShowCursor(TRUE);
-            cursorHidden_ = false;
-        }
-        model_->used("scrub." + scrubKey_);
-        model_->setScrub(false, ScrubPart::None, nullptr, 0.0, 0.0, 0.0);
-        model_->say(keep ? "Kept" : "Cancelled");
-        scrubKey_.clear();
     }
 
     // ---- Painting over the canvas ----
 
     void WorkspaceController::paintTop(BLContext& ctx) const {
-        if (!model_->documentOpen()) {
-            Font font = FontManager::getSystemFont(SystemUIFont::Message);
-            font.setSize(13.0f);
-            BLFont* blFont = font.blFont();
-            const Rect client = canvas_->getClientBounds();
-            if (blFont != nullptr && blFont->is_valid()) {
-                const std::string text = "Tap Space to start";
-                ctx.set_fill_style(rgb(Theme::current().textMuted));
-                ctx.fill_utf8_text(BLPoint(double(client.width() - font.measureText(text).width) * 0.5, double(client.height()) * 0.5), *blFont, text.c_str(), text.size());
-            }
-            return;
-        }
-        if (model_->scrubbing()) {
-            paintScrubCard(ctx);
-        } else if (model_->hover().part != ScrubPart::None && !menu_->isOpen() && (dock_ == nullptr || dock_->card() == DockController::Card::None) && (options_ == nullptr || !options_->isOpen())) {
-            paintHoverChip(ctx);
-        }
-    }
-
-    void WorkspaceController::paintScrubCard(BLContext& ctx) const {
-        const ScrubProp* prop = model_->scrubProp();
-        if (prop == nullptr) {
+        if (model_->documentOpen()) {
             return;
         }
         Font font = FontManager::getSystemFont(SystemUIFont::Message);
-        font.setSize(12.0f);
-        font.setBold(true);
+        font.setSize(13.0f);
         BLFont* blFont = font.blFont();
         if (blFont == nullptr || !blFont->is_valid()) {
             return;
         }
         const Rect client = canvas_->getClientBounds();
-        const double w = 250.0, h = 58.0;
-        const double ax = model_->scrubAnchorX(), ay = model_->scrubAnchorY();
-        const double x = std::clamp(ax - w * 0.5, 8.0, std::max(8.0, double(client.width()) - w - 8.0));
-        double y = ay - 24.0 - h;
-        if (y < 28.0) {
-            y = ay + 24.0;
-        }
-        ctx.set_fill_style(card());
-        ctx.fill_round_rect(BLRoundRect(x, y, w, h, 10.0));
-        ctx.set_stroke_style(rgb(Theme::current().border));
-        ctx.set_stroke_width(1.0);
-        ctx.stroke_round_rect(BLRoundRect(x + 0.5, y + 0.5, w - 1.0, h - 1.0, 10.0));
-
-        const std::string title = std::string(model_->scrubPart() == ScrubPart::Stroke ? "Outline - " : "Fill - ") + prop->name;
-        const std::string value = HoldScrub::format(*prop, model_->scrubValue());
-        ctx.set_fill_style(rgb(Theme::current().textPrimary));
-        ctx.fill_utf8_text(BLPoint(x + 12.0, y + 22.0), *blFont, title.c_str(), title.size());
-        ctx.set_fill_style(rgb(Theme::current().highlight));
-        ctx.fill_utf8_text(BLPoint(x + w - 12.0 - double(font.measureText(value).width), y + 22.0), *blFont, value.c_str(), value.size());
-
-        const double fraction = std::clamp((model_->scrubValue() - prop->min) / (prop->max - prop->min), 0.0, 1.0);
-        const double tx = x + 16.0, tw = w - 32.0, ty = y + h - 18.0;
-        ctx.set_fill_style(rgb(Theme::current().slot));
-        ctx.fill_round_rect(BLRoundRect(tx, ty, tw, 6.0, 3.0));
-        ctx.set_fill_style(rgb(Theme::current().highlight));
-        ctx.fill_round_rect(BLRoundRect(tx, ty, std::max(6.0, tw * fraction), 6.0, 3.0));
-        ctx.set_fill_style(rgb(Theme::current().bgSurface));
-        ctx.fill_circle(BLCircle(tx + tw * fraction, ty + 3.0, 9.0));
-        ctx.set_fill_style(rgb(Theme::current().highlight));
-        ctx.fill_circle(BLCircle(tx + tw * fraction, ty + 3.0, 7.0));
-    }
-
-    void WorkspaceController::paintHoverChip(BLContext& ctx) const {
-        const WorkspaceModel::Hover& hover = model_->hover();
-        Font font = FontManager::getSystemFont(SystemUIFont::Message);
-        font.setSize(12.0f);
-        BLFont* blFont = font.blFont();
-        if (blFont == nullptr || !blFont->is_valid() || !pointerKnown_) {
-            return;
-        }
-        std::string text = hover.part == ScrubPart::Stroke ? "Outline" : "Fill";
-        for (const ScrubProp& prop : HoldScrub::props(hover.part)) {
-            text += std::string("   ") + prop.key + " " + prop.name;
-        }
-        const Rect client = canvas_->getClientBounds();
-        const double w = double(font.measureText(text).width) + 20.0, h = 28.0;
-        double x = double(pointer_.x) - 24.0 - w;
-        double y = double(pointer_.y) - 24.0 - h;
-        if (x < 24.0) { x = double(pointer_.x) + 24.0; }
-        if (y < 24.0) { y = double(pointer_.y) + 24.0; }
-        x = std::min(x, double(client.width()) - w - 4.0);
-        ctx.set_fill_style(card());
-        ctx.fill_round_rect(BLRoundRect(x, y, w, h, 8.0));
-        ctx.set_stroke_style(rgb(Theme::current().border));
-        ctx.set_stroke_width(1.0);
-        ctx.stroke_round_rect(BLRoundRect(x + 0.5, y + 0.5, w - 1.0, h - 1.0, 8.0));
-        ctx.set_fill_style(rgb(Theme::current().textPrimary));
-        ctx.fill_utf8_text(BLPoint(x + 10.0, y + 18.0), *blFont, text.c_str(), text.size());
+        const std::string text = "Tap Space to start";
+        ctx.set_fill_style(rgb(Theme::current().textMuted));
+        ctx.fill_utf8_text(BLPoint(double(client.width() - font.measureText(text).width) * 0.5, double(client.height()) * 0.5), *blFont, text.c_str(), text.size());
     }
 
 }

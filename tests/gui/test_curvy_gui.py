@@ -9,6 +9,7 @@ buttons and the ring's key handling.
 """
 import ctypes
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -738,6 +739,77 @@ class NewDocumentDialog(CurvyCase):
         self.app.key_raw("enter")
         self.app.wait_until(lambda: not self.dialog_open(), "the dialog to close")
         self.app.wait_until(lambda: self.hint_tool() == "Select", "a document to open")
+
+
+class DocumentSetup(CurvyCase):
+    """The Document ring's hub opens the New Document dialog as Document Setup on the open document."""
+
+    def open_setup(self):
+        self.new_a4()
+        self.tap_space()
+        canvas = self.app.find("canvas")
+        self.app.click_at((canvas.x + canvas.w // 2, canvas.y + canvas.h // 2))   # the ring opens under the pointer: this is its hub
+        self.app.wait_until(self.dialog_open, "Document Setup to open")
+
+    def dialog_open(self):
+        try:
+            return self.app.find("createButton").w > 0
+        except newui_guitest.GuiTestError:
+            return False
+
+    def tearDown(self):
+        try:
+            if self.dialog_open():
+                self.app.click("cancelButton")
+        finally:
+            super().tearDown()
+
+    def test_the_dialog_is_a_setup_with_an_ok_button(self):
+        self.open_setup()
+        self.assertEqual("OK", self.app.prop("createButton", "text"))
+
+    def test_escape_leaves_the_document_alone(self):
+        self.open_setup()
+        self.app.key_raw("escape")
+        self.app.wait_until(lambda: not self.dialog_open(), "the dialog to close")
+        self.assertEqual("A4", self.app.prop("documentName", "text"))
+        self.assertEqual("Select", self.hint_tool())
+
+    def test_ok_applies_the_setup(self):
+        self.open_setup()
+        self.app.key_raw("enter")
+        self.app.wait_until(lambda: not self.dialog_open(), "the dialog to close")
+        self.app.wait_until(lambda: "Document setup changed" in self.app.prop("hintKeys", "text"), "the setup to apply")
+        self.assertEqual("Select", self.hint_tool())
+
+
+class OpenFile(CurvyCase):
+    """A .curvy file given with --open is loaded on the background thread and shown as the open document. The file is made by the
+    app's own `--check-file=<path>` (a CMYK, 144 ppi, 595 x 842 page named "Round trip")."""
+
+    def setUp(self):
+        self._files = tempfile.TemporaryDirectory()
+        self.addCleanup(self._files.cleanup)
+        self.path = os.path.join(self._files.name, "round.curvy")
+        exe = newui_guitest.testing.Settings.exe or self.exe
+        subprocess.run([exe, "--check-file=" + self.path], check=True, capture_output=True)
+        self.args = ("--open", self.path)
+        super().setUp()
+
+    def test_the_file_opens_as_the_document(self):
+        self.app.wait_until(lambda: self.hint_tool() == "Select", "the file to open")
+        self.assertEqual("Round trip", self.app.prop("documentName", "text"))
+        self.assertIn("Opened round.curvy", self.app.prop("hintKeys", "text"))
+
+    def test_the_opened_document_can_be_saved_again(self):
+        self.app.wait_until(lambda: self.hint_tool() == "Select", "the file to open")
+        before = os.path.getmtime(self.path)
+        time.sleep(0.05)
+        self.focus_canvas()
+        self.tap_space()
+        self.app.key("s")                                          # the Document ring's Save: the document has its own file, so no dialog
+        self.app.wait_until(lambda: "Saved round.curvy" in self.app.prop("hintKeys", "text"), "the save to finish")
+        self.assertGreater(os.path.getmtime(self.path), before)
 
 
 class TextObject(CurvyCase):

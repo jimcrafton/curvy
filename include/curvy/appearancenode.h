@@ -1,71 +1,36 @@
 #pragma once
 
-#include "curvy/sketchobject.h"
-
-#include <jitnodes/graph/network.h>
 #include <jitnodes/graph/node.h>
 
-#include <functional>
-#include <map>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace curvy {
 
-    // One entry of an object's appearance stack is one graph node, wired after the object's shape node and the entry below it:
-    //   curvyFill   - a paint (none, solid, gradient or pattern), opacity, blend mode, visibility
-    //   curvyStroke - the same, plus weight, cap, join, miter, dashes, width profile, alignment, arrows and brush
-    //   curvyEffect - a live effect with its amount, tint, softness, offset and radius
-    // The nodes pass their input geometry on unchanged: they carry the look as parameters. Colours are held in their own colour space, the
-    // gradient stops, dashes and width points as small geometry tables (one point per row).
-    inline constexpr const char* kFillNodeType = "curvyFill";
-    inline constexpr const char* kStrokeNodeType = "curvyStroke";
-    inline constexpr const char* kEffectNodeType = "curvyEffect";
+    inline const char* const fillNodeType = "curvyFill";
+    inline const char* const strokeNodeType = "curvyStroke";
 
-    // The brush of a stroke is one node after its curvyStroke node, whatever kind of brush it is: curvyBrush for the brushes of the library
-    // (calligraphic, scatter, art), an instance of the asset for a graph brush (graphbrush.h). It takes the stroke node as input 0 and passes
-    // on to what followed the stroke (the next look node or the paint node), so the flow reads Path -> Transform -> Fill -> Stroke -> Brush
-    // -> paint. The chain of look nodes sees through it.
-    inline constexpr const char* kBrushNodeType = "curvyBrush";
-    bool isBrushNodeType(const std::string& typeName);
+    // A fill or stroke of the shapes that reach it. It passes the geometry on with the look stamped onto every primitive as attributes, so
+    // the cooked result describes itself and the nodes after it (transforms, warps, merges) carry the look along. An invisible one passes its
+    // input on untouched. Stamped, per primitive:
+    //   fill   - fill.r fill.g fill.b fill.a (alpha already times opacity, sRGB 0..1), fill.evenOdd
+    //   stroke - stroke.r stroke.g stroke.b stroke.a, stroke.width, stroke.cap, stroke.join, stroke.miter
+    // @reflect ignore=true
+    class AppearanceNode : public jitnodes::Node {
+    public:
+        enum class Kind { Fill, Stroke };
 
-    bool isAppearanceNodeType(const std::string& typeName);
-    const char* appearanceNodeType(AppearanceKind kind);
-    // Registers the three node types with jitnodes' registry (registerCurvyNodes() calls it).
+        AppearanceNode(const char* type, Kind kind);
+
+        jitnodes::GeometryHandle cook(jitnodes::CookContext& context, const std::vector<jitnodes::GeometryHandle>& inputs) override;
+
+    private:
+        void stamp(jitnodes::Geometry& geometry) const;
+        static void fillColumn(jitnodes::Geometry& geometry, const std::string& name, float value);
+
+        Kind kind_;
+    };
+
     void registerAppearanceNodes();
-
-    // A stroke whose brush has changed settings has them in the params as `brush.<name>` numbers (the names of the asset's settings, or
-    // BrushDef::kParamNames). They are held by the stroke's brush node, so paramsOf(Node) of the stroke node itself never has them.
-    inline constexpr const char* kBrushSettingPrefix = "brush.";
-
-    // What a node holds for an item, as plain values: every float parameter that applies to the item (a solid paint has no gradient
-    // parameters) and the tables, whose rows are the columns of the table in order. Two items are the same look exactly when their params
-    // are equal, which is how the document tells which of the object and its node changed.
-    struct AppearanceParams {
-        std::map<std::string, float> numbers;
-        std::map<std::string, std::vector<std::vector<float>>> tables;
-
-        bool operator==(const AppearanceParams& other) const { return numbers == other.numbers && tables == other.tables; }
-        bool operator!=(const AppearanceParams& other) const { return !(*this == other); }
-    };
-
-    // Finds the library entries an item refers to by id.
-    struct AppearanceLibrary {
-        std::function<std::shared_ptr<const SymbolDef>(std::size_t)> pattern;
-        std::function<std::shared_ptr<const BrushDef>(std::size_t)> brush;
-    };
-
-    // The appearance nodes of a network by the node they take their input from, and the chain that follows a shape node through them.
-    // The transform node of each shape node (by the shape's id) sits between the shape and its appearance nodes; the successors below see through it.
-    std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> placementNodes(const jitnodes::Network& network, const std::vector<jitnodes::NodeId>& ids);
-    std::unordered_map<jitnodes::NodeId, jitnodes::NodeId> appearanceSuccessors(const jitnodes::Network& network, const std::vector<jitnodes::NodeId>& ids);
-    std::vector<jitnodes::NodeId> appearanceChain(const std::unordered_map<jitnodes::NodeId, jitnodes::NodeId>& successors, jitnodes::NodeId shape);
-
-    AppearanceParams paramsOf(const AppearanceItem& item);
-    AppearanceParams paramsOf(const jitnodes::Node& node);
-    void store(jitnodes::Node& node, const AppearanceParams& params);
-    // `base` with what `params` changed relative to `baseParams` (paramsOf(base)): untouched values keep their full precision.
-    AppearanceItem itemFrom(const AppearanceParams& params, const AppearanceParams& baseParams, const AppearanceItem& base, const AppearanceLibrary& library);
 
 }

@@ -1,0 +1,113 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>curvy canvas dock areas</title>
+<!-- Four dock areas (top, left, right, bottom) around the canvas, built from nested newui Splitters (two panes each):
+       topSplitter    (Vertical)   : topArea   | bottomSplitter
+       bottomSplitter (Vertical)   : leftSplitter | bottomArea
+       leftSplitter   (Horizontal) : leftArea  | rightSplitter
+       rightSplitter  (Horizontal) : canvas    | rightArea
+     Each splitter is named after the area it resizes.
+     Drag a splitter to size its area; double-click a splitter to collapse the area it borders to zero and double-click again to
+     restore the previous size (the app keeps the last size and calls setSplitPosition). fixedPane keeps the dock areas at a
+     fixed size on window resize while the canvas absorbs the change. Each area's size and collapsed flag persist between
+     sessions (the preview uses localStorage; the app stores them in its settings). The script below is browser preview only. -->
+<style>
+  :root { --bg: #121212; --bar: #1E1E1E; --canvas: #2A2A2A; --line: #4A4A4A; --text: #F0F0F0; --dim: #A0A0A0; --accent: #3A86FF; --accent2: #FFB454; }
+  body { width: 1360px; height: 860px; display: flex; flex-direction: column; margin: 0; background: var(--bg); color: var(--text); font-family: "Segoe UI", sans-serif; font-size: 12px; }
+  #topBar { display: flex; flex-direction: row; align-items: center; gap: 10px; height: 32px; padding: 0 12px; background: var(--bar); border-bottom: 1px solid var(--line); }
+  #topBarSpace { flex-grow: 1; }
+  #topSplitter, #bottomSplitter, #leftSplitter, #rightSplitter { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; }
+  #topSplitter, #bottomSplitter { flex-direction: column; }
+  #leftSplitter, #rightSplitter { flex-direction: row; }
+  .area { display: flex; flex-direction: column; background: #1E1E1E99; overflow: hidden; }
+  .areaHead { display: flex; flex-direction: row; align-items: center; height: 22px; padding: 0 8px; background: #2E2E2E99; font-weight: 700; flex-shrink: 0; }
+  .areaBody { display: flex; flex-direction: column; gap: 6px; padding: 8px; color: var(--dim); }
+  .chip { height: 22px; background: #2E2E2E; border: 1px solid var(--line); border-radius: 3px; padding: 0 8px; display: flex; align-items: center; color: var(--text); }
+  #topArea { height: 64px; }
+  #bottomArea { height: 120px; }
+  #leftArea { width: 220px; }
+  #rightArea { width: 268px; }
+  #canvas { flex: 1 1 0; min-width: 0; min-height: 0; width: 0; height: auto; background: var(--canvas); }
+  .splitH, .splitV { background: #3A3A3A; flex-shrink: 0; }
+  .splitH { width: 6px; cursor: col-resize; }
+  .splitV { height: 6px; cursor: row-resize; }
+  .splitH:hover, .splitV:hover { background: var(--accent); }
+  #hintBar { display: flex; flex-direction: row; align-items: center; height: 28px; padding: 0 14px; background: var(--bar); border-top: 1px solid var(--line); color: var(--dim); }
+</style>
+</head>
+<body>
+  <div id="topBar">
+    <span style="color:#3A86FF;font-size:16px;font-weight:700">~</span>
+    <span style="font-size:13px;font-weight:600">curvy</span>
+    <span id="topBarSpace"></span>
+    <button id="topToggle">Top</button><button id="leftToggle">Left</button><button id="rightToggle">Right</button><button id="bottomToggle">Bottom</button>
+  </div>
+
+  <div id="topSplitter" data-newui-type="Splitter">
+    <div id="topArea" class="area">
+      <div id="topAreaHeaderBar" class="areaHead">Top</div>
+      <div id="topAreaBody" class="areaBody"><div class="chip">Tool options</div></div>
+    </div>
+    <div id="bottomSplitter" data-newui-type="Splitter">
+      <div id="leftSplitter" data-newui-type="Splitter">
+        <div id="leftArea" class="area">
+          <div id="leftAreaHeaderBar" class="areaHead">Left</div>
+          <div id="leftAreaBody" class="areaBody"><div class="chip">Tools</div><div class="chip">Layers</div></div>
+        </div>
+        <div id="rightSplitter" data-newui-type="Splitter">
+          <canvas id="canvas" data-newui-type="CanvasView"></canvas>
+          <div id="rightArea" class="area">
+            <div id="rightAreaHeaderBar" class="areaHead">Right</div>
+            <div id="rightAreaBody" class="areaBody"><div class="chip">Transform</div><div class="chip">Colour</div><div class="chip">Stroke</div></div>
+          </div>
+        </div>
+      </div>
+      <div id="bottomArea" class="area">
+        <div id="bottomAreaHeaderBar" class="areaHead">Bottom</div>
+        <div id="bottomAreaBody" class="areaBody"><div class="chip">Timeline</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="hintBar">Drag a splitter to resize - double-click it to hide or show the area beside it</div>
+
+<script>
+// preview only: one splitter bar per dock area, drag to size, double-click to collapse/restore
+(function () {
+  function wire(area, side) {
+    var bar = document.createElement('div');
+    var horiz = side === 'left' || side === 'right';
+    bar.className = horiz ? 'splitH' : 'splitV';
+    var before = side === 'left' || side === 'top';
+    area.parentNode.insertBefore(bar, before ? area.nextSibling : area);
+    var prop = horiz ? 'width' : 'height', minSize = 40, collapsed = false;
+    var size = parseFloat(getComputedStyle(area)[prop]);
+    area.style.flex = '0 0 auto';
+    var key = 'curvyDock.' + side;
+    try { var s = JSON.parse(localStorage.getItem(key)); if (s) { size = s.size; collapsed = s.collapsed; } } catch (x) {}
+    function apply() {
+      area.style[prop] = size + 'px'; area.style.display = collapsed ? 'none' : 'flex';
+      try { localStorage.setItem(key, JSON.stringify({ size: size, collapsed: collapsed })); } catch (x) {}
+    }
+    apply();
+    function toggle() { collapsed = !collapsed; apply(); }
+    bar.addEventListener('dblclick', toggle);
+    bar.addEventListener('mousedown', function (e) {
+      if (collapsed) return;
+      var start = horiz ? e.clientX : e.clientY, startSize = size;
+      var sign = before ? 1 : -1;
+      function move(m) { size = Math.max(minSize, startSize + sign * ((horiz ? m.clientX : m.clientY) - start)); apply(); }
+      function up() { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); }
+      document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+      e.preventDefault();
+    });
+    var btn = document.getElementById(side + 'Toggle');
+    if (btn) btn.addEventListener('click', toggle);
+  }
+  ['top', 'left', 'right', 'bottom'].forEach(function (s) { wire(document.getElementById(s + 'Area'), s); });
+})();
+</script>
+</body>
+</html>

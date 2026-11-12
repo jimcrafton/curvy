@@ -1,0 +1,484 @@
+{
+  format: "curvy",
+  version: 3,
+  meta: {
+    app: "curvy",
+    appVersion: "0.1.0",
+    saved: "2026-11-10T01:12:23Z"
+  },
+  document: {
+    name: "Layers and groups",
+    page: {
+      width: 595,
+      height: 842,
+      ppi: 72,
+      colorMode: "rgb",
+      background: [
+        1,
+        1,
+        1,
+        1
+      ]
+    }
+  },
+  graph: {
+    format: "jitnodes",
+    version: 1,
+    fps: 24,
+    time: 0,
+    display: 1,
+    nodes: [
+      {
+        id: 1,
+        type: "merge",
+        name: "layers",
+        tags: [
+          "document:merge"
+        ],
+        floats: {},
+        strings: {},
+        inputs: [
+          2,
+          3,
+          4,
+          0
+        ]
+      },
+      {
+        id: 2,
+        type: "curvyObject",
+        name: "Layer1",
+        tags: [
+          "layer"
+        ],
+        floats: {
+          locked: 0
+        },
+        strings: {},
+        inputs: [],
+        graph: {
+          fps: 24,
+          display: 1,
+          nodes: [
+            {
+              id: 1,
+              type: "transform",
+              name: "xform",
+              tags: [
+                "object:xform"
+              ],
+              floats: {},
+              strings: {},
+              inputs: [
+                2
+              ]
+            },
+            {
+              id: 2,
+              type: "merge",
+              name: "merge",
+              tags: [
+                "object:merge"
+              ],
+              floats: {},
+              strings: {},
+              inputs: [
+                3,
+                4,
+                0
+              ]
+            },
+            {
+              id: 3,
+              type: "curvyObject",
+              name: "Group1",
+              tags: [
+                "group"
+              ],
+              floats: {
+                locked: 0
+              },
+              strings: {},
+              inputs: [],
+              graph: {
+                fps: 24,
+                display: 1,
+                nodes: [
+                  {
+                    id: 1,
+                    type: "transform",
+                    name: "xform",
+                    tags: [
+                      "object:xform"
+                    ],
+                    floats: {},
+                    strings: {},
+                    inputs: [
+                      2
+                    ]
+                  },
+                  {
+                    id: 2,
+                    type: "merge",
+                    name: "merge",
+                    tags: [
+                      "object:merge"
+                    ],
+                    floats: {},
+                    strings: {},
+                    inputs: [
+                      4,
+                      0
+                    ]
+                  },
+                  {
+                    id: 3,
+                    type: "circle",
+                    name: "circle",
+                    floats: {
+                      count: 96,
+                      cx: 150,
+                      cy: 200,
+                      radius: 90
+                    },
+                    strings: {},
+                    inputs: []
+                  },
+                  {
+                    id: 4,
+                    type: "curvyFill",
+                    name: "fill",
+                    floats: {
+                      alpha: 0.8,
+                      b: 0.2,
+                      g: 0.3,
+                      r: 0.9
+                    },
+                    strings: {},
+                    inputs: [
+                      3
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              id: 4,
+              type: "curvyObject",
+              name: "Group2",
+              tags: [
+                "group"
+              ],
+              floats: {
+                locked: 0
+              },
+              strings: {},
+              inputs: [],
+              graph: {
+                fps: 24,
+                display: 1,
+                nodes: [
+                  {
+                    id: 1,
+                    type: "transform",
+                    name: "xform",
+                    tags: [
+                      "object:xform"
+                    ],
+                    floats: {},
+                    strings: {},
+                    inputs: [
+                      2
+                    ]
+                  },
+                  {
+                    id: 2,
+                    type: "merge",
+                    name: "merge",
+                    tags: [
+                      "object:merge"
+                    ],
+                    floats: {},
+                    strings: {},
+                    inputs: [
+                      4,
+                      0
+                    ]
+                  },
+                  {
+                    id: 3,
+                    type: "circle",
+                    name: "circle",
+                    floats: {
+                      count: 96,
+                      cx: 210,
+                      cy: 250,
+                      radius: 90
+                    },
+                    strings: {},
+                    inputs: []
+                  },
+                  {
+                    id: 4,
+                    type: "curvyFill",
+                    name: "fill",
+                    floats: {
+                      alpha: 0.8,
+                      b: 0.34,
+                      g: 0.38000003,
+                      r: 0.76
+                    },
+                    strings: {},
+                    inputs: [
+                      3
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        id: 3,
+        type: "curvyObject",
+        name: "Layer2",
+        tags: [
+          "layer"
+        ],
+        floats: {
+          locked: 0
+        },
+        strings: {},
+        inputs: [],
+        graph: {
+          fps: 24,
+          display: 1,
+          nodes: [
+            {
+              id: 1,
+              type: "transform",
+              name: "xform",
+              tags: [
+                "object:xform"
+              ],
+              floats: {},
+              strings: {},
+              inputs: [
+                2
+              ]
+            },
+            {
+              id: 2,
+              type: "merge",
+              name: "merge",
+              tags: [
+                "object:merge"
+              ],
+              floats: {},
+              strings: {},
+              inputs: [
+                3,
+                0
+              ]
+            },
+            {
+              id: 3,
+              type: "curvyObject",
+              name: "Group3",
+              tags: [
+                "group"
+              ],
+              floats: {
+                locked: 0
+              },
+              strings: {},
+              inputs: [],
+              graph: {
+                fps: 24,
+                display: 1,
+                nodes: [
+                  {
+                    id: 1,
+                    type: "transform",
+                    name: "xform",
+                    tags: [
+                      "object:xform"
+                    ],
+                    floats: {},
+                    strings: {},
+                    inputs: [
+                      2
+                    ]
+                  },
+                  {
+                    id: 2,
+                    type: "merge",
+                    name: "merge",
+                    tags: [
+                      "object:merge"
+                    ],
+                    floats: {},
+                    strings: {},
+                    inputs: [
+                      4,
+                      0
+                    ]
+                  },
+                  {
+                    id: 3,
+                    type: "circle",
+                    name: "circle",
+                    floats: {
+                      count: 96,
+                      cx: 270,
+                      cy: 300,
+                      radius: 90
+                    },
+                    strings: {},
+                    inputs: []
+                  },
+                  {
+                    id: 4,
+                    type: "curvyFill",
+                    name: "fill",
+                    floats: {
+                      alpha: 0.8,
+                      b: 0.48000002,
+                      g: 0.46000004,
+                      r: 0.62
+                    },
+                    strings: {},
+                    inputs: [
+                      3
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        id: 4,
+        type: "curvyObject",
+        name: "Layer3",
+        tags: [
+          "layer"
+        ],
+        floats: {
+          locked: 0
+        },
+        strings: {},
+        inputs: [],
+        graph: {
+          fps: 24,
+          display: 1,
+          nodes: [
+            {
+              id: 1,
+              type: "transform",
+              name: "xform",
+              tags: [
+                "object:xform"
+              ],
+              floats: {},
+              strings: {},
+              inputs: [
+                2
+              ]
+            },
+            {
+              id: 2,
+              type: "merge",
+              name: "merge",
+              tags: [
+                "object:merge"
+              ],
+              floats: {},
+              strings: {},
+              inputs: [
+                3,
+                0
+              ]
+            },
+            {
+              id: 3,
+              type: "curvyObject",
+              name: "GroupA",
+              tags: [
+                "group"
+              ],
+              floats: {
+                locked: 0
+              },
+              strings: {},
+              inputs: [],
+              graph: {
+                fps: 24,
+                display: 1,
+                nodes: [
+                  {
+                    id: 1,
+                    type: "transform",
+                    name: "xform",
+                    tags: [
+                      "object:xform"
+                    ],
+                    floats: {},
+                    strings: {},
+                    inputs: [
+                      2
+                    ]
+                  },
+                  {
+                    id: 2,
+                    type: "merge",
+                    name: "merge",
+                    tags: [
+                      "object:merge"
+                    ],
+                    floats: {},
+                    strings: {},
+                    inputs: [
+                      4,
+                      0
+                    ]
+                  },
+                  {
+                    id: 3,
+                    type: "circle",
+                    name: "circle",
+                    floats: {
+                      count: 96,
+                      cx: 330,
+                      cy: 350,
+                      radius: 90
+                    },
+                    strings: {},
+                    inputs: []
+                  },
+                  {
+                    id: 4,
+                    type: "curvyFill",
+                    name: "fill",
+                    floats: {
+                      alpha: 0.8,
+                      b: 0.62,
+                      g: 0.54,
+                      r: 0.47999996
+                    },
+                    strings: {},
+                    inputs: [
+                      3
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

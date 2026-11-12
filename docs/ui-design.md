@@ -132,6 +132,21 @@ popups use the translucent card style (`#17181bf0`), which is liked and is the s
 - **Appearance hub:** the "..." under the object ring opens a docked list of all fills and strokes with opacity, for stacked fills and the rare cases.
   Swatches there open the same colour popup, so there is one colour editor.
 
+### Swatches and palettes in the colour card (mockup `docs/mockups/swatches.html`, approved 2026-11-10, built)
+The card the graph panel's colour swatch opens (`ColorPickerCard`) shows the active palette under its sliders (`SwatchStrip`, connected to the document by
+`SwatchPaletteController`). Plain swatches (a copy of a colour; linked "global" swatches are a later step) in several named palettes, one active.
+- The palette name opens the list (Recent first, then the document's palettes); the "..." button has New palette, Duplicate, Rename and Delete (asks first, undoable,
+  the last palette cannot go). Rename and delete ask in an inline bar, not a dialog.
+- Click a swatch to use its colour (one undo step); the outlined swatch matches the colour on show; "+" saves it; hovering shows name and hex. Right-click: Use, Replace
+  with current colour, Rename, Delete. Drag to reorder. Every edit is one undo step.
+- **Recent** is automatic and per session: the colours the card applied, newest first, no repeats (24). Read-only; right-click offers Save to palette.
+- **Keys 1 to 8** (graph view, colour card open) apply the 1st to 8th recent colour (newest first) to the card's colour as one undo step, as a swatch click does; with the card closed they do nothing.
+- **Linked swatches** (built): the swatch right-click menu has Link / Unlink (not in Recent); a linked swatch has a white corner triangle and "linked" in the hover line. Using a linked swatch on a
+  colour row ties the row to it (node tag `swatch:<link>:<group>`, saved with the graph; the swatch's number is saved as `link` in the palette). "Replace with current colour" on a linked swatch recolours
+  every tied row, in the same undo step as the swatch. Changing the row's colour any other way (wheel, sliders, hex, a plain swatch, a Recent colour) unties it. Unlinking or deleting the swatch (or its
+  palette) unties its rows, which keep their colours. Duplicated palettes, "+" and Save to palette make plain swatches. A keyed colour channel is overwritten, not keyed.
+- Not built yet: import of .ASE / .ACO, palette from an image, a Swatches tab on the document card.
+
 ### Pen path drawing and editing (mockup `docs/mockups/pen.html`, proposal)
 A test bench on pointer events (hover badges, pressure and the eraser end work with a pen; right button stands in for the barrel button).
 - **Pen (P):** click = corner, drag = smooth (the drag pulls the outgoing handle, the incoming one mirrors it). Hover the first point to close, the last
@@ -333,6 +348,24 @@ node. So the node UI is one more view, never a separate mode. The mockups explor
   thumbnails on every node, dropping to thumbnails only (no text or ports) when zoomed out; selection linked both ways with the canvas; a filter that
   matches group names, colours and node types; Fit, a minimap and breadcrumbs. Graphs this size want the lens or a large window, not the drawer.
 - Not yet explored: auto-layout, collapsing a chain into one node, and a palette node feeding many Fill nodes.
+
+### Graph view (mockups `graphView.html`, `graphPointTable.html`; decided 2026-11-09)
+The full node graph replaces the canvas in the canvas area while it is open (Graph button or Tab); the bottom dock stays for the timeline. A toolbar
+(breadcrumb, filter, Fit, zoom) sits over the node area, the properties of the selected node on the right, a small document preview at the top left of the
+node area and a minimap at the lower right. The end of the graph is the `curvyRender` node, the document's display node after the layers' merge.
+- **Node ring** (tap Space over a selected node, or the barrel button): eight slots - Display `D`, Bypass `B`, Freeze `F`, Rename `R`, Group `G`, Ungroup `U`,
+  Enter `E`, Exit `X` (Backspace also goes up). Group wraps the node in a new group object; Ungroup does the reverse. Exit is off at the root. The hub names the node and its
+  "Data..." opens the data popup.
+- **Data popup** (`graphPointTable.html`): what the node cooks, read-only, in a newui `TableView` (virtualized, so 10,000 points are no heavier than 50) with
+  Points, Primitives and Detail tabs, a Source choice (the node's output or one of its inputs), a filter for attribute columns, and Copy as tab separated text.
+  A row per point or primitive, a column for x, y and every attribute. It is a floating tool window (newui `ToolFrame`: a top-level window with a thin
+  caption and a sizing border, owned by the main window, never activating, the close button hides it), not a panel inside the graph view.
+- **Property panel:** every parameter of the selected node is a row in a scroll view; Enter in a field commits it (one undo step) and dragging sideways on the
+  caption scrubs the number (one undo step per drag; Shift is a tenth of the step, Ctrl+Shift a hundredth).
+  Rows come from **parameter tags**, which the node type adds where it declares the parameter (`tagParam`; not saved, never affect cooking). They are
+  plain or `key:value` like node tags: `group:<name>` folds the parameters sharing it into one row, `kind:color` with `channel:r|g|b|a` makes that row a
+  swatch and a `#RRGGBB` (or `#RRGGBBAA` when the group has an alpha) field, and `unit:<step>` is the scrub step per pixel (default 1). A colour group
+  missing r, g or b is shown as plain numbers. Not done: min/max tags, saving tags a user adds, tags on spare parameters.
 
 ### Graph tree (mockup `docs/mockups/graphTree.html`)
 A node view without a canvas, for reading and editing the graph as a list; built from a TreeView, a filter field and a parameter box, so it needs

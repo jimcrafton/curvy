@@ -1,0 +1,210 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>curvy swatches</title>
+<!-- Proposal: swatches and palettes in the colour card (include/curvy/colorpickercard.h), for approval before any code or .newui conversion.
+     Plain swatches (a copy of a colour, not a link) in several named palettes; one palette is active and shown under the sliders.
+     Ideas: Procreate (one active palette everywhere, a "+" slot saves the current colour, hold a swatch for replace / delete, drag to reorder, a
+     warning before a palette is deleted) and Illustrator (named colour groups). Linked ("global") swatches come later, as their own step.
+     Click around: pick a swatch, "+" saves the colour shown, right-click a swatch, the palette name and the "..." button open menus, drag a swatch to reorder. -->
+<link rel="stylesheet" href="preview.css">
+<style>
+  body { margin: 0; padding: 24px; width: 760px; font-family: "Segoe UI", sans-serif; font-size: 12px; color: #F0F0F0; display: flex; flex-direction: row; gap: 28px; }
+  #card { position: relative; width: 230px; background: #1E1E1E; border: 1px solid #4A4A4A; padding: 8px; box-sizing: border-box; user-select: none; }
+  #wheel { width: 190px; height: 190px; margin: 0 auto 6px auto; border-radius: 50%; background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); position: relative; }
+  #wheel::after { content: ""; position: absolute; left: 36px; top: 36px; width: 118px; height: 118px; background: linear-gradient(to bottom, transparent, #000), linear-gradient(to right, #fff, #e64d33); }
+  .modes { display: flex; flex-direction: row; height: 22px; margin-bottom: 8px; }
+  .modes span { flex: 1; text-align: center; line-height: 22px; background: #2E2E2E; border: 1px solid #4A4A4A; color: #A0A0A0; }
+  .modes span.on { color: #F0F0F0; background: #3A3A3A; }
+  .slider { display: flex; flex-direction: row; align-items: center; gap: 4px; height: 22px; }
+  .slider b { width: 36px; font-weight: 400; color: #A0A0A0; }
+  .slider i { flex: 1; height: 4px; background: #4A4A4A; border-radius: 2px; position: relative; }
+  .slider u { width: 40px; text-align: right; text-decoration: none; }
+  #swatchHead { display: flex; flex-direction: row; align-items: center; gap: 4px; height: 26px; margin-top: 8px; border-top: 1px solid #4A4A4A; padding-top: 8px; }
+  #paletteName { flex: 1; height: 22px; line-height: 20px; padding: 0 6px; background: #121212; border: 1px solid #4A4A4A; border-radius: 3px; cursor: pointer; display: flex; justify-content: space-between; }
+  #paletteName:hover { border-color: #FFB454; }
+  #paletteMenuButton { width: 24px; height: 22px; padding: 0; }
+  #grid { display: flex; flex-direction: row; flex-wrap: wrap; gap: 3px; margin-top: 6px; min-height: 40px; }
+  .sw { width: 18px; height: 18px; border: 1px solid #00000080; box-sizing: border-box; cursor: pointer; }
+  .sw:hover { outline: 1px solid #F0F0F0; }
+  .sw.current { outline: 2px solid #FFB454; outline-offset: 1px; }
+  .sw.dragging { opacity: .35; }
+  .sw.add { background: #2E2E2E; border: 1px dashed #A0A0A0; color: #A0A0A0; text-align: center; line-height: 15px; }
+  .sw.add.off { opacity: .35; cursor: default; }
+  #swatchFoot { color: #A0A0A0; height: 18px; margin-top: 6px; white-space: nowrap; overflow: hidden; }
+  .menu { position: absolute; background: #1E1E1E; border: 1px solid #4A4A4A; box-shadow: 0 4px 14px #00000099; min-width: 150px; z-index: 5; display: none; padding: 3px 0; }
+  .menu div { padding: 4px 12px; cursor: pointer; display: flex; justify-content: space-between; gap: 18px; }
+  .menu div:hover { background: #3A3A3A; }
+  .menu div.off { color: #6A6A6A; cursor: default; }
+  .menu div.off:hover { background: none; }
+  .menu hr { border: 0; border-top: 1px solid #4A4A4A; margin: 3px 0; }
+  #confirm { display: none; margin-top: 6px; padding: 6px; background: #2E2E2E; border: 1px solid #FFB454; }
+  #confirm button { margin: 6px 6px 0 0; height: 22px; padding: 0 10px; }
+  #notes { width: 440px; color: #A0A0A0; line-height: 1.5; }
+  #notes h3 { color: #F0F0F0; margin: 0 0 6px 0; font-size: 13px; }
+  #notes li { margin-bottom: 4px; }
+  #notes b { color: #F0F0F0; }
+  #chip { display: inline-block; width: 12px; height: 12px; vertical-align: -2px; border: 1px solid #00000080; margin-right: 4px; }
+</style>
+</head>
+<body>
+  <div id="card">
+    <div id="wheel"></div>
+    <div class="modes"><span class="on">RGB</span><span>HSB</span><span>CMYK</span><span>Gray</span></div>
+    <div class="slider"><b>R</b><i></i><u id="r">230</u></div>
+    <div class="slider"><b>G</b><i></i><u id="g">77</u></div>
+    <div class="slider"><b>B</b><i></i><u id="b">51</u></div>
+    <div class="slider"><b>A</b><i></i><u>100</u></div>
+    <div id="swatchHead">
+      <div id="paletteName"><span id="paletteLabel">Sunset</span><span>&#9662;</span></div>
+      <button id="paletteMenuButton">&#8943;</button>
+    </div>
+    <div id="grid"></div>
+    <div id="swatchFoot"></div>
+    <div id="confirm"></div>
+
+    <div class="menu" id="paletteMenu" style="left:8px; top:318px; width:214px"></div>
+    <div class="menu" id="moreMenu" style="left:100px; top:346px"></div>
+    <div class="menu" id="swatchMenu"></div>
+  </div>
+
+  <div id="notes">
+    <h3>Swatches in the colour card</h3>
+    <ul>
+      <li><b>One active palette</b> sits under the sliders. The name opens the list of palettes; the &hellip; button has New, Duplicate, Rename and Delete.</li>
+      <li><b>Click a swatch</b> to use its colour: the wheel, sliders and the fill's colour follow (one undo step). The outlined swatch is the one that matches the current colour.</li>
+      <li><b>+</b> saves the colour on show into the active palette. Hovering a swatch shows its name and hex below the grid.</li>
+      <li><b>Right-click</b> (or hold, with a pen) a swatch: Use, Replace with current colour, Rename, Delete. <b>Drag</b> a swatch to reorder.</li>
+      <li><b>Recent</b> is automatic: the last colours you applied, newest first. Read-only, no +, cannot be renamed or deleted. Keys 1&ndash;8 pick from it. Right-click a recent colour and Save to palette moves it into the active palette.</li>
+      <li><b>Deleting a palette</b> asks first and can be undone with Undo; a document always keeps at least one palette.</li>
+      <li>Palettes are saved in the document (names, colour order). Import of .ASE / .ACO and "palette from image" come later.</li>
+      <li>Plain swatches are a <b>copy</b> of the colour: editing a swatch does not recolour shapes. Linked (global) swatches are a later step.</li>
+    </ul>
+    <h3>Current colour</h3>
+    <div><span id="chip"></span><span id="chipText">#E64D33</span></div>
+  </div>
+
+<script>
+  const state = {
+    current: '#E64D33',
+    active: 'Sunset',
+    palettes: {
+      'Recent': { auto: true, colors: [{ c: '#E64D33' }, { c: '#FFB454' }, { c: '#3A86FF' }, { c: '#1E1E1E' }, { c: '#F0F0F0' }, { c: '#8338EC' }] },
+      'Sunset': { colors: [{ c: '#FFBE0B', n: 'Marigold' }, { c: '#FB5607', n: 'Blaze' }, { c: '#FF006E', n: 'Hot pink' }, { c: '#E64D33', n: 'Sunset orange' }, { c: '#8338EC', n: 'Violet' }, { c: '#3A86FF', n: 'Sky' }, { c: '#FFD6A5', n: 'Peach' }, { c: '#7A2E1D', n: 'Rust' }] },
+      'Cool night': { colors: [{ c: '#0B132B' }, { c: '#1C2541' }, { c: '#3A506B' }, { c: '#5BC0BE' }, { c: '#6FFFE9' }] },
+      'Greys': { colors: [{ c: '#000000' }, { c: '#333333' }, { c: '#666666' }, { c: '#999999' }, { c: '#CCCCCC' }, { c: '#FFFFFF' }] }
+    }
+  };
+  const $ = (id) => document.getElementById(id);
+  const hide = () => ['paletteMenu', 'moreMenu', 'swatchMenu'].forEach((m) => { $(m).style.display = 'none'; });
+  let menuTarget = null, dragFrom = null;
+
+  function rgb(hex) { return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)); }
+  function setCurrent(hex) {
+    state.current = hex.toUpperCase();
+    const [r, g, b] = rgb(state.current);
+    $('r').textContent = r; $('g').textContent = g; $('b').textContent = b;
+    $('chip').style.background = state.current; $('chipText').textContent = state.current;
+    render();
+  }
+  function label(s) { return (s.n ? s.n + '  ' : '') + s.c.toUpperCase(); }
+
+  function render() {
+    const pal = state.palettes[state.active];
+    $('paletteLabel').textContent = state.active + (pal.auto ? ' (automatic)' : '');
+    const grid = $('grid');
+    grid.innerHTML = '';
+    pal.colors.forEach((s, i) => {
+      const d = document.createElement('div');
+      d.className = 'sw' + (s.c.toUpperCase() === state.current ? ' current' : '');
+      d.style.background = s.c;
+      d.draggable = !pal.auto;
+      d.onmouseenter = () => { $('swatchFoot').textContent = label(s); };
+      d.onmouseleave = () => { $('swatchFoot').textContent = pal.colors.length + ' colours'; };
+      d.onclick = () => { hide(); setCurrent(s.c); };
+      d.oncontextmenu = (e) => { e.preventDefault(); showSwatchMenu(e, i); };
+      d.ondragstart = () => { dragFrom = i; d.classList.add('dragging'); };
+      d.ondragend = () => { d.classList.remove('dragging'); };
+      d.ondragover = (e) => e.preventDefault();
+      d.ondrop = () => { if (dragFrom !== null && dragFrom !== i) { const [m] = pal.colors.splice(dragFrom, 1); pal.colors.splice(i, 0, m); } dragFrom = null; render(); };
+      grid.appendChild(d);
+    });
+    const add = document.createElement('div');
+    add.className = 'sw add' + (pal.auto ? ' off' : '');
+    add.textContent = '+';
+    add.title = pal.auto ? 'Recent fills itself' : 'Save the colour on show';
+    add.onclick = () => { if (!pal.auto) { pal.colors.push({ c: state.current }); render(); } };
+    grid.appendChild(add);
+    $('swatchFoot').textContent = pal.colors.length + ' colours';
+  }
+
+  function fill(menu, items) {
+    menu.innerHTML = '';
+    items.forEach((it) => {
+      if (it === '-') { menu.appendChild(document.createElement('hr')); return; }
+      const d = document.createElement('div');
+      d.className = it.off ? 'off' : '';
+      d.innerHTML = '<span>' + it.t + '</span><span>' + (it.k || '') + '</span>';
+      if (!it.off) { d.onclick = () => { hide(); it.run(); }; }
+      menu.appendChild(d);
+    });
+  }
+
+  function showPaletteMenu() {
+    hide();
+    const items = [];
+    Object.keys(state.palettes).forEach((name) => {
+      items.push({ t: (name === state.active ? '✓ ' : ' ') + name, k: state.palettes[name].auto ? '' : state.palettes[name].colors.length, run: () => { state.active = name; render(); } });
+    });
+    fill($('paletteMenu'), items);
+    $('paletteMenu').style.display = 'block';
+  }
+  function showMoreMenu() {
+    hide();
+    const auto = state.palettes[state.active].auto;
+    const real = Object.keys(state.palettes).filter((n) => !state.palettes[n].auto);
+    fill($('moreMenu'), [
+      { t: 'New palette', run: () => { let n = 'Palette ' + (real.length + 1); state.palettes[n] = { colors: [{ c: state.current }] }; state.active = n; render(); } },
+      { t: 'Duplicate', off: auto, run: () => { const n = state.active + ' copy'; state.palettes[n] = { colors: state.palettes[state.active].colors.map((s) => ({ ...s })) }; state.active = n; render(); } },
+      { t: 'Rename…', off: auto, run: () => { const n = prompt('Palette name', state.active); if (n && !state.palettes[n]) { state.palettes[n] = state.palettes[state.active]; delete state.palettes[state.active]; state.active = n; render(); } } },
+      '-',
+      { t: 'Delete…', off: auto || real.length < 2, run: askDelete }
+    ]);
+    $('moreMenu').style.display = 'block';
+  }
+  function askDelete() {
+    const c = $('confirm');
+    c.style.display = 'block';
+    c.innerHTML = 'Delete the palette “' + state.active + '” and its ' + state.palettes[state.active].colors.length + ' colours? You can undo this.<br>'
+      + '<button id="yes">Delete</button><button id="no">Cancel</button>';
+    $('no').onclick = () => { c.style.display = 'none'; };
+    $('yes').onclick = () => { delete state.palettes[state.active]; state.active = Object.keys(state.palettes).find((n) => !state.palettes[n].auto); c.style.display = 'none'; render(); };
+  }
+  function showSwatchMenu(e, i) {
+    hide();
+    const pal = state.palettes[state.active], s = pal.colors[i];
+    const card = $('card').getBoundingClientRect();
+    const items = [{ t: 'Use', run: () => setCurrent(s.c) }];
+    if (pal.auto) {
+      items.push({ t: 'Save to palette', run: () => { const target = Object.keys(state.palettes).find((n) => !state.palettes[n].auto && n !== 'Recent' && n === 'Sunset') || 'Sunset'; state.palettes[target].colors.push({ c: s.c }); render(); } });
+    } else {
+      items.push({ t: 'Replace with current colour', run: () => { s.c = state.current; render(); } });
+      items.push({ t: 'Rename…', run: () => { const n = prompt('Swatch name', s.n || ''); if (n !== null) { s.n = n || undefined; render(); } } });
+      items.push('-');
+      items.push({ t: 'Delete', run: () => { pal.colors.splice(i, 1); render(); } });
+    }
+    fill($('swatchMenu'), items);
+    const m = $('swatchMenu');
+    m.style.left = Math.min(e.clientX - card.left, 70) + 'px';
+    m.style.top = (e.clientY - card.top + 4) + 'px';
+    m.style.display = 'block';
+  }
+
+  $('paletteName').onclick = (e) => { e.stopPropagation(); showPaletteMenu(); };
+  $('paletteMenuButton').onclick = (e) => { e.stopPropagation(); showMoreMenu(); };
+  document.onclick = hide;
+  setCurrent(state.current);
+</script>
+</body>
+</html>

@@ -1,7 +1,8 @@
 #include "curvy/graphdocument.h"
 
-#include "curvy/graphbrush.h"
-#include "curvy/pathnode.h"
+#include "curvy/appearancenode.h"
+#include "curvy/objectnode.h"
+#include "curvy/rendernode.h"
 
 #include <algorithm>
 #include <cmath>
@@ -11,7 +12,9 @@
 namespace curvy {
 
     GraphDocument::GraphDocument() {
-        registerCurvyNodes();
+        registerObjectNodes();
+        registerAppearanceNodes();
+        registerRenderNode();
     }
 
     void GraphDocument::graphChanged() {
@@ -144,10 +147,7 @@ namespace curvy {
         // A keyed parameter takes an edit as a key at the current time, any other as its stored value.
         void writeFloat(jitnodes::Network& network, jitnodes::NodeId id, const std::string& name, float value, double time) {
             jitnodes::Node& node = network.node(id);
-            if (pivotShownInParent(node, name)) {
-                // The pivot is where the node turns and scales about, not where the shape sits: moving it leaves the shape where it is.
-                setPivotInParent(node, name, value);
-            } else if (node.keyframes(name).empty()) {
+            if (node.keyframes(name).empty()) {
                 node.setFloat(name, value);
             } else {
                 putKey(node, name, time, value);
@@ -159,6 +159,14 @@ namespace curvy {
     void GraphDocument::setGraphFloatLive(const NodeRef& ref, const std::string& name, float value) {
         writeFloat(networkOf(ref.scope), ref.id, name, value, network_->time());
         graphChanged();
+    }
+
+    void GraphDocument::setGraphPositionsLive(std::uint32_t scope, const std::map<jitnodes::NodeId, std::pair<float, float>>& positions) {
+        jitnodes::Network& net = networkOf(scope);
+        for (const auto& [id, at] : positions) {
+            net.node(id).setPosition(at.first, at.second);
+        }
+        updateAllViews();
     }
 
     void GraphDocument::setGraphKey(const NodeRef& ref, const std::string& name, float value) {
@@ -214,14 +222,87 @@ namespace curvy {
     }
 
     void GraphDocument::removeGraphNode(const NodeRef& ref) {
+        if (!hasNode(ref)) {
+            throw std::runtime_error("no such node");
+        }
+        if (const std::string why = refuseGraphEdit(ref, true); !why.empty()) {
+            throw std::runtime_error(why);
+        }
         const jitnodes::GraphSnapshot before = snapshotGraph();
         networkOf(ref.scope).removeNode(ref.id);
         commitGraphEdit(before, "Delete Node");
     }
 
+    void GraphDocument::removeGraphNodes(const std::vector<NodeRef>& refs) {
+        for (const NodeRef& ref : refs) {
+            if (!hasNode(ref)) {
+                throw std::runtime_error("no such node");
+            }
+            if (const std::string why = refuseGraphEdit(ref, true); !why.empty()) {
+                throw std::runtime_error(why);
+            }
+        }
+        if (refs.empty()) {
+            return;
+        }
+        const jitnodes::GraphSnapshot before = snapshotGraph();
+        for (const NodeRef& ref : refs) {
+            if (networkOf(ref.scope).hasNode(ref.id)) {   // removing a subnet takes its contents with it
+                networkOf(ref.scope).removeNode(ref.id);
+            }
+        }
+        commitGraphEdit(before, refs.size() == 1 ? "Delete Node" : "Delete Nodes");
+    }
+
+    void GraphDocument::moveGraphWire(const NodeRef& oldTo, int oldIndex, const NodeRef& newTo, int newIndex) {
+        if (oldTo.scope != newTo.scope) {
+            throw std::runtime_error("nodes can only be connected inside one subnet");
+        }
+        if (!hasNode(oldTo) || !hasNode(newTo) || oldIndex < 0 || oldIndex >= node(oldTo).inputCount() || newIndex < 0) {
+            throw std::runtime_error("no such input");
+        }
+        for (const NodeRef& ref : {oldTo, newTo}) {
+            if (const std::string why = refuseGraphEdit(ref, false); !why.empty()) {
+                throw std::runtime_error(why);
+            }
+        }
+        jitnodes::Network& net = networkOf(oldTo.scope);
+        const jitnodes::NodeId from = net.inputOf(oldTo.id, oldIndex);
+        if (from == jitnodes::invalidNodeId) {
+            throw std::runtime_error("that input is not wired");
+        }
+        const jitnodes::GraphSnapshot before = snapshotGraph();
+        try {
+            net.disconnect(oldTo.id, oldIndex);
+            net.connect(from, newTo.id, newIndex);
+        } catch (...) {
+            restoreGraph(before);   // a cycle or a bad input: leave the graph as it was
+            throw;
+        }
+        commitGraphEdit(before, "Move Wire");
+    }
+
+    void GraphDocument::disconnectGraphNode(const NodeRef& to, int inputIndex) {
+        if (!hasNode(to) || inputIndex < 0 || inputIndex >= node(to).inputCount()) {
+            throw std::runtime_error("no such input");
+        }
+        if (const std::string why = refuseGraphEdit(to, false); !why.empty()) {
+            throw std::runtime_error(why);
+        }
+        const jitnodes::GraphSnapshot before = snapshotGraph();
+        networkOf(to.scope).disconnect(to.id, inputIndex);
+        commitGraphEdit(before, "Disconnect Nodes");
+    }
+
     void GraphDocument::connectGraphNodes(const NodeRef& from, const NodeRef& to, int inputIndex) {
         if (from.scope != to.scope) {
             throw std::runtime_error("nodes can only be connected inside one subnet");
+        }
+        if (!hasNode(from) || !hasNode(to)) {
+            throw std::runtime_error("no such node");
+        }
+        if (const std::string why = refuseGraphEdit(to, false); !why.empty()) {
+            throw std::runtime_error(why);
         }
         const jitnodes::GraphSnapshot before = snapshotGraph();
         networkOf(to.scope).connect(from.id, to.id, inputIndex);
@@ -280,13 +361,28 @@ namespace curvy {
         commitGraphEdit(before, "Rename Node");
     }
 
+    void GraphDocument::setGraphTags(const NodeRef& ref, const std::vector<std::string>& tags) {
+        if (!hasNode(ref)) {
+            throw std::runtime_error("no such node");
+        }
+        if (node(ref).tags() == tags) {
+            return;
+        }
+        if (const std::string why = refuseTagEdit(ref, tags); !why.empty()) {
+            throw std::runtime_error(why);
+        }
+        const jitnodes::GraphSnapshot before = snapshotGraph();
+        node(ref).setTags(tags);
+        networkOf(ref.scope).markDirty(ref.id);
+        commitGraphEdit(before, "Change Tags");
+    }
+
     bool GraphDocument::graphFromText(const std::string& text) {
         try {
             jitnodes::loadNetwork(*network_, text);
         } catch (const std::exception&) {
             return false;
         }
-        registerEmbeddedBrushes();
         graphChanged();
         return true;
     }
@@ -297,7 +393,6 @@ namespace curvy {
         } catch (const std::exception&) {
             return false;
         }
-        registerEmbeddedBrushes();
         return true;
     }
 

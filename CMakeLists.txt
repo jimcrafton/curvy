@@ -30,109 +30,52 @@ add_subdirectory(3rdparty/newui EXCLUDE_FROM_ALL)
 
 include(cmake/jitnodes.cmake)
 
-add_executable(curvy
-    src/main.cpp
+# Everything but main() is one library, shared by the app and its unit tests.
+add_library(curvy_core STATIC
     src/canvasview.cpp
-    src/canvastools.cpp
-    src/texttool.cpp
-    src/cuttools.cpp
-    src/artboardtool.cpp
-    src/transformtools.cpp
-    src/guides.cpp
-    src/cursorset.cpp
-    src/shapetools.cpp
-    src/pathops.cpp
-    src/textoutline.cpp
-    src/gzip.cpp
-    src/sketchbin.cpp
-    src/curvyfile.cpp
-    src/gradientbar.cpp
-    src/swatchgrid.cpp
-    src/pagepreview.cpp
-    src/welcomeoverlay.cpp
-    src/loadingoverlay.cpp
-    src/backgroundtask.cpp
-    src/stylepanel.cpp
-    src/transformpanel.cpp
-    src/layertree.cpp
-    src/layerspanel.cpp
-    src/artboardpanel.cpp
-    src/librarypanel.cpp
-    src/brushpanel.cpp
-    src/brushlist.cpp
-    src/brush.cpp
-    src/graphbrush.cpp
-    src/pathflatten.cpp
-    src/imagedata.cpp
-    src/textwarp.cpp
-    src/documenttextpath.cpp
-    src/documentimages.cpp
-    src/documentexpand.cpp
-    src/io/pdf/pdfexport.cpp
-    src/io/eps/epsexport.cpp
-    src/io/pdf/pdfimport.cpp
-    src/io/pdf/fontprogram.cpp
-    src/io/pdf/pdfcrypt.cpp
-    src/documentbrushes.cpp
-    src/textpanel.cpp
-    src/liveshape.cpp
-    src/shapepanel.cpp
-    src/numberscrubber.cpp
-    src/expressionfield.cpp
-    src/paramgrid.cpp
-    src/sketchcolor.cpp
-    src/sketchobject.cpp
-    src/graphdocument.cpp
-    src/graphtree.cpp
-    src/graphdock.cpp
-    src/timelinebar.cpp
-    src/pathnode.cpp
-    src/shapenode.cpp
-    src/appearancenode.cpp
-    src/radialmenu.cpp
-    src/tooloptionscard.cpp
+    src/geometrytable.cpp
+    src/colorpickercard.cpp
     src/colorwheel.cpp
-    src/holdscrub.cpp
+    src/graphcrumbs.cpp
+    src/swatchpalettes.cpp
+    src/swatchstrip.cpp
+    src/swatchpalettecontroller.cpp
+    src/graphpanel.cpp
+    src/graphoverviews.cpp
+    src/numberscrubber.cpp
+    src/graphview.cpp
+    src/pointtable.cpp
+    src/sketchnodes.cpp
+    src/rendernode.cpp
+    src/radialmenu.cpp
     src/workspacemodel.cpp
-    src/workspacecontroller.cpp
-    src/dockcontroller.cpp
-    src/dockcontext.cpp
-    src/workspacechecks.cpp
-    src/sketchdocument.cpp
-    src/documentlive.cpp
-    src/documentcutting.cpp
-    src/documentpaths.cpp
-    src/documenttransform.cpp
-    src/documentguides.cpp
-    src/documentlayers.cpp
-    src/documentswatches.cpp
-    src/documentselect.cpp
-    src/documentclip.cpp
-    src/documentsymbols.cpp
-    src/documentartboards.cpp
-    src/documenttrace.cpp
-    src/imagetrace.cpp
-    src/io/svg/sketchsvg.cpp
-    src/sketchexport.cpp
-    src/sketchcontroller.cpp
-    src/sketchcommands.cpp
-    src/sketchwindow.cpp
-    src/sketchchecks.cpp
     src/newdocumentmodel.cpp
     src/newdocumentdialog.cpp
+    src/pagepreview.cpp
+    src/workspacecontroller.cpp
+    src/dockcontroller.cpp
     src/settings.cpp
     src/settingsdialog.cpp
-    src/tracedialog.cpp
-    src/pdfpagesdialog.cpp
+    src/graphdocument.cpp
+    src/appearancenode.cpp
+    src/objectnode.cpp
+    src/sketchobjects.cpp
+    src/sketchdocument.cpp
+    src/backgroundtask.cpp
 )
 
-target_include_directories(curvy PRIVATE include)
-target_link_libraries(curvy PRIVATE newui jitnodes::jitnodes zlib_static windowscodecs ole32)
+target_include_directories(curvy_core PUBLIC include)
+target_include_directories(curvy_core PRIVATE src)
+target_compile_definitions(curvy_core PUBLIC CURVY_VERSION="${PROJECT_VERSION}")
+target_link_libraries(curvy_core PUBLIC newui jitnodes::jitnodes zlib_static windowscodecs ole32)
 
 if(CURVY_GUI_AUTOMATION)
-    target_link_libraries(curvy PRIVATE newui_automation)
-    target_compile_definitions(curvy PRIVATE CURVY_GUI_AUTOMATION)
+    target_link_libraries(curvy_core PUBLIC newui_automation)
+    target_compile_definitions(curvy_core PUBLIC CURVY_GUI_AUTOMATION)
 endif()
+
+add_executable(curvy src/main.cpp)
+target_link_libraries(curvy PRIVATE curvy_core)
 
 # newui_add_reflectgen_output() reads these from the scope ReflectGen.cmake was included in (newui's).
 set(NEWUI_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/newui)
@@ -147,44 +90,20 @@ set(NEWUI_REFLECTGEN_BASE_INCLUDE_DIRS
 
 # Generates registerCurvyReflection() for curvy's reflected classes (CanvasView, GradientBar, ...) so
 # curvy.newui can name them as "type"; main() calls it after newui's own registerReflectionData().
-newui_add_reflectgen_output(curvy
-    SCAN_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include/curvy
+# Only the headers directly in include/curvy are scanned (the io/ subfolder is left out); reflectgen takes files as well as directories.
+file(GLOB CURVY_REFLECT_HEADERS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/include/curvy/*.h)
+newui_add_reflectgen_output(curvy_core
+    SCAN_DIRS ${CURVY_REFLECT_HEADERS}
     INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/jitnodes/include
     REGISTER_FUNCTION registerCurvyReflection)
+# The function only tracks headers it finds by globbing a directory; the files above are not one, so say what the output depends on.
+add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/generated/curvy_core_reflection_generated.cpp APPEND DEPENDS ${CURVY_REFLECT_HEADERS})
 
 newui_add_resources(curvy "${CMAKE_CURRENT_SOURCE_DIR}/Resources")
 
-# Headless tests of the model layer (color, objects, document, file formats).
-set(CURVY_MODEL_SOURCES
-    sketchcolor sketchobject sketchdocument documentcutting documentpaths documenttransform documentguides
-    documentlayers documentswatches documentselect documentclip documentsymbols documentbrushes brush graphbrush
-    pathflatten textwarp imagedata documenttextpath documentimages documentexpand io/pdf/pdfexport io/eps/epsexport io/pdf/pdfimport io/pdf/fontprogram io/pdf/pdfcrypt documentartboards
-    documenttrace imagetrace io/svg/sketchsvg sketchexport shapetools pathops textoutline gzip numberscrubber expressionfield
-    backgroundtask sketchbin curvyfile cursorset newdocumentmodel graphdocument graphtree pathnode shapenode appearancenode documentlive radialmenu holdscrub workspacemodel dockcontext liveshape settings)
-list(TRANSFORM CURVY_MODEL_SOURCES PREPEND src/)
-list(TRANSFORM CURVY_MODEL_SOURCES APPEND .cpp)
-
-add_executable(curvyTests tests/test_sketch_model.cpp tests/sampleart.cpp tests/graphprobe.cpp tests/curvyfile.cpp ${CURVY_MODEL_SOURCES})
-target_include_directories(curvyTests PRIVATE include)
-target_compile_definitions(curvyTests PRIVATE CURVY_BRUSH_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Resources/brushes")
-if(MSVC)
-    # test_sketch_model.cpp has grown past the default limit of sections per object file.
-    target_compile_options(curvyTests PRIVATE /bigobj)
-endif()
-target_link_libraries(curvyTests PRIVATE newui jitnodes::jitnodes zlib_static windowscodecs ole32 GTest::gtest_main)
-include(GoogleTest)
-gtest_discover_tests(curvyTests)
-
-# A throwaway app for trying the pen+keyboard interaction (labs/uilab) before it goes into the editor.
-add_executable(curvyUiLab labs/uilab/main.cpp labs/uilab/labcanvas.cpp src/radialmenu.cpp)
-target_include_directories(curvyUiLab PRIVATE include labs/uilab)
-target_link_libraries(curvyUiLab PRIVATE newui)
-newui_add_reflectgen_output(curvyUiLab
-    SCAN_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/labs/uilab
-    INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/labs/uilab
-    REGISTER_FUNCTION registerLabReflection)
-newui_add_resources(curvyUiLab "${CMAKE_CURRENT_SOURCE_DIR}/labs/uilab/Resources")
-if(CURVY_GUI_AUTOMATION)
-    target_link_libraries(curvyUiLab PRIVATE newui_automation)
-    target_compile_definitions(curvyUiLab PRIVATE CURVY_GUI_AUTOMATION)
-endif()
+# Unit tests: GoogleTest only, run curvyTests directly (no ctest). The window layouts load from Resources next to the exe.
+file(GLOB CURVY_TEST_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp)
+add_executable(curvyTests ${CURVY_TEST_SOURCES})
+target_include_directories(curvyTests PRIVATE src)
+target_link_libraries(curvyTests PRIVATE curvy_core GTest::gtest_main)
+newui_add_resources(curvyTests "${CMAKE_CURRENT_SOURCE_DIR}/Resources")
