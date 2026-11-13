@@ -4,7 +4,7 @@
   meta: {
     app: "curvy",
     appVersion: "0.1.0",
-    saved: "2026-11-10T01:35:24Z"
+    saved: "2026-11-13T00:43:19Z"
   },
   document: {
     name: "Layers and groups",
@@ -19,6 +19,146 @@
         1,
         1
       ]
+    },
+    palettes: {
+      active: 0,
+      list: [
+        {
+          name: "Swatches",
+          swatches: [
+            {
+              color: [
+                0,
+                0,
+                0,
+                1
+              ],
+              name: "Black"
+            },
+            {
+              color: [
+                0.25,
+                0.25,
+                0.25,
+                1
+              ],
+              name: "Dark grey"
+            },
+            {
+              color: [
+                0.5,
+                0.5,
+                0.5,
+                1
+              ],
+              name: "Grey"
+            },
+            {
+              color: [
+                0.75,
+                0.75,
+                0.75,
+                1
+              ],
+              name: "Light grey"
+            },
+            {
+              color: [
+                1,
+                1,
+                1,
+                1
+              ],
+              name: "White"
+            },
+            {
+              color: [
+                0.9,
+                0.2,
+                0.2,
+                1
+              ],
+              name: "Red"
+            },
+            {
+              color: [
+                0.96,
+                0.55,
+                0.13,
+                1
+              ],
+              name: "Orange"
+            },
+            {
+              color: [
+                0.98,
+                0.8,
+                0.15,
+                1
+              ],
+              name: "Yellow"
+            },
+            {
+              color: [
+                0.3,
+                0.72,
+                0.31,
+                1
+              ],
+              name: "Green"
+            },
+            {
+              color: [
+                0.2,
+                0.72,
+                0.8,
+                1
+              ],
+              name: "Cyan"
+            },
+            {
+              color: [
+                0.2,
+                0.45,
+                0.9,
+                1
+              ],
+              name: "Blue"
+            },
+            {
+              color: [
+                0.55,
+                0.3,
+                0.85,
+                1
+              ],
+              name: "Purple"
+            },
+            {
+              color: [
+                0.92,
+                0.35,
+                0.65,
+                1
+              ],
+              name: "Pink"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  view: {
+    graph: {
+      open: 1,
+      zoom: 1,
+      pan: [
+        160.5,
+        297.5
+      ],
+      selected: [
+        5
+      ]
     }
   },
   graph: {
@@ -32,6 +172,10 @@
         id: 1,
         type: "merge",
         name: "layers",
+        pos: [
+          210,
+          0
+        ],
         tags: [
           "document:merge"
         ],
@@ -48,6 +192,10 @@
         id: 2,
         type: "curvyRender",
         name: "render",
+        pos: [
+          420,
+          0
+        ],
         tags: [
           "document:render"
         ],
@@ -61,8 +209,14 @@
         id: 3,
         type: "curvyObject",
         name: "Layer1",
+        pos: [
+          97,
+          -127
+        ],
         tags: [
-          "layer"
+          "layer",
+          "gioo",
+          "ppo"
         ],
         floats: {
           locked: 0
@@ -256,6 +410,10 @@
         id: 4,
         type: "curvyObject",
         name: "Layer2",
+        pos: [
+          0,
+          64
+        ],
         tags: [
           "layer"
         ],
@@ -376,6 +534,10 @@
         id: 5,
         type: "curvyObject",
         name: "Layer3",
+        pos: [
+          -75,
+          302
+        ],
         tags: [
           "layer"
         ],

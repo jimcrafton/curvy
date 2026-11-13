@@ -275,6 +275,11 @@ namespace curvy {
     }
 
     void WorkspaceController::frameShouldClose(bool& canClose) {
+        if (busy_) {
+            model_->say(taskLabel_ + " - wait for it to finish, or press Esc to cancel");
+            canClose = false;
+            return;
+        }
         if (!confirmDiscard()) {
             canClose = false;
             return;

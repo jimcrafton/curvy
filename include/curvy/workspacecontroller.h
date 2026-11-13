@@ -75,6 +75,7 @@ namespace curvy {
         // True when the open document has no unsaved edits, or the user saved or discarded them; false when they cancelled.
         bool confirmDiscard();
         void showTitle();
+        newui::DocumentController& documents() { return documents_; }
         // After an open: when the file had damaged layers or groups, asks whether to repair them.
         void offerObjectRepair();
         bool busy() const { return busy_; }
