@@ -19,6 +19,12 @@ class GraphViewCase(Samples):
     sample = "layersAndGroups.curvy"
     shots = os.path.join(tempfile.gettempdir(), "curvyGraphShots")
 
+    # Points in the root view's own coordinates. The sample opens with the graph showing at the view saved in the file (zoom 1, pan 160.5/297.5)
+    # and the right dock open beside it (showing the graph opens it); inside a layer the view is fitted to the graph's size.
+    LAYER1 = (338, 258)            # the Layer1 box at the root level
+    GROUP1 = (328, 404)            # the Group1 box inside Layer1
+    PANEL_SWATCH = (1200, 407)     # the colour swatch of the fill's colour row in the Node panel
+
     def shot(self, name):
         os.makedirs(self.shots, exist_ok=True)
         path = os.path.join(self.shots, name + ".bmp")
@@ -34,19 +40,31 @@ class GraphViewCase(Samples):
 
     def save(self):
         """With the graph up the canvas is covered and the ring that Space opens is the node ring, which swallows S."""
+        self.app.click("graphToggle")                    # hiding the graph gives the canvas the keyboard
+        self.app.wait_idle()
+        self.tap_space()                                 # no press on the canvas first: on empty canvas it would clear the selection the save keeps
+        self.app.key("s")
+        self.app.wait_idle()
         self.app.click("graphToggle")
         self.app.wait_idle()
-        super().save()
-        self.app.click("graphToggle")
+
+    def graph_shown(self):
+        return self.app.find("graphNodes").visible
+
+    def show_graph(self):
+        """Shows the graph whatever state it is in (the button flips it). Showing it opens the right dock, which holds the Node panel."""
+        if not self.graph_shown():
+            self.app.click("graphToggle")
+        self.app.wait_until(self.graph_shown, "the graph to show")
         self.app.wait_idle()
+        self.assertTrue(self.app.find("rightArea").visible, "the dock opens with the graph, it holds the node properties")
 
     def open_graph(self):
         self.open_sample()
         self.wait_until_open()
-        self.app.click("graphToggle")
-        self.app.wait_idle()
+        self.show_graph()
         root = self.app.find("rootview")
-        return (root.x + 330, root.y + 370)             # a layer box, as in the double-click test
+        return (root.x + self.LAYER1[0], root.y + self.LAYER1[1])
 
 
 class GraphEditing(GraphViewCase):
@@ -60,9 +78,10 @@ class GraphEditing(GraphViewCase):
         layer = self.open_graph()
         self.app.double_click(layer)                        # Layer1
         self.app.wait_idle()
-        self.app.double_click((layer[0], layer[1] + 33))    # Group1
+        root = self.app.find("rootview")
+        self.app.double_click((root.x + self.GROUP1[0], root.y + self.GROUP1[1]))   # Group1
         self.app.wait_idle()
-        return self.app.find("rootview")
+        return root
 
     def fills_in_file(self):
         with open(self.path, encoding="utf-8") as f:
@@ -100,8 +119,10 @@ class GraphEditing(GraphViewCase):
 
     def first_fill_tags(self):
         with open(self.path, encoding="utf-8") as f:
-            found = re.search(r'type: "curvyFill",\s*name: "fill",\s*tags: \[(.*?)\]', f.read(), re.S)
-        return re.findall(r'"([^"]*)"', found.group(1)) if found else []
+            # Between the name and the floats come the node's uid, position and tags, whichever it has.
+            header = re.search(r'type: "curvyFill",\s*name: "fill",(.*?)floats:', f.read(), re.S)
+        tags = re.search(r'tags:\s*\[(.*?)\]', header.group(1), re.S) if header else None
+        return re.findall(r'"([^"]*)"', tags.group(1)) if tags else []
 
     def type_tags(self, root, text):
         self.app.click_at((root.x + self.FILL[0], root.y + self.FILL[1]))
@@ -278,15 +299,14 @@ class GraphView(GraphViewCase):
     def test_double_click_on_a_box_enters_it(self):
         self.open_sample()
         self.wait_until_open()
-        self.app.click("graphToggle")
-        self.app.wait_idle()
+        self.show_graph()
         nodes = self.app.find("graphNodes")
         print("\ngraphNodes x=%d y=%d w=%d h=%d visible=%s" % (nodes.x, nodes.y, nodes.w, nodes.h, nodes.visible))
         print("crumb before: %r" % self.crumb())
         self.shot("opened")
         self.assertGreater(nodes.w, 50)
         root = self.app.find("rootview")
-        layer = (root.x + 330, root.y + 370)
+        layer = (root.x + self.LAYER1[0], root.y + self.LAYER1[1])
         self.app.double_click(layer)
         self.app.wait_idle()
         self.shot("afterDoubleClick")
@@ -295,17 +315,18 @@ class GraphView(GraphViewCase):
 
     def test_dragging_a_node_is_one_undo_step(self):
         layer = self.open_graph()
-        self.assertEqual([], self.positions_in_file() or [])
+        self.save()
+        before = self.positions_in_file()    # the sample already carries its boxes' positions (it was saved with a view), so compare, not expect none
         self.app.drag(layer, (layer[0] + 60, layer[1] + 40))
         self.app.wait_idle()
         self.save()
         pinned = self.positions_in_file()
-        self.assertGreater(len(pinned), 1, "the first move pins every shown node")
+        self.assertNotEqual(before, pinned, "the drag moved the box")
 
         self.app.key("ctrl+z")
         self.app.wait_idle()
         self.save()
-        self.assertEqual([], self.positions_in_file(), "one undo takes the whole drag back")
+        self.assertEqual(before, self.positions_in_file(), "one undo takes the whole drag back")
 
         self.app.key("ctrl+y")
         self.app.wait_idle()
@@ -314,10 +335,12 @@ class GraphView(GraphViewCase):
 
     def test_a_click_without_a_drag_moves_nothing(self):
         layer = self.open_graph()
+        self.save()
+        before = self.positions_in_file()
         self.app.click_at(layer)
         self.app.wait_idle()
         self.save()
-        self.assertEqual([], self.positions_in_file())
+        self.assertEqual(before, self.positions_in_file())
 
 
 class ColourCard(GraphViewCase):
@@ -331,12 +354,12 @@ class ColourCard(GraphViewCase):
         layer = self.open_graph()
         self.app.double_click(layer)                    # Layer1
         self.app.wait_idle()
-        self.app.double_click((layer[0], layer[1] + 33))   # Group1: circle > fill > merge > xform
-        self.app.wait_idle()
         root = self.app.find("rootview")
+        self.app.double_click((root.x + self.GROUP1[0], root.y + self.GROUP1[1]))   # Group1: circle > fill > merge > xform
+        self.app.wait_idle()
         self.app.click_at((root.x + 437, root.y + 430))    # the fill box
         self.app.wait_idle()
-        self.app.click_at((root.x + 1193, root.y + 224))   # the colour swatch of the panel
+        self.app.click_at((root.x + self.PANEL_SWATCH[0], root.y + self.PANEL_SWATCH[1]))   # the colour swatch of the Node panel
         self.app.wait_idle()
         self.assertTrue(self.app.find("SwatchTiles").visible)
 
@@ -357,7 +380,7 @@ class ColourCard(GraphViewCase):
     def panel_colour(self):
         """The fill's colour as the panel's swatch paints it: no node value is readable without saving, which closes the card."""
         root = self.app.find("rootview")
-        return self.app.screenshot().pixel(root.x + 1193, root.y + 224)
+        return self.app.screenshot().pixel(root.x + self.PANEL_SWATCH[0], root.y + self.PANEL_SWATCH[1])
 
     def tile_colour(self, tile):
         return self.app.screenshot().pixel(*self.tile_point(tile))

@@ -2,7 +2,7 @@
 
 #include "curvy/colorpickercard.h"
 #include "curvy/colorwheel.h"
-#include "curvy/graphpanel.h"
+#include "curvy/nodepanel.h"
 #include "curvy/sketchdocument.h"
 #include "testsupport.h"
 
@@ -206,7 +206,7 @@ TEST_F(GraphEditTest, theDocumentsOwnNodesCannotBeDeletedAndTheViewSaysWhy) {
 
 TEST_F(GraphEditTest, undoingAColourEditBringsTheOpenColourCardAndThePanelBack) {
     graph_->select(curvy::NodeRef(fill_));
-    curvy::GraphPanel& panel = window().graphPanel();
+    curvy::NodePanel& panel = window().nodePanel();
     ASSERT_EQ(panel.paramCaption(0), "color");
     const std::string originalHex = panel.paramValue(0);
     panel.toggleColorPicker(0);
@@ -233,7 +233,7 @@ TEST_F(GraphEditTest, undoingAColourEditBringsTheOpenColourCardAndThePanelBack) 
 
 TEST_F(GraphEditTest, theTagsFieldEditsANodesTagsAsOneUndoStep) {
     graph_->select(curvy::NodeRef(circle_));
-    curvy::GraphPanel& panel = window().graphPanel();
+    curvy::NodePanel& panel = window().nodePanel();
     panel.retag("shape  sketch shape");   // blanks are separators and a repeated word counts once
     const std::vector<std::string> expected = {"shape", "sketch"};
     EXPECT_EQ(document_->network().node(circle_).tags(), expected);
@@ -252,7 +252,7 @@ TEST_F(GraphEditTest, theTagsThatMarkTheDocumentsOwnNodesCannotBeEditedFromThePa
     document_->buildSampleLayers();
     const curvy::NodeRef layer = document_->childrenOf()[0];
     graph_->select(layer);
-    curvy::GraphPanel& panel = window().graphPanel();
+    curvy::NodePanel& panel = window().nodePanel();
     std::vector<std::string> refusals;
     panel.onRefused = [&](const std::string& message) { refusals.push_back(message); };
     const std::vector<std::string> before = document_->node(layer).tags();

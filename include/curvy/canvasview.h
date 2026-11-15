@@ -50,6 +50,7 @@ namespace curvy {
         BLPoint toView(const BLPoint& documentPoint) const;
 
         // The topmost shape of the cooked artwork under a view point: inside its fill, or within `tolerancePx` screen pixels of its stroke.
+        // Nothing outside the page is hit (the artwork is clipped to it).
         // The key in the hit names the node that made the shape (see GraphDocument::nodeForShapeKey).
         // @reflect ignore=true
         std::optional<ShapeHit> shapeAt(const newui::Point& viewPoint, float tolerancePx = 3.0f) const;

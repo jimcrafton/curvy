@@ -3,6 +3,7 @@
 #include "curvy/colorpickercard.h"
 #include "curvy/noderef.h"
 #include "curvy/numberscrubber.h"
+#include "curvy/panel.h"
 #include "curvy/sketchdocument.h"
 #include "curvy/swatchpalettecontroller.h"
 
@@ -17,21 +18,28 @@
 
 namespace curvy {
 
-    // The property panel on the right of the graph view (the "graphProps" part of Resources/graphView.newui): the selected node's name, type and
-    // tags, its Display / Bypass / Freeze buttons, every parameter as an editable row in a scroll view, and what feeds it and what uses it. A
-    // node's r, g and b are shown as one colour row (a swatch and a #RRGGBB field). Enter in the name or a field commits it as one undo step;
-    // dragging sideways on a number's caption scrubs it (one undo step per drag). The buttons only report a command; the owner runs it.
+    // The Node panel of the right dock (content in Resources/nodePanel.newui): the selected node's name, type and tags, its Display / Bypass /
+    // Freeze buttons, every parameter as an editable row in a scroll view, and what feeds it and what uses it. A node's r, g and b are shown as
+    // one colour row (a swatch and a #RRGGBB field). Enter in the name or a field commits it as one undo step; dragging sideways on a number's
+    // caption scrubs it (one undo step per drag). The buttons only report a command; the owner runs it. The owner shows the node of the
+    // selection (SelectionModel::primary), whether it was picked in the graph view or on the canvas.
+    // The colour card a colour row opens is a child of `pickerHost` (the canvas), at its top right next to the dock.
     // @reflect ignore=true
-    class GraphPanel {
+    class NodePanel : public Panel {
     public:
-        GraphPanel(newui::View& root, SketchDocument& document);
-        GraphPanel(const GraphPanel&) = delete;
-        GraphPanel& operator=(const GraphPanel&) = delete;
+        // How tall the body starts out, and the least height the content is laid out at (a shorter body scrolls).
+        static constexpr float kBodyHeight = 440.0f;
+        static constexpr float kContentHeight = 360.0f;
+
+        NodePanel(SketchDocument& document, newui::SubView& pickerHost);
 
         // Shows this node; an invalid ref shows an empty panel.
         void show(const NodeRef& node);
         // Puts the keyboard in the name field (what the ring's Rename does).
         void focusName();
+        // Lets go of what listens to the document (the colour card's palettes). The owner calls it before the document dies, because the dock
+        // destroys the panel later; the panel shows nothing useful afterwards.
+        void releaseDocument();
 
         // "graph.display", "graph.bypass" or "graph.freeze" from the buttons.
         std::function<void(const std::string& command)> onCommand;
@@ -111,7 +119,11 @@ namespace curvy {
         void dropLinkTags(const std::string& group);
         std::uint32_t pendingLink_ = 0;   // the linked swatch being used, so the end of its gesture ties the colour to it
 
-        newui::View& root_;
+        newui::SubView& loadContent();
+        void layoutContent();
+
+        newui::SubView& root_;   // the loaded content, in the body
+        newui::SubView& pickerHost_;
         ColorPickerCard* picker_ = nullptr;
         std::unique_ptr<SwatchPaletteController> swatches_;
         std::size_t pickerRow_ = 0;

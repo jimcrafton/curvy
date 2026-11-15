@@ -167,3 +167,15 @@ TEST(ShapeKeyTest, theCanvasHandsBackTheKeyOfTheShapeUnderThePointer) {
     EXPECT_EQ(inside->key, s.key());
     EXPECT_FALSE(canvas.shapeAt(newui::Point(400.0f, 400.0f)).has_value());
 }
+
+TEST(ShapeKeyTest, aShapeBeyondThePageCannotBeClickedWhereItIsNotDrawn) {
+    curvy::SketchDocument document;
+    const curvy::NodeRef layer = document.addLayer();
+    document.addCircle(layer, 0.0f, 0.0f, 500.0f, newui::Color(1.0f, 0.0f, 0.0f, 1.0f));   // far larger than the page, centred on its corner
+    curvy::CanvasView canvas;
+    canvas.setDocument(&document);
+    canvas.setZoom(1.0f);
+    canvas.setPan(100.0f, 100.0f);
+    EXPECT_TRUE(canvas.shapeAt(newui::Point(150.0f, 150.0f)).has_value());     // on the page
+    EXPECT_FALSE(canvas.shapeAt(newui::Point(50.0f, 50.0f)).has_value());      // left of and above the page, still inside the circle
+}

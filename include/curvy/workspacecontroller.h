@@ -9,7 +9,7 @@
 #include "curvy/paneldock.h"
 #include "curvy/panelsmenu.h"
 #include "curvy/graphcrumbs.h"
-#include "curvy/graphpanel.h"
+#include "curvy/nodepanel.h"
 #include "curvy/graphview.h"
 #include "curvy/newdocumentdialog.h"
 #include "curvy/pointtable.h"
@@ -94,7 +94,7 @@ namespace curvy {
         // @reflect ignore=true
         PointTable& pointTable() { return *pointTable_; }
         // @reflect ignore=true
-        GraphPanel& graphPanel() { return *graphPanel_; }
+        NodePanel& nodePanel() { return *nodePanel_; }
         GraphCrumbs& graphCrumbs() { return *graphCrumbs_; }
         // Runs a command of the node ring ("graph.bypass", ...) on the node selected in the graph view.
         bool runGraphCommandFor(const std::string& command) { return runGraphCommand(command); }
@@ -121,6 +121,8 @@ namespace curvy {
         bool pressed(const newui::PenState& pen, const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys);
 
         void openRing(bool byPress);
+        void ensureDockShown(DockSide side);
+        bool recentColorKey(std::uint32_t vk, bool shift);
         // A left press on the canvas: selects the shape under it (the node that made it) in the selection the graph view shares, or clears
         // the selection on empty canvas; `additive` (Shift or Ctrl) adds to it instead. True when the press did something.
         bool selectAt(const newui::Point& pt, bool additive);
@@ -200,7 +202,7 @@ namespace curvy {
         newui::SubView* graphOverlay_ = nullptr;
         std::unique_ptr<newui::ToolFrame> pointFrame_;
         std::unique_ptr<PointTable> pointTable_;
-        std::unique_ptr<GraphPanel> graphPanel_;
+        NodePanel* nodePanel_ = nullptr;   // in the right dock, which owns it
         std::array<newui::Action, 3> historyActions_;   // Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z; the run loop matches them whichever view has focus
         std::unique_ptr<GraphCrumbs> graphCrumbs_;
         RadialMenu* menu_ = nullptr;

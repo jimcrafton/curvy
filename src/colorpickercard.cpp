@@ -1,6 +1,6 @@
 #include "curvy/colorpickercard.h"
 
-#include "curvy/graphpanel.h"
+#include "curvy/nodepanel.h"
 #include "curvy/theme.h"
 
 #include <newui/mouse_constants.h>
@@ -281,7 +281,7 @@ namespace curvy {
     }
 
     std::string ColorPickerCard::hexText() const {
-        return hasAlpha_ ? GraphPanel::colorText(float(r_), float(g_), float(b_), float(a_)) : GraphPanel::colorText(float(r_), float(g_), float(b_));
+        return hasAlpha_ ? NodePanel::colorText(float(r_), float(g_), float(b_), float(a_)) : NodePanel::colorText(float(r_), float(g_), float(b_));
     }
 
     void ColorPickerCard::refreshHex() {
@@ -347,7 +347,7 @@ namespace curvy {
     bool ColorPickerCard::setHex(const std::string& text) {
         float r = 0.0f, g = 0.0f, b = 0.0f, a = 1.0f;
         bool withAlpha = false;
-        if (!GraphPanel::parseColor(text, r, g, b, a, withAlpha)) {
+        if (!NodePanel::parseColor(text, r, g, b, a, withAlpha)) {
             refreshHex();
             return false;
         }

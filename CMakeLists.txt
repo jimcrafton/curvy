@@ -42,7 +42,7 @@ add_library(curvy_core STATIC
     src/swatchpalettes.cpp
     src/swatchstrip.cpp
     src/swatchpalettecontroller.cpp
-    src/graphpanel.cpp
+    src/nodepanel.cpp
     src/selectionmodel.cpp
     src/shapepaths.cpp
     src/graphoverviews.cpp

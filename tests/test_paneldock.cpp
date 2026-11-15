@@ -13,6 +13,7 @@ namespace {
         void SetUp() override {
             curvytest::WorkspaceTest::SetUp();
             window().presentMenu = [](const std::vector<curvy::PanelMenuEntry>&, const Point&) {};   // the native popup would block
+            layout().setUserHidden("node", true);   // these tests are about two panels: Document and the sample
             window().docks().setCollapsed(DockSide::Right, false);   // the dock must have a size for "outside it" to mean something
             frame_.rootView().updateLayout();
         }

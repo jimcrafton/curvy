@@ -365,6 +365,11 @@ namespace curvy {
         info.title = "Document";
         info.side = DockSide::Right;
         panelLayout_.add(info);
+        PanelInfo nodeInfo;
+        nodeInfo.id = "node";
+        nodeInfo.title = "Node";
+        nodeInfo.side = DockSide::Right;
+        panelLayout_.add(nodeInfo);
 
         rightDock_ = new PanelDock(panelLayout_, DockSide::Right);
         rightDock_->setLayoutParams(std::make_unique<FlexLayoutParams>(1.0f));
@@ -379,6 +384,30 @@ namespace curvy {
 
         documentPanel_ = new DocumentPanel(document_);
         rightDock_->addPanel(documentPanel_);
+        nodePanel_ = new NodePanel(document_, *canvas_);
+        rightDock_->addPanel(nodePanel_);
+        nodePanel_->onCommand = [this](const std::string& command) {
+            runGraphCommand(command);
+            if (graphOverlay_->isVisible()) {
+                focusGraph();
+            }
+        };
+        nodePanel_->onRefused = [this](const std::string& message) { model_->say(message); };
+        nodePanel_->onEdited = [this]() {
+            graphView_->style().markDirty();
+            canvas_->style().markDirty();
+        };
+        if (auto* data = dynamic_cast<Button*>(nodePanel_->findView("graphDataButton"))) {
+            data->onClick += [this](Control&) {
+                showPointTable();
+                return SyncReturn::Handled;
+            };
+        }
+        // Whatever the selection is, picked in the graph view or on the canvas, is what the panel shows.
+        graphView_->selectionModel().onChanged += [this](SelectionModel& selection) {
+            nodePanel_->show(selection.primary());
+            return SyncReturn::Ignored;
+        };
         rightDock_->onPanelMenu += [this](PanelDock&, Panel& panel, const Point& at) {
             showPanelMenu(panel, at);
             return SyncReturn::Handled;
@@ -460,7 +489,6 @@ namespace curvy {
         canvas_->onSizeChanged.add(this, &WorkspaceController::handleCanvasSized);
 
         graphView_->onSelectionChanged = [this]() {
-            graphPanel_->show(graphView_->selected());
             model_->say(graphView_->hint());
             graphCrumbs_->show(graphView_->levelNames());
         };
@@ -488,14 +516,6 @@ namespace curvy {
             graphView_->goToLevel(level);
             focusGraph();
         };
-
-        graphPanel_ = std::make_unique<GraphPanel>(*graphOverlay_, document_);
-        graphPanel_->onCommand = [this](const std::string& command) {
-            runGraphCommand(command);
-            focusGraph();
-        };
-        graphPanel_->onRefused = [this](const std::string& message) { model_->say(message); };
-        graphPanel_->onEdited =[this]() { graphView_->style().markDirty(); };
 
         View* popup = Bundle::instance().loadView("pointTable");
         auto* popupView = dynamic_cast<SubView*>(popup);
@@ -534,12 +554,6 @@ namespace curvy {
             pointFrame_->hide();
             focusGraph();
         };
-        if (auto* data = dynamic_cast<Button*>(graphOverlay_->findView("graphDataButton"))) {
-            data->onClick += [this](Control&) {
-                showPointTable();
-                return SyncReturn::Handled;
-            };
-        }
         if (auto* fit = dynamic_cast<Button*>(graphOverlay_->findView("graphFitButton"))) {
             fit->onClick += [this](Control&) {
                 graphView_->fit();
@@ -568,6 +582,23 @@ namespace curvy {
         return {name, "Data...", "graph.data", {
             {"Display", "D", "graph.display"}, {"Bypass", "B", "graph.bypass"}, {"Freeze", "F", "graph.freeze"}, {"Rename", "R", "graph.rename"},
             {"Group", "G", "graph.group"}, {"Ungroup", "U", "graph.ungroup"}, {"Enter", "E", "graph.enter"}, {"Exit", "X", "graph.exit"}}};
+    }
+
+    // While the Node panel's colour card is open the number keys 1 to 8 apply the recent colours. The card lies over the canvas, so a click in it
+    // leaves the keyboard with the canvas as often as with the graph view; both filters ask.
+    bool WorkspaceController::recentColorKey(std::uint32_t vk, bool shift) {
+        if (shift || vk < vkNumber1 || vk > vkNumber8 || nodePanel_ == nullptr || !nodePanel_->colorPickerOpen()) {
+            return false;
+        }
+        const std::size_t index = vk - vkNumber1;
+        if (nodePanel_->useRecentColor(index)) {
+            graphView_->style().markDirty();
+            canvas_->style().markDirty();
+            model_->say("Recent colour " + std::to_string(index + 1));
+        } else {
+            model_->say("No recent colour " + std::to_string(index + 1));
+        }
+        return true;
     }
 
     bool WorkspaceController::filterGraphKey(std::uint32_t mask, std::uint32_t vk) {
@@ -599,15 +630,7 @@ namespace curvy {
             }
             return true;
         }
-        if (!shift && vk >= vkNumber1 && vk <= vkNumber8 && graphPanel_->colorPickerOpen()) {
-            const std::size_t index = vk - vkNumber1;
-            if (graphPanel_->useRecentColor(index)) {
-                graphView_->style().markDirty();
-                canvas_->style().markDirty();
-                model_->say("Recent colour " + std::to_string(index + 1));
-            } else {
-                model_->say("No recent colour " + std::to_string(index + 1));
-            }
+        if (recentColorKey(vk, shift)) {
             return true;
         }
         const std::string key = keyName(vk);
@@ -623,7 +646,7 @@ namespace curvy {
     }
 
     SyncReturn WorkspaceController::handleGraphMouseDown(View&, const Point& pt, std::uint32_t buttons, std::uint32_t) {
-        graphPanel_->closeColorPicker();
+        nodePanel_->closeColorPicker();
         if ((buttons & mbmRightButton) != 0) {
             pointer_ = graphView_->mapTo(*canvas_, pt);
             pointerKnown_ = true;
@@ -669,7 +692,7 @@ namespace curvy {
                 document_.setNodeFrozen(selected, now);
                 model_->say(name + (now ? " frozen" : " unfrozen"));
             } else if (command == "graph.rename") {
-                graphPanel_->focusName();
+                nodePanel_->focusName();
                 model_->say("Type the new name and press Enter");
                 return true;
             } else if (command == "graph.group") {
@@ -699,22 +722,19 @@ namespace curvy {
         } catch (const std::exception& error) {
             model_->say(error.what());
         }
-        graphPanel_->show(graphView_->selected());
+        nodePanel_->show(graphView_->selected());
         graphView_->style().markDirty();
         canvas_->style().markDirty();
         return true;
     }
 
     void WorkspaceController::showPointTable() {
-        if (!graphOverlay_->isVisible()) {
-            return;
-        }
         if (!graphView_->selected().valid()) {
             model_->say("Select a node to see its data");
             return;
         }
         if (!pointFrame_->isVisible()) {
-            const Rect screen = graphOverlay_->localToScreen(graphOverlay_->getClientBounds());
+            const Rect screen = canvas_->localToScreen(canvas_->getClientBounds());
             const float w = pointFrame_->getBounds().width(), h = pointFrame_->getBounds().height();
             pointFrame_->moveTo(Rect(screen.left() + (screen.width() - w) * 0.5f, screen.top() + (screen.height() - h) * 0.5f, w, h));
         }
@@ -738,6 +758,8 @@ namespace curvy {
             return;
         }
         if (show) {
+            ensureDockShown(DockSide::Right);   // before the layout, so the overlay is sized for the narrower canvas
+            frame_.rootView().updateLayout();   // the dock changes the canvas size, which the overlay reads next
             layoutGraphOverlay();
         }
         if (!show) {
@@ -758,6 +780,9 @@ namespace curvy {
         *alive_ = false;
         for (Action& action : historyActions_) {
             loop_->unregisterAction(&action);
+        }
+        if (nodePanel_ != nullptr) {
+            nodePanel_->releaseDocument();   // the dock destroys the panel after the document is gone
         }
         task_.cancel();
         task_.waitFor(std::chrono::seconds(30));   // the task's own destructor joins; this only bounds how long a stuck job is waited on first
@@ -1037,6 +1062,13 @@ namespace curvy {
     void WorkspaceController::showPanelMenu(Panel& panel, const Point& screen) {
         const Point floatAt(screen.x - DockLayout::kTearOffDistance - 200.0f, screen.y);
         presentMenu(PanelsMenu::forPanel(panelLayout_, panel, floatAt), screen);
+    }
+
+    // The Node panel is what shows the selection, so whatever selects something or shows the graph makes sure the dock it lives in is open.
+    void WorkspaceController::ensureDockShown(DockSide side) {
+        if (docks_ != nullptr && docks_->collapsed(side)) {
+            docks_->setCollapsed(side, false);
+        }
     }
 
     void WorkspaceController::toggleDock(DockSide side) {
@@ -1326,6 +1358,7 @@ namespace curvy {
             return !additive && selection.clear();
         }
         if (selection.selectShapeKey(hit->key, additive) && selection.primary().valid()) {
+            ensureDockShown(DockSide::Right);
             model_->say(document_.node(selection.primary()).name());
         }
         return true;
@@ -1409,7 +1442,7 @@ namespace curvy {
             stack.undo();
         }
         // The panel is not a view of the document: it shows the selected node again (a node an undo removed shows as an empty panel).
-        graphPanel_->show(graphView_->selected());
+        nodePanel_->show(graphView_->selected());
         graphView_->style().markDirty();
         canvas_->style().markDirty();
         model_->say((forward ? "Redo " : "Undo ") + what);
@@ -1434,6 +1467,9 @@ namespace curvy {
             } else {
                 menu_->handleKey(keyName(vk), shift);
             }
+            return true;
+        }
+        if (recentColorKey(vk, shift)) {
             return true;
         }
         if (vk == vkTab && !shift) {

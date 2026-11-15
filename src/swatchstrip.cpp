@@ -1,6 +1,6 @@
 #include "curvy/swatchstrip.h"
 
-#include "curvy/graphpanel.h"
+#include "curvy/nodepanel.h"
 #include "curvy/theme.h"
 
 #include <newui/menus.h>
@@ -401,7 +401,7 @@ namespace curvy {
         const auto& swatches = tiles_->swatches();
         if (index >= 0 && std::size_t(index) < swatches.size()) {
             const StripSwatch& s = swatches[std::size_t(index)];
-            const std::string hex = s.a < 1.0f ? GraphPanel::colorText(s.r, s.g, s.b, s.a) : GraphPanel::colorText(s.r, s.g, s.b);
+            const std::string hex = s.a < 1.0f ? NodePanel::colorText(s.r, s.g, s.b, s.a) : NodePanel::colorText(s.r, s.g, s.b);
             foot_->setText((s.name.empty() ? hex : s.name + "  " + hex) + (s.linked ? "  linked" : ""));
         } else {
             foot_->setText(std::to_string(swatches.size()) + (swatches.size() == 1 ? " colour" : " colours"));

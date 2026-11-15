@@ -1,9 +1,10 @@
-#include "curvy/graphpanel.h"
+#include "curvy/nodepanel.h"
 
 #include <jitnodes/graph/network.h>
 
 #include "curvy/theme.h"
 
+#include <newui/bundle.h>
 #include <newui/cursor.h>
 #include <newui/mouse_constants.h>
 
@@ -19,7 +20,35 @@ namespace curvy {
 
     using namespace newui;
 
-    GraphPanel::GraphPanel(View& root, SketchDocument& document) : root_(root), document_(document) {
+    SubView& NodePanel::loadContent() {
+        View* loaded = Bundle::instance().loadView("nodePanel");
+        auto* content = dynamic_cast<SubView*>(loaded);
+        if (content == nullptr) {
+            delete loaded;
+            throw std::runtime_error("NodePanel: Resources/nodePanel.newui did not load");
+        }
+        body().addChild(content);
+        return *content;
+    }
+
+    // The body shows the whole content when it can; a shorter body scrolls it.
+    void NodePanel::layoutContent() {
+        const Rect own = body().bounds();
+        const float width = own.width();
+        const float height = (std::max)(own.height(), kContentHeight);
+        root_.setBounds(Rect(0.0f, 0.0f, width, height));
+        body().setContentSize(Size(width, height));
+        root_.updateLayout();
+        style().markDirty();
+    }
+
+    NodePanel::NodePanel(SketchDocument& document, SubView& pickerHost) : Panel("node", "Node"), root_(loadContent()), pickerHost_(pickerHost), document_(document) {
+        setBodyHeight(kBodyHeight);
+        body().onSizeChanged += [this](View&, const Size&) {
+            layoutContent();
+            return SyncReturn::Handled;
+        };
+        layoutContent();
         for (const char* id : {"graphNameField", "graphTagsField"}) {
             if (auto* f = field(id)) {
                 f->caret().setColor(Theme::current().textColor());
@@ -60,23 +89,23 @@ namespace curvy {
         show(NodeRef());
     }
 
-    Label* GraphPanel::label(const std::string& name) const {
+    Label* NodePanel::label(const std::string& name) const {
         return dynamic_cast<Label*>(root_.findView(name));
     }
 
-    TextField* GraphPanel::field(const std::string& name) const {
+    TextField* NodePanel::field(const std::string& name) const {
         return dynamic_cast<TextField*>(root_.findView(name));
     }
 
-    std::string GraphPanel::narrow(const std::wstring& text) {
+    std::string NodePanel::narrow(const std::wstring& text) {
         return std::string(text.begin(), text.end());
     }
 
-    std::wstring GraphPanel::widen(const std::string& text) {
+    std::wstring NodePanel::widen(const std::string& text) {
         return std::wstring(text.begin(), text.end());
     }
 
-    void GraphPanel::show(const NodeRef& node) {
+    void NodePanel::show(const NodeRef& node) {
         if (!(node == node_)) {
             closeColorPicker();
         }
@@ -203,7 +232,7 @@ namespace curvy {
         root_.style().markDirty();
     }
 
-    void GraphPanel::focusName() {
+    void NodePanel::focusName() {
         if (TextField* name = field("graphNameField")) {
             if (RootView* rootView = name->rootView()) {
                 rootView->setFocusedSubView(name);
@@ -211,19 +240,24 @@ namespace curvy {
         }
     }
 
-    void GraphPanel::commitName() {
+    void NodePanel::releaseDocument() {
+        closeColorPicker();
+        swatches_.reset();
+    }
+
+    void NodePanel::commitName() {
         if (TextField* name = field("graphNameField")) {
             rename(narrow(name->text()));
         }
     }
 
-    void GraphPanel::commitTags() {
+    void NodePanel::commitTags() {
         if (TextField* tags = field("graphTagsField")) {
             retag(narrow(tags->text()));
         }
     }
 
-    void GraphPanel::retag(const std::string& text) {
+    void NodePanel::retag(const std::string& text) {
         if (!node_.valid() || !document_.hasNode(node_)) {
             show(node_);
             return;
@@ -250,7 +284,7 @@ namespace curvy {
         show(node_);
     }
 
-    void GraphPanel::rename(const std::string& text) {
+    void NodePanel::rename(const std::string& text) {
         if (!node_.valid() || !document_.hasNode(node_) || text.empty() || text == document_.node(node_).name()) {
             show(node_);
             return;
@@ -268,7 +302,7 @@ namespace curvy {
         show(node_);
     }
 
-    void GraphPanel::makeRow() {
+    void NodePanel::makeRow() {
         if (viewport_ == nullptr) {
             return;
         }
@@ -334,7 +368,7 @@ namespace curvy {
         rows_.push_back(row);
     }
 
-    void GraphPanel::fillRow(std::size_t index) {
+    void NodePanel::fillRow(std::size_t index) {
         Row& row = rows_[index];
         const bool used = index < entries_.size() && node_.valid() && document_.hasNode(node_);
         row.caption->setVisible(used);
@@ -359,7 +393,7 @@ namespace curvy {
         }
     }
 
-    void GraphPanel::layoutRows() {
+    void NodePanel::layoutRows() {
         if (viewport_ == nullptr || scroll_ == nullptr) {
             return;
         }
@@ -383,7 +417,7 @@ namespace curvy {
         scroll_->style().markDirty();
     }
 
-    double GraphPanel::clampTo(const Entry& entry, double value) {
+    double NodePanel::clampTo(const Entry& entry, double value) {
         if (entry.minimum && value < *entry.minimum) {
             return *entry.minimum;
         }
@@ -393,7 +427,7 @@ namespace curvy {
         return value;
     }
 
-    std::string GraphPanel::limitText(const Entry& entry) {
+    std::string NodePanel::limitText(const Entry& entry) {
         char low[32], high[32];
         std::snprintf(low, sizeof(low), "%g", entry.minimum.value_or(0.0));
         std::snprintf(high, sizeof(high), "%g", entry.maximum.value_or(0.0));
@@ -403,12 +437,9 @@ namespace curvy {
         return entry.minimum ? "at least " + std::string(low) : "at most " + std::string(high);
     }
 
-    // The card lies over the node area, at its top right, so it never covers the property panel it was opened from.
-    void GraphPanel::makePicker() {
-        auto* nodes = dynamic_cast<SubView*>(root_.findView("graphNodes"));
-        if (nodes == nullptr) {
-            return;
-        }
+    // The card lies over the canvas, at its top right next to the dock, so it never covers the panel it was opened from.
+    void NodePanel::makePicker() {
+        SubView* nodes = &pickerHost_;
         picker_ = new ColorPickerCard();
         picker_->setHexVisible(false);   // the colour row already shows the hex
         picker_->setVisible(false);
@@ -448,11 +479,11 @@ namespace curvy {
         };
     }
 
-    bool GraphPanel::colorPickerOpen() const {
+    bool NodePanel::colorPickerOpen() const {
         return picker_ != nullptr && picker_->isVisible();
     }
 
-    bool GraphPanel::useRecentColor(std::size_t index) {
+    bool NodePanel::useRecentColor(std::size_t index) {
         const std::vector<Swatch>& recent = document_.recentColors();
         if (!colorPickerOpen() || index >= recent.size()) {
             return false;
@@ -462,7 +493,7 @@ namespace curvy {
         return true;
     }
 
-    void GraphPanel::closeColorPicker() {
+    void NodePanel::closeColorPicker() {
         if (picker_ != nullptr && picker_->isVisible()) {
             picker_->setVisible(false);
             if (View* parent = picker_->parent()) {
@@ -472,7 +503,7 @@ namespace curvy {
         pickerBefore_.reset();
     }
 
-    void GraphPanel::toggleColorPicker(std::size_t row) {
+    void NodePanel::toggleColorPicker(std::size_t row) {
         if (picker_ == nullptr || row >= entries_.size() || !entries_[row].color || !node_.valid() || !document_.hasNode(node_)) {
             return;
         }
@@ -491,7 +522,7 @@ namespace curvy {
         syncPicker();
     }
 
-    void GraphPanel::syncPicker() {
+    void NodePanel::syncPicker() {
         if (!colorPickerOpen()) {
             return;
         }
@@ -506,7 +537,7 @@ namespace curvy {
         swatches_->setCurrent(Swatch{float(picker_->red()), float(picker_->green()), float(picker_->blue()), float(picker_->alpha()), ""});
     }
 
-    void GraphPanel::dropLinkTags(const std::string& group) {
+    void NodePanel::dropLinkTags(const std::string& group) {
         jitnodes::Node& node = document_.node(node_);
         const std::vector<std::string> tags = node.tags();
         for (const std::string& tag : tags) {
@@ -518,7 +549,7 @@ namespace curvy {
         }
     }
 
-    void GraphPanel::applyPicker() {
+    void NodePanel::applyPicker() {
         if (pickerRow_ >= entries_.size() || !entries_[pickerRow_].color || !node_.valid() || !document_.hasNode(node_)) {
             return;
         }
@@ -536,21 +567,21 @@ namespace curvy {
         }
     }
 
-    std::string GraphPanel::colorText(float r, float g, float b) {
+    std::string NodePanel::colorText(float r, float g, float b) {
         const auto byte = [](float v) { return unsigned(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f); };
         char text[16];
         std::snprintf(text, sizeof(text), "#%02X%02X%02X", byte(r), byte(g), byte(b));
         return text;
     }
 
-    std::string GraphPanel::colorText(float r, float g, float b, float a) {
+    std::string NodePanel::colorText(float r, float g, float b, float a) {
         const auto byte = [](float v) { return unsigned(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f); };
         char text[16];
         std::snprintf(text, sizeof(text), "#%02X%02X%02X%02X", byte(r), byte(g), byte(b), byte(a));
         return text;
     }
 
-    bool GraphPanel::parseColor(const std::string& text, float& r, float& g, float& b, float& a, bool& hasAlpha) {
+    bool NodePanel::parseColor(const std::string& text, float& r, float& g, float& b, float& a, bool& hasAlpha) {
         std::string digits = text;
         digits.erase(std::remove_if(digits.begin(), digits.end(), [](unsigned char c) { return std::isspace(c) != 0; }), digits.end());
         if (!digits.empty() && digits[0] == '#') {
@@ -571,14 +602,14 @@ namespace curvy {
         return true;
     }
 
-    void GraphPanel::setParam(std::size_t row, const std::string& text) {
+    void NodePanel::setParam(std::size_t row, const std::string& text) {
         if (row < rows_.size()) {
             rows_[row].field->setText(widen(text));
         }
         commitParam(row);
     }
 
-    void GraphPanel::commitParam(std::size_t row) {
+    void NodePanel::commitParam(std::size_t row) {
         if (row >= rows_.size() || row >= entries_.size() || !node_.valid() || !document_.hasNode(node_)) {
             return;
         }
@@ -626,30 +657,30 @@ namespace curvy {
         show(node_);
     }
 
-    std::string GraphPanel::title() const {
+    std::string NodePanel::title() const {
         const Label* l = label("graphPropsTitle");
         return l != nullptr ? l->text() : "";
     }
 
-    std::string GraphPanel::kind() const {
+    std::string NodePanel::kind() const {
         const Label* l = label("graphPropsKind");
         return l != nullptr ? l->text() : "";
     }
 
-    std::string GraphPanel::name() const {
+    std::string NodePanel::name() const {
         const TextField* f = field("graphNameField");
         return f != nullptr ? narrow(f->text()) : "";
     }
 
-    std::string GraphPanel::paramCaption(std::size_t row) const {
+    std::string NodePanel::paramCaption(std::size_t row) const {
         return row < entries_.size() ? entries_[row].name : "";
     }
 
-    std::string GraphPanel::paramValue(std::size_t row) const {
+    std::string NodePanel::paramValue(std::size_t row) const {
         return row < entries_.size() && row < rows_.size() ? narrow(rows_[row].field->text()) : "";
     }
 
-    bool GraphPanel::paramShown(std::size_t row) const {
+    bool NodePanel::paramShown(std::size_t row) const {
         return row < entries_.size() && row < rows_.size() && rows_[row].field->isVisible();
     }
 

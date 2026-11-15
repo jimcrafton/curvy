@@ -2,7 +2,7 @@
 
 #include "curvy/geometrytable.h"
 #include "curvy/graphcrumbs.h"
-#include "curvy/graphpanel.h"
+#include "curvy/nodepanel.h"
 #include "curvy/objectnode.h"
 #include "curvy/sketchdocument.h"
 #include "testsupport.h"
@@ -84,7 +84,7 @@ TEST_F(GraphOverlayTest, theGraphViewReplacesTheCanvasUntilToggledBack) {
     EXPECT_TRUE(window().graphShown());
     EXPECT_EQ(window().graph().path(), "root");
     const newui::Rect canvas = window().canvas().getClientBounds();
-    EXPECT_NEAR(window().graph().getClientBounds().width() + 260.0f, canvas.width(), 1.0f);
+    EXPECT_NEAR(window().graph().getClientBounds().width(), canvas.width(), 1.0f);   // the node properties are in the dock now
 
     window().toggleGraph();
     EXPECT_FALSE(window().graphShown());
@@ -142,8 +142,8 @@ TEST_F(GraphOverlayTest, theNodeRingRunsItsCommandsOnTheSelectedNode) {
     EXPECT_FALSE(document.node(layer).bypassed());
 
     window().graph().select(layer);
-    EXPECT_EQ(window().graphPanel().title(), "Layer1");
-    EXPECT_EQ(window().graphPanel().kind(), "curvyObject");
+    EXPECT_EQ(window().nodePanel().title(), "Layer1");
+    EXPECT_EQ(window().nodePanel().kind(), "curvyObject");
 
     window().runGraphCommandFor("graph.bypass");
     EXPECT_TRUE(document.node(layer).bypassed());
@@ -193,18 +193,18 @@ TEST_F(GraphOverlayTest, thePanelRenamesANodeAndEditsItsNumbersAsUndoSteps) {
     const curvy::NodeRef layer = document.childrenOf()[0];
     window().graph().select(layer);
 
-    window().graphPanel().rename("Backdrop");
+    window().nodePanel().rename("Backdrop");
     EXPECT_EQ(document.node(layer).name(), "Backdrop");
-    EXPECT_EQ(window().graphPanel().title(), "Backdrop");
+    EXPECT_EQ(window().nodePanel().title(), "Backdrop");
     document.undoStack().undo();
     EXPECT_EQ(document.node(layer).name(), "Layer1");
 
     window().graph().select(layer);
-    ASSERT_TRUE(window().graphPanel().paramShown(0));
-    const std::string caption = window().graphPanel().paramCaption(0);
-    window().graphPanel().setParam(0, "1");
+    ASSERT_TRUE(window().nodePanel().paramShown(0));
+    const std::string caption = window().nodePanel().paramCaption(0);
+    window().nodePanel().setParam(0, "1");
     EXPECT_EQ(document.node(layer).getFloat(caption), 1.0f);
-    EXPECT_EQ(window().graphPanel().paramValue(0), "1");
+    EXPECT_EQ(window().nodePanel().paramValue(0), "1");
 }
 
 TEST_F(GraphOverlayTest, undoAndRedoBringThePanelBackToTheDocument) {
@@ -215,21 +215,21 @@ TEST_F(GraphOverlayTest, undoAndRedoBringThePanelBackToTheDocument) {
     curvy::SketchDocument& document = window().document();
     const curvy::NodeRef layer = document.childrenOf()[0];
     window().graph().select(layer);
-    ASSERT_TRUE(window().graphPanel().paramShown(0));
-    const std::string caption = window().graphPanel().paramCaption(0);
-    const std::string before = window().graphPanel().paramValue(0);
+    ASSERT_TRUE(window().nodePanel().paramShown(0));
+    const std::string caption = window().nodePanel().paramCaption(0);
+    const std::string before = window().nodePanel().paramValue(0);
 
-    window().graphPanel().setParam(0, "7");
-    ASSERT_EQ(window().graphPanel().paramValue(0), "7");
+    window().nodePanel().setParam(0, "7");
+    ASSERT_EQ(window().nodePanel().paramValue(0), "7");
     EXPECT_TRUE(window().undo());
-    EXPECT_EQ(window().graphPanel().paramValue(0), before);
+    EXPECT_EQ(window().nodePanel().paramValue(0), before);
     EXPECT_NE(document.node(layer).getFloat(caption), 7.0f);
     EXPECT_TRUE(window().redo());
-    EXPECT_EQ(window().graphPanel().paramValue(0), "7");
+    EXPECT_EQ(window().nodePanel().paramValue(0), "7");
 
-    window().graphPanel().rename("Backdrop");
+    window().nodePanel().rename("Backdrop");
     EXPECT_TRUE(window().undo());
-    EXPECT_EQ(window().graphPanel().name(), "Layer1");
+    EXPECT_EQ(window().nodePanel().name(), "Layer1");
 }
 
 TEST_F(GraphOverlayTest, groupingFromTheGraphWrapsTheSelectedShape) {
@@ -273,7 +273,7 @@ TEST_F(GraphOverlayTest, thePanelShowsEveryParameterOfATransformAndFoldsAFillsRg
     }
 
     window().graph().select(transform);
-    curvy::GraphPanel& panel = window().graphPanel();
+    curvy::NodePanel& panel = window().nodePanel();
     ASSERT_EQ(panel.paramCount(), 8u);
     bool hasTx = false, hasTy = false;
     for (std::size_t row = 0; row < panel.paramCount(); ++row) {
@@ -298,7 +298,7 @@ TEST_F(GraphOverlayTest, thePanelShowsEveryParameterOfATransformAndFoldsAFillsRg
     EXPECT_NEAR(document.node(fill).getFloat("g"), 128.0f / 255.0f, 1e-5);
     EXPECT_FLOAT_EQ(document.node(fill).getFloat("b"), 0.0f);
     EXPECT_FLOAT_EQ(document.node(fill).getFloat("alpha"), originalAlpha);   // six digits leave the alpha alone
-    EXPECT_EQ(panel.paramValue(0), curvy::GraphPanel::colorText(1.0f, 128.0f / 255.0f, 0.0f, originalAlpha));
+    EXPECT_EQ(panel.paramValue(0), curvy::NodePanel::colorText(1.0f, 128.0f / 255.0f, 0.0f, originalAlpha));
     panel.setParam(0, "#FF800080");
     EXPECT_NEAR(document.node(fill).getFloat("alpha"), 128.0f / 255.0f, 1e-5);
     document.undoStack().undo();
@@ -342,7 +342,7 @@ TEST_F(GraphOverlayTest, minAndMaxTagsKeepATypedNumberInRange) {
         }
     }
     window().graph().select(fill);
-    curvy::GraphPanel& panel = window().graphPanel();
+    curvy::NodePanel& panel = window().nodePanel();
     std::string refused;
     panel.onRefused = [&refused](const std::string& message) { refused = message; };
     std::size_t opacity = panel.paramCount();
@@ -376,7 +376,7 @@ TEST_F(GraphOverlayTest, theColourSwatchOpensAWheelThatEditsTheColourAsOneUndoSt
         (network.node(id).typeName() == "curvyFill" ? fill : other) = curvy::NodeRef(window().graph().scope(), id);
     }
     window().graph().select(fill);
-    curvy::GraphPanel& panel = window().graphPanel();
+    curvy::NodePanel& panel = window().nodePanel();
     ASSERT_EQ(panel.paramCaption(0), "color");
     const float originalR = document.node(fill).getFloat("r"), originalG = document.node(fill).getFloat("g"), originalB = document.node(fill).getFloat("b");
 
@@ -443,7 +443,7 @@ TEST_F(GraphOverlayTest, usingALinkedSwatchTiesTheColourToItAndAHandEditUntiesIt
         }
     }
     window().graph().select(fill);
-    curvy::GraphPanel& panel = window().graphPanel();
+    curvy::NodePanel& panel = window().nodePanel();
     document.setSwatchLinked(0, 5, true);
     const std::string tag = curvy::SwatchLinks::tag(document.palettes()[0].swatches[5].link, "color");
 
@@ -486,7 +486,7 @@ TEST_F(GraphOverlayTest, keysOneToEightApplyTheRecentColoursWhileTheColourCardIs
         }
     }
     window().graph().select(fill);
-    curvy::GraphPanel& panel = window().graphPanel();
+    curvy::NodePanel& panel = window().nodePanel();
     const HWND target = frame_.rootView().windowHandle();
     frame_.rootView().setFocusedSubView(&window().graph());
 
@@ -527,7 +527,7 @@ TEST_F(GraphOverlayTest, theColourCardShowsThePalettesAndASwatchClickEditsTheCol
         }
     }
     window().graph().select(fill);
-    curvy::GraphPanel& panel = window().graphPanel();
+    curvy::NodePanel& panel = window().nodePanel();
     const float originalR = document.node(fill).getFloat("r"), originalG = document.node(fill).getFloat("g"), originalB = document.node(fill).getFloat("b");
 
     panel.toggleColorPicker(0);
@@ -636,17 +636,17 @@ TEST(ColorWheelTest, hsbAndRgbConvertBothWays) {
     EXPECT_FALSE(defined);
 }
 
-TEST(GraphPanelColor, convertsHexAndRejectsJunk) {
+TEST(NodePanelColor, convertsHexAndRejectsJunk) {
     float r = 0.0f, g = 0.0f, b = 0.0f, a = 1.0f;
     bool hasAlpha = true;
-    EXPECT_TRUE(curvy::GraphPanel::parseColor("e64d33", r, g, b, a, hasAlpha));
+    EXPECT_TRUE(curvy::NodePanel::parseColor("e64d33", r, g, b, a, hasAlpha));
     EXPECT_FALSE(hasAlpha);
-    EXPECT_EQ(curvy::GraphPanel::colorText(r, g, b), "#E64D33");
-    EXPECT_TRUE(curvy::GraphPanel::parseColor("#E64D3380", r, g, b, a, hasAlpha));
+    EXPECT_EQ(curvy::NodePanel::colorText(r, g, b), "#E64D33");
+    EXPECT_TRUE(curvy::NodePanel::parseColor("#E64D3380", r, g, b, a, hasAlpha));
     EXPECT_TRUE(hasAlpha);
-    EXPECT_EQ(curvy::GraphPanel::colorText(r, g, b, a), "#E64D3380");
-    EXPECT_FALSE(curvy::GraphPanel::parseColor("#12345", r, g, b, a, hasAlpha));
-    EXPECT_FALSE(curvy::GraphPanel::parseColor("#GG0000", r, g, b, a, hasAlpha));
+    EXPECT_EQ(curvy::NodePanel::colorText(r, g, b, a), "#E64D3380");
+    EXPECT_FALSE(curvy::NodePanel::parseColor("#12345", r, g, b, a, hasAlpha));
+    EXPECT_FALSE(curvy::NodePanel::parseColor("#GG0000", r, g, b, a, hasAlpha));
 }
 
 TEST_F(GraphOverlayTest, theDataWindowShowsAVerticalScrollBarForManyRowsAndKeepsItWhenResized) {

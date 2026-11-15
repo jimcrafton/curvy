@@ -59,6 +59,9 @@ namespace curvy {
             return std::nullopt;
         }
         const BLPoint at = toDocument(viewPoint);
+        if (at.x < 0.0 || at.y < 0.0 || at.x > double(document_->pageWidth()) || at.y > double(document_->pageHeight())) {
+            return std::nullopt;   // the artwork is clipped to the page, so what lies beyond it is not drawn and cannot be clicked
+        }
         return curvy::shapeAt(*artwork, float(at.x), float(at.y), tolerancePx / zoom_);
     }
 
