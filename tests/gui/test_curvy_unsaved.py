@@ -1,9 +1,9 @@
 r"""GUI check of unsaved changes: the title star, the Save/Don't Save/Cancel question when the window is closed, and a close that is
 refused while a long save is still running.
 
-    python D:\code\curvy\tests\gui\test_curvy_unsaved.py --exe D:\code\curvy\out\build\x64-debug\curvy.exe
+    python D:\code\curvy\tests\gui\test_curvy_unsaved.py --exe D:\code\curvy\out\build\x64-release\curvy.exe
 
-The document is large (tens of thousands of nodes, a save takes seconds). curvyTests.exe, next to curvy.exe, writes it once per run
+The document is large (15,000 circles; a save takes about 0.3 s on release, seconds on debug). curvyTests.exe, next to curvy.exe, writes it once per run
 (LargeDocument.DISABLED_WriteTheLargeFile); the file opens with the graph view up and the first layer selected, so the edit is a rename
 in the property panel and no test needs to know where a box is.
 """
@@ -19,7 +19,7 @@ sys.path.insert(0, r"D:\code\newui\tools\guitest")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import newui_guitest
-from test_curvy_gui import CurvyCase
+from curvyCase import CurvyCase
 from test_curvy_samples import Samples
 
 WM_CLOSE = 0x0010
@@ -127,11 +127,10 @@ class UnsavedChanges(Samples):
         self.app.wait_idle()
         self.key_on_canvas("s", raw=True)
         self.app.wait_until(lambda: "Saving" in self.app.prop("hintKeys", "text"), "the save to start", timeout=10, interval=0.01)
-        self.close_window()
-        time.sleep(0.5)
+        user32.SendMessageW(self.window, WM_CLOSE, 0, 0)   # returns once the app has handled it; the save (about 0.3 s on release) is still running
+        self.assertIn("Saving", self.app.prop("hintKeys", "text"), "the save ended before the close was handled; the document is too small")
         self.assertFalse(self.window_is_gone(), "the window closed during the save")
         self.assertNotEqual(QUESTION, self.foreground_title(), "the question came up during the save")
-        self.assertIn("Saving", self.app.prop("hintKeys", "text"), "the save ended before the close was tried; the document is too small")
         self.app.wait_until(lambda: "Saved" in self.app.prop("hintKeys", "text"), "the save to finish", timeout=120)
         self.assertTrue(self.name_in_file())
         self.assertFalse(self.title().endswith("*"), self.title())

@@ -393,6 +393,7 @@ namespace curvy {
             }
         };
         nodePanel_->onRefused = [this](const std::string& message) { model_->say(message); };
+        nodePanel_->onDestroyed = [this]() { nodePanel_ = nullptr; };
         nodePanel_->onEdited = [this]() {
             graphView_->style().markDirty();
             canvas_->style().markDirty();
@@ -405,7 +406,9 @@ namespace curvy {
         }
         // Whatever the selection is, picked in the graph view or on the canvas, is what the panel shows.
         graphView_->selectionModel().onChanged += [this](SelectionModel& selection) {
-            nodePanel_->show(selection.primary());
+            if (nodePanel_ != nullptr) {
+                nodePanel_->show(selection.primary());
+            }
             return SyncReturn::Ignored;
         };
         rightDock_->onPanelMenu += [this](PanelDock&, Panel& panel, const Point& at) {
@@ -781,7 +784,8 @@ namespace curvy {
         for (Action& action : historyActions_) {
             loop_->unregisterAction(&action);
         }
-        if (nodePanel_ != nullptr) {
+        if (nodePanel_ != nullptr) {   // null when the window's teardown already destroyed the panel
+            nodePanel_->onDestroyed = nullptr;
             nodePanel_->releaseDocument();   // the dock destroys the panel after the document is gone
         }
         task_.cancel();

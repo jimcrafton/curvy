@@ -32,6 +32,7 @@ namespace curvy {
         static constexpr float kContentHeight = 360.0f;
 
         NodePanel(SketchDocument& document, newui::SubView& pickerHost);
+        ~NodePanel() override;
 
         // Shows this node; an invalid ref shows an empty panel.
         void show(const NodeRef& node);
@@ -40,6 +41,10 @@ namespace curvy {
         // Lets go of what listens to the document (the colour card's palettes). The owner calls it before the document dies, because the dock
         // destroys the panel later; the panel shows nothing useful afterwards.
         void releaseDocument();
+
+        // Called when the panel is destroyed. Closing the window destroys the view tree before the owner, so the owner must not touch the panel
+        // afterwards; the owner clears this in its own destructor when it goes first.
+        std::function<void()> onDestroyed;
 
         // "graph.display", "graph.bypass" or "graph.freeze" from the buttons.
         std::function<void(const std::string& command)> onCommand;

@@ -16,7 +16,7 @@ sys.path.insert(0, r"D:\code\newui\tools\guitest")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import newui_guitest
-from test_curvy_gui import CurvyCase
+from curvyCase import CurvyCase
 
 SAMPLES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "Resources", "samples")
 OBJECT_XFORM = "object:xform"     # every layer and group has one; the damaged sample is missing Group2's

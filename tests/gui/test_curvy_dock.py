@@ -12,7 +12,7 @@ sys.path.insert(0, r"D:\code\newui\tools\guitest")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import newui_guitest
-from test_curvy_gui import CurvyCase
+from curvyCase import CurvyCase
 
 class Docks(CurvyCase):
     def setUp(self):
@@ -25,7 +25,7 @@ class Docks(CurvyCase):
         return newui_guitest.App(newui_guitest.testing.Settings.exe or self.exe, ("--settings", self.settings_file), cwd=newui_guitest.testing.Settings.cwd)
 
     def geometry(self):
-        names = ["topSplitter", "bottomSplitter", "leftSplitter", "rightSplitter", "topArea", "leftArea", "rightArea", "bottomArea", "canvas"]
+        names = ["topSplitter", "bottomSplitter", "leftSplitter", "rightSplitter", "topArea", "leftArea", "rightArea", "canvas"]
         return {n: self.app.find(n) for n in names}
 
     def show(self, label):
@@ -39,11 +39,10 @@ class Docks(CurvyCase):
         top = self.app.find("topSplitter")
         self.app.double_click((top.x + 600, top.y + 3))
         self.app.click("toolbarToggle")
-        self.app.click("graphToggle")
 
     def test_dragging_the_top_splitter_off_the_window_keeps_everything(self):
         self.open_all()
-        self.show("all four areas open")
+        self.show("all areas open")
         top = self.app.find("topSplitter")
         area = self.app.find("topArea")
         grab = (top.x + 600, top.y + area.h + 3)

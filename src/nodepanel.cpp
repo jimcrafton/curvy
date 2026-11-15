@@ -42,6 +42,12 @@ namespace curvy {
         style().markDirty();
     }
 
+    NodePanel::~NodePanel() {
+        if (onDestroyed) {
+            onDestroyed();
+        }
+    }
+
     NodePanel::NodePanel(SketchDocument& document, SubView& pickerHost) : Panel("node", "Node"), root_(loadContent()), pickerHost_(pickerHost), document_(document) {
         setBodyHeight(kBodyHeight);
         body().onSizeChanged += [this](View&, const Size&) {
