@@ -44,6 +44,7 @@ add_library(curvy_core STATIC
     src/swatchpalettecontroller.cpp
     src/graphpanel.cpp
     src/selectionmodel.cpp
+    src/shapepaths.cpp
     src/graphoverviews.cpp
     src/numberscrubber.cpp
     src/graphview.cpp

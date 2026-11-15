@@ -29,3 +29,7 @@ add_executable(jitnodesTests ${JITNODES_DIR}/tests/testMain.cpp)
 target_link_libraries(jitnodesTests PRIVATE jitnodes::jitnodes)
 target_compile_definitions(jitnodesTests PRIVATE JITNODES_SOURCE_DIR="${JITNODES_DIR}")
 add_test(NAME jitnodesTests COMMAND jitnodesTests)
+
+# Thousands of nodes and tens of thousands of points; run it by hand (--quick for the small size).
+add_executable(jitnodesStress ${JITNODES_DIR}/tests/stressTest.cpp)
+target_link_libraries(jitnodesStress PRIVATE jitnodes::jitnodes)

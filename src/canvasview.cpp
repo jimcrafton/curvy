@@ -1,5 +1,7 @@
 #include "curvy/canvasview.h"
 
+#include "curvy/shapepaths.h"
+
 #include <newui/rootview.h>
 
 #include <windows.h>
@@ -46,6 +48,18 @@ namespace curvy {
     BLPoint CanvasView::toView(const BLPoint& documentPoint) const {
         const Rect client = getClientBounds();
         return BLPoint(client.left() + double(panX_) + documentPoint.x * double(zoom_), client.top() + double(panY_) + documentPoint.y * double(zoom_));
+    }
+
+    std::optional<ShapeHit> CanvasView::shapeAt(const Point& viewPoint, float tolerancePx) const {
+        if (document_ == nullptr) {
+            return std::nullopt;
+        }
+        const jitnodes::GeometryHandle artwork = document_->artwork();
+        if (artwork == nullptr) {
+            return std::nullopt;
+        }
+        const BLPoint at = toDocument(viewPoint);
+        return curvy::shapeAt(*artwork, float(at.x), float(at.y), tolerancePx / zoom_);
     }
 
     void CanvasView::zoomAt(const Point& anchor, float newZoom) {
@@ -135,8 +149,6 @@ namespace curvy {
             return;
         }
         const jitnodes::Geometry& geo = *artwork;
-        const float* px = geo.x();
-        const float* py = geo.y();
         const auto column = [&](const char* name) -> const float* {
             const jitnodes::AttribArray* a = geo.findAttrib(jitnodes::AttribClass::primitive, name);
             return a != nullptr ? a->floats().data() : nullptr;
@@ -160,28 +172,13 @@ namespace curvy {
 
         ctx.save();
         ctx.clip_to_rect(BLRect(originX, originY, w, h));
-        const auto& prims = geo.primitives();
-        for (std::size_t i = 0; i < prims.size(); ++i) {
-            const jitnodes::Primitive& prim = prims[i];
-            if (prim.count < 2) {
+        // One path per shape, so the primitives of a compound shape (a ring and its counter) fill together and leave the hole open; the shape
+        // takes the look of its first primitive.
+        for (const jitnodes::ShapeRange& shape : geo.shapes()) {
+            const std::size_t i = shape.first;
+            const BLPath path = shapePath(geo, shape, originX, originY, scale);
+            if (path.is_empty()) {
                 continue;
-            }
-            const auto at = [&](std::uint32_t k) { return BLPoint(originX + double(px[prim.start + k]) * scale, originY + double(py[prim.start + k]) * scale); };
-            BLPath path;
-            path.move_to(at(0));
-            if (prim.kind == jitnodes::PrimKind::cubic) {
-                const std::uint32_t segments = jitnodes::cubicSegments(prim);
-                for (std::uint32_t s = 0; s < segments; ++s) {
-                    const std::uint32_t k = s * 3;
-                    path.cubic_to(at(k + 1), at(k + 2), at((k + 3) % prim.count));
-                }
-            } else {
-                for (std::uint32_t k = 1; k < prim.count; ++k) {
-                    path.line_to(at(k));
-                }
-            }
-            if (prim.closed) {
-                path.close();
             }
             if (fillA != nullptr && fillA[i] > 0.0f) {
                 ctx.set_fill_rule(evenOdd != nullptr && evenOdd[i] != 0.0f ? BL_FILL_RULE_EVEN_ODD : BL_FILL_RULE_NON_ZERO);

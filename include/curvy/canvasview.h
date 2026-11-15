@@ -1,11 +1,13 @@
 #pragma once
 
+#include "curvy/shapepaths.h"
 #include "curvy/sketchdocument.h"
 
 #include <newui/subview.h>
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 
 namespace curvy {
 
@@ -46,6 +48,11 @@ namespace curvy {
         BLPoint toDocument(const newui::Point& viewPoint) const;
         // @reflect ignore=true
         BLPoint toView(const BLPoint& documentPoint) const;
+
+        // The topmost shape of the cooked artwork under a view point: inside its fill, or within `tolerancePx` screen pixels of its stroke.
+        // The key in the hit names the node that made the shape (see GraphDocument::nodeForShapeKey).
+        // @reflect ignore=true
+        std::optional<ShapeHit> shapeAt(const newui::Point& viewPoint, float tolerancePx = 3.0f) const;
 
         // Draws the document's cooked artwork with the page's top-left at (originX, originY) and `scale` pixels per point, clipped to the page.
         // @reflect ignore=true

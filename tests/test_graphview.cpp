@@ -120,8 +120,9 @@ TEST_F(GraphOverlayTest, theDataPopupShowsTheSelectedNodesPointsPrimitivesAndInp
     EXPECT_EQ(window().pointTable().model()->rowCount(), 1u);
     EXPECT_EQ(window().pointTable().model()->columnTitle(4), "fill.a");   // after the structural columns, the fill the node stamped
 
-    window().pointTable().setSource(1);   // the circle that feeds the fill: no look yet
-    EXPECT_EQ(window().pointTable().model()->columnCount(), 4u);
+    window().pointTable().setSource(1);   // the circle that feeds the fill: no look yet, only the key it stamps on its shape
+    EXPECT_EQ(window().pointTable().model()->columnCount(), 5u);
+    EXPECT_EQ(window().pointTable().model()->columnTitle(4), "shape.key");
 
     const std::string copied = window().pointTable().copySelection();
     EXPECT_NE(copied.find("start\tcount"), std::string::npos);

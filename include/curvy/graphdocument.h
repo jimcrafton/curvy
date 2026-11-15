@@ -9,6 +9,7 @@
 #include <memory>
 #include <map>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace curvy {
@@ -43,6 +44,16 @@ namespace curvy {
         bool hasNode(const NodeRef& ref) const;
         // The scope a subnet node's contents live in.
         NodeRef parentOfScope(std::uint32_t scope) const;
+
+        // Shapes are keyed by node uid (see docs/shape-structure.md). nodeOfUid finds a node anywhere in the document by its uid, nothing
+        // (an invalid ref) when there is none. The index behind it is rebuilt when a lookup finds it stale, so it needs no upkeep.
+        NodeRef nodeOfUid(std::uint32_t uid);
+        // The node that made the shapes with this key: the last uid in it, before any "#part" or "@copy". Invalid when the node is gone.
+        NodeRef nodeForShapeKey(const std::string& key);
+        // What every key of the shapes a node makes starts with: the uids of the subnets around it, then its own.
+        std::string shapeKeyOf(const NodeRef& ref) const;
+        // The uids a key is made of, the outermost subnet first and the generator last; empty for a key that does not parse.
+        static std::vector<std::uint32_t> uidsOfShapeKey(const std::string& key);
 
         // Each of these is one undo step. New nodes go into `scope`.
         NodeRef addGraphNode(const std::string& type, const std::string& name = {}, std::uint32_t scope = 0);
@@ -147,6 +158,8 @@ namespace curvy {
 
     private:
         std::shared_ptr<void> alive_ = std::make_shared<int>(0);
+        void indexUids(jitnodes::Network& net, std::vector<jitnodes::NodeId>& path);
+        std::unordered_map<std::uint32_t, NodeRef> uidIndex_;
         std::vector<jitnodes::NodeId> childPath(const NodeRef& subnet) const;
         std::vector<std::vector<jitnodes::NodeId>> scopePaths_{std::vector<jitnodes::NodeId>{}};
         std::map<std::vector<jitnodes::NodeId>, std::uint32_t> scopeIndex_{{std::vector<jitnodes::NodeId>{}, 0}};

@@ -121,6 +121,9 @@ namespace curvy {
         bool pressed(const newui::PenState& pen, const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys);
 
         void openRing(bool byPress);
+        // A left press on the canvas: selects the shape under it (the node that made it) in the selection the graph view shares, or clears
+        // the selection on empty canvas; `additive` (Shift or Ctrl) adds to it instead. True when the press did something.
+        bool selectAt(const newui::Point& pt, bool additive);
         void runCommand(const std::string& command);
 
         // One step back or forward in the document's history (Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z); the graph panel is shown again so it follows.

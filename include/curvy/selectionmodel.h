@@ -42,6 +42,11 @@ namespace curvy {
         bool toggle(const NodeRef& node);
         bool setPrimary(const NodeRef& node);               // must already be selected; the selection itself stays
         bool replace(const std::vector<NodeRef>& nodes);    // the last one is the primary; unknown nodes are skipped
+        // Selects the node that made the shapes with this key (what a click on the canvas hands over; see CanvasView::shapeAt). A key that
+        // names no node clears the selection, unless `additive`, which then changes nothing; additive joins the selection like add().
+        bool selectShapeKey(const std::string& key, bool additive = false);
+        // True when the node that made the shape, or a subnet around it (a layer or group), is selected: what the canvas highlights.
+        bool isShapeKeySelected(const std::string& key) const;
         // Drops the nodes the document no longer has (done by itself on onGraphChanged).
         bool prune();
 

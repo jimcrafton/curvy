@@ -136,9 +136,24 @@ A rig is a node that takes geometry and a list of *bindings*, each a key or a ke
    `checkShapes`; `ShapeRange`, `shapeKeyAttrib`) in `geometry.h` / `geometry.cpp`, 9 tests in `jitnodes/tests/testMain.cpp` (run
    `jitnodesTests.exe`, 222 pass). Not built yet: copies get distinct keys (step 3). Until then a keyed geometry through `copyToPoints`
    or `symmetry` would merge adjacent copies into one shape; nothing stamps keys yet, so nothing is affected.
-2. `uid` on `Node`: created, saved, loaded, copied.
-3. `CookContext::shapeKey` and the object prefix; stamp in `circle`, `rect`, `line`, `path`; `copyToPoints` and `symmetry` derive keys.
-4. Curvy: renderer and hit test per shape; `uid -> NodeRef` index; `SelectionModel` by key.
+2. Done 2026-11-14: `uid` on `Node` (`uid()`, `uidText()`, `setUid()`): taken from a counter on the root network (`Network::takeUid`,
+   `reserveUid`; reset when the root is cleared), saved as `uid` in the standard body, so undo snapshots and files keep it; `pasteNodes`
+   gives every pasted node, and every node inside a pasted subnet, a fresh one. A file from before uids gets fresh ones on load. Asset
+   instances take their children from the definition, so keys made inside one are not stable across loads (not handled).
+3. Done 2026-11-14: `CookContext::shapeKey(local)` = subnet uids (`Network::keyPrefix`, outermost first, each followed by `/`) + node uid
+   (+ `#local`). Every subnet contributes, not only objects, so no owner has to supply a prefix. Stamped by jitnodes `circle` and `line`;
+   there is no jitnodes `rect` or `path` node yet, and curvy's shape nodes and the importers are still to do. `copyToPoints` and the
+   symmetry node (`mirror`) give each copy `key@N`. Tests: 5 in `jitnodes/tests/testMain.cpp` (227 pass).
+4. Done 2026-11-14: curvy side, 10 tests in `tests/test_shapes.cpp` (curvyTests 279). `include/curvy/shapepaths.h`: `shapePath` (one path
+   per shape) and `shapeAt` (topmost shape under a point: inside its fill, or within a tolerance of its stroke; the shape takes its first
+   primitive's look). `CanvasView` paints one path per shape (holes work) and has `shapeAt(viewPoint, tolerancePx)`.
+   `GraphDocument::nodeOfUid`, `nodeForShapeKey`, `shapeKeyOf`, `uidsOfShapeKey`: the uid index is rebuilt when a lookup finds it stale, so it
+   needs no hook on graph changes. `SelectionModel::selectShapeKey(key, additive)` (a key that names nothing clears) and
+   `isShapeKeySelected(key)` (true when the generator or any subnet around it is selected). Wired the same day (5 tests in
+   `tests/test_canvasselect.cpp`, curvyTests 284): a left press on the canvas calls `WorkspaceController::selectAt`, which selects the
+   generator node of the shape under the pointer in the graph view's selection model (so the graph view follows), Shift or Ctrl adds, a press
+   on empty canvas clears, Space held still pans. Selected shapes (and the shapes inside a selected layer or group) get a 2 px accent outline
+   from `paintTop`, repainted from the model's `onChanged`. Shapes without a key (anonymous) cannot be selected.
 5. `curvyText` emits glyph shapes with counters as continuation primitives of one key.
 6. First rig node on top of the API, to prove the binding story before more is built.
 

@@ -103,6 +103,82 @@ namespace curvy {
         return NodeRef(scopeIndex_.at(up), path.back());
     }
 
+    std::vector<std::uint32_t> GraphDocument::uidsOfShapeKey(const std::string& key) {
+        std::vector<std::uint32_t> uids;
+        std::size_t start = 0;
+        while (start <= key.size()) {
+            std::size_t end = key.find('/', start);
+            const bool last = end == std::string::npos;
+            if (last) {
+                end = key.find_first_of("#@", start);
+                if (end == std::string::npos) {
+                    end = key.size();
+                }
+            }
+            if (end == start) {
+                return {};
+            }
+            std::uint64_t uid = 0;
+            for (std::size_t i = start; i < end; ++i) {
+                const char c = key[i];
+                const int digit = c >= '0' && c <= '9' ? c - '0' : (c >= 'a' && c <= 'z' ? c - 'a' + 10 : -1);
+                if (digit < 0 || (uid = uid * 36 + std::uint64_t(digit)) > 0xFFFFFFFFull) {
+                    return {};
+                }
+            }
+            uids.push_back(std::uint32_t(uid));
+            if (last) {
+                break;
+            }
+            start = end + 1;
+        }
+        return uids;
+    }
+
+    void GraphDocument::indexUids(jitnodes::Network& net, std::vector<jitnodes::NodeId>& path) {
+        const std::uint32_t scope = scopeOf(path);
+        for (const jitnodes::NodeId id : net.nodeIds()) {
+            jitnodes::Node& node = net.node(id);
+            uidIndex_[node.uid()] = NodeRef(scope, id);
+            if (jitnodes::Network* child = node.childNetwork()) {
+                path.push_back(id);
+                indexUids(*child, path);
+                path.pop_back();
+            }
+        }
+    }
+
+    NodeRef GraphDocument::nodeOfUid(std::uint32_t uid) {
+        if (uid == 0) {
+            return kNoNode;
+        }
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            const auto found = uidIndex_.find(uid);
+            if (found != uidIndex_.end() && hasNode(found->second) && node(found->second).uid() == uid) {
+                return found->second;
+            }
+            if (attempt == 0) {
+                uidIndex_.clear();
+                std::vector<jitnodes::NodeId> path;
+                indexUids(*network_, path);
+            }
+        }
+        return kNoNode;
+    }
+
+    NodeRef GraphDocument::nodeForShapeKey(const std::string& key) {
+        const std::vector<std::uint32_t> uids = uidsOfShapeKey(key);
+        return uids.empty() ? kNoNode : nodeOfUid(uids.back());
+    }
+
+    std::string GraphDocument::shapeKeyOf(const NodeRef& ref) const {
+        const jitnodes::Network* net = findNetwork(ref.scope);
+        if (net == nullptr || !net->hasNode(ref.id)) {
+            return {};
+        }
+        return net->keyPrefix() + net->node(ref.id).uidText();
+    }
+
     jitnodes::GraphSnapshot GraphDocument::snapshotGraph() const {
         jitnodes::GraphSnapshot snapshot = jitnodes::snapshotNetwork(*network_, lastSnapshot_.get());
         lastSnapshot_ = std::make_shared<const jitnodes::GraphSnapshot>(snapshot);

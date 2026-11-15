@@ -64,6 +64,30 @@ namespace curvy {
         return true;
     }
 
+    bool SelectionModel::selectShapeKey(const std::string& key, bool additive) {
+        if (!documentAlive()) {
+            return false;
+        }
+        const NodeRef node = document_->nodeForShapeKey(key);
+        if (additive) {
+            return node.valid() && (contains(node) ? setPrimary(node) : add(node));
+        }
+        return set(node);   // a key that names nothing (a click on empty canvas) clears
+    }
+
+    bool SelectionModel::isShapeKeySelected(const std::string& key) const {
+        if (!documentAlive() || items_.empty()) {
+            return false;
+        }
+        const std::vector<std::uint32_t> uids = GraphDocument::uidsOfShapeKey(key);
+        for (const NodeRef& item : items_) {
+            if (document_->hasNode(item) && std::find(uids.begin(), uids.end(), document_->node(item).uid()) != uids.end()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     bool SelectionModel::clear() {
         if (items_.empty() && !primary_.valid()) {
             return false;

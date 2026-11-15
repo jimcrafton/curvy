@@ -1,5 +1,7 @@
 #include "curvy/workspacecontroller.h"
+#include "curvy/selectionmodel.h"
 #include "curvy/settingsdialog.h"
+#include "curvy/shapepaths.h"
 #include "curvy/theme.h"
 
 #include <newui/automation.h>
@@ -974,6 +976,10 @@ namespace curvy {
         canvas_->onPressFilter = [this](const Point& pt, std::uint32_t buttons, std::uint32_t keys) { return filterPress(pt, buttons, keys); };
         canvas_->onKeyFilter = [this](std::uint32_t mask, std::uint32_t vk) { return filterKey(mask, vk); };
         canvas_->onPaintTop = [this](BLContext& ctx) { paintTop(ctx); };
+        graphView_->selectionModel().onChanged += [this](SelectionModel&) {
+            canvas_->style().markDirty();   // the outline of the selected shapes
+            return SyncReturn::Ignored;
+        };
         canvas_->onKeyUp.add(this, &WorkspaceController::handleKeyUp);
         canvas_->onMouseMove.add(this, &WorkspaceController::handleMouseMove);
         canvas_->onMouseUp.add(this, &WorkspaceController::handleMouseUp);
@@ -1310,7 +1316,19 @@ namespace curvy {
             }
             return true;
         }
-        return false;
+        return (buttons & mbmLeftButton) != 0 && selectAt(pt, (keys & (kmShift | kmCtrl)) != 0);
+    }
+
+    bool WorkspaceController::selectAt(const Point& pt, bool additive) {
+        SelectionModel& selection = graphView_->selectionModel();
+        const std::optional<ShapeHit> hit = canvas_->shapeAt(pt);
+        if (!hit.has_value() || hit->key.empty()) {   // an anonymous shape has no node to name
+            return !additive && selection.clear();
+        }
+        if (selection.selectShapeKey(hit->key, additive) && selection.primary().valid()) {
+            model_->say(document_.node(selection.primary()).name());
+        }
+        return true;
     }
 
     SyncReturn WorkspaceController::handleMouseMove(View&, const Point& pt, std::uint32_t buttons, std::uint32_t keys) {
@@ -1452,6 +1470,18 @@ namespace curvy {
 
     void WorkspaceController::paintTop(BLContext& ctx) const {
         if (model_->documentOpen()) {
+            const SelectionModel& selection = graphView_->selectionModel();
+            const jitnodes::GeometryHandle artwork = selection.empty() ? nullptr : document_.artwork();
+            if (artwork == nullptr) {
+                return;
+            }
+            const BLPoint origin = canvas_->toView(BLPoint(0.0, 0.0));
+            ctx.set_stroke_width(2.0);
+            for (const jitnodes::ShapeRange& shape : artwork->shapes()) {
+                if (!shape.key.empty() && selection.isShapeKeySelected(std::string(shape.key))) {
+                    ctx.stroke_path(shapePath(*artwork, shape, origin.x, origin.y, double(canvas_->zoom())), rgb(Theme::current().accent));
+                }
+            }
             return;
         }
         Font font = FontManager::getSystemFont(SystemUIFont::Message);
