@@ -20,6 +20,7 @@ namespace curvy {
     void GraphDocument::graphChanged() {
         markModified();
         updateAllViews();
+        onGraphChanged(*this);
     }
 
     std::vector<jitnodes::NodeId> GraphDocument::childPath(const NodeRef& subnet) const {
@@ -407,6 +408,7 @@ namespace curvy {
 
     void GraphDocument::clearGraph() {
         network_->clear();
+        onGraphChanged(*this);
     }
 
 }

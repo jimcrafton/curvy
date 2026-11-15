@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>curvy panel</title>
+<!-- The base Panel (see dockPanels.html for how panels dock, reorder and tear off): the chrome only, with an empty body that a derived panel fills.
+     Static copy of one .panel of dockPanels.html so html2newui can read it.
+     Convert: python _____.claude/skills/html-mockup-to-newui/scripts/html2newui.py docs/mockups/panel.html -o Resources/panel.newui --name panel --fragment
+     The four buttons are ToolbarButtons whose icons (Resources/icons/panel-*.svg) code sets (the caret changes with collapsed); the menu and close buttons show only while the pointer is over the panel. -->
+<style>
+  body { margin: 0; width: 268px; height: 200px; font-family: "Segoe UI", sans-serif; font-size: 12px; color: #F0F0F0; background: #1E1E1E; }
+  #panelBox { display: flex; flex-direction: column; width: 268px; height: 200px; background: #252525; border: 1px solid #3A3A3A; }
+  #panelTitleBar { display: flex; flex-direction: row; align-items: center; gap: 5px; padding: 0 4px; height: 20px; background: #2E2E2E; }
+  .icon { height: 20px; background-repeat: no-repeat; background-position: center; background-size: 14px 14px; }
+  #panelCaret { width: 20px; background-size: 20px 20px; background-image: url(../../Resources/icons/panel-caret-open.svg); }
+  #panelGrip { width: 16px; background-image: url(../../Resources/icons/panel-grip.svg); }
+  #panelTitle { flex-grow: 1; height: 20px; font-size: 11px; color: #D0D0D0; text-align: left; }
+  #panelMenu { width: 20px; background-image: url(../../Resources/icons/panel-menu.svg); }
+  #panelClose { width: 20px; background-image: url(../../Resources/icons/panel-close.svg); }
+  #panelBody { flex-grow: 1; overflow-y: auto; padding: 6px 8px; background: #252525; }
+</style>
+</head>
+<body>
+  <div id="panelBox">
+    <div id="panelTitleBar">
+      <canvas id="panelCaret" class="icon" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="panelGrip" class="icon" data-newui-type="ToolbarButton"></canvas>
+      <span id="panelTitle">Panel</span>
+      <canvas id="panelMenu" class="icon" data-newui-type="ToolbarButton"></canvas>
+      <canvas id="panelClose" class="icon" data-newui-type="ToolbarButton"></canvas>
+    </div>
+    <div id="panelBody"></div>
+  </div>
+</body>
+</html>

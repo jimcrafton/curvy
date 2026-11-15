@@ -1,6 +1,7 @@
 #pragma once
 
 #include "curvy/noderef.h"
+#include "curvy/selectionmodel.h"
 #include "curvy/sketchdocument.h"
 #include "curvy/viewstate.h"
 
@@ -27,7 +28,7 @@ namespace curvy {
     public:
         // Declared (not implicit) so reflectgen registers it - a .newui load builds one through it.
         GraphView();
-        ~GraphView() override = default;
+        ~GraphView() override;
 
         // Not owned; null shows nothing. The owner registers the view with the document (Model::addView) so edits repaint it.
         // @reflect ignore=true
@@ -40,14 +41,20 @@ namespace curvy {
         bool enter(const NodeRef& subnet);
         // Back up one level; false at the root.
         bool exit();
+        // The selection is a SelectionModel: this view's own until the owner hands it one shared with the other views (the canvas, the panels).
+        // A shared model's document is the owner's to set; the view's setDocument only sets its own model's. Null goes back to the own model.
         // @reflect ignore=true
-        const NodeRef& selected() const { return selected_; }
+        void setSelectionModel(SelectionModel* model);
+        // @reflect ignore=true
+        SelectionModel& selectionModel() { return *model_; }
+        // @reflect ignore=true
+        const NodeRef& selected() const { return model_->primary(); }
         // Selects just this node (an invalid ref clears the selection).
         // @reflect ignore=true
         void select(const NodeRef& node);
-        // Every selected node of the shown network, the one the panel shows (selected()) last.
+        // Every selected node, the one the panel shows (selected()) the last that was picked.
         // @reflect ignore=true
-        const std::vector<NodeRef>& selection() const { return selection_; }
+        const std::vector<NodeRef>& selection() const { return model_->items(); }
         // Deletes the selected nodes; false when none, or when the document refuses (onMessage then says why).
         bool deleteSelected();
         // "root > Layer1 > Group1" for the shown network.
@@ -119,6 +126,8 @@ namespace curvy {
         void endWire(const newui::Point& pt);
         void endMarquee();
         void say(const std::string& text) const;
+        // The selection changed (or the level did): repaint and tell the owner.
+        void selectionChanged();
         newui::SyncReturn handleMouseDown(newui::View& sender, const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys);
         // The second press of a double-click arrives here, not as a mouse down.
         newui::SyncReturn handleMouseDoubleClick(newui::View& sender, const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys);
@@ -131,8 +140,9 @@ namespace curvy {
 
         SketchDocument* document_ = nullptr;
         std::uint32_t scope_ = 0;
-        NodeRef selected_;
-        std::vector<NodeRef> selection_;
+        SelectionModel ownModel_;
+        SelectionModel* model_ = &ownModel_;
+        newui::Connection modelConnection_;
         double zoom_ = 1.0, panX_ = 0.0, panY_ = 0.0;
         bool fitted_ = false;
         bool panning_ = false;

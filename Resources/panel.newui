@@ -1,0 +1,150 @@
+{
+  meta: {
+    author: "",
+    date: "2026-11-13",
+    copyright: "",
+    version: "0.1.0.900"
+  },
+  type: "SubView",
+  bounds: {
+    type: "Rect",
+    pos: { type: "Point", x: 0, y: 0 },
+    size: { type: "Size", width: 268, height: 200 }
+  },
+  visible: true,
+  name: "panel",
+  style: {
+    type: "ViewStyle",
+    backgroundFill: { type: "Fill", kind: "Color", color: "#1e1e1e" }
+  },
+  childViews: [
+    {
+      type: "SubView",
+      bounds: {
+        type: "Rect",
+        pos: { type: "Point", x: 0, y: 0 },
+        size: { type: "Size", width: 268, height: 200 }
+      },
+      visible: true,
+      name: "panelBox",
+      layout: { type: "FlexLayout", orientation: "Vertical" },
+      style: {
+        type: "ViewStyle",
+        backgroundFill: { type: "Fill", kind: "Color", color: "#252525" },
+        borderWidth: 1,
+        borderFill: "#3a3a3a"
+      },
+      desiredSize: { type: "Size", width: 268, height: 200 },
+      desiredSizeOverride: true,
+      childViews: [
+        {
+          type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 0 },
+            size: { type: "Size", width: 268, height: 20 }
+          },
+          visible: true,
+          name: "panelTitleBar",
+          layout: {
+            type: "FlexLayout",
+            orientation: "Horizontal",
+            crossAxisAlignment: "Center",
+            spacing: 5,
+            padding: 2
+          },
+          style: {
+            type: "ViewStyle",
+            backgroundFill: { type: "Fill", kind: "Color", color: "#2e2e2e" }
+          },
+          desiredSize: { type: "Size", width: 268, height: 20 },
+          desiredSizeOverride: true,
+          childViews: [
+            {
+              type: "ToolbarButton",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 2, y: 0 },
+                size: { type: "Size", width: 20, height: 20 }
+              },
+              name: "panelCaret",
+              desiredSize: { type: "Size", width: 20, height: 20 },
+              desiredSizeOverride: true
+            },
+            {
+              type: "ToolbarButton",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 27, y: 0 },
+                size: { type: "Size", width: 16, height: 20 }
+              },
+              name: "panelGrip",
+              desiredSize: { type: "Size", width: 16, height: 20 },
+              desiredSizeOverride: true
+            },
+            {
+              type: "Label",
+              text: "Panel",
+              textAlignment: "Left",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 48, y: 0 },
+                size: { type: "Size", width: 168, height: 20 }
+              },
+              name: "panelTitle",
+              layoutParams: { type: "FlexLayoutParams", weight: 1 },
+              style: {
+                type: "LabelStyle",
+                text: "Panel",
+                wordWrap: true,
+                font: { type: "Font", name: "Segoe UI", size: 11, bold: false, italic: false, strikeThrough: false, underlined: false },
+                textColor: "#d0d0d0",
+                textAlignment: "Left"
+              },
+              desiredSize: { type: "Size", width: 168, height: 20 },
+              desiredSizeOverride: true
+            },
+            {
+              type: "ToolbarButton",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 221, y: 0 },
+                size: { type: "Size", width: 20, height: 20 }
+              },
+              name: "panelMenu",
+              desiredSize: { type: "Size", width: 20, height: 20 },
+              desiredSizeOverride: true
+            },
+            {
+              type: "ToolbarButton",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 246, y: 0 },
+                size: { type: "Size", width: 20, height: 20 }
+              },
+              name: "panelClose",
+              desiredSize: { type: "Size", width: 20, height: 20 },
+              desiredSizeOverride: true
+            }
+          ]
+        },
+        {
+          type: "ScrollView",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 20 },
+            size: { type: "Size", width: 268, height: 180 }
+          },
+          name: "panelBody",
+          layoutParams: { type: "FlexLayoutParams", weight: 1 },
+          style: {
+            type: "ViewStyle",
+            backgroundFill: { type: "Fill", kind: "Color", color: "#252525" }
+          },
+          contentSize: { type: "Size", width: 268, height: 180 },
+          childViews: []
+        }
+      ]
+    }
+  ]
+}

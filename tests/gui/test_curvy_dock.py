@@ -34,10 +34,11 @@ class Docks(CurvyCase):
             print("  %-15s x=%5d y=%5d w=%5d h=%5d" % (name, r.x, r.y, r.w, r.h))
 
     def open_all(self):
+        self.new_a4()                                            # the right area goes through the View ring, which needs a document
+        self.toggle_properties()
         top = self.app.find("topSplitter")
         self.app.double_click((top.x + 600, top.y + 3))
         self.app.click("toolbarToggle")
-        self.app.click("propertiesToggle")
         self.app.click("graphToggle")
 
     def test_dragging_the_top_splitter_off_the_window_keeps_everything(self):
@@ -63,57 +64,17 @@ class Docks(CurvyCase):
         self.assertGreaterEqual(self.app.find("leftArea").w, 60)
 
 
-    def test_a_dragged_area_keeps_its_header_bar(self):
-        self.app.click("propertiesToggle")
-        self.app.click("toolbarToggle")
-        parts = ["rightArea", "rightAreaHeaderBar", "rightAreaHeader", "rightAreaBody", "leftArea", "leftAreaHeaderBar", "leftAreaBody"]
-
-        def dump(label):
-            print("\n" + label)
-            for n in parts:
-                r = self.app.find(n)
-                print("  %-19s x=%5d y=%5d w=%5d h=%5d vis=%s" % (n, r.x, r.y, r.w, r.h, r.visible))
-
-        def pixels(label):
-            shot = self.app.screenshot()
-            out = []
-            for n in ("rightAreaHeaderBar", "rightAreaBody", "leftAreaHeaderBar", "leftAreaBody"):
-                r = self.app.find(n)
-                out.append((n, shot.pixel(r.x + r.w - 30, r.y + r.h / 2 if n.endswith("Bar") else r.y + 30)))
-            print("  pixels " + label + ": " + ", ".join("%s=%s" % p for p in out))
-            return dict(out)
-
-        dump("both opened by the buttons")
-        first = pixels("opened")
-        right = self.app.find("rightArea")
-        self.app.drag((right.x - 3, right.y + 200), (right.x - 150, right.y + 200), steps=20)
-        dump("right area dragged 150 wider")
-        second = pixels("right dragged")
-        left = self.app.find("leftArea")
-        self.app.drag((left.x + left.w + 3, left.y + 200), (left.x + left.w + 100, left.y + 200), steps=20)
-        dump("left area dragged 100 wider")
-        third = pixels("left dragged")
-        for n in ("rightAreaHeaderBar", "leftAreaHeaderBar"):
-            self.assertGreater(self.app.find(n).h, 0, n)
-            self.assertGreater(self.app.find(n).w, 0, n)
-            self.assertNotEqual(first[n], first[n.replace("HeaderBar", "Body")], n + " is drawn apart from the body")
-            self.assertEqual(first[n], second[n], n + " after the right drag")
-            self.assertEqual(first[n], third[n], n + " after the left drag")
-
-
-    def test_dragging_a_hidden_areas_splitter_opens_it_with_its_header_bar(self):
-        self.app.click("propertiesToggle")                       # shown
-        self.app.click("propertiesToggle")                       # hidden again
+    def test_dragging_a_hidden_areas_splitter_opens_it(self):
+        self.new_a4()
+        self.toggle_properties()                                 # shown
+        self.toggle_properties()                                 # hidden again
         self.assertFalse(self.app.find("rightArea").visible)
         splitter = self.app.find("rightSplitter")
         grab = (splitter.x + splitter.w - 3, splitter.y + 200)
         self.app.drag(grab, (grab[0] - 200, grab[1]), steps=20)
         area = self.app.find("rightArea")
-        bar = self.app.find("rightAreaHeaderBar")
         self.assertTrue(area.visible)
         self.assertGreaterEqual(area.w, 60)
-        shot = self.app.screenshot()
-        self.assertEqual((46, 46, 46), shot.pixel(bar.x + bar.w - 30, bar.y + bar.h / 2), "the header bar is drawn")
 
 
     def test_the_session_comes_back_after_a_restart(self):
@@ -128,7 +89,8 @@ class Docks(CurvyCase):
         root = self.app.find("rootview")
         self.assertAlmostEqual(1000, root.w + 16, delta=40, msg="the window size from the file")
 
-        self.app.click("propertiesToggle")                       # one change this session: the right area
+        self.new_a4()
+        self.toggle_properties()                                 # one change this session: the right area
         self.app.key_raw("alt+f4")
         self.app.wait_until(lambda: not self.app.running, "the app to exit", timeout=10)
         with open(self.settings_file) as f:

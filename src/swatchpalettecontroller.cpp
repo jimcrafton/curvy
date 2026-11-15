@@ -5,7 +5,10 @@
 namespace curvy {
 
     SwatchPaletteController::SwatchPaletteController(SketchDocument& document, SwatchStrip& strip) : document_(document), strip_(strip) {
-        document_.onPalettesChanged = [this]() { refresh(); };
+        connection_ = document_.onPalettesChanged.add([this](SketchDocument&) {
+            refresh();
+            return newui::SyncReturn::Handled;
+        });
 
         strip_.onSelectPalette = [this](std::size_t index) {
             guarded([&]() {
@@ -86,7 +89,7 @@ namespace curvy {
     }
 
     SwatchPaletteController::~SwatchPaletteController() {
-        document_.onPalettesChanged = nullptr;
+        document_.onPalettesChanged.remove(connection_);
     }
 
     void SwatchPaletteController::guarded(const std::function<void()>& edit) {

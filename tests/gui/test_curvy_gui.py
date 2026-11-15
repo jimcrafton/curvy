@@ -59,6 +59,18 @@ class CurvyCase(AppTestCase):
         self.app.key("2")                                          # the New ring's second slot
         self.app.wait_until(lambda: self.hint_tool() == "Select", "a document to open")
 
+    def toggle_properties(self):
+        """Shows or hides the right dock. The top bar's Panels button opens a native menu that blocks, so this goes through the View ring (Space, V,
+        P) instead. It needs a document open and nothing selected, with the pointer on the pasteboard so the Document ring comes up; the bottom-left
+        corner is clear of the page, the toolbar and the cards."""
+        canvas = self.app.find("canvas")
+        self.app.click_at((canvas.x + 40, canvas.y + canvas.h - 40))
+        self.tap_space()
+        self.app.key("v")
+        self.app.wait_until(lambda: self.app.prop("hintKeys", "text") == "Ring: View", "the View ring")
+        self.app.key("p")
+        self.app.wait_until(lambda: not self.ring_open(), "the ring to close")
+
 
 class StartUp(CurvyCase):
     def test_the_workspace_starts_empty(self):                     # read-only
@@ -84,8 +96,8 @@ class Closing(CurvyCase):
 
     def open_docks(self, draw):
         self.new_a4()
+        self.toggle_properties()
         self.app.click("toolbarToggle")
-        self.app.click("propertiesToggle")
         self.app.click("graphToggle")
         self.app.wait_until(lambda: self.app.prop("graphToggle", "checked"), "the graph dock")
         if draw:
@@ -198,8 +210,8 @@ class Docks(CurvyCase):
 
     def test_the_property_dock_sits_flush_right(self):
         self.new_a4()
+        self.toggle_properties()
         canvas = self.app.find("canvas")
-        self.app.click("propertiesToggle")
         self.app.wait_until(lambda: self.app.prop("propertiesToggle", "checked"), "the toggle to check")
         field = self.app.find("transformXField")
         self.assertGreater(field.x, canvas.x + canvas.w - 268)
@@ -230,10 +242,10 @@ class GraphDock(CurvyCase):
 
     def test_the_graph_dock_sits_beside_the_property_dock(self):
         self.new_a4()
-        self.app.click("propertiesToggle")
+        self.toggle_properties()
         self.app.click("graphToggle")
         self.app.wait_until(lambda: self.app.prop("graphToggle", "checked"), "the toggle to check")
-        graph = self.app.find("graphTree")
+        graph =self.app.find("graphTree")
         field = self.app.find("transformXField")
         self.assertLess(graph.x + graph.w, field.x)                # the graph dock is left of the property boxes
 
@@ -350,8 +362,8 @@ class GraphDock(CurvyCase):
     def open_transform_of_new_rectangle(self):
         # A 120x80 rectangle (so width and height differ), with the property dock beside the graph dock to read its bounds back.
         self.new_a4()
+        self.toggle_properties()
         self.app.click("toolbarToggle")
-        self.app.click("propertiesToggle")
         canvas = self.app.find("canvas")
         self.app.click("rectangleTool")
         self.app.drag((canvas.x + 300, canvas.y + 200), (canvas.x + 420, canvas.y + 280))
@@ -423,6 +435,7 @@ class GraphDock(CurvyCase):
 
     def test_reset_puts_a_turned_text_with_an_off_centre_pivot_back(self):
         self.new_a4()
+        self.toggle_properties()                                    # before the text is selected: the ring only reaches View from the Document ring
         self.app.click("toolbarToggle")
         self.app.click("textTool")
         self.app.wait_until(lambda: self.hint_tool() == "Text", "the Text tool")
@@ -432,7 +445,6 @@ class GraphDock(CurvyCase):
         self.app.click("selectTool")
         self.app.wait_until(lambda: self.hint_tool() == "Select", "the Select tool")
         self.app.key("ctrl+a")
-        self.app.click("propertiesToggle")
         self.app.click("graphToggle")
         self.app.wait_until(lambda: self.app.prop("graphToggle", "checked"), "the toggle to check")
         self.app.click_segment("graphModeControl", 1)
@@ -817,6 +829,7 @@ class TextObject(CurvyCase):
 
     def make_text(self, words="Hi"):
         self.new_a4()
+        self.toggle_properties()                                   # first: the ring only reaches View from the Document ring, nothing selected
         self.app.click("toolbarToggle")
         self.app.click("textTool")
         self.app.wait_until(lambda: self.hint_tool() == "Text", "the Text tool")
@@ -827,7 +840,6 @@ class TextObject(CurvyCase):
         self.app.click("selectTool")                               # choosing a tool finishes the typing
         self.app.wait_until(lambda: self.hint_tool() == "Select", "the Select tool")
         self.app.key("ctrl+a")                                     # the text is the only object
-        self.app.click("propertiesToggle")
         self.app.wait_until(lambda: self.app.prop("propertiesToggle", "checked"), "the property dock")
 
     def shown(self, name):
@@ -849,6 +861,7 @@ class TextObject(CurvyCase):
 
     def test_the_text_box_is_hidden_for_a_shape(self):
         self.new_a4()
+        self.toggle_properties()
         self.app.click("toolbarToggle")
         self.app.click("rectangleTool")
         canvas = self.app.find("canvas")
@@ -856,7 +869,6 @@ class TextObject(CurvyCase):
         self.app.drag((cx - 60, cy - 40), (cx + 60, cy + 40))
         self.app.click("selectTool")
         self.app.click_at((cx, cy))
-        self.app.click("propertiesToggle")
         self.app.wait_until(lambda: self.shown("transformPanel"), "the dock")
         self.assertFalse(self.shown("textPanel"))
 
@@ -914,6 +926,7 @@ class ShapeBox(CurvyCase):
 
     def draw_alone(self, tool):
         self.new_a4()
+        self.toggle_properties()                                   # first: nothing selected yet
         self.app.click("toolbarToggle")
         self.app.click(tool)
         canvas = self.app.find("canvas")
@@ -922,7 +935,6 @@ class ShapeBox(CurvyCase):
         self.app.click("selectTool")
         self.app.wait_until(lambda: self.hint_tool() == "Select", "the Select tool")
         self.app.key("ctrl+a")                                     # the shape is the only object
-        self.app.click("propertiesToggle")
         self.app.wait_until(lambda: self.app.prop("propertiesToggle", "checked"), "the property dock")
 
     def shown(self, name):
@@ -1008,6 +1020,7 @@ class Grouping(CurvyCase):
 
     def draw_two(self):
         self.new_a4()
+        self.toggle_properties()
         canvas = self.app.find("canvas")
         cx, cy = canvas.x + canvas.w // 2, canvas.y + canvas.h // 2
         for dx in (-120, 60):
@@ -1018,7 +1031,6 @@ class Grouping(CurvyCase):
             self.app.drag((cx + dx - 30, cy - 40), (cx + dx + 30, cy + 40))
             self.app.key("escape")
             self.app.wait_until(lambda: self.hint_tool() == "Select", "the Select tool")
-        self.app.click("propertiesToggle")
         self.app.wait_until(lambda: self.app.prop("propertiesToggle", "checked"), "the dock")
         self.app.click_at((cx - 120, cy))
         self.app.key("ctrl+a")

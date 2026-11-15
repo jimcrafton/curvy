@@ -20,6 +20,10 @@ namespace curvy {
         GraphDocument();
 
         newui::UndoStack& undoStack() { return undoStack_; }
+        // Fired after every change of the graph (an edit, undo or redo, a load that replaced it, a clear); what holds NodeRefs prunes them here.
+        newui::Delegate<GraphDocument> onGraphChanged;
+        // Expires when the document is destroyed, so something that observes it from a longer-lived view can tell not to touch it.
+        std::weak_ptr<void> lifetime() const { return alive_; }
         jitnodes::Network& network() { return *network_; }
         const jitnodes::Network& network() const { return *network_; }
 
@@ -142,6 +146,7 @@ namespace curvy {
         newui::UndoStack undoStack_;
 
     private:
+        std::shared_ptr<void> alive_ = std::make_shared<int>(0);
         std::vector<jitnodes::NodeId> childPath(const NodeRef& subnet) const;
         std::vector<std::vector<jitnodes::NodeId>> scopePaths_{std::vector<jitnodes::NodeId>{}};
         std::map<std::vector<jitnodes::NodeId>, std::uint32_t> scopeIndex_{{std::vector<jitnodes::NodeId>{}, 0}};

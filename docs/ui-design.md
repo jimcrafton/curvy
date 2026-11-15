@@ -146,6 +146,25 @@ The card the graph panel's colour swatch opens (`ColorPickerCard`) shows the act
   every tied row, in the same undo step as the swatch. Changing the row's colour any other way (wheel, sliders, hex, a plain swatch, a Recent colour) unties it. Unlinking or deleting the swatch (or its
   palette) unties its rows, which keep their colours. Duplicated palettes, "+" and Save to palette make plain swatches. A keyed colour channel is overwritten, not keyed.
 - Not built yet: import of .ASE / .ACO, palette from an image, a Swatches tab on the document card.
+- **Swatches tab and palette from image (mockup `docs/mockups/swatchesTab.html`, layout C chosen, proposal):** the tab shows every palette as a row with its colours as a strip
+  (click to make it active, Recent last), then the active palette's grid, a details box (name, hex, Linked, used by N shapes in M groups, Select them) and the colours in use
+  that are in no palette (+ Add). It shares the strip's `SwatchPaletteController`, so both views agree. "New palette from image" (the "..." menu) takes a PNG/JPG, shrinks it to
+  about 128 px and runs median cut for 4-16 colours (default 8), with Order by (most used, hue, lightness), Merge near-duplicates and Ignore near-white/near-black; one undo
+  step makes a new active palette of plain swatches named after the file.
+  `docs/mockups/documentCard.html` shows the whole document card around it: a floating panel (a newui `TabControl`, one `TabPage` per tab: Document, Swatches, Library, Fonts)
+  that opens over the canvas from a top-bar Document button or the name chip (later also the document ring's "..." hub), keeps the canvas live beside it, and sets the
+  modified flag on any edit. Document, Library and Fonts are sketched only; Swatches is live, with shapes on the canvas for Used by, Select them and linked recolouring.
+  **Superseded in part by `docs/mockups/dockPanels.html` (proposal):** the card is a Panel in the right dock (see below), not its own window.
+- **Docks and Panels (mockup `docs/mockups/dockPanels.html`, proposal):** a Dock class holds zero or more Panels. Right dock = panels (the document card with its tabs, and the
+  panels the Panels button used to show); left dock = toolbar; bottom dock = timeline; top dock reserved. A Panel has a small title area, scrollable content and `canTearOff`
+  (true only for the right dock's panels; false for the toolbar and timeline, decided 2026-11-13). Dragging a title reorders within the dock; dragging it more than 40 px outside
+  tears it off into a floating `newui::ToolFrame` hosting the panel, and dragging the frame back over the dock and releasing docks it; closing the frame docks it back
+  (Hide is separate). The dock has no scrollbar: the mouse wheel scrolls it (not while a panel is being dragged), with a faint position hint for 0.7 s; a panel with more
+  content than its height has its own scrollbar and takes the wheel first until it is at its end.
+  **Restart (2026-11-13), decided by the user:** `Panel` is a base class (a `newui::SubView`) loaded from `Resources/panel.newui`, converted from `docs/mockups/panel.html` (a static
+  copy of one panel of dockPanels.html): the chrome only (title bar with collapse caret, grip, title, menu and close buttons, all always visible, as the mockup draws them) and an empty scrollable
+  body. It knows nothing of docks. A dock view driven by `DockLayout` does the docking, reordering and wheel scrolling; tear-off hosts the panel in a `newui::ToolFrame`. Panels
+  such as `DocumentPanel` derive from `Panel` and only add content. Close on a docked panel hides it; close on the floating ToolFrame docks the panel back. Panels start expanded.
 
 ### Pen path drawing and editing (mockup `docs/mockups/pen.html`, proposal)
 A test bench on pointer events (hover badges, pressure and the eraser end work with a pen; right button stands in for the barrel button).
@@ -506,3 +525,5 @@ Esc cancels). The canvas offers `onPressFilter`, `onKeyFilter` and `onPaintTop` 
 On the first start (`Settings::welcomeShown` false, no file given on the command line, no autosaved copy to recover) a card is centred over the canvas: a
 stylised keyboard with the Space bar lit, and three lines on how Space opens the ring menu (tap), pans (hold and move) and starts a document. Any key, or a press anywhere (the canvas, the top bar, the hint bar), closes it (Esc just closes; Space closes it and carries on, so the first tap opens the ring). The flag is saved when the card is shown, so it appears once.
 It is a newui `Overlay` (`WelcomeOverlay`) built from `newui::shapes`: the keyboard is rounded-rect shapes with blue outlines (roughly opposite the amber accent) and the lit Space bar has a small glow plus an amber focus ring.
+
+**Panels menu (2026-11-13, decided by the user):** the top bar's Panels button (`propertiesToggle`) no longer toggles the right dock; it opens a native menu that lists every panel with a tick on the shown ones (a click shows or hides it, and showing a docked panel opens the dock), then a separator and "Show panel dock" / "Hide panel dock". A panel's own "..." button opens Collapse/Expand, Float/Dock and Hide. The View ring's P still toggles the dock. Both menus are `PanelsMenu` (entries as data, shown through `WorkspaceController::presentMenu`, which tests replace because the native popup blocks).

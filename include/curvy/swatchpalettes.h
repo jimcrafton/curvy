@@ -35,6 +35,15 @@ namespace curvy {
         static bool channels(const jitnodes::Node& node, const std::string& group, Channels& out);
     };
 
+    // How a colour is used in the graph: `rows` colour rows (a fill's or a stroke's colour) have it, in `groups` different networks (a layer's or a
+    // group's contents). Colours are compared as 8-bit values.
+    // @reflect ignore=true
+    struct ColorUse {
+        Swatch color;
+        std::size_t rows = 0;
+        std::size_t groups = 0;
+    };
+
     // A named list of swatches; a document keeps one or more of them, one active.
     // @reflect ignore=true
     struct Palette {

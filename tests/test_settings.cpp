@@ -138,3 +138,19 @@ TEST(SettingsFile, ResettingAPagePutsBackOnlyThatPage) {
     EXPECT_EQ(300, reset.spaceTapMs);
     EXPECT_EQ(Settings::ThemeChoice::FollowWindows, reset.theme);
 }
+
+TEST(SettingsFile, PanelStatesRoundTripInOrder) {
+    Settings changed;
+    changed.panels = {{"zeta", true, false, false, 0.0f, 0.0f, 0.0f}, {"alpha", false, true, true, 310.0f, -20.0f, 180.0f}};
+    Settings back;
+    back.fromText(changed.toText());
+    ASSERT_EQ(2u, back.panels.size());
+    EXPECT_EQ("zeta", back.panels[0].id);
+    EXPECT_TRUE(back.panels[0].collapsed);
+    EXPECT_EQ("alpha", back.panels[1].id);
+    EXPECT_TRUE(back.panels[1].userHidden);
+    EXPECT_TRUE(back.panels[1].floating);
+    EXPECT_FLOAT_EQ(310.0f, back.panels[1].floatX);
+    EXPECT_FLOAT_EQ(-20.0f, back.panels[1].floatY);
+    EXPECT_FLOAT_EQ(180.0f, back.panels[1].bodyHeight);
+}

@@ -7,6 +7,7 @@
 #include "curvy/viewstate.h"
 
 #include <newui/color.h>
+#include <newui/delegate.h>
 
 #include <atomic>
 #include <functional>
@@ -66,13 +67,22 @@ namespace curvy {
         void setSwatchLinked(std::size_t palette, std::size_t index, bool linked);
         // Puts the swatch at position `to` (counted after it is taken out).
         void moveSwatch(std::size_t palette, std::size_t from, std::size_t to);
+        // One undo step: a new active palette (the name made unique) of plain copies of `swatches`, for a palette made from an image. Throws when
+        // the name or the list is empty.
+        std::size_t addPaletteFrom(const std::string& name, const std::vector<Swatch>& swatches);
+        // The distinct colours of the colour rows in the graph, most used first (ties keep the order they were found in). `onlyInNoPalette` leaves out
+        // the colours some swatch of some palette has. Read from the graph each time, so call it when something needs showing, not while drawing.
+        std::vector<ColorUse> colorsInUse(bool onlyInNoPalette = false);
+        // The colour rows a swatch is used by: for a linked swatch those tied to it, for a plain one those with its colour. `users` gets one node
+        // per row (a node with two colour rows is listed once).
+        ColorUse swatchUse(std::size_t palette, std::size_t index, std::vector<NodeRef>* users = nullptr);
 
         // The colours applied lately, newest first, without repeats (at most kRecentLimit). Held for the session: not saved, not an undo step and
         // not a change of the document.
         // Called after the palettes, the active palette or the recent colours changed by an edit, undo or redo (on the caller's thread). Not called by
         // New or a load, which may run on another thread: whoever shows the palettes reads them again when it opens. One listener: the colour card's
-        // swatch strip.
-        std::function<void()> onPalettesChanged;
+        // swatch strips (one SwatchPaletteController each); a listener must disconnect before the document is destroyed.
+        newui::Delegate<SketchDocument> onPalettesChanged;
 
         static constexpr std::size_t kRecentLimit = 24;
         const std::vector<Swatch>& recentColors() const { return recent_; }
@@ -179,15 +189,20 @@ namespace curvy {
         void editPalettes(const std::string& description, const std::function<void()>& edit, bool withGraph = false);
         // Every node of every network, subnets included.
         void forEachNode(const std::function<void(jitnodes::Network&, jitnodes::NodeId)>& visit);
+        // Every colour row of the graph: the node, its colour and the swatch link it is tied to (0 for none).
+        struct ColorRow {
+            NodeRef node;
+            Swatch color;
+            std::uint32_t link = 0;
+        };
+        std::vector<ColorRow> colorRows();
         // Gives the colour rows tied to swatch `link` the swatch's colour (`color` null: drops the tie and keeps their colours).
         void applyLink(std::uint32_t link, const Swatch* color);
         Palette& paletteAt(std::size_t index);
         Swatch& swatchAt(std::size_t palette, std::size_t index);
         void clampActivePalette();
         void palettesChanged() {
-            if (onPalettesChanged) {
-                onPalettesChanged();
-            }
+            onPalettesChanged(*this);
         }
         void findObjectProblems(const jitnodes::Network& network, std::vector<jitnodes::NodeId>& path);
 

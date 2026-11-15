@@ -1,0 +1,326 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>curvy docks and panels</title>
+<!-- Proposal, for approval before any code or .newui conversion: the workspace docks and the Panel class. Right dock = a column of Panels (the document
+     card with its tabs and the property panels the Panels button used to show), left dock = toolbar, bottom dock = timeline, top dock = empty for now.
+     Click around: drag a panel's title to reorder it inside the right dock; drag it out of the dock (past the tear-off distance) and it becomes a floating
+     ToolFrame hosting the panel; drag the frame's title back over the dock and drop to dock it; close the frame (x) and it docks back. Scroll the dock with the mouse wheel (not
+     while a panel is being dragged); a panel with more content than its height has its own scrollbar, the dock has none. The Panels button lists every panel to show or hide it. -->
+<link rel="stylesheet" href="preview.css">
+<style>
+  body { margin: 0; padding: 20px; width: 1660px; font-family: "Segoe UI", sans-serif; font-size: 12px; color: #F0F0F0; display: flex; flex-direction: row; gap: 24px; }
+  #stage { position: relative; width: 1180px; height: 720px; background: #2A2A2A; border: 1px solid #4A4A4A; overflow: hidden; flex: none; user-select: none; }
+  #topBar { position: absolute; left: 0; right: 0; top: 0; height: 32px; background: #1E1E1E; border-bottom: 1px solid #4A4A4A; display: flex; flex-direction: row; align-items: center; gap: 10px; padding: 0 12px; box-sizing: border-box; }
+  #topBar .logo { color: #3A86FF; font-size: 16px; font-weight: 700; }
+  #topBar b { font-size: 13px; font-weight: 600; }
+  #topBar .name { color: #A0A0A0; }
+  #topBar .space { flex: 1; }
+  #topBar button { height: 22px; padding: 0 10px; }
+  #topDock { position: absolute; left: 0; right: 0; top: 33px; height: 20px; background: #1A1A1A; border-bottom: 1px dashed #4A4A4A; color: #6A6A6A; line-height: 20px; text-align: center; font-size: 11px; }
+  #leftDock { position: absolute; left: 0; top: 54px; bottom: 148px; width: 44px; background: #1E1E1E; border-right: 1px solid #4A4A4A; display: flex; flex-direction: column; align-items: center; gap: 4px; padding-top: 6px; box-sizing: border-box; }
+  #leftDock .tool { width: 30px; height: 30px; background: #2E2E2E; border: 1px solid #4A4A4A; border-radius: 3px; text-align: center; line-height: 28px; font-size: 15px; color: #A0A0A0; }
+  #leftDock .tool.on { border-color: #FFB454; color: #F0F0F0; }
+  #leftDock .lock, #bottomDock .lock { color: #6A6A6A; font-size: 10px; margin-top: auto; padding-bottom: 6px; }
+  #canvas { position: absolute; left: 45px; right: 301px; top: 54px; bottom: 148px; overflow: hidden; }
+  #bottomDock { position: absolute; left: 0; right: 0; bottom: 25px; height: 122px; background: #1E1E1E; border-top: 1px solid #4A4A4A; box-sizing: border-box; }
+  #bottomDock .head { display: flex; flex-direction: row; gap: 10px; align-items: center; height: 24px; padding: 0 10px; border-bottom: 1px solid #333; color: #A0A0A0; }
+  #bottomDock .head b { color: #F0F0F0; font-weight: 600; }
+  #bottomDock .head .lockTag { margin-left: auto; color: #6A6A6A; font-size: 10px; }
+  .track { height: 22px; margin: 6px 10px 0 90px; background: #2A2A2A; border: 1px solid #333; position: relative; }
+  .track i { position: absolute; top: 3px; height: 14px; background: #3A86FF88; border: 1px solid #3A86FF; }
+  .tlabel { position: absolute; left: 10px; width: 76px; color: #A0A0A0; }
+  #statusBar { position: absolute; left: 0; right: 0; bottom: 0; height: 24px; background: #1E1E1E; border-top: 1px solid #4A4A4A; display: flex; flex-direction: row; align-items: center; gap: 16px; padding: 0 12px; color: #A0A0A0; box-sizing: border-box; white-space: nowrap; }
+  #statusBar #tool { color: #FFB454; font-weight: 600; }
+
+  #dock { position: absolute; right: 0; top: 54px; bottom: 148px; width: 300px; background: #1E1E1E; border-left: 1px solid #4A4A4A; box-sizing: border-box; }
+  #dock.dropping { outline: 2px dashed #FFB454; outline-offset: -3px; }
+  #dockScroll { position: absolute; inset: 0; overflow: hidden; padding: 6px 6px 40px 6px; }
+  #dockEmpty { color: #6A6A6A; text-align: center; padding: 40px 20px; display: none; }
+  #indicator { position: absolute; left: 6px; right: 6px; height: 3px; background: #FFB454; display: none; z-index: 6; pointer-events: none; }
+  #scrollHint { position: absolute; right: 1px; top: 0; width: 3px; background: #FFFFFF55; border-radius: 2px; opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 6; }
+
+  .panel { background: #252525; border: 1px solid #3A3A3A; margin-bottom: 6px; }
+  .panel.dragging { opacity: .35; }
+  .ptitle { height: 20px; display: flex; flex-direction: row; align-items: center; gap: 5px; padding: 0 4px; background: #2E2E2E; cursor: grab; font-size: 11px; color: #D0D0D0; }
+  .ptitle .caret { width: 12px; text-align: center; color: #A0A0A0; cursor: pointer; font-size: 9px; }
+  .ptitle .pt { flex: 1; letter-spacing: .02em; }
+  .ptitle .grip { color: #6A6A6A; font-size: 9px; }
+  .ptitle .pm, .ptitle .px { color: #A0A0A0; padding: 0 3px; cursor: pointer; visibility: hidden; }
+  .panel:hover .pm, .panel:hover .px { visibility: visible; }
+  .ptitle .pm:hover, .ptitle .px:hover { color: #F0F0F0; }
+  .ptitle .fixed { color: #6A6A6A; font-size: 10px; }
+  .pbody { overflow-y: auto; overflow-x: hidden; padding: 6px 8px; box-sizing: border-box; }
+  .pbody::-webkit-scrollbar { width: 6px; }
+  .pbody::-webkit-scrollbar-thumb { background: #5A5A5A; border-radius: 3px; }
+  .panel.collapsed .pbody { display: none; }
+
+  .frame { position: absolute; width: 290px; background: #252525; border: 1px solid #5A5A5A; box-shadow: 0 8px 26px #000000C0; z-index: 7; }
+  .frame .ftitle { height: 24px; display: flex; flex-direction: row; align-items: center; gap: 6px; padding: 0 4px 0 8px; background: #3A3A3A; cursor: move; font-size: 12px; }
+  .frame .ftitle span.t { flex: 1; }
+  .frame .ftitle span.fx { color: #A0A0A0; cursor: pointer; padding: 0 6px; }
+  .frame .ftitle span.fx:hover { color: #F0F0F0; }
+  .frame.over { border-color: #FFB454; }
+
+  .row { display: flex; flex-direction: row; align-items: center; gap: 6px; margin-bottom: 5px; }
+  .row label { width: 58px; color: #A0A0A0; flex: none; }
+  .row input[type=text] { flex: 1; min-width: 0; height: 20px; }
+  .muted { color: #A0A0A0; }
+  .chips { display: flex; flex-direction: row; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+  .chip { padding: 0 8px; border: 1px solid #4A4A4A; background: #2E2E2E; border-radius: 9px; cursor: pointer; color: #A0A0A0; }
+  .chip.on { background: #FFB454; border-color: #FFB454; color: #1B1B1B; }
+  .sw { width: 20px; height: 20px; border: 1px solid #00000080; display: inline-block; flex: none; }
+  .grid { display: flex; flex-direction: row; flex-wrap: wrap; gap: 3px; margin: 6px 0; }
+  .mini { display: flex; flex-direction: row; height: 10px; }
+  .mini i { flex: 1; }
+  .pal { border: 1px solid #4A4A4A; padding: 4px 5px; margin-bottom: 3px; background: #2E2E2E; }
+  .pal.on { border-color: #FFB454; }
+  .pal .top { display: flex; justify-content: space-between; margin-bottom: 3px; }
+  .tree .t { display: flex; flex-direction: row; align-items: center; gap: 5px; height: 20px; color: #D0D0D0; }
+  .tree .t i { width: 8px; height: 8px; background: #6A6A6A; display: inline-block; }
+  .wheel { width: 130px; height: 130px; border-radius: 50%; margin: 2px auto 8px; background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); }
+  .slider { display: flex; flex-direction: row; align-items: center; gap: 6px; height: 20px; }
+  .slider b { width: 14px; font-weight: 400; color: #A0A0A0; }
+  .slider i { flex: 1; height: 4px; background: #4A4A4A; border-radius: 2px; }
+  .slider u { width: 28px; text-align: right; text-decoration: none; }
+
+  .menu { position: absolute; background: #1E1E1E; border: 1px solid #4A4A4A; box-shadow: 0 4px 14px #00000099; min-width: 180px; z-index: 20; display: none; padding: 3px 0; }
+  .menu div { padding: 4px 12px; cursor: pointer; display: flex; justify-content: space-between; gap: 18px; }
+  .menu div:hover { background: #3A3A3A; }
+  .menu div.off { color: #6A6A6A; cursor: default; }
+  .menu div.off:hover { background: none; }
+  .menu hr { border: 0; border-top: 1px solid #4A4A4A; margin: 3px 0; }
+
+  #notes { width: 420px; color: #A0A0A0; line-height: 1.5; }
+  #notes h3 { color: #F0F0F0; margin: 14px 0 6px 0; font-size: 13px; }
+  #notes h3:first-child { margin-top: 0; }
+  #notes ul { margin: 0; padding-left: 18px; }
+  #notes li { margin-bottom: 4px; }
+  #notes b { color: #F0F0F0; }
+  #try { background: #1E1E1E; border: 1px solid #4A4A4A; padding: 8px 10px; margin-bottom: 14px; }
+  #try label { display: block; margin: 2px 0; color: #F0F0F0; }
+  #try input { accent-color: #FFB454; }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <div id="topBar"><span class="logo">~</span><b>curvy</b><span class="name">Sunset Harbour</span><span class="space"></span><button>Tools</button><button id="panelsButton">Panels</button><button>Graph</button></div>
+    <div id="topDock">top dock (empty: tool options will go here)</div>
+    <div id="leftDock"></div>
+    <div id="canvas"><svg id="art" width="835" height="518"></svg></div>
+    <div id="dock"><div id="dockScroll"></div><div id="dockEmpty">No panels shown.<br>Use the Panels button.</div><div id="indicator"></div><div id="scrollHint"></div></div>
+    <div id="bottomDock">
+      <div class="head"><b>Timeline</b><span>&#9654;</span><span>0:00 / 2:00</span><span class="lockTag">canTearOff: false</span></div>
+      <div class="track"><span class="tlabel" style="top:3px">Layer1</span><i style="left:10px;width:180px"></i><i style="left:230px;width:120px"></i></div>
+      <div class="track"><span class="tlabel" style="top:3px">Layer2</span><i style="left:60px;width:260px"></i></div>
+    </div>
+    <div id="statusBar"><span id="tool">Select</span><span id="message">Drag a panel title to move it; drag it out of the dock to float it</span></div>
+    <div id="floats"></div>
+    <div class="menu" id="menu"></div>
+  </div>
+
+  <div id="notes">
+    <div id="try">
+      <b>Mockup controls (not part of the app)</b>
+      <label><input type="checkbox" id="hintToggle" checked> show a faint scroll position hint while the dock scrolls</label>
+      <label><button id="reset">Reset the layout</button></label>
+    </div>
+    <h3>The dock</h3>
+    <ul>
+      <li><b>Dock class:</b> a column holding zero or more Panels. The <b>right dock</b> is the panel dock; the <b>left dock</b> holds the toolbar and the <b>bottom dock</b> the timeline; the <b>top dock</b> is reserved and empty. Each is a Dock with the same class, so any panel could live in any dock later.</li>
+      <li><b>No dock scrollbar.</b> When the panels together are taller than the dock, scroll the dock with the <b>mouse wheel</b> (not while a panel is being dragged). Over a panel's content the wheel scrolls that panel first and hands over to the dock only when the panel is at its end; over a title or a gap it scrolls the dock. A faint position hint shows for 0.7 s while the dock scrolls.</li>
+      <li><b>Panels may have their own scrollbar</b> (Document, Layers and Properties here), thin and only on the panel, so the dock itself stays clean.</li>
+    </ul>
+    <h3>The Panel class</h3>
+    <ul>
+      <li>A small <b>title area</b> (20 px): a grip, a collapse caret, the title, and a menu and a hide button that appear on hover. Content below is scrollable. A panel has <b>canTearOff</b>.</li>
+      <li><b>Dragging the title:</b> inside the dock it reorders (an amber line shows the drop place). Drag past the tear-off distance (40 px outside the dock) and the panel becomes a floating <b>newui::ToolFrame</b> hosting it, and the same drag carries on moving the frame.</li>
+      <li><b>Docking again:</b> drag the frame by its title over the dock (it outlines in amber) and release. <b>Closing</b> the frame docks the panel back into the right dock; Hide (in the panel menu or the Panels button) is how a panel is put away.</li>
+      <li><b>canTearOff</b> is true only for the panels of the right dock. The toolbar (left dock) and the timeline (bottom dock) have it false: they stay where they are and cannot be reordered.</li>
+    </ul>
+    <h3>What the panels are</h3>
+    <ul>
+      <li><b>Document</b> is the document card as a panel: tabs Document | Swatches | Library | Fonts inside it (a TabControl in the panel body), so the card is no longer a separate floating thing. Tear it off and it is the floating card of the earlier mockup.</li>
+      <li><b>Colour, Appearance, Transform, Layers, Properties</b> are what the old Panels button showed. The <b>Panels</b> button now lists every panel with a tick for shown ones; clicking toggles it. A hidden panel returns at the bottom of the dock.</li>
+    </ul>
+  </div>
+
+<script>
+const $ = s => document.querySelector(s);
+const stage = $('#stage');
+const TEAR = 40;
+let z = 10;
+
+/* ---- panel bodies (representative content) ---- */
+let docTab = 'Swatches';
+const SW = ['#E64D33', '#F2994A', '#F2C94C', '#8E3B46', '#3C2A4D', '#1F1B2E', '#EFDAC4', '#233244', '#B8D1F4', '#4CD9A0', '#4375C6', '#000000', '#FFFFFF', '#808080'];
+const mini = l => `<div class="mini">${l.map(c => `<i style="background:${c}"></i>`).join('')}</div>`;
+const docBody = () => `<div class="chips">${['Document', 'Swatches', 'Library', 'Fonts'].map(t => `<span class="chip ${t === docTab ? 'on' : ''}" data-doctab="${t}">${t}</span>`).join('')}</div>` + ({
+  Document: `<div class="row"><label>Name</label><input type="text" value="Sunset Harbour"></div><div class="row"><label>Author</label><input type="text" value="Jim"></div><div class="row"><label>Size</label><input type="text" value="612"><span class="muted">&times;</span><input type="text" value="792"></div><div class="row"><label>Resolution</label><input type="text" value="72"></div><div class="row"><label>Colour</label><span class="chip on">RGB</span><span class="chip">CMYK</span></div><div class="muted">Artboards: Page 1, Cover<br>Layers 2, groups 3, shapes 20</div>`,
+  Swatches: `<div class="pal on"><div class="top"><span>Sunset</span><span class="muted">7</span></div>${mini(SW.slice(0, 7))}</div><div class="pal"><div class="top"><span>Default</span><span class="muted">9</span></div>${mini(SW.slice(7).concat(SW.slice(0, 2)))}</div><div class="pal" style="opacity:.7"><div class="top"><span>Recent</span><span class="muted">automatic</span></div>${mini(SW.slice(7, 11))}</div><div class="grid">${SW.map(c => `<span class="sw" style="background:${c}"></span>`).join('')}</div><div class="muted" style="margin:6px 0">In use, in no palette</div>${['#233244', '#B8D1F4', '#4CD9A0'].map(c => `<div class="row"><span class="sw" style="background:${c}"></span><span>${c}</span><span class="muted" style="margin-left:auto">+ Add</span></div>`).join('')}`,
+  Library: `<div class="chips"><span class="chip on">Symbols</span><span class="chip">Patterns</span><span class="chip">Styles</span><span class="chip">Brushes</span></div><div class="row"><span class="sw" style="background:#B8D1F4"></span>Bird<span class="muted" style="margin-left:auto">3</span></div><div class="row"><span class="sw" style="background:#F2C94C"></span>Sparkle<span class="muted" style="margin-left:auto">12</span></div>`,
+  Fonts: `<div class="row">Segoe UI<span class="muted" style="margin-left:auto">4</span></div><div class="row">Bahnschrift<span class="muted" style="margin-left:auto">1</span></div><div class="row">Lobster Two<span style="margin-left:auto;color:#FFD5CC">Missing</span></div>`
+})[docTab];
+const colourBody = () => `<div class="wheel"></div>` + [['R', 230], ['G', 77], ['B', 51], ['A', 100]].map(([k, v]) => `<div class="slider"><b>${k}</b><i></i><u>${v}</u></div>`).join('');
+const appearanceBody = () => `<div class="row"><label>Fill</label><span class="sw" style="background:#E64D33"></span><input type="text" value="#E64D33"></div><div class="row"><label>Stroke</label><span class="sw" style="background:#233244"></span><input type="text" value="#233244"></div><div class="row"><label>Width</label><input type="text" value="2"></div><div class="row"><label>Opacity</label><input type="text" value="100"></div>`;
+const transformBody = () => ['X', 'Y', 'Width', 'Height', 'Rotation'].map((k, i) => `<div class="row"><label>${k}</label><input type="text" value="${[120, 80, 64, 64, 0][i]}"></div>`).join('');
+const layersBody = () => `<div class="tree">` + ['Layer1', '&nbsp;&nbsp;Sky', '&nbsp;&nbsp;&nbsp;&nbsp;Cloud', '&nbsp;&nbsp;&nbsp;&nbsp;Sun', '&nbsp;&nbsp;Sea', '&nbsp;&nbsp;&nbsp;&nbsp;Wave 1', '&nbsp;&nbsp;&nbsp;&nbsp;Wave 2', '&nbsp;&nbsp;&nbsp;&nbsp;Wave 3', '&nbsp;&nbsp;Boats', '&nbsp;&nbsp;&nbsp;&nbsp;Hull', '&nbsp;&nbsp;&nbsp;&nbsp;Sail', 'Layer2', '&nbsp;&nbsp;Lighthouse', '&nbsp;&nbsp;&nbsp;&nbsp;Tower', '&nbsp;&nbsp;&nbsp;&nbsp;Lamp', 'Layer3', '&nbsp;&nbsp;Frame'].map(n => `<div class="t"><i></i>${n}</div>`).join('') + '</div>';
+const propsBody = () => ['radius', 'cx', 'cy', 'segments', 'startAngle', 'sweep', 'closed', 'smooth', 'tension', 'seed', 'offsetX', 'offsetY'].map((k, i) => `<div class="row"><label>${k}</label><input type="text" value="${[32, 120, 80, 24, 0, 360, 1, 0, 0.5, 7, 0, 0][i]}"></div>`).join('');
+
+const DEFAULTS = () => [
+  { id: 'document', title: 'Document', canTearOff: true, state: 'dock', collapsed: false, h: 290, body: docBody },
+  { id: 'colour', title: 'Colour', canTearOff: true, state: 'dock', collapsed: false, h: 215, body: colourBody },
+  { id: 'appearance', title: 'Appearance', canTearOff: true, state: 'dock', collapsed: false, h: 125, body: appearanceBody },
+  { id: 'transform', title: 'Transform', canTearOff: true, state: 'dock', collapsed: false, h: 140, body: transformBody },
+  { id: 'layers', title: 'Layers', canTearOff: true, state: 'dock', collapsed: false, h: 190, body: layersBody },
+  { id: 'props', title: 'Properties', canTearOff: true, state: 'dock', collapsed: false, h: 170, body: propsBody }
+];
+let panels = DEFAULTS();
+const byId = id => panels.find(p => p.id === id);
+const say = t => $('#message').textContent = t;
+
+/* ---- left dock and canvas ---- */
+$('#leftDock').innerHTML = ['&#8598;', '&#9998;', '&#9645;', '&#9675;', 'T', '&#8982;', '&#9986;', '&#9995;'].map((g, i) => `<div class="tool ${i === 0 ? 'on' : ''}">${g}</div>`).join('') + '<div class="lock">fixed</div>';
+$('#art').innerHTML = `<rect x="60" y="30" width="700" height="450" fill="#FFFFFF"/>` + [[160, 140, 36, '#EFDAC4'], [260, 170, 28, '#E64D33'], [380, 130, 44, '#EFDAC4'], [500, 190, 32, '#8E3B46'], [610, 150, 30, '#E64D33'], [230, 320, 40, '#233244'], [420, 340, 34, '#B8D1F4'], [560, 330, 38, '#4CD9A0']].map(([x, y, r, c]) => `<circle cx="${x}" cy="${y}" r="${r}" fill="${c}"/>`).join('');
+
+/* ---- rendering ---- */
+function panelHtml(p) {
+  return `<div class="panel ${p.collapsed ? 'collapsed' : ''}" data-id="${p.id}"><div class="ptitle"><span class="caret" data-act="collapse">${p.collapsed ? '&#9656;' : '&#9662;'}</span><span class="grip">&#8942;&#8942;</span><span class="pt">${p.title}</span>${p.canTearOff ? '' : '<span class="fixed">fixed</span>'}<span class="pm" data-act="menu" title="Panel menu">&#8943;</span><span class="px" data-act="hide" title="Hide">&#10005;</span></div><div class="pbody" style="max-height:${p.h}px">${p.body()}</div></div>`;
+}
+function render() {
+  const scroll = $('#dockScroll').scrollTop;
+  const docked = panels.filter(p => p.state === 'dock');
+  $('#dockScroll').innerHTML = docked.map(panelHtml).join('');
+  $('#dockEmpty').style.display = docked.length ? 'none' : 'block';
+  $('#dockScroll').scrollTop = scroll;
+  $('#floats').innerHTML = panels.filter(p => p.state === 'float').map(p => `<div class="frame" data-id="${p.id}" style="left:${p.fx}px;top:${p.fy}px;z-index:${p.z || 7}"><div class="ftitle"><span class="t">${p.title}</span><span class="fx" data-act="close" title="Close: docks the panel back">&#10005;</span></div><div class="pbody" style="max-height:${p.h}px">${p.body()}</div></div>`).join('');
+  document.querySelectorAll('[data-doctab]').forEach(e => e.onclick = () => { docTab = e.dataset.doctab; render(); });
+}
+function setState(p, state, index) {
+  p.state = state;
+  if (state === 'dock') {
+    panels = panels.filter(x => x !== p);
+    const docked = panels.filter(x => x.state === 'dock');
+    const before = index != null && index < docked.length ? docked[index] : null;
+    panels.splice(before ? panels.indexOf(before) : panels.length, 0, p);
+  }
+  render();
+}
+
+/* ---- menus ---- */
+const closeMenu = () => $('#menu').style.display = 'none';
+document.addEventListener('pointerdown', e => { if (!e.target.closest('#menu') && !e.target.closest('[data-act=menu]') && e.target.id !== 'panelsButton') closeMenu(); }, true);
+function openMenu(entries, x, y) {
+  const m = $('#menu');
+  m.innerHTML = entries.map(e => e === '-' ? '<hr>' : `<div class="${e.off ? 'off' : ''}"><span>${e.t}</span><span class="muted">${e.s || ''}</span></div>`).join('');
+  const items = entries.filter(e => e !== '-'); let i = 0;
+  m.querySelectorAll('div').forEach(d => { const e = items[i++]; d.onclick = () => { if (e.off) return; closeMenu(); e.f(); }; });
+  m.style.left = x + 'px'; m.style.top = y + 'px'; m.style.display = 'block';
+}
+const stagePos = el => { const r = el.getBoundingClientRect(), s = stage.getBoundingClientRect(); return { x: r.left - s.left, y: r.bottom - s.top }; };
+$('#panelsButton').onclick = e => {
+  const at = stagePos(e.currentTarget);
+  openMenu([...panels.map(p => ({ t: (p.state !== 'hidden' ? '&#10003; ' : '&nbsp;&nbsp;&nbsp; ') + p.title, s: p.state === 'float' ? 'floating' : p.state === 'hidden' ? '' : 'docked', f: () => { if (p.state === 'hidden') { setState(p, 'dock'); say(p.title + ' shown in the dock'); } else { setState(p, 'hidden'); say(p.title + ' hidden'); } } })), '-', { t: 'Reset the layout', f: resetLayout }], at.x - 150, at.y + 2);
+};
+function panelMenu(p, el) {
+  const at = stagePos(el);
+  openMenu([
+    { t: p.collapsed ? 'Expand' : 'Collapse', f: () => { p.collapsed = !p.collapsed; render(); } },
+    { t: 'Tear off', off: !p.canTearOff, s: p.canTearOff ? '' : 'fixed', f: () => { const r = $('#dock').getBoundingClientRect(), s = stage.getBoundingClientRect(); p.fx = r.left - s.left - 310; p.fy = 80; p.z = ++z; setState(p, 'float'); say(p.title + ' is floating'); } },
+    '-', { t: 'Hide', f: () => { setState(p, 'hidden'); say(p.title + ' hidden'); } }
+  ], at.x - 150, at.y);
+}
+function resetLayout() { panels = DEFAULTS(); render(); say('Layout reset'); }
+$('#reset').onclick = resetLayout;
+
+/* ---- clicks on titles ---- */
+stage.addEventListener('click', e => {
+  const a = e.target.closest('[data-act]'); if (!a) return;
+  const host = a.closest('[data-id]'), p = host && byId(host.dataset.id); if (!p) return;
+  if (a.dataset.act === 'collapse') { p.collapsed = !p.collapsed; render(); }
+  else if (a.dataset.act === 'hide') { setState(p, 'hidden'); say(p.title + ' hidden'); }
+  else if (a.dataset.act === 'menu') { panelMenu(p, a); }
+  else if (a.dataset.act === 'close') { setState(p, 'dock'); say(p.title + ' docked back'); }
+});
+
+/* ---- dragging a panel: reorder in the dock, tear off, dock again ---- */
+const rel = e => { const r = stage.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+const dockBox = () => { const r = $('#dock').getBoundingClientRect(), s = stage.getBoundingClientRect(); return { l: r.left - s.left, t: r.top - s.top, r: r.right - s.left, b: r.bottom - s.top }; };
+const inside = (m, b) => m.x >= b.l && m.x <= b.r && m.y >= b.t && m.y <= b.b;
+const outsideBy = (m, b) => Math.max(0, b.l - m.x, m.x - b.r, b.t - m.y, m.y - b.b);
+let drag = null;
+function dropIndex(m, skipId) {
+  const els = [...document.querySelectorAll('#dockScroll .panel')].filter(e => e.dataset.id !== skipId);
+  let idx = 0;
+  els.forEach(e => { const r = e.getBoundingClientRect(), s = stage.getBoundingClientRect(); if (m.y > r.top - s.top + r.height / 2) idx++; });
+  const ind = $('#indicator'); const dk = $('#dock').getBoundingClientRect();
+  let y = 4;
+  if (els.length) { const ref = idx < els.length ? els[idx].getBoundingClientRect() : els[els.length - 1].getBoundingClientRect(); y = (idx < els.length ? ref.top : ref.bottom) - dk.top - 2; }
+  ind.style.top = Math.max(2, Math.min(y, dk.height - 4)) + 'px'; ind.style.display = 'block';
+  return idx;
+}
+const hideIndicator = () => { $('#indicator').style.display = 'none'; $('#dock').classList.remove('dropping'); };
+
+stage.addEventListener('pointerdown', e => {
+  if (e.button !== 0 || e.target.closest('[data-act]')) return;
+  const title = e.target.closest('.ptitle'), ftitle = e.target.closest('.ftitle');
+  if (title) {
+    const host = title.closest('.panel'), p = byId(host.dataset.id), r = host.getBoundingClientRect();
+    drag = { kind: 'dock', id: p.id, sx: e.clientX, sy: e.clientY, moved: false, offX: e.clientX - r.left, offY: e.clientY - r.top, index: null };
+    e.preventDefault();
+  } else if (ftitle) {
+    const host = ftitle.closest('.frame'), p = byId(host.dataset.id), r = host.getBoundingClientRect();
+    p.z = ++z; host.style.zIndex = p.z;
+    drag = { kind: 'float', id: p.id, sx: e.clientX, sy: e.clientY, moved: false, offX: e.clientX - r.left, offY: e.clientY - r.top, index: null };
+    e.preventDefault();
+  } else if (e.target.closest('.frame')) { const p = byId(e.target.closest('.frame').dataset.id); p.z = ++z; e.target.closest('.frame').style.zIndex = p.z; }
+});
+document.addEventListener('pointermove', e => {
+  if (!drag) return;
+  if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 4) return;
+  drag.moved = true;
+  const m = rel(e), box = dockBox(), p = byId(drag.id);
+  if (drag.kind === 'dock') {
+    const el = document.querySelector(`#dockScroll .panel[data-id=${p.id}]`); if (el) el.classList.add('dragging');
+    if (p.canTearOff && outsideBy(m, box) >= TEAR) {   // past the tear-off distance: float it and carry on dragging the frame
+      hideIndicator(); p.fx = m.x - drag.offX; p.fy = m.y - drag.offY; p.z = ++z; p.state = 'float'; render(); drag.kind = 'float';
+      say(p.title + ' is floating; drag it back over the dock to dock it'); return;
+    }
+    if (inside(m, box)) { drag.index = dropIndex(m, p.id); say('Release to move ' + p.title + (p.canTearOff ? ' here (drag further out to float it)' : ' here')); }
+    else { hideIndicator(); drag.index = null; say(p.canTearOff ? 'Keep going to float ' + p.title + ' (' + Math.round(outsideBy(m, box)) + ' of ' + TEAR + ' px)' : p.title + ' cannot be torn off'); }
+  } else {
+    const el = document.querySelector(`.frame[data-id=${p.id}]`); p.fx = m.x - drag.offX; p.fy = m.y - drag.offY;
+    if (el) { el.style.left = p.fx + 'px'; el.style.top = p.fy + 'px'; }
+    if (inside(m, box)) { drag.index = dropIndex(m, p.id); $('#dock').classList.add('dropping'); if (el) el.classList.add('over'); say('Release to dock ' + p.title); }
+    else { hideIndicator(); drag.index = null; if (el) el.classList.remove('over'); }
+  }
+});
+document.addEventListener('pointerup', e => {
+  if (!drag) return;
+  const d = drag; drag = null;
+  const p = byId(d.id), m = rel(e);
+  hideIndicator();
+  if (d.kind === 'dock') { if (d.moved && d.index != null) { setState(p, 'dock', d.index); say(p.title + ' moved'); } else render(); }
+  else if (d.moved && inside(m, dockBox()) && d.index != null) { setState(p, 'dock', d.index); say(p.title + ' docked'); }
+});
+/* ---- scrolling the dock: the wheel, when no panel is being dragged; a panel's own content takes the wheel first until it is at its end ---- */
+let hintTimer = 0;
+function showHint() {
+  const s = $('#dockScroll'), h = $('#scrollHint');
+  if (!$('#hintToggle').checked || s.scrollHeight <= s.clientHeight) return;
+  const frac = s.clientHeight / s.scrollHeight;
+  h.style.height = Math.max(24, frac * s.clientHeight) + 'px'; h.style.top = (s.scrollTop / s.scrollHeight) * s.clientHeight + 'px'; h.style.opacity = 1;
+  clearTimeout(hintTimer); hintTimer = setTimeout(() => h.style.opacity = 0, 700);
+}
+$('#dock').addEventListener('wheel', e => {
+  if (drag) { e.preventDefault(); return; }
+  const body = e.target.closest('.pbody');
+  if (body && (e.deltaY > 0 ? body.scrollTop + body.clientHeight < body.scrollHeight - 1 : body.scrollTop > 0)) return;
+  e.preventDefault(); $('#dockScroll').scrollTop += e.deltaY; showHint();
+}, { passive: false });
+
+render();
+</script>
+</body>
+</html>

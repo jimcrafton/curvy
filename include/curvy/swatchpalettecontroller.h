@@ -4,6 +4,8 @@
 #include "curvy/swatchpalettes.h"
 #include "curvy/swatchstrip.h"
 
+#include <newui/delegate.h>
+
 #include <functional>
 #include <string>
 
@@ -39,6 +41,7 @@ namespace curvy {
 
         SketchDocument& document_;
         SwatchStrip& strip_;
+        newui::Connection connection_;
         Swatch current_;
         bool recent_ = false;
         bool refreshing_ = false;

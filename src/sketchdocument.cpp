@@ -16,7 +16,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <map>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 
@@ -465,6 +467,138 @@ namespace curvy {
             index = palettes_.size() - 1;
         });
         return index;
+    }
+
+    std::size_t SketchDocument::addPaletteFrom(const std::string& name, const std::vector<Swatch>& swatches) {
+        if (name.empty()) {
+            throw std::runtime_error("a palette needs a name");
+        }
+        if (swatches.empty()) {
+            throw std::runtime_error("there are no colours for the palette");
+        }
+        std::size_t index = 0;
+        editPalettes("Add Palette From Image", [&]() {
+            Palette palette{uniqueName(palettes_, name), swatches};
+            for (Swatch& swatch : palette.swatches) {
+                swatch.link = 0;
+            }
+            palettes_.push_back(std::move(palette));
+            index = palettes_.size() - 1;
+            activePalette_ = index;
+        });
+        return index;
+    }
+
+    std::vector<SketchDocument::ColorRow> SketchDocument::colorRows() {
+        std::vector<ColorRow> rows;
+        std::vector<jitnodes::NodeId> path;
+        const std::function<void(jitnodes::Network&)> walk = [&](jitnodes::Network& net) {
+            const std::uint32_t scope = scopeOf(path);
+            for (const jitnodes::NodeId id : net.nodeIds()) {
+                jitnodes::Node& node = net.node(id);
+                std::vector<std::string> groups;
+                for (const std::string& name : node.floatNames()) {
+                    if (node.paramTagValue(name, "kind").value_or("") != "color") {
+                        continue;
+                    }
+                    const std::string group = node.paramTagValue(name, "group").value_or("");
+                    if (!group.empty() && std::find(groups.begin(), groups.end(), group) == groups.end()) {
+                        groups.push_back(group);
+                    }
+                }
+                for (const std::string& group : groups) {
+                    SwatchLinks::Channels channels;
+                    if (!SwatchLinks::channels(node, group, channels)) {
+                        continue;
+                    }
+                    ColorRow row;
+                    row.node = NodeRef(scope, id);
+                    row.color.r = node.getFloat(channels.r);
+                    row.color.g = node.getFloat(channels.g);
+                    row.color.b = node.getFloat(channels.b);
+                    row.color.a = channels.a.empty() ? 1.0f : node.getFloat(channels.a);
+                    for (const std::string& tag : node.tags()) {
+                        std::uint32_t tied = 0;
+                        std::string tagGroup;
+                        if (SwatchLinks::parse(tag, tied, tagGroup) && tagGroup == group) {
+                            row.link = tied;
+                        }
+                    }
+                    rows.push_back(row);
+                }
+                if (jitnodes::Network* inner = node.childNetwork()) {
+                    path.push_back(id);
+                    walk(*inner);
+                    path.pop_back();
+                }
+            }
+        };
+        walk(network());
+        return rows;
+    }
+
+    namespace {
+        std::uint32_t colorKey(const Swatch& color) {
+            const auto byte = [](float v) { return std::uint32_t(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f)); };
+            return (byte(color.r) << 24) | (byte(color.g) << 16) | (byte(color.b) << 8) | byte(color.a);
+        }
+    }
+
+    std::vector<ColorUse> SketchDocument::colorsInUse(bool onlyInNoPalette) {
+        std::set<std::uint32_t> inPalette;
+        if (onlyInNoPalette) {
+            for (const Palette& palette : palettes_) {
+                for (const Swatch& swatch : palette.swatches) {
+                    inPalette.insert(colorKey(swatch));
+                }
+            }
+        }
+        std::vector<ColorUse> uses;
+        std::vector<std::set<std::uint32_t>> scopes;
+        std::map<std::uint32_t, std::size_t> found;
+        for (const ColorRow& row : colorRows()) {
+            const std::uint32_t key = colorKey(row.color);
+            if (inPalette.count(key) != 0) {
+                continue;
+            }
+            auto [it, isNew] = found.emplace(key, uses.size());
+            if (isNew) {
+                ColorUse use;
+                use.color = row.color;
+                use.color.name.clear();
+                uses.push_back(use);
+                scopes.emplace_back();
+            }
+            ++uses[it->second].rows;
+            scopes[it->second].insert(row.node.scope);
+        }
+        for (std::size_t i = 0; i < uses.size(); ++i) {
+            uses[i].groups = scopes[i].size();
+        }
+        std::stable_sort(uses.begin(), uses.end(), [](const ColorUse& a, const ColorUse& b) { return a.rows > b.rows; });
+        return uses;
+    }
+
+    ColorUse SketchDocument::swatchUse(std::size_t palette, std::size_t index, std::vector<NodeRef>* users) {
+        const Swatch swatch = swatchAt(palette, index);
+        if (users != nullptr) {
+            users->clear();
+        }
+        ColorUse use;
+        use.color = swatch;
+        std::set<std::uint32_t> scopes;
+        for (const ColorRow& row : colorRows()) {
+            if (swatch.link != 0 ? row.link != swatch.link : colorKey(row.color) != colorKey(swatch)) {
+                continue;
+            }
+            ++use.rows;
+            scopes.insert(row.node.scope);
+            if (users != nullptr && std::find(users->begin(), users->end(), row.node) == users->end()) {
+                users->push_back(row.node);
+            }
+        }
+        use.groups = scopes.size();
+        return use;
     }
 
     std::size_t SketchDocument::duplicatePalette(std::size_t index) {

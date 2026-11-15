@@ -243,6 +243,19 @@ namespace curvy {
             b[dockName(i)] = b.pop();
         }
         b["docks"] = b.pop();
+
+        b.push_object();   // an object, not an array: the keys keep their order
+        for (const PanelState& panel : panels) {
+            b.push_object();
+            flag("collapsed", panel.collapsed);
+            flag("hidden", panel.userHidden);
+            flag("floating", panel.floating);
+            number("floatX", panel.floatX);
+            number("floatY", panel.floatY);
+            number("bodyHeight", panel.bodyHeight);
+            b[panel.id.c_str()] = b.pop();
+        }
+        b["panels"] = b.pop();
         b.pop();
 
         json5::writer_params params;
@@ -333,6 +346,28 @@ namespace curvy {
                     docks[i].size = float(size);
                     readBool(g, "collapsed", docks[i].collapsed);
                 }
+            }
+        }
+        json5::value panelsGroup;
+        if (group(root, "panels", panelsGroup)) {
+            panels.clear();
+            for (auto [name, child] : json5::object_view(panelsGroup)) {
+                if (!child.is_object() || std::string_view(name).empty()) {
+                    continue;
+                }
+                PanelState state;
+                state.id = std::string(name);
+                double x = 0.0, y = 0.0, height = 0.0;
+                readBool(child, "collapsed", state.collapsed);
+                readBool(child, "hidden", state.userHidden);
+                readBool(child, "floating", state.floating);
+                readReal(child, "floatX", x, -32000.0, 32000.0);
+                readReal(child, "floatY", y, -32000.0, 32000.0);
+                readReal(child, "bodyHeight", height, 0.0, 32000.0);
+                state.floatX = float(x);
+                state.floatY = float(y);
+                state.bodyHeight = float(height);
+                panels.push_back(state);
             }
         }
     }

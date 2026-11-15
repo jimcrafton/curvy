@@ -230,6 +230,7 @@ namespace curvy {
                 placed.monitor.push_back(char(*c));   // device names are plain ASCII ("\\.\DISPLAY1")
             }
         }
+        capturePanelSettings();   // the floating windows move without telling anyone
         if (placed.known()) {
             settings_.window = placed;
             saveSettings();
@@ -344,8 +345,99 @@ namespace curvy {
         menu_ = new RadialMenu();
         canvas_->addChild(menu_);
         docks_ = std::make_unique<DockController>(frame_, settings_, [this]() { saveSettings(); });
+        buildRightDock();
         bindViews();
         start();
+    }
+
+    void WorkspaceController::buildRightDock() {
+        auto* body = dynamic_cast<SubView*>(frame_.rootView().findView("rightAreaBody"));
+        if (body == nullptr) {
+            return;
+        }
+        presentMenu = [this](const std::vector<PanelMenuEntry>& entries, const Point& screen) {
+            PanelsMenu::popup(frame_.frameHandle(), entries, screen);
+        };
+        PanelInfo info;
+        info.id = "document";
+        info.title = "Document";
+        info.side = DockSide::Right;
+        panelLayout_.add(info);
+
+        rightDock_ = new PanelDock(panelLayout_, DockSide::Right);
+        rightDock_->setLayoutParams(std::make_unique<FlexLayoutParams>(1.0f));
+        body->addChild(rightDock_);
+        floatingPanels_ = std::make_unique<FloatingPanels>(frame_.frameHandle(), panelLayout_, [this](DockSide side) {
+            return side == DockSide::Right ? rightDock_ : nullptr;
+        });
+        panelLayout_.onChanged = [this]() {
+            floatingPanels_->sync();   // panels leave and enter their frames first, then the dock stacks what it has
+            rightDock_->sync();
+        };
+
+        documentPanel_ = new DocumentPanel(document_);
+        rightDock_->addPanel(documentPanel_);
+        rightDock_->onPanelMenu += [this](PanelDock&, Panel& panel, const Point& at) {
+            showPanelMenu(panel, at);
+            return SyncReturn::Handled;
+        };
+        applyPanelSettings();
+        // Saving starts after the saved state is applied, so applying it does not write the half-built state back.
+        panelLayout_.onChanged = [this]() {
+            floatingPanels_->sync();
+            rightDock_->sync();
+            capturePanelSettings();
+            saveSettings();
+        };
+        rightDock_->onPanelResized += [this](PanelDock&, Panel&) {
+            capturePanelSettings();
+            saveSettings();
+            return SyncReturn::Handled;
+        };
+        documentSwatches_ = std::make_unique<SwatchPaletteController>(document_, documentPanel_->strip());
+        documentSwatches_->onMessage = [this](const std::string& message) { model_->say(message); };
+    }
+
+    void WorkspaceController::applyPanelSettings() {
+        for (const Settings::PanelState& state : settings_.panels) {
+            Panel* panel = rightDock_->panel(state.id);
+            const PanelInfo* info = panelLayout_.find(state.id);
+            if (panel == nullptr || info == nullptr) {
+                continue;
+            }
+            if (state.bodyHeight > 0.0f) {
+                panel->setBodyHeight((std::max)(Panel::kMinBodyHeight, state.bodyHeight));
+            }
+            panel->setCollapsed(state.collapsed);
+            panelLayout_.setUserHidden(state.id, state.userHidden);
+            if (state.floating && info->canTearOff) {
+                panelLayout_.tearOff(state.id, state.floatX, state.floatY);
+            } else if (!state.userHidden) {
+                panelLayout_.move(state.id, DockLayout::kEnd);   // in the saved order, one after another
+            }
+        }
+    }
+
+    void WorkspaceController::capturePanelSettings() {
+        if (rightDock_ == nullptr || floatingPanels_ == nullptr) {
+            return;
+        }
+        std::vector<Settings::PanelState> states;
+        for (const PanelInfo& info : panelLayout_.panels()) {
+            Settings::PanelState state;
+            state.id = info.id;
+            state.userHidden = info.userHidden;
+            state.floating = info.floating;
+            state.floatX = info.floatX;
+            state.floatY = info.floatY;
+            floatingPanels_->screenPosition(info.id, state.floatX, state.floatY);
+            if (const Panel* panel = rightDock_->panel(info.id)) {
+                state.collapsed = panel->collapsed();
+                state.bodyHeight = panel->bodyHeight();
+            }
+            states.push_back(state);
+        }
+        settings_.panels = std::move(states);
     }
 
     // Resources/graphView.newui (from docs/mockups/graphView.html) lies over the canvas, hidden until the Graph button or Tab shows it.
@@ -738,6 +830,10 @@ namespace curvy {
         canvas_->setDocument(&document_);
         graphView_->setDocument(&document_);
         model_->setDocument(true, document_.name());
+        if (documentPanel_ != nullptr) {
+            documentPanel_->refresh();
+            documentSwatches_->refresh();   // New and Open change the palettes without telling the strip
+        }
         showTitle();
         applyView(document_.viewState());
         canvas_->style().markDirty();
@@ -887,7 +983,7 @@ namespace curvy {
             const char* button;
             DockSide side;
         };
-        for (const Toggle& toggle : {Toggle{"toolbarToggle", DockSide::Left}, Toggle{"propertiesToggle", DockSide::Right}}) {
+        for (const Toggle& toggle : {Toggle{"toolbarToggle", DockSide::Left}}) {
             if (auto* button = dynamic_cast<Button*>(frame_.rootView().findView(toggle.button))) {
                 button->onClick += [this, side = toggle.side](Control&) {
                     toggleDock(side);
@@ -895,6 +991,14 @@ namespace curvy {
                     return SyncReturn::Handled;
                 };
             }
+        }
+        // The Panels button lists the panels; the dock itself is the menu's last line.
+        if (auto* button = dynamic_cast<Button*>(frame_.rootView().findView("propertiesToggle"))) {
+            button->onClick += [this, button](Control&) {
+                showPanelsMenu(button->localToScreen(Point(0.0f, button->bounds().height())));
+                focusCanvas();
+                return SyncReturn::Handled;
+            };
         }
         if (auto* button = dynamic_cast<Button*>(frame_.rootView().findView("graphToggle"))) {
             button->onClick += [this](Control&) {
@@ -906,6 +1010,27 @@ namespace curvy {
 
     void WorkspaceController::toggleGraph() {
         showGraph(!graphOverlay_->isVisible());
+    }
+
+    void WorkspaceController::showPanelsMenu(const Point& screen) {
+        const bool shown = !docks_->collapsed(DockSide::Right);
+        presentMenu(panelsMenuEntries(shown), screen);
+    }
+
+    std::vector<PanelMenuEntry> WorkspaceController::panelsMenuEntries(bool dockShown) {
+        return PanelsMenu::forPanels(
+            panelLayout_, dockShown,
+            [this]() {
+                if (docks_->collapsed(DockSide::Right)) {
+                    toggleDock(DockSide::Right);
+                }
+            },
+            [this]() { toggleDock(DockSide::Right); });
+    }
+
+    void WorkspaceController::showPanelMenu(Panel& panel, const Point& screen) {
+        const Point floatAt(screen.x - DockLayout::kTearOffDistance - 200.0f, screen.y);
+        presentMenu(PanelsMenu::forPanel(panelLayout_, panel, floatAt), screen);
     }
 
     void WorkspaceController::toggleDock(DockSide side) {
@@ -1053,6 +1178,10 @@ namespace curvy {
                 break;
         }
         model_->setDocument(true, document_.name());
+        if (documentPanel_ != nullptr) {
+            documentPanel_->refresh();
+            documentSwatches_->refresh();   // New and Open change the palettes without telling the strip
+        }
         showTitle();
         canvas_->style().markDirty();
         model_->say("Document setup changed");

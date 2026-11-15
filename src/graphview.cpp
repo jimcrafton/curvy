@@ -39,6 +39,35 @@ namespace curvy {
         onMouseWheel.add(this, &GraphView::handleMouseWheel);
         onKeyDown.add(this, &GraphView::handleKeyDown);
         onSizeChanged.add(this, &GraphView::handleSizeChanged);
+        modelConnection_ = model_->onChanged.add([this](SelectionModel&) {
+            selectionChanged();
+            return SyncReturn::Ignored;
+        });
+    }
+
+    GraphView::~GraphView() {
+        model_->onChanged.remove(modelConnection_);
+    }
+
+    void GraphView::setSelectionModel(SelectionModel* model) {
+        SelectionModel* next = model != nullptr ? model : &ownModel_;
+        if (next == model_) {
+            return;
+        }
+        model_->onChanged.remove(modelConnection_);
+        model_ = next;
+        modelConnection_ = model_->onChanged.add([this](SelectionModel&) {
+            selectionChanged();
+            return SyncReturn::Ignored;
+        });
+        selectionChanged();
+    }
+
+    void GraphView::selectionChanged() {
+        style().markDirty();
+        if (onSelectionChanged) {
+            onSelectionChanged();
+        }
     }
 
     // The document preview stays at the top left (where it was made) and the minimap goes to the lower right.
@@ -53,8 +82,9 @@ namespace curvy {
     void GraphView::setDocument(SketchDocument* document) {
         document_ = document;
         scope_ = 0;
-        selected_ = NodeRef();
-        selection_.clear();
+        if (model_ == &ownModel_) {
+            ownModel_.setDocument(document);
+        }
         fitted_ = false;
         style().markDirty();
     }
@@ -68,12 +98,9 @@ namespace curvy {
             return false;
         }
         scope_ = document_->scopeOfSubnet(subnet);
-        selected_ = NodeRef();
-        selection_.clear();
         fitted_ = false;
-        style().markDirty();
-        if (onSelectionChanged) {
-            onSelectionChanged();
+        if (!model_->clear()) {
+            selectionChanged();   // the level changed even when nothing was selected
         }
         return true;
     }
@@ -84,27 +111,15 @@ namespace curvy {
         }
         const NodeRef left = document_->parentOfScope(scope_);
         scope_ = left.scope;
-        selected_ = NodeRef();
-        selection_.clear();
         fitted_ = false;
-        select(left);
-        style().markDirty();
+        if (!model_->set(left)) {
+            selectionChanged();
+        }
         return true;
     }
 
     void GraphView::select(const NodeRef& node) {
-        if (selected_ == node && selection_.size() == (node.valid() ? 1u : 0u)) {
-            return;
-        }
-        selected_ = node;
-        selection_.clear();
-        if (node.valid()) {
-            selection_.push_back(node);
-        }
-        style().markDirty();
-        if (onSelectionChanged) {
-            onSelectionChanged();
-        }
+        model_->set(node);
     }
 
     GraphViewState GraphView::state() const {
@@ -117,8 +132,10 @@ namespace curvy {
         state.zoom = zoom_;
         state.panX = panX_;
         state.panY = panY_;
-        for (const NodeRef& ref : selection_) {
-            state.selected.push_back(ref.id);
+        for (const NodeRef& ref : model_->items()) {
+            if (ref.scope == scope_) {
+                state.selected.push_back(ref.id);
+            }
         }
         return state;
     }
@@ -137,14 +154,9 @@ namespace curvy {
             scope = document_->scopeOfSubnet(subnet);
         }
         scope_ = scope;
-        selection_.clear();
-        selected_ = NodeRef();
+        std::vector<NodeRef> picked;
         for (jitnodes::NodeId id : state.selected) {
-            const NodeRef ref(scope_, id);
-            if (document_->hasNode(ref)) {
-                selection_.push_back(ref);
-                selected_ = ref;
-            }
+            picked.push_back(NodeRef(scope_, id));
         }
         fitted_ = state.placed;
         if (state.placed) {
@@ -152,9 +164,8 @@ namespace curvy {
             panX_ = state.panX;
             panY_ = state.panY;
         }
-        style().markDirty();
-        if (onSelectionChanged) {
-            onSelectionChanged();
+        if (!model_->replace(picked)) {
+            selectionChanged();
         }
         if (onViewChanged) {
             onViewChanged();
@@ -196,10 +207,11 @@ namespace curvy {
     }
 
     std::string GraphView::describeSelected() const {
-        if (document_ == nullptr || !selected_.valid() || !document_->hasNode(selected_)) {
+        const NodeRef& selected = model_->primary();
+        if (document_ == nullptr || !selected.valid() || !document_->hasNode(selected)) {
             return "";
         }
-        const jitnodes::Node& node = document_->node(selected_);
+        const jitnodes::Node& node = document_->node(selected);
         std::string text = node.name() + " (" + node.typeName() + ")";
         if (node.bypassed()) {
             text += ", bypassed";
@@ -215,7 +227,7 @@ namespace curvy {
 
     std::string GraphView::hint() const {
         std::string text = describeSelected();
-        const bool onSubnet = !text.empty() && dynamic_cast<const jitnodes::SubnetNode*>(&document_->node(selected_)) != nullptr;
+        const bool onSubnet = !text.empty() && dynamic_cast<const jitnodes::SubnetNode*>(&document_->node(model_->primary())) != nullptr;
         if (text.empty()) {
             text = scope_ == 0 ? "Graph: click a node to select it" : "Graph: inside " + path();
         }
@@ -440,29 +452,14 @@ namespace curvy {
             return SyncReturn::Handled;
         }
         const NodeRef ref(scope_, hit->id);
-        const auto inSelection = std::find(selection_.begin(), selection_.end(), ref);
         if (left && extend) {
-            if (inSelection != selection_.end()) {
-                selection_.erase(inSelection);
-                selected_ = selection_.empty() ? NodeRef() : selection_.back();
-            } else {
-                selection_.push_back(ref);
-                selected_ = ref;
-            }
-            style().markDirty();
-            if (onSelectionChanged) {
-                onSelectionChanged();
-            }
+            model_->toggle(ref);
             return SyncReturn::Handled;
         }
-        if (inSelection == selection_.end()) {
-            select(ref);
-        } else if (selected_ != ref) {
-            selected_ = ref;   // pressing a box of a larger selection keeps it, so the group can be dragged
-            style().markDirty();
-            if (onSelectionChanged) {
-                onSelectionChanged();
-            }
+        if (!model_->contains(ref)) {
+            model_->set(ref);
+        } else {
+            model_->setPrimary(ref);   // pressing a box of a larger selection keeps it, so the group can be dragged
         }
         if (left) {
             dragId_ = hit->id;
@@ -470,7 +467,7 @@ namespace curvy {
             dragPress_ = pt;
             dragOrigins_.clear();
             for (const Box& box : all) {
-                if (std::find(selection_.begin(), selection_.end(), NodeRef(scope_, box.id)) != selection_.end()) {
+                if (model_->contains(NodeRef(scope_, box.id))) {
                     dragOrigins_[box.id] = BLPoint(box.x, box.y);
                 }
             }
@@ -514,19 +511,13 @@ namespace curvy {
         }
         const BLPoint a = toGraph(marqueeStart_), b = toGraph(wireEnd_);
         const double left = (std::min)(a.x, b.x), right = (std::max)(a.x, b.x), top = (std::min)(a.y, b.y), bottom = (std::max)(a.y, b.y);
-        bool changed = false;
+        std::vector<NodeRef> touched;
         for (const Box& box : boxes(*network)) {
-            const NodeRef ref(scope_, box.id);
-            if (box.x <= right && box.x + box.w >= left && box.y <= bottom && box.y + box.h >= top &&
-                std::find(selection_.begin(), selection_.end(), ref) == selection_.end()) {
-                selection_.push_back(ref);
-                selected_ = ref;
-                changed = true;
+            if (box.x <= right && box.x + box.w >= left && box.y <= bottom && box.y + box.h >= top) {
+                touched.push_back(NodeRef(scope_, box.id));
             }
         }
-        if (changed && onSelectionChanged) {
-            onSelectionChanged();
-        }
+        model_->addAll(touched);
     }
 
     bool GraphView::deleteSelected() {
@@ -534,7 +525,7 @@ namespace curvy {
             return false;
         }
         std::vector<NodeRef> doomed;
-        for (const NodeRef& ref : selection_) {
+        for (const NodeRef& ref : model_->items()) {
             if (ref.scope == scope_ && document_->hasNode(ref)) {
                 doomed.push_back(ref);
             }
@@ -685,7 +676,7 @@ namespace curvy {
         const Theme& theme = Theme::current();
         const jitnodes::Node& node = network.node(box.id);
         const NodeRef self(scope_, box.id);
-        const bool isSelected = std::find(selection_.begin(), selection_.end(), self) != selection_.end();
+        const bool isSelected = model_->contains(self);
         const bool isSubnet = dynamic_cast<const jitnodes::SubnetNode*>(&node) != nullptr;
         const BLPoint topLeft = toView(box.x, box.y);
         const double w = box.w * zoom_, h = box.h * zoom_;

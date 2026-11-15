@@ -3,6 +3,11 @@
 #include "curvy/backgroundtask.h"
 #include "curvy/canvasview.h"
 #include "curvy/dockcontroller.h"
+#include "curvy/docklayout.h"
+#include "curvy/documentpanel.h"
+#include "curvy/floatingpanels.h"
+#include "curvy/paneldock.h"
+#include "curvy/panelsmenu.h"
 #include "curvy/graphcrumbs.h"
 #include "curvy/graphpanel.h"
 #include "curvy/graphview.h"
@@ -11,6 +16,7 @@
 #include "curvy/radialmenu.h"
 #include "curvy/settings.h"
 #include "curvy/sketchdocument.h"
+#include "curvy/swatchpalettecontroller.h"
 #include "curvy/workspacemodel.h"
 
 #include <newui/action.h>
@@ -100,6 +106,14 @@ namespace curvy {
         CanvasView& canvas() { return *canvas_; }
         RadialMenu& menu() { return *menu_; }
         DockController& docks() { return *docks_; }
+        DockLayout& panelLayout() { return panelLayout_; }
+        // The lines of the Panels button's menu as they are now (the popup itself blocks, so tests read the lines instead).
+        std::vector<PanelMenuEntry> panelsMenuEntries(bool dockShown);
+        // How a panel menu is shown (screen point); the native popup unless a test replaces it, because that one blocks until the user picks.
+        std::function<void(const std::vector<PanelMenuEntry>&, const newui::Point&)> presentMenu;
+        PanelDock& rightDock() { return *rightDock_; }
+        FloatingPanels& floatingPanels() { return *floatingPanels_; }
+        DocumentPanel& documentPanel() { return *documentPanel_; }
 
         // A press on the canvas as the pen (or mouse) made it; filterPress passes the root view's pen state. The pen's barrel button does what
         // Settings::barrelButton says (open the rings, pan while it is held, or nothing), its eraser end what Settings::eraserEnd says; a
@@ -149,7 +163,13 @@ namespace curvy {
         void restyle();
         void focusCanvas();
         void toggleDock(DockSide side);
+        void showPanelsMenu(const newui::Point& screen);
+        void showPanelMenu(Panel& panel, const newui::Point& screen);
         void buildGraphOverlay();
+        void buildRightDock();
+        // Settings::panels <-> the layout, the panel views and the floating windows.
+        void applyPanelSettings();
+        void capturePanelSettings();
         void layoutGraphOverlay();
         newui::SyncReturn handleCanvasSized(newui::View& sender, const newui::Size& size);
         void focusGraph();
@@ -182,6 +202,11 @@ namespace curvy {
         std::unique_ptr<GraphCrumbs> graphCrumbs_;
         RadialMenu* menu_ = nullptr;
         std::unique_ptr<DockController> docks_;
+        DockLayout panelLayout_;   // where every panel is; the dock views read it
+        PanelDock* rightDock_ = nullptr;   // owned by the right area's view tree
+        DocumentPanel* documentPanel_ = nullptr;   // owned by rightDock_ (or by its floating frame)
+        std::unique_ptr<FloatingPanels> floatingPanels_;   // declared before documentSwatches_: that controller is gone first, then the frames and their panels
+        std::unique_ptr<SwatchPaletteController> documentSwatches_;   // declared after the document: gone before it
         newui::Label* hintTool_ = nullptr;
         newui::Label* hintKeys_ = nullptr;
         newui::Label* hintInfo_ = nullptr;

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace curvy {
 
@@ -29,6 +30,15 @@ namespace curvy {
         struct DockArea {
             float size = 240.0f;
             bool collapsed = true;
+        };
+        // How the user left one dockable panel. The list is in dock order; a panel the app no longer knows is ignored when it is applied.
+        struct PanelState {
+            std::string id;
+            bool collapsed = false;
+            bool userHidden = false;
+            bool floating = false;
+            float floatX = 0.0f, floatY = 0.0f;   // the window's screen position while floating
+            float bodyHeight = 0.0f;               // 0: the panel's own default
         };
         static constexpr int dockCount = 4;
         static constexpr float minDockSize = 60.0f;
@@ -71,6 +81,7 @@ namespace curvy {
         // State
         WindowPlacement window;
         DockArea docks[dockCount];
+        std::vector<PanelState> panels;
 
         Settings();
 

@@ -37,10 +37,13 @@ add_library(curvy_core STATIC
     src/colorpickercard.cpp
     src/colorwheel.cpp
     src/graphcrumbs.cpp
+    src/docklayout.cpp
+    src/paletteextract.cpp
     src/swatchpalettes.cpp
     src/swatchstrip.cpp
     src/swatchpalettecontroller.cpp
     src/graphpanel.cpp
+    src/selectionmodel.cpp
     src/graphoverviews.cpp
     src/numberscrubber.cpp
     src/graphview.cpp
@@ -54,6 +57,12 @@ add_library(curvy_core STATIC
     src/pagepreview.cpp
     src/workspacecontroller.cpp
     src/dockcontroller.cpp
+    src/documentpanel.cpp
+    src/floatingpanels.cpp
+    src/panelframe.cpp
+    src/paneldock.cpp
+    src/panelsmenu.cpp
+    src/panel.cpp
     src/settings.cpp
     src/settingsdialog.cpp
     src/graphdocument.cpp

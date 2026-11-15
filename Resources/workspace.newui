@@ -204,33 +204,7 @@
             childViews: [
               {
                 type: "SubView",
-                bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 1360, height: 22 } },
-                visible: true,
-                name: "topAreaHeaderBar",
-                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", padding: 4 },
-                style: { type: "ViewStyle", backgroundFill: { type: "Fill", kind: "Color", color: "#2e2e2e" } },
-                desiredSize: { type: "Size", width: 0, height: 22 },
-                desiredSizeOverride: true,
-                childViews: [
-                  {
-                    type: "Label",
-                    text: "Top",
-                    textAlignment: "Left",
-                    bounds: { type: "Rect", pos: { type: "Point", x: 4, y: 2 }, size: { type: "Size", width: 0, height: 17 } },
-                    name: "topAreaHeader",
-                    style: {
-                      type: "LabelStyle",
-                      text: "Top",
-                      font: { type: "Font", name: "Segoe UI", size: 12, bold: true, italic: false, strikeThrough: false, underlined: false },
-                      textColor: "#f0f0f0",
-                      textAlignment: "Left"
-                    }
-                  }
-                ]
-              },
-              {
-                type: "SubView",
-                bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 22 }, size: { type: "Size", width: 1360, height: 0 } },
+                bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 1360, height: 0 } },
                 visible: true,
                 name: "topAreaBody",
                 layout: { type: "FlexLayout", orientation: "Vertical", spacing: 6, padding: 8 },
@@ -270,33 +244,7 @@
                     childViews: [
                       {
                         type: "SubView",
-                        bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 0, height: 22 } },
-                        visible: true,
-                        name: "leftAreaHeaderBar",
-                        layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", padding: 4 },
-                        style: { type: "ViewStyle", backgroundFill: { type: "Fill", kind: "Color", color: "#2e2e2e" } },
-                        desiredSize: { type: "Size", width: 0, height: 22 },
-                        desiredSizeOverride: true,
-                        childViews: [
-                          {
-                            type: "Label",
-                            text: "Left",
-                            textAlignment: "Left",
-                            bounds: { type: "Rect", pos: { type: "Point", x: 4, y: 2 }, size: { type: "Size", width: 0, height: 17 } },
-                            name: "leftAreaHeader",
-                            style: {
-                              type: "LabelStyle",
-                              text: "Left",
-                              font: { type: "Font", name: "Segoe UI", size: 12, bold: true, italic: false, strikeThrough: false, underlined: false },
-                              textColor: "#f0f0f0",
-                              textAlignment: "Left"
-                            }
-                          }
-                        ]
-                      },
-                      {
-                        type: "SubView",
-                        bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 22 }, size: { type: "Size", width: 0, height: 772 } },
+                        bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 0, height: 794 } },
                         visible: true,
                         name: "leftAreaBody",
                         layout: { type: "FlexLayout", orientation: "Vertical", spacing: 6, padding: 8 },
@@ -330,33 +278,7 @@
                         childViews: [
                           {
                             type: "SubView",
-                            bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 0, height: 22 } },
-                            visible: true,
-                            name: "rightAreaHeaderBar",
-                            layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", padding: 4 },
-                            style: { type: "ViewStyle", backgroundFill: { type: "Fill", kind: "Color", color: "#2e2e2e" } },
-                            desiredSize: { type: "Size", width: 0, height: 22 },
-                            desiredSizeOverride: true,
-                            childViews: [
-                              {
-                                type: "Label",
-                                text: "Right",
-                                textAlignment: "Left",
-                                bounds: { type: "Rect", pos: { type: "Point", x: 4, y: 2 }, size: { type: "Size", width: 0, height: 17 } },
-                                name: "rightAreaHeader",
-                                style: {
-                                  type: "LabelStyle",
-                                  text: "Right",
-                                  font: { type: "Font", name: "Segoe UI", size: 12, bold: true, italic: false, strikeThrough: false, underlined: false },
-                                  textColor: "#f0f0f0",
-                                  textAlignment: "Left"
-                                }
-                              }
-                            ]
-                          },
-                          {
-                            type: "SubView",
-                            bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 22 }, size: { type: "Size", width: 0, height: 772 } },
+                            bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 0, height: 794 } },
                             visible: true,
                             name: "rightAreaBody",
                             layout: { type: "FlexLayout", orientation: "Vertical", spacing: 6, padding: 8 },
@@ -378,33 +300,7 @@
                 childViews: [
                   {
                     type: "SubView",
-                    bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 1360, height: 22 } },
-                    visible: true,
-                    name: "bottomAreaHeaderBar",
-                    layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", padding: 4 },
-                    style: { type: "ViewStyle", backgroundFill: { type: "Fill", kind: "Color", color: "#2e2e2e" } },
-                    desiredSize: { type: "Size", width: 0, height: 22 },
-                    desiredSizeOverride: true,
-                    childViews: [
-                      {
-                        type: "Label",
-                        text: "Bottom",
-                        textAlignment: "Left",
-                        bounds: { type: "Rect", pos: { type: "Point", x: 4, y: 2 }, size: { type: "Size", width: 0, height: 17 } },
-                        name: "bottomAreaHeader",
-                        style: {
-                          type: "LabelStyle",
-                          text: "Bottom",
-                          font: { type: "Font", name: "Segoe UI", size: 12, bold: true, italic: false, strikeThrough: false, underlined: false },
-                          textColor: "#f0f0f0",
-                          textAlignment: "Left"
-                        }
-                      }
-                    ]
-                  },
-                  {
-                    type: "SubView",
-                    bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 22 }, size: { type: "Size", width: 1360, height: 0 } },
+                    bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 1360, height: 0 } },
                     visible: true,
                     name: "bottomAreaBody",
                     layout: { type: "FlexLayout", orientation: "Vertical", spacing: 6, padding: 8 },

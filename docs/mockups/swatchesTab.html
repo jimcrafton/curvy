@@ -1,0 +1,277 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>curvy swatches tab</title>
+<!-- Proposal, for approval before any code or .newui conversion: the Swatches tab of the document card, and "New palette from image".
+     The tab is a second view of the same palettes the colour card's strip shows (swatches.html), with the manager's extras: details, what uses a swatch,
+     colours in use that are in no palette. Click around: pick a swatch, drag to reorder, right-click, the palette name and "..." menus, "In use" +,
+     then "..." > New palette from image. The extraction here is the median-cut the app would use. -->
+<link rel="stylesheet" href="preview.css">
+<style>
+  body { margin: 0; padding: 24px; width: 940px; font-family: "Segoe UI", sans-serif; font-size: 12px; color: #F0F0F0; display: flex; flex-direction: row; gap: 28px; }
+  #card { position: relative; width: 330px; height: 640px; background: #1E1E1E; border: 1px solid #4A4A4A; padding: 10px 12px; box-sizing: border-box; user-select: none; overflow: hidden; flex: none; }
+  .tabs { display: flex; flex-direction: row; gap: 5px; margin-bottom: 10px; }
+  .tab { padding: 1px 9px; border-radius: 10px; border: 1px solid #4A4A4A; background: #2E2E2E; color: #A0A0A0; }
+  .tab.on { background: #FFB454; border-color: #FFB454; color: #1B1B1B; }
+  h4 { margin: 12px 0 5px 0; font-size: 10px; letter-spacing: .05em; text-transform: uppercase; color: #A0A0A0; font-weight: 400; display: flex; justify-content: space-between; align-items: center; }
+  h4 span { text-transform: none; letter-spacing: 0; }
+  #head { display: flex; flex-direction: row; gap: 4px; align-items: center; }
+  #paletteName { flex: 1; height: 22px; line-height: 20px; padding: 0 6px; background: #121212; border: 1px solid #4A4A4A; border-radius: 3px; cursor: pointer; display: flex; justify-content: space-between; }
+  #paletteName:hover { border-color: #FFB454; }
+  #moreButton { width: 24px; height: 22px; padding: 0; }
+  .grid { display: flex; flex-direction: row; flex-wrap: wrap; gap: 4px; min-height: 26px; }
+  .sw { width: 24px; height: 24px; border: 1px solid #00000080; box-sizing: border-box; cursor: pointer; position: relative; }
+  .sw:hover { outline: 1px solid #F0F0F0; }
+  .sw.sel { outline: 2px solid #FFB454; outline-offset: 1px; }
+  .sw.dragging { opacity: .35; }
+  .sw.linked::after { content: ""; position: absolute; right: 0; top: 0; border-style: solid; border-width: 0 7px 7px 0; border-color: transparent #F0F0F0 transparent transparent; }
+  .sw.add { background: #2E2E2E; border: 1px dashed #A0A0A0; color: #A0A0A0; text-align: center; line-height: 21px; }
+  .box { background: #2E2E2E; border: 1px solid #4A4A4A; padding: 8px; margin-top: 8px; }
+  .row { display: flex; flex-direction: row; align-items: center; gap: 8px; margin-bottom: 5px; }
+  .row label { width: 52px; color: #A0A0A0; }
+  .big { width: 40px; height: 40px; border: 1px solid #00000080; flex: none; }
+  .stat { display: flex; justify-content: space-between; color: #A0A0A0; margin: 6px 0; }
+  .stat b { color: #F0F0F0; font-weight: 400; }
+  .chips { display: flex; flex-direction: row; gap: 5px; margin-top: 6px; }
+  .chip { padding: 1px 9px; border: 1px solid #4A4A4A; background: #2E2E2E; cursor: pointer; border-radius: 10px; }
+  .chip:hover { border-color: #FFB454; }
+  .chip.off { opacity: .35; cursor: default; }
+  .use { display: flex; flex-direction: row; align-items: center; gap: 8px; height: 26px; }
+  .use .sw { cursor: default; }
+  .use span { flex: 1; color: #A0A0A0; }
+  .use b { font-weight: 400; color: #F0F0F0; }
+  .use .chip { padding: 0 8px; }
+  .muted { color: #A0A0A0; }
+  .menu { position: absolute; background: #1E1E1E; border: 1px solid #4A4A4A; box-shadow: 0 4px 14px #00000099; min-width: 170px; z-index: 5; display: none; padding: 3px 0; }
+  .menu div { padding: 4px 12px; cursor: pointer; display: flex; justify-content: space-between; gap: 18px; }
+  .menu div:hover { background: #3A3A3A; }
+  .menu div.off { color: #6A6A6A; cursor: default; }
+  .menu div.off:hover { background: none; }
+  .menu hr { border: 0; border-top: 1px solid #4A4A4A; margin: 3px 0; }
+  #status { position: absolute; left: 12px; right: 12px; bottom: 8px; color: #A0A0A0; height: 18px; white-space: nowrap; overflow: hidden; }
+  #shade { position: absolute; inset: 0; background: #000000A0; display: none; z-index: 8; }
+  #dialog { position: absolute; left: 20px; top: 70px; width: 290px; background: #1E1E1E; border: 1px solid #4A4A4A; padding: 10px; box-sizing: border-box; display: none; z-index: 9; box-shadow: 0 6px 20px #000000CC; }
+  #dialog h3 { margin: 0 0 8px 0; font-size: 13px; }
+  #pic { width: 268px; height: 150px; display: block; border: 1px solid #4A4A4A; background: #121212; }
+  #count { flex: 1; accent-color: #FFB454; }
+  .check { display: flex; flex-direction: row; align-items: center; gap: 6px; margin: 3px 0; color: #F0F0F0; }
+  .check input { accent-color: #FFB454; margin: 0; }
+  #previewSwatches { display: flex; flex-direction: row; flex-wrap: wrap; gap: 3px; min-height: 26px; margin-top: 6px; }
+  #previewSwatches .sw { width: 20px; height: 20px; cursor: default; }
+  .buttons { display: flex; flex-direction: row; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+  .buttons button { height: 24px; padding: 0 14px; }
+  .tiles { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px 6px; }
+  .tile { width: 46px; cursor: pointer; text-align: center; }
+  .tile .sw { width: 46px; height: 38px; cursor: pointer; }
+  .tile .cap { color: #A0A0A0; font-size: 10px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile.sel .cap { color: #FFB454; }
+  .pal { border: 1px solid #4A4A4A; padding: 5px 6px; margin-bottom: 4px; cursor: pointer; background: #2E2E2E; }
+  .pal.on { border-color: #FFB454; }
+  .pal .top { display: flex; flex-direction: row; justify-content: space-between; margin-bottom: 4px; }
+  .pal .top span:last-child { color: #A0A0A0; }
+  .mini { display: flex; flex-direction: row; height: 12px; }
+  .mini i { flex: 1; }
+  .lrow { display: flex; flex-direction: row; align-items: center; gap: 8px; height: 26px; padding: 0 4px; cursor: pointer; }
+  .lrow:hover { background: #2E2E2E; }
+  .lrow.sel { background: #3A3A3A; }
+  .lrow .sw { width: 18px; height: 18px; flex: none; cursor: pointer; }
+  .lrow .n { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lrow .h { color: #A0A0A0; width: 58px; }
+  .lrow .u { color: #A0A0A0; width: 30px; text-align: right; }
+  .lrow.dim .n { color: #A0A0A0; }
+  .vbutton.on { background: #FFB454; color: #1B1B1B; border-color: #FFB454; }
+  #notes { width: 520px; color: #A0A0A0; line-height: 1.5; }
+  #notes h3 { color: #F0F0F0; margin: 0 0 6px 0; font-size: 13px; }
+  #notes li { margin-bottom: 4px; }
+  #notes b { color: #F0F0F0; }
+</style>
+</head>
+<body>
+  <div id="card">
+    <div class="tabs"><span class="tab">Document</span><span class="tab on">Swatches</span><span class="tab">Library</span><span class="tab">Fonts</span></div>
+    <div id="body"></div>
+
+    <div class="menu" id="paletteMenu" style="width:250px"></div>
+    <div class="menu" id="moreMenu"></div>
+    <div class="menu" id="swatchMenu"></div>
+    <div id="status"></div>
+
+    <div id="shade"></div>
+    <div id="dialog">
+      <h3>New palette from image</h3>
+      <canvas id="pic" width="268" height="150"></canvas>
+      <div class="row" style="margin-top:8px"><button id="nextImage">Choose image&hellip;</button><span class="muted" id="imageName"></span></div>
+      <div class="row"><label>Colours</label><input type="range" id="count" min="4" max="16" value="8"><span id="countText" style="width:20px;text-align:right">8</span></div>
+      <div class="row"><label>Order by</label><select id="order"><option>Most used</option><option>Hue</option><option>Lightness</option></select></div>
+      <div class="check"><input type="checkbox" id="merge" checked><span>Merge near-duplicates</span></div>
+      <div class="check"><input type="checkbox" id="skip" checked><span>Ignore near-white and near-black</span></div>
+      <div id="previewSwatches"></div>
+      <div class="row" style="margin-top:8px"><label>Name</label><input type="text" id="newName" style="flex:1"></div>
+      <div class="buttons"><button id="cancel">Cancel</button><button id="ok">Create palette</button></div>
+    </div>
+  </div>
+
+  <div id="notes">
+    <h3>Swatches tab of the document card</h3>
+    <ul>
+      <li><b>Same palettes as the colour card's strip.</b> Both are views of one list (one controller), so a swatch added, renamed or reordered in one shows in the other at once. Every change is one undo step.</li>
+      <li><b>Palettes</b> are rows, each with its colours as a strip: click one to make it active (it is outlined and opens below). The &hellip; button has New, Duplicate, Rename, Delete and <b>New palette from image</b>. Recent is the last row, read-only.</li>
+      <li><b>Grid:</b> click selects and shows the details; right-click (or hold with a pen) Use, Replace with current colour, Rename, Delete; drag reorders; + adds the current colour. A white corner mark is a <b>linked</b> swatch.</li>
+      <li><b>Details:</b> name, hex, Linked, and how many shapes in how many groups use it. <b>Select them</b> selects those shapes on the canvas. Typing a hex on a linked swatch recolours every user at once.</li>
+      <li><b>In use, in no palette:</b> every colour found on a colour row that no swatch matches, with its count. + adds it to the active palette. Worked out when the tab opens, not kept up to date while you draw.</li>
+    </ul>
+    <h3>New palette from image</h3>
+    <ul>
+      <li>Pick an image file (PNG or JPG). It is shrunk to about 128 px on its long side and the colours are found by <b>median cut</b>: the pixels are split along the widest colour channel until there are as many boxes as colours asked for, and each box's average becomes a swatch.</li>
+      <li><b>Colours</b> 4&ndash;16 (default 8). <b>Order by</b> most used, hue or lightness. <b>Merge near-duplicates</b> joins swatches closer than a small distance. <b>Ignore near-white and near-black</b> leaves out paper and shadow.</li>
+      <li>The swatches update as the controls move. Create palette makes plain (unlinked) swatches named by hex, a new active palette named after the file; one undo step. Cancel changes nothing.</li>
+      <li>The three sample pictures stand in for the file dialog.</li>
+    </ul>
+  </div>
+
+<script>
+const $ = s => document.querySelector(s);
+const hexOf = (r, g, b) => '#' + [r, g, b].map(v => Math.round(v).toString(16).padStart(2, '0')).join('').toUpperCase();
+const lum = c => (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255;
+const hue = c => { const [r, g, b] = c.map(v => v / 255), mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn; if (d < .001) return 0; return (mx === r ? ((g - b) / d + 6) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4) * 60; };
+const sw = (hex, name = '', linked = false, uses = 0, groups = 0) => ({ hex, name, linked, uses, groups });
+const palettes = [
+  { name: 'Sunset', sw: [sw('#E64D33', 'Ember', true, 14, 3), sw('#F2994A', '', false, 6, 2), sw('#F2C94C', '', false, 3, 1), sw('#8E3B46', 'Plum', true, 9, 2), sw('#3C2A4D', '', false, 0, 0), sw('#1F1B2E', '', false, 0, 0), sw('#EFDAC4', 'Paper', true, 31, 5)] },
+  { name: 'Default', sw: ['#000000', '#FFFFFF', '#808080', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#00FFFF', '#FF00FF'].map(h => sw(h)) }
+];
+const recent = ['#E64D33', '#233244', '#B8D1F4', '#4CD9A0'];
+let inUse = [{ hex: '#233244', shapes: 12, groups: 2 }, { hex: '#B8D1F4', shapes: 5, groups: 1 }, { hex: '#4CD9A0', shapes: 2, groups: 1 }, { hex: '#4375C6', shapes: 22, groups: 4 }];
+let active = 0, selected = 0, dragFrom = -1, imageIndex = 0;
+const cur = () => palettes[active];
+const say = t => $('#status').textContent = t;
+const swatchEl = (s, cls = '') => `<div class="sw ${cls} ${s.linked ? 'linked' : ''}" style="background:${s.hex}" title="${s.name || s.hex}"></div>`;
+
+const detailsBox = (s, compact) => s ? `<div class="box"><div class="row"><div class="big" style="background:${s.hex};${compact ? 'width:30px;height:30px' : ''}"></div><div style="flex:1;${compact ? 'display:flex;flex-direction:row;gap:5px' : ''}"><input type="text" id="nm" value="${s.name}" placeholder="Name" style="width:100%;${compact ? '' : 'margin-bottom:5px'}"><input type="text" id="hx" value="${s.hex}" style="width:${compact ? '80px' : '100%'}"></div></div>` +
+  `<div class="check"><input type="checkbox" id="lk" ${s.linked ? 'checked' : ''}><span>Linked: shapes follow this swatch</span></div>` +
+  `<div class="stat"><span>Used by</span><b>${s.uses ? s.uses + ' shapes in ' + s.groups + ' group' + (s.groups > 1 ? 's' : '') : 'nothing yet'}</b></div>` +
+  `<div class="chips"><span class="chip ${s.uses ? '' : 'off'}" id="selThem">Select them</span><span class="chip" id="useIt">Use as fill</span></div></div>` : '<div class="muted" style="margin-top:8px">Click a swatch to see what uses it.</div>';
+const headHtml = () => `<div id="head"><div id="paletteName"><span id="paletteLabel">${cur().name}</span><span>&#9662;</span></div><button id="moreButton">&#8943;</button></div>`;
+const inUseList = () => `<h4>In use, in no palette <span class="muted">${inUse.length}</span></h4>` + (inUse.length ? inUse.map((u, i) => `<div class="use">${swatchEl(sw(u.hex))}<b>${u.hex}</b><span>${u.shapes} shapes, ${u.groups} group${u.groups > 1 ? 's' : ''}</span><span class="chip" data-u="${i}">+ Add</span></div>`).join('') : '<div class="muted">Every colour in the document is in a palette.</div>');
+const gridHtml = p => `<div class="grid">` + p.sw.map((s, i) => `<div class="sw ${i === selected ? 'sel' : ''} ${s.linked ? 'linked' : ''}" draggable="true" data-i="${i}" style="background:${s.hex}" title="${s.name || s.hex}"></div>`).join('') + '<div class="sw add" id="add" title="Save the current colour">+</div></div>';
+function bodyHtml() {
+  const p = cur(), s = p.sw[selected];
+  const mini = q => `<div class="mini">${q.map(x => `<i style="background:${x}"></i>`).join('')}</div>`;
+  return `<h4>Palettes <button id="moreButton" style="width:24px;height:20px;padding:0">&#8943;</button></h4>` + palettes.map((q, i) => `<div class="pal ${i === active ? 'on' : ''}" data-p="${i}"><div class="top"><span>${q.name}</span><span>${q.sw.length}</span></div>${mini(q.sw.map(x => x.hex))}</div>`).join('') +
+    `<div class="pal" data-recent="1" style="opacity:.7"><div class="top"><span>Recent</span><span>automatic</span></div>${mini(recent)}</div>` +
+    `<h4>${cur().name}</h4>` + gridHtml(p) + detailsBox(s) + inUseList();
+}
+function render() {
+  $('#body').innerHTML = bodyHtml();
+  bind();
+}
+const below = el => { const r = el.getBoundingClientRect(), c = $('#card').getBoundingClientRect(); return [r.left - c.left, r.bottom - c.top + 2]; };
+function bind() {
+  document.querySelectorAll('#body [data-i]').forEach(e => {
+    const i = +e.dataset.i;
+    e.onclick = () => { selected = i; say((cur().sw[i].name || cur().sw[i].hex) + ' selected'); render(); };
+    e.oncontextmenu = ev => { ev.preventDefault(); selected = i; render(); openSwatchMenu(ev); };
+    e.ondragstart = () => { dragFrom = i; e.classList.add('dragging'); };
+    e.ondragover = ev => ev.preventDefault();
+    e.ondrop = () => { if (dragFrom >= 0 && dragFrom !== i) { const [m] = cur().sw.splice(dragFrom, 1); cur().sw.splice(i, 0, m); selected = i; say('Reordered'); } dragFrom = -1; render(); };
+  });
+  document.querySelectorAll('#body [data-p]').forEach(e => e.onclick = () => { active = +e.dataset.p; selected = 0; say('Palette ' + cur().name); render(); });
+  document.querySelectorAll('#body [data-recent]').forEach(e => e.onclick = () => say('Recent shows the last colours you applied; it cannot be edited'));
+  $('#add').onclick = () => { cur().sw.push(sw('#E64D33')); selected = cur().sw.length - 1; say('Saved the current colour'); render(); };
+  if ($('#paletteName')) $('#paletteName').onclick = openPaletteMenu;
+  $('#moreButton').onclick = openMoreMenu;
+  const s = cur().sw[selected];
+  if (s && $('#nm')) {
+    $('#nm').onchange = e => { s.name = e.target.value; say('Renamed'); render(); };
+    $('#hx').onchange = e => { if (/^#[0-9a-f]{6}$/i.test(e.target.value)) { s.hex = e.target.value.toUpperCase(); say(s.linked ? 'Recoloured ' + s.uses + ' shapes' : 'Colour changed'); } render(); };
+    $('#lk').onchange = e => { s.linked = e.target.checked; say(s.linked ? 'Linked: shapes using this colour now follow it' : 'Unlinked: shapes keep their colours'); render(); };
+    $('#selThem').onclick = () => { if (s.uses) say('Selected ' + s.uses + ' shapes on the canvas'); };
+    $('#useIt').onclick = () => say('Fill set to ' + s.hex);
+  }
+  document.querySelectorAll('#body [data-u]').forEach(e => e.onclick = () => { const u = inUse.splice(+e.dataset.u, 1)[0]; cur().sw.push(sw(u.hex, '', false, u.shapes, u.groups)); selected = cur().sw.length - 1; say('Added ' + u.hex + ' to ' + cur().name); render(); });
+}
+function menu(id, entries, x, y) {
+  closeMenus();
+  const m = $(id); if (x !== undefined) { m.style.left = x + 'px'; m.style.top = y + 'px'; }
+  m.innerHTML = entries.map(e => e === '-' ? '<hr>' : `<div class="${e.off ? 'off' : ''}" data-k="${e.k}"><span>${e.t}</span>${e.s ? `<span class="muted">${e.s}</span>` : ''}</div>`).join('');
+  m.style.display = 'block';
+  m.querySelectorAll('div').forEach(d => d.onclick = ev => { ev.stopPropagation(); const e = entries.find(x => x.k === d.dataset.k); if (e.off) return; closeMenus(); e.f(); });
+}
+const closeMenus = () => document.querySelectorAll('.menu').forEach(m => m.style.display = 'none');
+document.addEventListener('click', e => { if (!e.target.closest('.menu')) closeMenus(); });
+function openPaletteMenu(e) { e.stopPropagation(); menu('#paletteMenu', [...palettes.map((p, i) => ({ k: 'p' + i, t: p.name, s: i === active ? '&#10003;' : p.sw.length, f: () => { active = i; selected = 0; render(); } })), '-', { k: 'r', t: 'Recent', s: 'automatic', f: () => say('Recent shows the last colours you applied; it cannot be edited') }], ...below(e.currentTarget)); }
+function openMoreMenu(e) {
+  e.stopPropagation();
+  const at = below(e.currentTarget);
+  menu('#moreMenu', [
+    { k: 'n', t: 'New palette', f: () => { palettes.push({ name: 'Palette ' + (palettes.length + 1), sw: [] }); active = palettes.length - 1; selected = -1; say('New palette'); render(); } },
+    { k: 'd', t: 'Duplicate', f: () => { palettes.push({ name: cur().name + ' copy', sw: cur().sw.map(s => ({ ...s, linked: false, uses: 0, groups: 0 })) }); active = palettes.length - 1; say('Duplicated (plain swatches)'); render(); } },
+    { k: 'r', t: 'Rename', f: () => { const n = prompt('Palette name', cur().name); if (n) { cur().name = n; render(); } } },
+    { k: 'x', t: 'Delete', off: palettes.length < 2, f: () => { if (confirm('Delete palette ' + cur().name + '? Undo brings it back.')) { palettes.splice(active, 1); active = 0; selected = 0; render(); } } },
+    '-',
+    { k: 'i', t: 'New palette from image&hellip;', f: openDialog }
+  ], at[0] - 130, at[1]);
+}
+function openSwatchMenu(ev) {
+  const r = $('#card').getBoundingClientRect();
+  menu('#swatchMenu', [
+    { k: 'u', t: 'Use', f: () => say('Fill set to ' + cur().sw[selected].hex) },
+    { k: 'c', t: 'Replace with current colour', f: () => { cur().sw[selected].hex = '#E64D33'; say('Replaced'); render(); } },
+    { k: 'n', t: 'Rename', f: () => { const n = prompt('Swatch name', cur().sw[selected].name); if (n !== null) { cur().sw[selected].name = n; render(); } } },
+    { k: 'd', t: 'Delete', f: () => { cur().sw.splice(selected, 1); selected = Math.min(selected, cur().sw.length - 1); say('Deleted'); render(); } }
+  ], ev.clientX - r.left, ev.clientY - r.top);
+}
+
+/* ---- sample images drawn on a canvas, standing in for the file dialog ---- */
+const IMAGES = [
+  ['sunsetHarbour.jpg', c => { let g = c.createLinearGradient(0, 0, 0, 100); g.addColorStop(0, '#2B2A55'); g.addColorStop(.55, '#D6506B'); g.addColorStop(1, '#F6B25A'); c.fillStyle = g; c.fillRect(0, 0, 268, 100); c.fillStyle = '#FFE08A'; c.beginPath(); c.arc(190, 92, 26, 0, 7); c.fill(); c.fillStyle = '#1D2B3F'; c.fillRect(0, 100, 268, 50); c.fillStyle = '#E0A04A'; c.fillRect(150, 106, 80, 3); c.fillRect(165, 116, 50, 3); c.fillStyle = '#0F1722'; c.beginPath(); c.moveTo(20, 100); c.lineTo(34, 60); c.lineTo(48, 100); c.fill(); c.fillRect(33, 40, 2, 30); }],
+  ['forestPath.jpg', c => { c.fillStyle = '#E9EFE2'; c.fillRect(0, 0, 268, 150); c.fillStyle = '#2F5D3A'; c.fillRect(0, 0, 268, 90); c.fillStyle = '#4C8A4F'; for (let i = 0; i < 9; i++) { c.beginPath(); c.arc(15 + i * 30, 40 + (i % 3) * 12, 26, 0, 7); c.fill(); } c.fillStyle = '#1C3B26'; for (let i = 0; i < 6; i++) c.fillRect(10 + i * 48, 70, 7, 80); c.fillStyle = '#B9A07A'; c.beginPath(); c.moveTo(110, 150); c.lineTo(138, 90); c.lineTo(160, 90); c.lineTo(200, 150); c.fill(); c.fillStyle = '#E9C46A'; c.beginPath(); c.arc(230, 20, 12, 0, 7); c.fill(); }],
+  ['poster.png', c => { c.fillStyle = '#F4F1EA'; c.fillRect(0, 0, 268, 150); const cols = ['#E63946', '#1D3557', '#F1C40F', '#2A9D8F', '#8D5CF6']; cols.forEach((k, i) => { c.fillStyle = k; c.fillRect(14 + i * 50, 20 + (i % 2) * 14, 42, 60 + (i % 3) * 20); }); c.fillStyle = '#111'; c.fillRect(0, 128, 268, 22); c.fillStyle = '#FFFFFF'; c.fillRect(0, 0, 268, 6); }]
+];
+function drawImage() {
+  const c = $('#pic').getContext('2d'); c.clearRect(0, 0, 268, 150); IMAGES[imageIndex][1](c);
+  $('#imageName').textContent = IMAGES[imageIndex][0];
+}
+/* median cut on a shrunk copy: split the box with the widest channel range at its median until there are n boxes */
+function extract(n, merge, skip, order) {
+  const d = $('#pic').getContext('2d').getImageData(0, 0, 268, 150).data, px = [];
+  for (let i = 0; i < d.length; i += 4 * 2) { const c = [d[i], d[i + 1], d[i + 2]], l = lum(c); if (skip && (l > .95 || l < .06)) continue; px.push(c); }
+  if (!px.length) return [];
+  let boxes = [px];
+  while (boxes.length < n) {
+    let bi = -1, best = 0, ch = 0;
+    boxes.forEach((b, i) => { for (let k = 0; k < 3; k++) { const v = b.map(p => p[k]), r = Math.max(...v) - Math.min(...v); if (r * Math.sqrt(b.length) > best && b.length > 1) { best = r * Math.sqrt(b.length); bi = i; ch = k; } } });
+    if (bi < 0) break;
+    const b = boxes[bi].sort((a, c) => a[ch] - c[ch]), m = b.length >> 1;
+    boxes.splice(bi, 1, b.slice(0, m), b.slice(m));
+  }
+  let out = boxes.map(b => ({ c: [0, 1, 2].map(k => b.reduce((s, p) => s + p[k], 0) / b.length), n: b.length }));
+  if (merge) {
+    for (let again = true; again;) {
+      again = false;
+      for (let i = 0; i < out.length && !again; i++) for (let j = i + 1; j < out.length && !again; j++) {
+        if (Math.hypot(...out[i].c.map((v, k) => v - out[j].c[k])) < 28) { const a = out[i], b = out[j], t = a.n + b.n; out[i] = { c: a.c.map((v, k) => (v * a.n + b.c[k] * b.n) / t), n: t }; out.splice(j, 1); again = true; }
+      }
+    }
+  }
+  out.sort(order === 'Hue' ? (a, b) => hue(a.c) - hue(b.c) : order === 'Lightness' ? (a, b) => lum(a.c) - lum(b.c) : (a, b) => b.n - a.n);
+  return out.map(o => hexOf(...o.c));
+}
+let found = [];
+function preview() {
+  $('#countText').textContent = $('#count').value;
+  found = extract(+$('#count').value, $('#merge').checked, $('#skip').checked, $('#order').value);
+  $('#previewSwatches').innerHTML = found.map(h => `<div class="sw" style="background:${h}" title="${h}"></div>`).join('') + `<span class="muted" style="align-self:center;margin-left:6px">${found.length} found</span>`;
+}
+function openDialog() {
+  $('#shade').style.display = 'block'; $('#dialog').style.display = 'block'; drawImage(); $('#newName').value = IMAGES[imageIndex][0].replace(/\.\w+$/, ''); preview();
+}
+const closeDialog = () => { $('#shade').style.display = 'none'; $('#dialog').style.display = 'none'; };
+['#count', '#merge', '#skip', '#order'].forEach(s => $(s).oninput = preview);
+$('#nextImage').onclick = () => { imageIndex = (imageIndex + 1) % IMAGES.length; drawImage(); $('#newName').value = IMAGES[imageIndex][0].replace(/\.\w+$/, ''); preview(); };
+$('#cancel').onclick = () => { closeDialog(); say('Nothing changed'); };
+$('#ok').onclick = () => { palettes.push({ name: $('#newName').value || 'From image', sw: found.map(h => sw(h)) }); active = palettes.length - 1; selected = 0; closeDialog(); say('Created ' + cur().name + ' with ' + found.length + ' swatches (one undo step)'); render(); };
+render(); say('Pick a swatch, drag to reorder, or ... > New palette from image');
+</script>
+</body>
+</html>
