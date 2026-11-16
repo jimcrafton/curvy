@@ -35,8 +35,12 @@ Python objects can outlive the document (`kept = doc`, then File > New). Raw poi
   closed")` when the token has expired. Pybind11 turns that into a Python `RuntimeError`.
 - `ScriptDocument` and `ScriptObject` both hold a `shared_ptr<DocumentGuard>` and call `get()` on **every** member call, never caching the
   reference.
-- A `ScriptObject` also checks `hasNode(ref)` (`node()`): undo, `new_blank` or `move_to` can remove or replace the node, and a stale object
+- A `ScriptObject` also checks `hasNode(ref)` (`node()`): undo or `move_to` can remove or replace the node, and a stale object
   raises "the object no longer exists".
+- `new_blank` and `open` replace the whole document, and node ids then start again, so `hasNode` alone would let an object from before
+  silently point at an unrelated new one. `SketchDocument::replaceCount()` (bumped in `install()`, which New and every load go through) is
+  noted by each `ScriptObject` when it is made; `ScriptObject::document()` and `liveRef()` (used by `refOf`, so also by `doc.remove_node(old)`)
+  raise "the object no longer exists" when it differs. `repr` shows `Object(<gone>)`. Not checked for plain `jitnodes` node handles.
 - Node handles are `jitnodes` handles (id + network token + generation); they go stale on their own, with `StaleHandleError`.
 
 Every new wrapper type that reaches into the document must hold a `DocumentGuard` and use it the same way.
@@ -150,6 +154,47 @@ Python, on `Document`: `fill(node)` and `stroke(node)` give `(r, g, b, a)` or `N
 look (`visible = 0`) rather than deleting the node, so a later colour needs no new node and keeps its width; a colour makes it visible again. To
 change only the opacity or width, pass the current colour (`doc.set_fill(s, doc.fill(s), opacity=0.5)`). Not exposed: cap, join and miter, which
 the stroke node stores but the canvas does not draw yet (it reads only `stroke.width`); expose them when the renderer honours them.
+
+## Files: `doc.path`, `doc.save()`, `doc.open()`
+
+Only the native `.curvy` format is reachable from scripts. Export (SVG, PDF, EPS, PNG) is not: `src/io` and `include/curvy/io` (identical to the
+copy in `tmp/`) were written for the old Sketch document (`layers()`, `artboards()`, symbols, brushes), include headers that no longer exist
+(`gzip.h`, `imagedata.h`, `textoutline.h`, `sketchexport.h`, `graphbrush.h`) and are not in `CMakeLists.txt`. A script export needs them ported to
+the graph document first, which waits for the import/export branch.
+
+- `doc.path`: the file the document was opened from or last saved to, or `None`. `doc.is_modified`: changed since then (the script's own edits count).
+- `doc.save(path=None)`: writes the file and returns the path. No argument saves to `doc.path` (`RuntimeError` when there is none yet); with a
+  path it is Save As and the document belongs to that file afterwards. Not an undo step. A failure raises `RuntimeError("could not save ...: <reason>")`.
+  `Document::save` keeps a one-time `<path>.bak` of an existing file, as the app's Save does. The saved view (zoom and pan) is the one from the last
+  Save or Open in the window, since a script has no canvas to ask.
+- `doc.open(path, discard_changes=False)`: replaces the document with a file, as File > Open does, but **refuses while the document is modified**
+  unless `discard_changes=True` (the window would ask; a script cannot). A file that cannot be read leaves the document as it was. Everything from
+  before is gone (see "Lifetime guard"), and the undo history starts again, so later edits in the same script are one step of the new
+  document (`HistoryChange`, like `new_blank`). Damaged objects are left alone (the window cannot prompt in the middle of a script); the status bar says how many.
+- Both run on the main thread (every `Document` call does), so a big file freezes the window for its duration, like a `cook()`.
+- The window is told through `ScriptConsole::setDocumentFileHook` (`setScriptDocumentFileHook`): after a save `WorkspaceController` refreshes the title,
+  after an open it calls `showDocument()` (canvas, graph view, panels, saved view) and says "A script opened <file>". `onExecuted` refreshes the
+  title as well, because the modified marker is not updated while a script runs.
+- Sample: `Resources/samples/scripts/fileRoundTrip.py`. Tests: `ScriptModule.*` (save, Save As, open, refusals, failures, stale objects, the hook) and
+  `tests/gui/test_curvy_pyfiles.py`.
+
+## Running a script from the command line
+
+`curvy.exe --run script.py [--exit-after-run] [-- arg ...]` (main.cpp, `WorkspaceController::runScriptFile`):
+
+- The script runs once the window is up, through the same path as Run in the editor: in the background, shown in the console panel, with
+  the status bar, Cancel, Esc and the time limit. `--open file` loads first (the run waits while the open is busy).
+- `args` in the script is the list of what follows a bare `--` (`ScriptConsole::setArguments`; empty for the editor's runs).
+- What the script printed goes to stdout and its error to stderr, when it ends (`PyConsolePanel::onFinished`); not live.
+- `--exit-after-run` closes the window when the script ends and sets the exit code: 0 ok, 1 the script raised, 2 cancelled or timed out,
+  3 the script file cannot be read, 4 Python is not available. Without it the window stays open and the exit code is 0.
+- The window is closed by posting `WM_CLOSE`, so teardown happens in the normal order (an earlier version ended the run loop directly and
+  crashed in the destructors). `forcedClose_` skips the "discard changes?" prompt and the busy refusal, which a batch run could not answer, and
+  does not save the window placement, so a batch run never rewrites the user's settings. A script that wants its changes kept must `doc.save()`.
+- A UTF-8 byte order mark at the start of the file is dropped.
+- Example: `curvy --open in.curvy --run fix.py --exit-after-run -- out.curvy` with `fix.py` doing the edits and `doc.save(args[0])`.
+- Tests: `ScriptConsole.argsIsTheListGiven...` (unit) and `tests/gui/test_curvy_cli.py` (6 tests, each starts the exe with no input: output, error,
+  `args`, exit codes 0 to 3, open-change-save as a batch job).
 
 ## Selection
 

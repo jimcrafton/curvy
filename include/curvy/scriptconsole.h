@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace curvy {
 
@@ -69,6 +70,10 @@ namespace curvy {
         // background script is running.
         ScriptResult run(const std::string& code, SketchDocument* document, SelectionModel* selection = nullptr);
 
+        // The list scripts see as `args` (empty by default): what follows `--` on the command line of a `--run`. Takes effect for the
+        // runs that start after the call.
+        void setArguments(std::vector<std::string> arguments);
+
         // How a script thread reaches the main thread: `post` must run its task on the main thread later, from any thread (the application
         // passes RunLoop::post; a test passes a queue it drains). Without one runInBackground() is unavailable.
         void setMainThreadPoster(MainThreadPoster poster);
@@ -92,6 +97,10 @@ namespace curvy {
         // Stops the running script (from any thread; does nothing when none runs) by raising `curvy.Cancelled`, a BaseException, in it at the
         // next Python instruction, so `except Exception` does not swallow it. A long call into C++ (a cook, a render) finishes first.
         void cancel();
+
+        // Called on the main thread when a script saved the document to a file or opened one into it (see setScriptDocumentFileHook), so
+        // the window can refresh its title or everything it shows of the document.
+        void setDocumentFileHook(ScriptDocumentFileHook hook);
 
         // Stops a script that runs longer than this, as cancel() does (and with the same limits: a long call into C++ finishes first). Zero,
         // the default, means no limit. Applies to the runs that start after the call.

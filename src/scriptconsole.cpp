@@ -118,6 +118,11 @@ namespace curvy {
             timedOut = false;
             running = true;
             resetScriptProgress();
+            py::list argumentList;
+            for (const std::string& argument : arguments) {
+                argumentList.append(argument);
+            }
+            scope["args"] = argumentList;
             if (document != nullptr) {
                 transaction.begin(*document);
                 scope["doc"] = makeScriptDocument(*document, transaction, selection);
@@ -247,6 +252,7 @@ namespace curvy {
         std::function<void(const ScriptResult&)> done;
         std::atomic<bool> cancelRequested{false};
         std::atomic<bool> cancelOnEscape{true};
+        std::vector<std::string> arguments;
         std::atomic<long long> timeoutSeconds{0};
         std::atomic<bool> timedOut{false};
     };
@@ -334,6 +340,14 @@ namespace curvy {
         if (impl_->running.load()) {
             impl_->cancelRequested = true;
         }
+    }
+
+    void ScriptConsole::setArguments(std::vector<std::string> arguments) {
+        impl_->arguments = std::move(arguments);
+    }
+
+    void ScriptConsole::setDocumentFileHook(ScriptDocumentFileHook hook) {
+        setScriptDocumentFileHook(std::move(hook));
     }
 
     void ScriptConsole::setTimeout(std::chrono::seconds limit) {

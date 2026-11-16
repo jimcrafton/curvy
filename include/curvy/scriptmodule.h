@@ -29,6 +29,12 @@ namespace curvy {
     // While set, a script waiting for a call the main thread has not started gives up with curvy.Cancelled (the window is closing).
     void setScriptDispatchAborting(bool aborting);
 
+    // Told, on the main thread, when a script saved the document to a file (contentReplaced false: the file name or the modified marker may
+    // have changed) or opened a file into it (true: everything the window shows of the document is stale). The window sets this so it
+    // can refresh; none by default.
+    using ScriptDocumentFileHook = std::function<void(bool contentReplaced)>;
+    void setScriptDocumentFileHook(ScriptDocumentFileHook hook);
+
     // What `curvy.progress(fraction, message)` last reported; fraction is negative until a script reports one.
     struct ScriptProgress {
         float fraction = -1.0f;

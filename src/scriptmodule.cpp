@@ -32,6 +32,12 @@ namespace curvy {
 
         using Rgba = std::tuple<float, float, float, float>;
 
+        void notifyFileHook(bool contentReplaced);
+
+        std::string fileFailure(const std::string& what, const std::string& path, const SketchDocument& document) {
+            return "could not " + what + " " + path + (document.lastError().empty() ? std::string() : ": " + document.lastError());
+        }
+
         // Held by every script object that reaches into the document: a document that closed turns into an error, not a crash.
         class DocumentGuard {
         public:
@@ -96,11 +102,25 @@ namespace curvy {
         // A layer or a group.
         class ScriptObject {
         public:
-            ScriptObject(std::shared_ptr<DocumentGuard> guard, NodeRef ref) : guard_(std::move(guard)), ref_(ref) {}
+            ScriptObject(std::shared_ptr<DocumentGuard> guard, NodeRef ref)
+                : guard_(std::move(guard)), ref_(ref), replaceCount_(guard_->get().replaceCount()) {}
 
-            SketchDocument& document() const { return guard_->get(); }
+            // Ids start again when the whole document is replaced (New, open), so an object from before may share its id with an
+            // unrelated one now: it counts as gone.
+            bool stale() const { return guard_->get().replaceCount() != replaceCount_; }
+
+            SketchDocument& document() const {
+                if (stale()) {
+                    throw std::runtime_error("the object no longer exists");
+                }
+                return guard_->get();
+            }
             const std::shared_ptr<DocumentGuard>& guard() const { return guard_; }
             const NodeRef& ref() const { return ref_; }
+            const NodeRef& liveRef() const {
+                (void)document();
+                return ref_;
+            }
 
             // The object may have been deleted or replaced (undo, move) since the script got it.
             jitnodes::Node& node() const {
@@ -114,6 +134,7 @@ namespace curvy {
         private:
             std::shared_ptr<DocumentGuard> guard_;
             NodeRef ref_;
+            std::uint64_t replaceCount_;
         };
 
         py::object wrapNode(SketchDocument& document, const NodeRef& ref) {
@@ -135,7 +156,7 @@ namespace curvy {
         // A script names nodes either as a graph node handle or as a layer or group.
         NodeRef refOf(SketchDocument& document, const py::object& value) {
             if (py::isinstance<ScriptObject>(value)) {
-                return value.cast<const ScriptObject&>().ref();
+                return value.cast<const ScriptObject&>().liveRef();
             }
             const auto& node = value.cast<const jitnodes::python::PyNode&>();
             const jitnodes::Network* network = node.network().raw();
@@ -548,8 +569,8 @@ namespace curvy {
                 .def("remove", [](const ScriptObject& o) { o.document().removeGraphNode(o.ref()); })
                 .def("__eq__", [](const ScriptObject& a, const ScriptObject& b) { return a.ref() == b.ref(); })
                 .def("__repr__", [](const ScriptObject& o) {
-                    SketchDocument& doc = o.document();
-                    return doc.hasNode(o.ref()) ? "Object('" + doc.node(o.ref()).name() + "')" : std::string("Object(<gone>)");
+                    SketchDocument& doc = o.guard()->get();
+                    return !o.stale() && doc.hasNode(o.ref()) ? "Object('" + doc.node(o.ref()).name() + "')" : std::string("Object(<gone>)");
                 });
         }
 
@@ -627,6 +648,40 @@ namespace curvy {
                          d.get().newBlank(name, width, height, ppi);
                      }, py::arg("name"), py::arg("width"), py::arg("height"), py::arg("ppi") = 72.0f,
                      "Replaces everything with an empty document. Not undoable; objects and nodes from before are gone.")
+                .def_property_readonly("path", [](const ScriptDocument& d) -> py::object {
+                    return d.get().hasFilePath() ? py::cast(d.get().filePath()) : py::none();
+                }, "The .curvy file the document was opened from or last saved to, or None when it has none yet.")
+                .def_property_readonly("is_modified", [](const ScriptDocument& d) { return d.get().isModified(); },
+                                       "True when the document changed since it was opened or saved (this script's own edits count).")
+                .def("save", [](const ScriptDocument& d, const std::optional<std::string>& path) {
+                         SketchDocument& doc = d.get();
+                         const std::string target = path ? *path : doc.filePath();
+                         if (target.empty()) {
+                             throw std::runtime_error("the document has no file yet: pass a path to save()");
+                         }
+                         if (!doc.save(target)) {
+                             throw std::runtime_error(fileFailure("save", target, doc));
+                         }
+                         notifyFileHook(false);
+                         return target;
+                     }, py::arg("path") = py::none(),
+                     "Saves the document as a .curvy file and returns the path. Without a path it saves to doc.path; with one it is Save As, and the "
+                     "document belongs to that file from then on. Not an undo step. Raises RuntimeError when it cannot write.")
+                .def("open", [](const ScriptDocument& d, const std::string& path, bool discardChanges) {
+                         SketchDocument& doc = d.get();
+                         if (doc.isModified() && !discardChanges) {
+                             throw std::runtime_error("the document has unsaved changes: save it first, or pass discard_changes=True");
+                         }
+                         {
+                             HistoryChange change(*d.guard());
+                             if (!doc.load(path)) {
+                                 throw std::runtime_error(fileFailure("open", path, doc));
+                             }
+                         }
+                         notifyFileHook(true);
+                     }, py::arg("path"), py::arg("discard_changes") = false,
+                     "Replaces the document with a .curvy file. Refuses while the document has unsaved changes unless discard_changes=True. Not "
+                     "undoable; objects and nodes from before are gone, and a file that cannot be read leaves the document as it was.")
 
                 .def_property_readonly("layers", [](const ScriptDocument& d) { return wrapObjects(d.guard(), d.get().childrenOf()); },
                                        "The layers, bottom first.")
@@ -989,6 +1044,36 @@ namespace curvy {
         Dispatch& state = dispatch();
         std::lock_guard<std::mutex> lock(state.mutex);
         return static_cast<bool>(state.poster);
+    }
+
+    namespace {
+
+        std::mutex& fileHookMutex() {
+            static std::mutex instance;
+            return instance;
+        }
+
+        ScriptDocumentFileHook& fileHook() {
+            static ScriptDocumentFileHook instance;
+            return instance;
+        }
+
+        void notifyFileHook(bool contentReplaced) {
+            ScriptDocumentFileHook hook;
+            {
+                std::lock_guard<std::mutex> lock(fileHookMutex());
+                hook = fileHook();
+            }
+            if (hook) {
+                hook(contentReplaced);
+            }
+        }
+
+    }
+
+    void setScriptDocumentFileHook(ScriptDocumentFileHook hook) {
+        std::lock_guard<std::mutex> lock(fileHookMutex());
+        fileHook() = std::move(hook);
     }
 
     void setScriptDispatchAborting(bool aborting) {

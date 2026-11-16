@@ -40,6 +40,9 @@ namespace curvy {
         // Stops the script that runs in the background (the Cancel button does the same).
         void cancelRun();
 
+        // Called with the result of every run, once it is shown (the owner of a command-line `--run` reports it and sets the exit code).
+        std::function<void(const ScriptResult&)> onFinished;
+
         // Called with true when a background script starts and false when its result is shown.
         std::function<void(bool)> onRunningChanged;
 

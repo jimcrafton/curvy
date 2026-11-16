@@ -65,6 +65,13 @@ namespace curvy {
         // The Python console the right dock's Python panel runs scripts in; call before the window is created. Without one there is no Python panel.
         // Gives the console the run loop to reach the main thread through, so scripts run in the background.
         void setScriptConsole(ScriptConsole* console);
+
+        // The command line's `--run`: runs a Python file once nothing else is loading, as if Run was pressed in the editor (the console panel
+        // shows it, `args` is `arguments`), then prints what it printed to stdout and its error to stderr. With `exitWhenDone` the run loop
+        // ends when the script does, so `curvy --run fix.py --exit-after-run -- a.curvy` is a batch command. exitCode(): 0 the script ended
+        // normally, 1 it raised, 2 it was cancelled or timed out, 3 the file could not be read, 4 Python is not available.
+        void runScriptFile(const std::string& path, std::vector<std::string> arguments, bool exitWhenDone);
+        int exitCode() const { return exitCode_; }
         void saveSettings() const;
         // Puts the window where the last session left it (when that is still on a screen), maximized if it was; call before the window is
         // created (it sets the Frame's bounds). The window is saved when it closes.
@@ -251,6 +258,11 @@ namespace curvy {
         std::string scriptStatusText(bool finished = false) const;
         newui::RunLoop::TimerHandle scriptTimer_ = newui::RunLoop::kInvalidTimerHandle;
         bool scriptStatusShown_ = false;
+        bool commandLineRun_ = false;
+        bool exitWhenScriptDone_ = false;
+        bool forcedClose_ = false;
+        int exitCode_ = 0;
+        void finishCommandLineRun(int code);
         std::chrono::steady_clock::time_point scriptStarted_;
         std::string taskLabel_;
         int taskPercent_ = -1;

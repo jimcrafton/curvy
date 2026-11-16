@@ -1,13 +1,16 @@
 #include "pythonconsole.h"
+#include "testsupport.h"
 
 #include "curvy/selectionmodel.h"
 #include "curvy/sketchdocument.h"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <vector>
 
 namespace {
 
@@ -21,7 +24,8 @@ TEST(ScriptModule, everySampleScriptRunsAndDrawsSomething) {
     const std::filesystem::path folder = std::filesystem::path(__FILE__).parent_path().parent_path() / "Resources" / "samples" / "scripts";
     int count = 0;
     for (const auto& entry : std::filesystem::directory_iterator(folder)) {
-        if (entry.path().extension() != ".py") {
+        // longRunning.py sleeps for 40 seconds on purpose (it is for trying the background run by hand).
+        if (entry.path().extension() != ".py" || entry.path().filename() == "longRunning.py") {
             continue;
         }
         std::ifstream in(entry.path(), std::ios::binary);
@@ -518,6 +522,173 @@ TEST(ScriptModule, theEditorSelectionIsReadAndChangedByScripts) {
                  "print(selection.step_up())");
     EXPECT_TRUE(result.ok) << result.error;
     EXPECT_EQ(result.output, "True G\nFalse\n");
+}
+
+namespace {
+
+    // A path for a script to use: forward slashes, so it can sit in a Python string without escaping.
+    std::string scriptPath(const char* name) {
+        std::string path = curvytest::tempFile(name).string();
+        std::replace(path.begin(), path.end(), '\\', '/');
+        return path;
+    }
+
+    // A saved document with one layer named `layer`.
+    void writeSample(const std::string& path, const char* layer) {
+        std::filesystem::remove(path);
+        std::filesystem::remove(path + ".bak");
+        curvy::SketchDocument document;
+        document.newBlank("Sample", 200.0f, 300.0f);
+        document.addLayer(layer);
+        ASSERT_TRUE(document.save(path)) << document.lastError();
+    }
+
+}
+
+TEST(ScriptModule, aNewDocumentHasNoPathAndSaveNeedsOne) {
+    curvy::SketchDocument document;
+    document.newBlank("Fresh", 100.0f, 100.0f);
+    const auto result = runOn(document, "print(doc.path)\ndoc.save()");
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.output, "None\n");
+    EXPECT_NE(result.error.find("pass a path"), std::string::npos) << result.error;
+}
+
+TEST(ScriptModule, saveWritesTheFileAndSaveAsMovesTheDocumentToIt) {
+    const std::string first = scriptPath("curvy_script_first.curvy");
+    const std::string second = scriptPath("curvy_script_second.curvy");
+    for (const std::string& file : {first, second}) {
+        std::filesystem::remove(file);
+        std::filesystem::remove(file + ".bak");
+    }
+    curvy::SketchDocument document;
+    document.newBlank("Saving", 100.0f, 100.0f);
+    const auto result = runOn(document, "doc.add_layer('A')\nprint(doc.is_modified)\nprint(doc.save('" + first + "') == '" + first +
+                                            "')\nprint(doc.is_modified, doc.path == '" + first + "')\ndoc.add_layer('B')\ndoc.save()\n"
+                                            "doc.save('" + second + "')\nprint(doc.path == '" + second + "')");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "True\nTrue\nFalse True\nTrue\n");
+    EXPECT_TRUE(std::filesystem::exists(first));
+    EXPECT_TRUE(std::filesystem::exists(second));
+
+    curvy::SketchDocument back;
+    ASSERT_TRUE(back.load(second)) << back.lastError();
+    EXPECT_EQ(back.childrenOf().size(), 2u) << "the second save has both layers";
+    curvy::SketchDocument older;
+    ASSERT_TRUE(older.load(first)) << older.lastError();
+    EXPECT_EQ(older.childrenOf().size(), 2u) << "doc.save() with no path rewrote the first file after B was added";
+    for (const std::string& file : {first, second}) {
+        std::filesystem::remove(file);
+        std::filesystem::remove(file + ".bak");
+    }
+}
+
+TEST(ScriptModule, aSaveThatCannotWriteRaises) {
+    curvy::SketchDocument document;
+    document.newBlank("Nowhere", 100.0f, 100.0f);
+    const auto result = runOn(document, "doc.save('" + scriptPath("curvy_no_such_folder/x/y.curvy") + "')");
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error.find("could not save"), std::string::npos) << result.error;
+    EXPECT_FALSE(document.hasFilePath());
+}
+
+TEST(ScriptModule, openReplacesTheDocumentAndOldHandlesAreGone) {
+    const std::string file = scriptPath("curvy_script_open.curvy");
+    writeSample(file, "FromFile");
+    curvy::SketchDocument document;
+    document.newBlank("Target", 100.0f, 100.0f);
+    const auto result = runOn(document, "old = doc.add_layer('Old')\ndoc.open('" + file + "', discard_changes=True)\nprint([l.name for l in doc.layers], doc.page_width, doc.path == '" + file +
+                                            "', doc.is_modified)\nold.name");
+    EXPECT_FALSE(result.ok) << "the layer from before the open is gone";
+    EXPECT_NE(result.error.find("no longer exists"), std::string::npos) << result.error;
+    EXPECT_EQ(result.output, "['FromFile'] 200.0 True False\n");
+    EXPECT_EQ(document.childrenOf().size(), 1u);
+    std::filesystem::remove(file);
+    std::filesystem::remove(file + ".bak");
+}
+
+TEST(ScriptModule, anObjectFromBeforeANewOrAnOpenIsGoneEvenWhenANewOneHasItsId) {
+    curvy::SketchDocument document;
+    document.newBlank("Ids", 100.0f, 100.0f);
+    // Ids start again, so the first layer of the blank document has the id the old one had.
+    auto result = runOn(document, "old = doc.add_layer('Old')\ndoc.new_blank('Fresh', 50, 50)\nnew = doc.add_layer('New')\nprint(old.id == new.id)\nprint(repr(old))");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "True\nObject(<gone>)\n");
+    for (const char* use : {"old.name", "old.remove()", "old.add_circle(1, 1, 1)", "doc.remove_node(old)"}) {
+        result = runOn(document, use);
+        EXPECT_FALSE(result.ok) << use;
+        EXPECT_NE(result.error.find("no longer exists"), std::string::npos) << use << ": " << result.error;
+    }
+    EXPECT_EQ(document.childrenOf().size(), 1u) << "none of those touched the new layer";
+    EXPECT_EQ(document.node(document.childrenOf()[0]).name(), "New");
+}
+
+TEST(ScriptModule, openRefusesUnsavedChangesUnlessToldToDiscardThem) {
+    const std::string file = scriptPath("curvy_script_refuse.curvy");
+    writeSample(file, "FromFile");
+    curvy::SketchDocument document;
+    document.newBlank("Target", 100.0f, 100.0f);
+    auto result = runOn(document, "doc.add_layer('Mine')\ndoc.open('" + file + "')");
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error.find("unsaved changes"), std::string::npos) << result.error;
+    EXPECT_EQ(document.childrenOf().size(), 1u) << "nothing was replaced";
+    EXPECT_EQ(document.node(document.childrenOf()[0]).name(), "Mine");
+
+    EXPECT_TRUE(runOn(document, "doc.open('" + file + "', True)").ok);
+    EXPECT_EQ(document.node(document.childrenOf()[0]).name(), "FromFile");
+    EXPECT_TRUE(runOn(document, "doc.open('" + file + "')").ok) << "an unmodified document opens without discard_changes";
+    std::filesystem::remove(file);
+    std::filesystem::remove(file + ".bak");
+}
+
+TEST(ScriptModule, openingAFileThatIsMissingOrNotACurvyFileLeavesTheDocumentAlone) {
+    const std::string notCurvy = scriptPath("curvy_script_notcurvy.curvy");
+    {
+        std::ofstream out(notCurvy, std::ios::binary);
+        out << "this is not a curvy file";
+    }
+    curvy::SketchDocument document;
+    document.newBlank("Keep", 100.0f, 100.0f);
+    ASSERT_TRUE(runOn(document, "doc.add_layer('Stay')").ok);
+    for (const std::string& file : {scriptPath("curvy_script_missing.curvy"), notCurvy}) {
+        const auto result = runOn(document, "doc.open('" + file + "', True)");
+        EXPECT_FALSE(result.ok) << file;
+        EXPECT_NE(result.error.find("could not open"), std::string::npos) << result.error;
+        ASSERT_EQ(document.childrenOf().size(), 1u) << file;
+        EXPECT_EQ(document.node(document.childrenOf()[0]).name(), "Stay");
+    }
+    std::filesystem::remove(notCurvy);
+}
+
+TEST(ScriptModule, editsAfterAnOpenInTheSameScriptAreOneUndoStepOfTheNewDocument) {
+    const std::string file = scriptPath("curvy_script_after.curvy");
+    writeSample(file, "FromFile");
+    curvy::SketchDocument document;
+    document.newBlank("Target", 100.0f, 100.0f);
+    const auto result = runOn(document, "doc.open('" + file + "')\ndoc.add_layer('A')\ndoc.add_layer('B')");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(document.childrenOf().size(), 3u);
+    const std::size_t depth = document.undoStack().depth();
+    document.undoStack().undo();
+    EXPECT_EQ(document.undoStack().depth(), depth - 1);
+    EXPECT_EQ(document.childrenOf().size(), 1u) << "both layers added after the open were one step";
+    std::filesystem::remove(file);
+    std::filesystem::remove(file + ".bak");
+}
+
+TEST(ScriptModule, theWindowIsToldWhenAScriptSavesOrOpens) {
+    const std::string file = scriptPath("curvy_script_hook.curvy");
+    writeSample(file, "FromFile");
+    std::vector<bool> told;
+    curvytest::sharedConsole().setDocumentFileHook([&told](bool replaced) { told.push_back(replaced); });
+    curvy::SketchDocument document;
+    document.newBlank("Hook", 100.0f, 100.0f);
+    const auto result = runOn(document, "doc.save('" + file + "')\ndoc.open('" + file + "')\ntry:\n    doc.open('x:/no/such.curvy')\nexcept RuntimeError:\n    pass");
+    curvytest::sharedConsole().setDocumentFileHook(nullptr);
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(told, (std::vector<bool>{false, true})) << "a refused open does not tell the window";
+    std::filesystem::remove(file);
+    std::filesystem::remove(file + ".bak");
 }
 
 TEST(ScriptModule, selectionIsNoneWithoutAnEditorAndRefusesAForeignDocument) {

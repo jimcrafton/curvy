@@ -212,6 +212,10 @@ namespace curvy {
         // Repairs every flagged object as one undo step and clears the flags.
         void repairObjectProblems();
 
+        // How many times the whole document was replaced (New, a load). Node ids start again each time, so what holds a node of the document
+        // for longer than one call (a script's handle) remembers this and treats a different value as "the node is gone".
+        std::uint64_t replaceCount() const { return replaceCount_; }
+
         // True while the document loads or saves itself, on whatever thread. Its own setters and newBlank throw std::runtime_error then.
         bool isLocked() const { return locked_.load(); }
 
@@ -270,6 +274,7 @@ namespace curvy {
         void findObjectProblems(const jitnodes::Network& network, std::vector<jitnodes::NodeId>& path);
 
         std::vector<ObjectProblem> objectProblems_;
+        std::uint64_t replaceCount_ = 0;
         std::atomic<bool> locked_{false};
         TaskProgress* taskProgress_ = nullptr;
         std::string lastError_;

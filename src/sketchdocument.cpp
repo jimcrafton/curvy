@@ -778,6 +778,7 @@ namespace curvy {
     }
 
     void SketchDocument::install(const std::string& name, float width, float height, float ppi, ColorSpace colorMode, const newui::Color& pageColor) {
+        ++replaceCount_;
         clearGraph();
         objectProblems_.clear();
         undoStack_.clear();

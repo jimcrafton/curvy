@@ -41,6 +41,16 @@ TEST(ScriptConsole, checkSyntaxNamesTheFirstErrorWithoutRunningAnything) {
     EXPECT_GE(text->column, 5);
 }
 
+TEST(ScriptConsole, argsIsTheListGivenToSetArgumentsAndEmptyByDefault) {
+    EXPECT_EQ(console().run("print(args)", nullptr).output, "[]\n");
+    console().setArguments({"a.curvy", "two words", "\xC3\xBC"});
+    auto result = console().run("print(len(args), args[1], args[2] == '\\u00fc')", nullptr);
+    console().setArguments({});
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "3 two words True\n");
+    EXPECT_EQ(console().run("print(args)", nullptr).output, "[]\n");
+}
+
 TEST(ScriptConsole, runsStatementsAndCapturesPrint) {
     auto result = console().run("print('hello')", nullptr);
     EXPECT_TRUE(result.ok) << result.error;

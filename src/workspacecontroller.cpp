@@ -23,7 +23,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <stdexcept>
 #include <vector>
 
@@ -332,16 +335,79 @@ namespace curvy {
         }
     }
 
+    void WorkspaceController::finishCommandLineRun(int code) {
+        commandLineRun_ = false;
+        exitCode_ = code;
+        if (scriptConsole_ != nullptr) {
+            scriptConsole_->setArguments({});   // the editor's runs later see no arguments
+        }
+        if (exitWhenScriptDone_) {
+            // The window closes the way the X button closes it, so everything is torn down in the usual order, but without the prompts a
+            // batch run could never answer (and without saving the window placement: a batch run is not the user rearranging the window).
+            forcedClose_ = true;
+            ::PostMessageW(frame_.frameHandle(), WM_CLOSE, 0, 0);
+        }
+    }
+
+    void WorkspaceController::runScriptFile(const std::string& path, std::vector<std::string> arguments, bool exitWhenDone) {
+        exitWhenScriptDone_ = exitWhenDone;
+        if (scriptConsole_ == nullptr || pyConsolePanel_ == nullptr) {
+            std::fprintf(stderr, "curvy: Python is not available, so %s was not run\n", path.c_str());
+            finishCommandLineRun(4);
+            return;
+        }
+        if (busy_) {
+            // A file given with --open is still loading.
+            loop_->postDelayed(std::chrono::milliseconds(50), [this, path, arguments, exitWhenDone]() {
+                runScriptFile(path, arguments, exitWhenDone);
+                return true;
+            });
+            return;
+        }
+        std::ifstream in(std::filesystem::u8path(path), std::ios::binary);
+        if (!in) {
+            std::fprintf(stderr, "curvy: cannot read the script %s\n", path.c_str());
+            finishCommandLineRun(3);
+            return;
+        }
+        std::ostringstream buffer;
+        buffer << in.rdbuf();
+        std::string code = buffer.str();
+        if (code.compare(0, 3, "\xEF\xBB\xBF") == 0) {
+            code.erase(0, 3);   // a UTF-8 byte order mark: Python would refuse the file
+        }
+        if (code.find_first_not_of(" \t\r\n") == std::string::npos) {
+            finishCommandLineRun(0);   // nothing to run
+            return;
+        }
+        commandLineRun_ = true;
+        scriptConsole_->setArguments(std::move(arguments));
+        pyConsolePanel_->runScript(code, fileNameOf(path));
+    }
+
     void WorkspaceController::setScriptConsole(ScriptConsole* console) {
         scriptConsole_ = console;
         if (console != nullptr) {
             RunLoop* loop = loop_;
             console->setMainThreadPoster([loop](std::function<void()> task) { loop->post(std::move(task)); });
             console->setTimeout(std::chrono::seconds(settings_.scriptTimeout ? settings_.scriptTimeoutSeconds : 0));
+            console->setDocumentFileHook([this](bool contentReplaced) {
+                if (contentReplaced) {
+                    showDocument();   // the canvas, graph view and panels show the new file; its saved view is applied
+                    const std::size_t damaged = document_.objectProblems().size();
+                    model_->say("A script opened " + fileNameOf(document_.filePath()) +
+                                (damaged > 0 ? " (" + std::to_string(damaged) + " damaged object(s), not repaired)" : std::string()));
+                } else {
+                    showTitle();
+                }
+            });
         }
     }
 
     void WorkspaceController::frameShouldClose(bool& canClose) {
+        if (forcedClose_) {
+            return;
+        }
         if (busy_) {
             model_->say(taskLabel_ + " - wait for it to finish, or press Esc to cancel");
             canClose = false;
@@ -502,6 +568,20 @@ namespace curvy {
                 frame_.rootView().repaintNow();
                 ::UpdateWindow(frame_.rootView().windowHandle());
             };
+            pyConsolePanel_->onFinished = [this](const ScriptResult& result) {
+                if (!commandLineRun_) {
+                    return;
+                }
+                if (!result.output.empty()) {
+                    std::fputs(result.output.c_str(), stdout);
+                }
+                if (!result.ok) {
+                    std::fputs(result.error.c_str(), stderr);
+                }
+                std::fflush(stdout);
+                std::fflush(stderr);
+                finishCommandLineRun(result.ok ? 0 : (result.cancelled ? 2 : 1));
+            };
             pyConsolePanel_->onRunningChanged = [this](bool running) {
                 busy_ = running;
                 taskLabel_ = "A script is running";
@@ -518,6 +598,7 @@ namespace curvy {
                 }
             };
             pyConsolePanel_->onExecuted = [this]() {
+                showTitle();   // the modified marker is not refreshed while a script runs
                 graphView_->style().markDirty();
                 canvas_->style().markDirty();
                 if (nodePanel_ != nullptr) {
@@ -1098,6 +1179,7 @@ namespace curvy {
         }
         if (scriptConsole_ != nullptr) {
             scriptConsole_->abort();   // a background script edits the document that is about to go
+            scriptConsole_->setDocumentFileHook(nullptr);
         }
         stopScriptStatus();
         task_.cancel();

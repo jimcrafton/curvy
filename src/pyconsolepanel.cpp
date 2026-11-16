@@ -161,6 +161,9 @@ namespace curvy {
             if (onExecuted) {
                 onExecuted();
             }
+            if (onFinished) {
+                onFinished(result);
+            }
             return;
         }
         before_ = before;
@@ -209,6 +212,9 @@ namespace curvy {
         }
         if (onExecuted) {
             onExecuted();
+        }
+        if (onFinished) {
+            onFinished(result);
         }
     }
 
