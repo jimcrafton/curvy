@@ -381,9 +381,14 @@ namespace curvy {
         if (scriptConsole_ != nullptr) {
             PanelInfo pythonInfo;
             pythonInfo.id = "pyconsole";
-            pythonInfo.title = "Python";
+            pythonInfo.title = "Python Console";
             pythonInfo.side = DockSide::Right;
             panelLayout_.add(pythonInfo);
+            PanelInfo editorInfo;
+            editorInfo.id = "pyeditor";
+            editorInfo.title = "Python Script Editor";
+            editorInfo.side = DockSide::Right;
+            panelLayout_.add(editorInfo);
         }
 
         rightDock_ = new PanelDock(panelLayout_, DockSide::Right);
@@ -431,6 +436,10 @@ namespace curvy {
             pyConsolePanel_ = new PyConsolePanel(*scriptConsole_, &document_);
             rightDock_->addPanel(pyConsolePanel_);
             pyConsolePanel_->onDestroyed = [this]() { pyConsolePanel_ = nullptr; };
+            pyConsolePanel_->onBeforeRun = [this]() {
+                frame_.rootView().repaintNow();
+                ::UpdateWindow(frame_.rootView().windowHandle());
+            };
             pyConsolePanel_->onExecuted = [this]() {
                 graphView_->style().markDirty();
                 canvas_->style().markDirty();
@@ -441,6 +450,32 @@ namespace curvy {
                     transformPanel_->refresh();
                 }
             };
+            scriptEditorPanel_ = new ScriptEditorPanel();
+            rightDock_->addPanel(scriptEditorPanel_);
+            scriptEditorPanel_->onDestroyed = [this]() { scriptEditorPanel_ = nullptr; };
+            scriptEditorPanel_->onRun = [this](const std::string& code, const std::string& name) {
+                if (pyConsolePanel_ != nullptr) {
+                    pyConsolePanel_->runScript(code, name);
+                }
+            };
+            scriptEditorPanel_->onChooseOpen = [this]() {
+                FileDialogOptions options;
+                options.title = "Open script";
+                options.filters.push_back({"Python scripts", "*.py"});
+                options.filters.push_back({"All Files", "*.*"});
+                std::string file;
+                return Dialog::showOpenFile(frame_.frameHandle(), options, file) ? std::filesystem::path(file) : std::filesystem::path();
+            };
+            scriptEditorPanel_->onChooseSave = [this](const std::filesystem::path& current) {
+                FileDialogOptions options;
+                options.title = "Save script";
+                options.filters.push_back({"Python scripts", "*.py"});
+                options.defaultExtension = "py";
+                options.defaultFileName = current.empty() ? std::string("script.py") : current.filename().string();
+                std::string file;
+                return Dialog::showSaveFile(frame_.frameHandle(), options, file) ? std::filesystem::path(file) : std::filesystem::path();
+            };
+            scriptEditorPanel_->onMessage = [this](const std::string& message) { model_->say(message); };
         }
         // Whatever the selection is, picked in the graph view or on the canvas, is what the panel shows.
         graphView_->selectionModel().onChanged += [this](SelectionModel& selection) {
@@ -954,6 +989,9 @@ namespace curvy {
         }
         if (pyConsolePanel_ != nullptr) {
             pyConsolePanel_->onDestroyed = nullptr;
+        }
+        if (scriptEditorPanel_ != nullptr) {
+            scriptEditorPanel_->onDestroyed = nullptr;
         }
         if (documentPanel_ != nullptr) {
             documentPanel_->onDestroyed = nullptr;

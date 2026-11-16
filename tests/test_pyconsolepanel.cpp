@@ -44,6 +44,14 @@ TEST_F(PyConsolePanelTest, scriptsEditTheDocumentAndTheOwnerIsTold) {
     EXPECT_EQ(executed, 1);
 }
 
+TEST_F(PyConsolePanelTest, theTranscriptSaysTheScriptIsRunningUntilItReturns) {
+    std::wstring seen;
+    panel_->onBeforeRun = [this, &seen]() { seen = panel_->transcript(); };
+    panel_->execute("x = 1");
+    EXPECT_EQ(seen, L">>> x = 1\nrunning... (Esc cancels)\n");
+    EXPECT_EQ(panel_->transcript(), L">>> x = 1\n");
+}
+
 TEST_F(PyConsolePanelTest, upAndDownWalkTheHistory) {
     panel_->execute("a = 1");
     panel_->execute("b = 2");
@@ -55,6 +63,45 @@ TEST_F(PyConsolePanelTest, upAndDownWalkTheHistory) {
     EXPECT_EQ(panel_->input(), "b = 2");
     panel_->recall(1);
     EXPECT_EQ(panel_->input(), "");
+}
+
+TEST_F(PyConsolePanelTest, theTranscriptStaysScrolledToItsLastLine) {
+    auto* output = panel_->findView<newui::TextControl>("pyConsoleOutput");
+    ASSERT_NE(output, nullptr);
+    for (int i = 0; i < 30; ++i) {
+        panel_->execute("print('line')");
+    }
+    panel_->execute("doc.color_mode = 'lab'");
+    output->controller().ensureLayoutUpToDate();
+    const float visible = output->bounds().height();
+    const float expected = output->controller().contentHeight() - visible;
+    ASSERT_GT(expected, 0.0f) << "the transcript should overflow the output view";
+    EXPECT_NEAR(output->controller().scrollOffsetY(), expected, 1.0f);
+    EXPECT_NE(panel_->transcript().find(L"color_mode is"), std::wstring::npos);
+
+    auto* scroll = panel_->findView<newui::ScrollView>("pyConsoleScroll");
+    ASSERT_NE(scroll, nullptr);
+    EXPECT_TRUE(scroll->vBar()->isVisible()) << "a transcript taller than the view gets a vertical scroll bar";
+    EXPECT_NEAR(scroll->vBar()->value(), scroll->vBar()->maxValue() - scroll->vBar()->pageSize(), 1.0f);
+}
+
+TEST_F(PyConsolePanelTest, aShortTranscriptHasNoScrollBar) {
+    panel_->execute("print('one line')");
+    auto* scroll = panel_->findView<newui::ScrollView>("pyConsoleScroll");
+    ASSERT_NE(scroll, nullptr);
+    EXPECT_FALSE(scroll->vBar()->isVisible());
+}
+
+TEST_F(PyConsolePanelTest, scrollingBackThenRunningSomethingJumpsToTheEnd) {
+    auto* scroll = panel_->findView<newui::ScrollView>("pyConsoleScroll");
+    ASSERT_NE(scroll, nullptr);
+    for (int i = 0; i < 30; ++i) {
+        panel_->execute("print('line')");
+    }
+    scroll->vBar()->setValue(0.0f);
+    EXPECT_FLOAT_EQ(scroll->vBar()->value(), 0.0f);
+    panel_->execute("print('newest')");
+    EXPECT_NEAR(scroll->vBar()->value(), scroll->vBar()->maxValue() - scroll->vBar()->pageSize(), 1.0f);
 }
 
 TEST_F(PyConsolePanelTest, clearEmptiesTheTranscript) {

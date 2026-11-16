@@ -37,13 +37,16 @@ namespace curvy {
         return std::wstring(text.begin(), text.end());
     }
 
-    PyConsolePanel::PyConsolePanel(ScriptConsole& console, SketchDocument* document) : Panel("pyconsole", "Python"), console_(console), document_(document) {
+    PyConsolePanel::PyConsolePanel(ScriptConsole& console, SketchDocument* document) : Panel("pyconsole", "Python Console"), console_(console), document_(document) {
         const Theme& theme = Theme::current();
+        scroll_ = new ScrollView();
+        scroll_->setName("pyConsoleScroll");
+        body().addChild(scroll_);
         output_ = new TextControl();
         output_->setName("pyConsoleOutput");
         output_->inputTraits().setReadOnly(true);
         output_->setTextColor(theme.textColor());
-        body().addChild(output_);
+        scroll_->addChild(output_);
 
         input_ = new TextField();
         input_->setName("pyConsoleInput");
@@ -77,9 +80,13 @@ namespace curvy {
         body().setContentSize(Size(own.width(), own.height()));
         const float width = (std::max)(own.width() - 2.0f * kPad, 40.0f);
         const float outputHeight = (std::max)(own.height() - kInputHeight - 3.0f * kPad, 20.0f);
-        output_->setBounds(Rect(kPad, kPad, width, outputHeight));
+        scroll_->setBounds(Rect(kPad, kPad, width, outputHeight));
         input_->setBounds(Rect(kPad, kPad * 2.0f + outputHeight, width, kInputHeight));
-        output_->controller().setScrollOffsetY((std::max)(0.0f, output_->controller().contentHeight() - outputHeight));
+        // The scroll view sizes its bar from the text's last layout, which is the old text until this; then the newest line is shown.
+        output_->controller().ensureLayoutUpToDate();
+        scroll_->updateLayout();
+        ScrollBar* bar = scroll_->vBar();
+        bar->setValue(bar->maxValue());
     }
 
     void PyConsolePanel::setTranscript(const std::wstring& text) {
@@ -87,10 +94,6 @@ namespace curvy {
         output_->setText(text);
         output_->inputTraits().setReadOnly(true);
         layoutParts();
-    }
-
-    void PyConsolePanel::append(const std::string& text) {
-        setTranscript(output_->text() + widen(text));
     }
 
     void PyConsolePanel::execute(const std::string& code) {
@@ -101,9 +104,25 @@ namespace curvy {
             history_.push_back(code);
         }
         recallAt_ = history_.size();
-        std::string echo = ">>> " + code + "\n";
+        runAndShow(code, ">>> " + code + "\n");
+    }
+
+    void PyConsolePanel::runScript(const std::string& code, const std::string& name) {
+        if (code.find_first_not_of(" \t\r\n") == std::string::npos) {
+            return;
+        }
+        runAndShow(code, ">>> run " + name + "\n");
+    }
+
+    void PyConsolePanel::runAndShow(const std::string& code, const std::string& echo) {
+        // The window cannot repaint while the script blocks the thread, so the "running" line is painted first and replaced afterwards.
+        const std::wstring before = output_->text();
+        setTranscript(before + widen(echo + "running... (Esc cancels)\n"));
+        if (onBeforeRun) {
+            onBeforeRun();
+        }
         const ScriptResult result = console_.run(code, document_);
-        append(echo + result.output + (result.ok ? "" : result.error + (result.error.empty() || result.error.back() != '\n' ? "\n" : "")));
+        setTranscript(before + widen(echo + result.output + (result.ok ? "" : result.error + (result.error.empty() || result.error.back() != '\n' ? "\n" : ""))));
         if (onExecuted) {
             onExecuted();
         }

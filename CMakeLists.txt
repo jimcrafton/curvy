@@ -81,6 +81,7 @@ add_library(curvy_core STATIC
     src/scriptconsole.cpp
     src/scriptmodule.cpp
     src/pyconsolepanel.cpp
+    src/scripteditorpanel.cpp
 )
 
 target_include_directories(curvy_core PUBLIC include)
@@ -122,6 +123,15 @@ newui_add_reflectgen_output(curvy_core
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/generated/curvy_core_reflection_generated.cpp APPEND DEPENDS ${CURVY_REFLECT_HEADERS})
 
 newui_add_resources(curvy "${CMAKE_CURRENT_SOURCE_DIR}/Resources")
+
+# Distribution: cmake --install <build dir> --prefix <folder> makes a folder that runs on its own (see docs/py-curvy-module.md, "Bundled Python").
+install(TARGETS curvy RUNTIME DESTINATION .)
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/Resources DESTINATION .)
+curvyInstallPython()
+# The compiler's own runtime DLLs next to the exe (app-local), so the machine needs no Visual C++ redistributable.
+set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION .)
+set(CMAKE_INSTALL_UCRT_LIBRARIES OFF)
+include(InstallRequiredSystemLibraries)
 
 # Unit tests: GoogleTest only, run curvyTests directly (no ctest). The window layouts load from Resources next to the exe.
 file(GLOB CURVY_TEST_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp)

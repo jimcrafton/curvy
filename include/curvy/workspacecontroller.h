@@ -19,6 +19,7 @@
 #include "curvy/swatchestab.h"
 #include "curvy/swatchpalettecontroller.h"
 #include "curvy/pyconsolepanel.h"
+#include "curvy/scripteditorpanel.h"
 #include "curvy/transformpanel.h"
 #include "curvy/workspacemodel.h"
 
@@ -221,6 +222,7 @@ namespace curvy {
         TransformPanel* transformPanel_ = nullptr;   // likewise
         ScriptConsole* scriptConsole_ = nullptr;   // the application's, outlives the window
         PyConsolePanel* pyConsolePanel_ = nullptr;   // likewise
+        ScriptEditorPanel* scriptEditorPanel_ = nullptr;   // likewise
         std::array<newui::Action, 3> historyActions_;   // Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z; the run loop matches them whichever view has focus
         std::unique_ptr<GraphCrumbs> graphCrumbs_;
         RadialMenu* menu_ = nullptr;

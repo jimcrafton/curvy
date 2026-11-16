@@ -26,7 +26,8 @@ namespace curvy {
         // Held by every script object that reaches into the document: a document that closed turns into an error, not a crash.
         class DocumentGuard {
         public:
-            explicit DocumentGuard(SketchDocument& document) : document_(&document), alive_(document.lifetime()) {}
+            DocumentGuard(SketchDocument& document, ScriptTransaction& transaction)
+                : document_(&document), alive_(document.lifetime()), transaction_(&transaction) {}
 
             SketchDocument& get() const {
                 if (alive_.expired()) {
@@ -35,14 +36,44 @@ namespace curvy {
                 return *document_;
             }
 
+            ScriptTransaction& transaction() const { return *transaction_; }
+
         private:
             SketchDocument* document_;
             std::weak_ptr<void> alive_;
+            ScriptTransaction* transaction_;
+        };
+
+        // Around a call that moves or clears the undo history: what the script did so far is closed as a step first and a new one starts
+        // after, so the depth the transaction noted stays meaningful.
+        class HistoryChange {
+        public:
+            explicit HistoryChange(const DocumentGuard& guard) : document_(guard.get()), transaction_(guard.transaction()) {
+                covered_ = transaction_.covers(document_);
+                if (covered_) {
+                    transaction_.end();
+                }
+            }
+
+            ~HistoryChange() {
+                if (covered_) {
+                    transaction_.begin(document_);
+                }
+            }
+
+            HistoryChange(const HistoryChange&) = delete;
+            HistoryChange& operator=(const HistoryChange&) = delete;
+
+        private:
+            SketchDocument& document_;
+            ScriptTransaction& transaction_;
+            bool covered_ = false;
         };
 
         class ScriptDocument {
         public:
-            explicit ScriptDocument(SketchDocument& document) : guard_(std::make_shared<DocumentGuard>(document)) {}
+            ScriptDocument(SketchDocument& document, ScriptTransaction& transaction)
+                : guard_(std::make_shared<DocumentGuard>(document, transaction)) {}
 
             SketchDocument& get() const { return guard_->get(); }
             const std::shared_ptr<DocumentGuard>& guard() const { return guard_; }
@@ -221,8 +252,63 @@ namespace curvy {
                 });
         }
 
+        // `with doc.transaction(name):` - an all-or-nothing block inside a script. Leaving it normally keeps its edits (as one step of the
+        // script's own); leaving it with an exception takes them all back, and the exception goes on.
+        class ScriptBlock {
+        public:
+            ScriptBlock(std::shared_ptr<DocumentGuard> guard, std::string name) : guard_(std::move(guard)), name_(std::move(name)) {}
+
+            void enter() {
+                if (entered_) {
+                    throw std::runtime_error("this transaction block is already open");
+                }
+                mark_ = guard_->get().undoStack().depth();
+                entered_ = true;
+            }
+
+            void leave(bool failed) {
+                if (!entered_) {
+                    return;
+                }
+                entered_ = false;
+                // A closed document has nothing left to undo or merge.
+                SketchDocument& document = guard_->get();
+                if (failed) {
+                    document.undoStack().rollbackTo(mark_);
+                } else {
+                    document.undoStack().mergeSince(mark_, name_);
+                }
+            }
+
+        private:
+            std::shared_ptr<DocumentGuard> guard_;
+            std::string name_;
+            std::size_t mark_ = 0;
+            bool entered_ = false;
+        };
+
         void bindDocument(py::module_& module) {
-            py::class_<ScriptDocument>(module, "Document", "The open document. Every edit is one undo step.")
+            py::class_<ScriptBlock>(module, "Transaction", "Returned by Document.transaction(); use it in a with statement.")
+                .def("__enter__", [](py::object self) {
+                    self.cast<ScriptBlock&>().enter();
+                    return self;
+                })
+                .def("__exit__", [](ScriptBlock& block, const py::object& type, const py::object&, const py::object&) {
+                    try {
+                        block.leave(!type.is_none());
+                    } catch (const std::runtime_error&) {
+                        // The document closed inside the block: the block's own error (if any) matters more than this one.
+                        if (type.is_none()) {
+                            throw;
+                        }
+                    }
+                    return false;
+                });
+
+            py::class_<ScriptDocument>(module, "Document", "The open document. A whole script run is one undo step.")
+                .def("transaction", [](const ScriptDocument& d, const std::string& name) { return ScriptBlock(d.guard(), name); },
+                     py::arg("name") = "Script step",
+                     "Use as `with doc.transaction('name'):`. If the block raises, everything it changed is undone and the error continues.")
                 .def_property("name", [](const ScriptDocument& d) { return d.get().name(); },
                               [](const ScriptDocument& d, const std::string& name) { d.get().setName(name); })
                 .def_property_readonly("page_width", [](const ScriptDocument& d) { return d.get().pageWidth(); })
@@ -236,6 +322,7 @@ namespace curvy {
                               [](const ScriptDocument& d, const std::string& mode) { d.get().setColorMode(colorModeFrom(mode)); })
                 .def("set_page_size", [](const ScriptDocument& d, float width, float height) { d.get().setPageSize(width, height); })
                 .def("new_blank", [](const ScriptDocument& d, const std::string& name, float width, float height, float ppi) {
+                         HistoryChange change(*d.guard());
                          d.get().newBlank(name, width, height, ppi);
                      }, py::arg("name"), py::arg("width"), py::arg("height"), py::arg("ppi") = 72.0f,
                      "Replaces everything with an empty document. Not undoable; objects and nodes from before are gone.")
@@ -293,8 +380,14 @@ namespace curvy {
 
                 .def("can_undo", [](const ScriptDocument& d) { return d.get().undoStack().canUndo(); })
                 .def("can_redo", [](const ScriptDocument& d) { return d.get().undoStack().canRedo(); })
-                .def("undo", [](const ScriptDocument& d) { d.get().undoStack().undo(); })
-                .def("redo", [](const ScriptDocument& d) { d.get().undoStack().redo(); });
+                .def("undo", [](const ScriptDocument& d) {
+                    HistoryChange change(*d.guard());
+                    d.get().undoStack().undo();
+                })
+                .def("redo", [](const ScriptDocument& d) {
+                    HistoryChange change(*d.guard());
+                    d.get().undoStack().redo();
+                });
         }
 
     }
@@ -302,13 +395,33 @@ namespace curvy {
     void registerCurvyModule() {
         py::module_ module = py::module_::import("types").attr("ModuleType")("curvy");
         py::module_::import("sys").attr("modules")["curvy"] = module;
+        // A BaseException, like KeyboardInterrupt, so a script's `except Exception` does not swallow a cancel.
+        module.attr("Cancelled") = py::module_::import("builtins").attr("type")(
+            "Cancelled", py::make_tuple(py::handle(PyExc_BaseException)), py::dict());
         bindSwatches(module);
         bindObject(module);
         bindDocument(module);
     }
 
-    py::object makeScriptDocument(SketchDocument& document) {
-        return py::cast(ScriptDocument(document));
+    void ScriptTransaction::begin(SketchDocument& document) {
+        document_ = &document;
+        alive_ = document.lifetime();
+        mark_ = document.undoStack().depth();
+    }
+
+    void ScriptTransaction::end() {
+        if (document_ != nullptr && !alive_.expired()) {
+            document_->undoStack().mergeSince(mark_, "Script");
+        }
+        document_ = nullptr;
+    }
+
+    bool ScriptTransaction::covers(const SketchDocument& document) const {
+        return document_ == &document && !alive_.expired();
+    }
+
+    py::object makeScriptDocument(SketchDocument& document, ScriptTransaction& transaction) {
+        return py::cast(ScriptDocument(document, transaction));
     }
 
 }

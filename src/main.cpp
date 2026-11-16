@@ -100,7 +100,7 @@ int main(int argc, char** argv) {
 
     std::unique_ptr<curvy::ScriptConsole> scriptConsole;
     try {
-        scriptConsole = std::make_unique<curvy::ScriptConsole>(CURVY_PYTHON_HOME);
+        scriptConsole = std::make_unique<curvy::ScriptConsole>(curvy::findPythonHome(curvy::executableDirectory(), CURVY_PYTHON_HOME));
     } catch (const std::exception& e) {
         std::printf("curvy: Python is not available (%s)\n", e.what());
     }

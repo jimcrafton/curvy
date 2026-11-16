@@ -4,6 +4,11 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <thread>
+
 namespace {
 
     curvy::ScriptConsole& console() {
@@ -71,4 +76,87 @@ TEST(ScriptConsole, aClosedDocumentRaisesInsteadOfCrashing) {
     auto result = console().run("kept.name", nullptr);
     EXPECT_FALSE(result.ok);
     EXPECT_NE(result.error.find("closed"), std::string::npos) << result.error;
+}
+
+namespace {
+
+    // Runs `code`, and cancels it from another thread after `delayMs`.
+    curvy::ScriptResult runAndCancel(const std::string& code, curvy::SketchDocument* document, int delayMs = 150) {
+        std::thread canceller([delayMs] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
+            console().cancel();
+        });
+        curvy::ScriptResult result = console().run(code, document);
+        canceller.join();
+        return result;
+    }
+
+}
+
+TEST(ScriptConsole, cancelStopsALoopThatNeverEnds) {
+    auto result = runAndCancel("while True:\n    pass", nullptr);
+    EXPECT_FALSE(result.ok);
+    EXPECT_TRUE(result.cancelled);
+    EXPECT_NE(result.error.find("cancelled"), std::string::npos) << result.error;
+    EXPECT_EQ(console().run("print('fine')", nullptr).output, "fine\n");
+}
+
+TEST(ScriptConsole, anExceptExceptionClauseCannotSwallowACancel) {
+    auto result = runAndCancel("try:\n    while True:\n        pass\nexcept Exception:\n    print('swallowed')", nullptr);
+    EXPECT_TRUE(result.cancelled);
+    EXPECT_EQ(result.output.find("swallowed"), std::string::npos);
+}
+
+TEST(ScriptConsole, cancelWithNothingRunningDoesNotAffectTheNextRun) {
+    console().cancel();
+    auto result = console().run("total = sum(range(100000))\nprint(total)", nullptr);
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_FALSE(result.cancelled);
+}
+
+TEST(ScriptConsole, editsBeforeTheCancelStayAsOneUndoStep) {
+    curvy::SketchDocument document;
+    document.newBlank("Cancel", 10.0f, 10.0f);
+    auto result = runAndCancel("while True:\n    doc.add_layer()\n    if len(doc.layers) >= 3:\n        while True:\n            pass", &document);
+    EXPECT_TRUE(result.cancelled);
+    EXPECT_EQ(document.childrenOf().size(), 3u);
+    EXPECT_EQ(document.undoStack().depth(), 1u);
+    EXPECT_TRUE(console().run("doc.undo()\nprint(len(doc.layers))", &document).ok);
+    EXPECT_EQ(document.childrenOf().size(), 0u);
+}
+
+TEST(ScriptConsole, findPythonHomePrefersTheBundledFolderNextToTheExe) {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / "curvyPythonHomeTest";
+    fs::remove_all(root);
+    fs::create_directories(root / "python" / "Lib");
+    const fs::path development = "D:/dev/python";
+
+    EXPECT_EQ(curvy::findPythonHome(root, development), development) << "a python folder without a standard library is not a bundle";
+    std::ofstream(root / "python" / "Lib" / "os.py") << "";
+    EXPECT_EQ(curvy::findPythonHome(root, development), root / "python");
+    EXPECT_EQ(curvy::findPythonHome(root / "elsewhere", development), development);
+    EXPECT_EQ(curvy::findPythonHome({}, development), development);
+    fs::remove_all(root);
+}
+
+TEST(ScriptConsole, theInterpreterRunsFromTheFolderFindPythonHomeChose) {
+    const std::filesystem::path home = curvy::findPythonHome(curvy::executableDirectory(), PYTHON_HOME_DIR);
+    auto result = console().run("import sys\nprint(sys.prefix)\nprint(sys.flags.isolated)", nullptr);
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(std::filesystem::path(result.output.substr(0, result.output.find('\n'))).lexically_normal(), home.lexically_normal()) << result.output;
+}
+
+TEST(ScriptConsole, numpyWorksInTheEmbeddedInterpreter) {
+    auto result = console().run("import numpy\nprint(int(numpy.arange(10).sum()))", nullptr);
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "45\n");
+}
+
+TEST(ScriptConsole, aLateCancelDoesNotHitTheNextRun) {
+    for (int i = 0; i < 20; ++i) {
+        auto result = runAndCancel("pass", nullptr, 0);
+        EXPECT_TRUE(result.ok || result.cancelled);
+        EXPECT_TRUE(console().run("x = 1", nullptr).ok);
+    }
 }
