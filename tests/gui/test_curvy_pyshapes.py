@@ -100,9 +100,9 @@ class PyShapes(CurvyCase):
         self.assertTrue(self.transcript().rstrip().endswith("0"), self.transcript())
 
         self.run_line("selection.set(r)")
-        self.run_line("print(len(selection), selection.primary.name)")
+        self.run_line("print(len(selection), selection.primary.name())")
         self.assertIn("1 fill", self.transcript())
-        self.app.wait_until(lambda: "curvyFill" in self.app.prop("hintInfo", "text"), "the hint bar to name the selected node")
+        self.app.wait_until(lambda: "curvyFill" in self.hint_keys(), "the hint bar to name the selected node")
 
         self.run_line("selection.replace([r, e]); print(len(selection))")
         self.assertTrue(self.transcript().rstrip().endswith("2"), self.transcript())
