@@ -2,6 +2,7 @@
 
 #include "curvy/panel.h"
 #include "curvy/scriptconsole.h"
+#include "curvy/selectionmodel.h"
 #include "curvy/sketchdocument.h"
 
 #include <newui/controls.h>
@@ -23,6 +24,8 @@ namespace curvy {
         ~PyConsolePanel() override;
 
         void setDocument(SketchDocument* document) { document_ = document; }
+        // The editor's selection, which scripts see as `selection`; null (the default) leaves it None.
+        void setSelection(SelectionModel* selection) { selection_ = selection; }
 
         // Runs `code` as if typed and Entered: echoes it, runs it, shows the result. Blank code does nothing.
         void execute(const std::string& code);
@@ -54,6 +57,7 @@ namespace curvy {
 
         ScriptConsole& console_;
         SketchDocument* document_;
+        SelectionModel* selection_ = nullptr;
         newui::ScrollView* scroll_ = nullptr;   // holds output_: scroll bar and wheel
         newui::TextControl* output_ = nullptr;
         newui::TextField* input_ = nullptr;

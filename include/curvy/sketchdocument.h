@@ -11,6 +11,8 @@
 
 #include <atomic>
 #include <functional>
+#include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -138,6 +140,62 @@ namespace curvy {
         // Adds a filled circle (a circle node into a fill node, wired into the object's merge on top of what is there) as one undo step. Only
         // a layer's or group's own merge is touched, so reorderChildren on that object would drop the shape - shapes need their own reorder.
         NodeRef addCircle(const NodeRef& object, float cx, float cy, float radius, const newui::Color& fill);
+
+        // The transform of a whole layer or group: the parameters of its transform node (tx ty rot sx sy skew px py; degrees, pivot in the
+        // object's own space). Throws std::runtime_error when `object` is not a sound layer or group.
+        std::map<std::string, float> objectTransform(const NodeRef& object);
+        // Sets the named parameters (the others keep their values) as one undo step; an unknown name throws and changes nothing.
+        void setObjectTransform(const NodeRef& object, const std::map<std::string, float>& values);
+
+        // The transform of one shape: a transform node ("localXform") right after the shape's generator, before its fill and stroke. `node` is any
+        // node of the shape's chain; these throw std::runtime_error when it is not part of a shape (a layer or group has objectTransform).
+        // localTransformOf: the existing transform node, or an invalid ref.
+        NodeRef localTransformOf(const NodeRef& node);
+        // Makes the transform node when the shape has none (one undo step; nothing happens when it has one) and returns it.
+        NodeRef addLocalTransform(const NodeRef& node);
+        // The parameters (as objectTransform); the identity values when the shape has no transform node yet. Does not create one.
+        std::map<std::string, float> shapeTransform(const NodeRef& node);
+        // Sets the named parameters, making the transform node first when needed, all as one undo step; an unknown name throws and changes nothing.
+        void setShapeTransform(const NodeRef& node, const std::map<std::string, float>& values);
+
+        // The fill and stroke of one shape: the curvyFill / curvyStroke node in its chain (`node` is any node of it; throws std::runtime_error
+        // when it is part of no shape). Parameters: visible r g b alpha opacity, plus evenOdd on a fill and width on a stroke.
+        enum class LookKind { Fill, Stroke };
+        // The node's parameters, or nothing when the shape has no such node.
+        std::optional<std::map<std::string, float>> shapeLook(const NodeRef& node, LookKind kind);
+        // Sets the named parameters as one undo step, making the node first when the shape has none (a fill goes after the shape's local
+        // transform, or its generator; a stroke after the fill). An unknown name throws and changes nothing.
+        void setShapeLook(const NodeRef& node, LookKind kind, const std::map<std::string, float>& values);
+
+        // ---- Paths: shapes whose points are stored in the graph ----
+        struct PathPoint {
+            float x = 0.0f;
+            float y = 0.0f;
+        };
+        // The look of a new path: a fill and/or a stroke (neither leaves the bare geometry in the object's merge).
+        struct PathLook {
+            bool hasFill = true;
+            newui::Color fill{0.0f, 0.0f, 0.0f, 1.0f};
+            bool hasStroke = false;
+            newui::Color stroke{0.0f, 0.0f, 0.0f, 1.0f};
+            float strokeWidth = 1.0f;
+        };
+        // Adds a `geometry` node holding one primitive through `points` (a polyline, or with `cubic` Bezier control points in SVG order: anchor,
+        // out handle, in handle, anchor ...; 3n+1 points open, 3n closed), a fill and/or stroke after it, wired on top of the object's merge, as
+        // one undo step. Returns the last node of the chain (the one in the merge). Throws when `object` is not a layer or group or the points do
+        // not fit the primitive.
+        NodeRef addPath(const NodeRef& object, const std::vector<PathPoint>& points, bool closed, bool cubic, const PathLook& look, const std::string& name = "");
+        // The `geometry` node that feeds `node` along input 0 (the node itself when it is one); an invalid ref when there is none.
+        NodeRef pathNodeOf(const NodeRef& node) const;
+        // Points of a `geometry` node, all primitives in order.
+        std::vector<PathPoint> pathPoints(const NodeRef& pathNode) const;
+        // Replaces the points as one undo step. Same count: the points move. Another count: only for a single primitive, whose kind and closed
+        // flag stay (a cubic one must still fit its layout).
+        void setPathPoints(const NodeRef& pathNode, const std::vector<PathPoint>& points);
+        // Opens or closes a single-primitive path as one undo step (a cubic one must still fit).
+        void setPathClosed(const NodeRef& pathNode, bool closed);
+        bool pathClosed(const NodeRef& pathNode) const;
+        bool pathCubic(const NodeRef& pathNode) const;
 
         // What the document draws: the cooked result of the layers' merge, with each primitive carrying its fill.* / stroke.* attributes.
         // Null when there is no layer yet or the graph fails to cook. Not const because cooking caches in the network.

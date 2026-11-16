@@ -25,7 +25,6 @@ namespace curvy {
         };
         const Param kParams[] = {{"tx", "Move X", 1.0}, {"ty", "Move Y", 1.0}, {"rot", "Rotate", 1.0}, {"sx", "Scale X", 0.01},
                                  {"sy", "Scale Y", 0.01}, {"skew", "Skew", 1.0}, {"px", "Pivot X", 1.0}, {"py", "Pivot Y", 1.0}};
-        constexpr const char* kTransformType = "transform";
 
         std::string numberText(float value) {
             char text[32];
@@ -269,19 +268,7 @@ namespace curvy {
         if (!shape.valid() || !document_.hasNode(shape) || selection_.localTransform().valid()) {
             return false;
         }
-        const jitnodes::GraphSnapshot before = document_.snapshotGraph();
-        jitnodes::Network& network = document_.networkOf(shape.scope);
-        const std::vector<jitnodes::NodeId> consumers = network.consumersOf(shape.id);   // a copy: the wiring changes below
-        const jitnodes::NodeId made = network.addNode(kTransformType, "localXform");
-        for (const jitnodes::NodeId consumer : consumers) {
-            for (int input = 0; input < int(network.node(consumer).inputCount()); ++input) {
-                if (network.inputOf(consumer, input) == shape.id) {
-                    network.connect(made, consumer, input);
-                }
-            }
-        }
-        network.connect(shape.id, made, 0);
-        document_.commitGraphEdit(before, "Add Local Transform");
+        document_.addLocalTransform(shape);
         if (onEdited) {
             onEdited();
         }

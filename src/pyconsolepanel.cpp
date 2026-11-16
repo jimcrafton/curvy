@@ -122,7 +122,7 @@ namespace curvy {
         if (onBeforeRun) {
             onBeforeRun();
         }
-        const ScriptResult result = console_.run(code, document_);
+        const ScriptResult result = console_.run(code, document_, selection_);
         setTranscript(before + widen(echo + result.output + (result.ok ? "" : result.error + (result.error.empty() || result.error.back() != '\n' ? "\n" : ""))));
         if (onExecuted) {
             onExecuted();

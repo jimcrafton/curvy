@@ -12,13 +12,26 @@ WAIT_SECONDS = 10.0                                                # the harness
 
 
 class CurvyCase(AppTestCase):
+    def launch(self):
+        return newui_guitest.App(newui_guitest.testing.Settings.exe or self.exe, ("--settings", self.settings_file), cwd=newui_guitest.testing.Settings.cwd)
+
+    # The default window is too short for every panel of the right dock to show at once (the lower ones fall below the window), so a suite
+    # that works in the script panels puts them on top and starts the other panels collapsed.
+    SCRIPT_PANELS_SETTINGS = "{ panels: { pyeditor: {}, pyconsole: {}, document: { collapsed: true }, node: { collapsed: true }, transform: { collapsed: true } } }"
+
+    def make_settings_file(self, text=""):
+        self._settings_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._settings_dir.cleanup)
+        self.settings_file = os.path.join(self._settings_dir.name, "settings.json5")
+        if text:
+            with open(self.settings_file, "w") as f:
+                f.write(text)
+
     def setUp(self):
-        # A settings folder of its own per test, so nothing a test saves reaches another test or the user's own settings.
-        self._appdata = tempfile.TemporaryDirectory()
-        self.addCleanup(self._appdata.cleanup)
-        previous = os.environ.get("APPDATA")
-        os.environ["APPDATA"] = self._appdata.name
-        self.addCleanup(lambda: os.environ.__setitem__("APPDATA", previous) if previous is not None else os.environ.pop("APPDATA", None))
+        # A settings file of its own per test (the app keeps the editor's scratch.py next to it), so nothing a test saves or types reaches
+        # another test or the user's own settings. A suite that made its own file before calling this keeps it.
+        if getattr(self, "settings_file", None) is None:
+            self.make_settings_file()
 
         original = newui_guitest.App.wait_until
         self.addCleanup(setattr, newui_guitest.App, "wait_until", original)

@@ -7,6 +7,7 @@
 namespace curvy {
 
     class SketchDocument;
+    class SelectionModel;
 
     // The folder of the running executable.
     std::filesystem::path executableDirectory();
@@ -44,8 +45,9 @@ namespace curvy {
         ScriptConsole(const ScriptConsole&) = delete;
         ScriptConsole& operator=(const ScriptConsole&) = delete;
 
-        // Runs `code` with `doc` and `network` bound to `document` (both None when it is null). Never throws for a script error.
-        ScriptResult run(const std::string& code, SketchDocument* document);
+        // Runs `code` with `doc` and `network` bound to `document` (both None when it is null), and `selection` (also `doc.selection`) to the
+        // editor's selection when one is given (None otherwise). Never throws for a script error.
+        ScriptResult run(const std::string& code, SketchDocument* document, SelectionModel* selection = nullptr);
 
         // Stops the running script (from any thread; does nothing when none runs) by raising `curvy.Cancelled`, a BaseException, in it at the
         // next Python instruction, so `except Exception` does not swallow it. A long call into C++ (a cook, a render) finishes first.

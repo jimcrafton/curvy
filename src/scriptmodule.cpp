@@ -1,6 +1,7 @@
 #include "curvy/scriptmodule.h"
 
 #include "curvy/objectnode.h"
+#include "curvy/selectionmodel.h"
 #include "curvy/sketchdocument.h"
 
 #include <pyHandles.h>
@@ -9,7 +10,10 @@
 #include <pybind11/stl.h>
 
 #include <algorithm>
+#include <cmath>
+#include <map>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -72,14 +76,16 @@ namespace curvy {
 
         class ScriptDocument {
         public:
-            ScriptDocument(SketchDocument& document, ScriptTransaction& transaction)
-                : guard_(std::make_shared<DocumentGuard>(document, transaction)) {}
+            ScriptDocument(SketchDocument& document, ScriptTransaction& transaction, SelectionModel* selection)
+                : guard_(std::make_shared<DocumentGuard>(document, transaction)), selection_(selection) {}
 
             SketchDocument& get() const { return guard_->get(); }
             const std::shared_ptr<DocumentGuard>& guard() const { return guard_; }
+            SelectionModel* selection() const { return selection_; }
 
         private:
             std::shared_ptr<DocumentGuard> guard_;
+            SelectionModel* selection_;
         };
 
         // A layer or a group.
@@ -211,6 +217,220 @@ namespace curvy {
                 .def("__repr__", [](const Palette& p) { return "Palette('" + p.name + "', " + std::to_string(p.swatches.size()) + " swatches)"; });
         }
 
+        py::object wrapAny(const std::shared_ptr<DocumentGuard>& guard, const NodeRef& ref) {
+            SketchDocument& doc = guard->get();
+            if (dynamic_cast<ObjectNode*>(&doc.node(ref)) != nullptr) {
+                return wrapObject(guard, ref);
+            }
+            return wrapNode(doc, ref);
+        }
+
+        py::object wrapOptional(const std::shared_ptr<DocumentGuard>& guard, const NodeRef& ref) {
+            if (!ref.valid() || !guard->get().hasNode(ref)) {
+                return py::none();
+            }
+            return wrapAny(guard, ref);
+        }
+
+        // What is selected in the editor: shared with the canvas, graph view and panels, so a script's change shows there and a user's
+        // pick is what the script reads. Changing it is not an undo step.
+        class ScriptSelection {
+        public:
+            ScriptSelection(std::shared_ptr<DocumentGuard> guard, SelectionModel& model) : guard_(std::move(guard)), model_(&model) {}
+
+            const std::shared_ptr<DocumentGuard>& guard() const { return guard_; }
+            SelectionModel& model() const {
+                SketchDocument& doc = guard_->get();
+                if (model_->document() != &doc) {
+                    throw std::runtime_error("the selection no longer belongs to this document");
+                }
+                return *model_;
+            }
+
+        private:
+            std::shared_ptr<DocumentGuard> guard_;
+            SelectionModel* model_;
+        };
+
+        py::list selectionItems(const ScriptSelection& s) {
+            py::list list;
+            for (const NodeRef& ref : s.model().items()) {
+                list.append(wrapAny(s.guard(), ref));
+            }
+            return list;
+        }
+
+        void bindSelection(py::module_& module) {
+            using Role = SelectionModel::Role;
+            const auto role = [](Role which) {
+                return [which](const ScriptSelection& s) { return wrapOptional(s.guard(), s.model().find(which)); };
+            };
+            py::class_<ScriptSelection>(module, "Selection", "What is selected in the editor (layers, groups and graph nodes). Changing it is not an undo step.")
+                .def_property_readonly("items", &selectionItems, "The selected objects and nodes, in selection order.")
+                .def_property_readonly("primary", [](const ScriptSelection& s) { return wrapOptional(s.guard(), s.model().primary()); },
+                                       "The one the panels show, or None.")
+                .def("__len__", [](const ScriptSelection& s) { return s.model().items().size(); })
+                .def("__iter__", [](const ScriptSelection& s) { return py::iter(selectionItems(s)); })
+                .def("__contains__", [](const ScriptSelection& s, const py::object& node) { return s.model().contains(refOf(s.guard()->get(), node)); })
+                .def("set", [](const ScriptSelection& s, const py::object& node) { return s.model().set(refOf(s.guard()->get(), node)); },
+                     "Selects just this one.")
+                .def("add", [](const ScriptSelection& s, const py::object& node) { return s.model().add(refOf(s.guard()->get(), node)); })
+                .def("remove", [](const ScriptSelection& s, const py::object& node) { return s.model().remove(refOf(s.guard()->get(), node)); })
+                .def("toggle", [](const ScriptSelection& s, const py::object& node) { return s.model().toggle(refOf(s.guard()->get(), node)); })
+                .def("replace", [](const ScriptSelection& s, const py::sequence& nodes) { return s.model().replace(refsOf(s.guard()->get(), nodes)); },
+                     "Selects exactly these; the last becomes the primary.")
+                .def("clear", [](const ScriptSelection& s) { return s.model().clear(); })
+                .def("step_up", [](const ScriptSelection& s) { return s.model().stepUp(); },
+                     "Selects the group or layer around the primary; False at the top level.")
+                .def_property_readonly("object", role(Role::Object), "The layer or group the primary belongs to, or None.")
+                .def_property_readonly("layer", role(Role::Layer))
+                .def_property_readonly("fill", role(Role::Fill))
+                .def_property_readonly("stroke", role(Role::Stroke))
+                .def_property_readonly("shape", role(Role::Shape))
+                .def("__repr__", [](const ScriptSelection& s) { return "Selection(" + std::to_string(s.model().items().size()) + " selected)"; });
+        }
+
+        NodeRef pathNodeFor(SketchDocument& document, const py::object& node) {
+            const NodeRef path = document.pathNodeOf(refOf(document, node));
+            if (!path.valid()) {
+                throw std::runtime_error("the node has no path (points node) upstream");
+            }
+            return path;
+        }
+
+        std::size_t pointIndex(std::size_t size, long index) {
+            const long at = index < 0 ? index + long(size) : index;
+            if (at < 0 || at >= long(size)) {
+                throw std::out_of_range("point index out of range");
+            }
+            return std::size_t(at);
+        }
+
+        using OptionalRgba = std::optional<Rgba>;
+
+        // Colour given: visible with those channels; None: hidden (the node stays, so a later colour needs no new node).
+        std::map<std::string, float> lookValues(const OptionalRgba& color) {
+            if (!color) {
+                return {{"visible", 0.0f}};
+            }
+            return {{"visible", 1.0f}, {"r", std::get<0>(*color)}, {"g", std::get<1>(*color)}, {"b", std::get<2>(*color)}, {"alpha", std::get<3>(*color)}};
+        }
+
+        py::object lookColor(SketchDocument& document, const py::object& node, SketchDocument::LookKind kind) {
+            const auto look = document.shapeLook(refOf(document, node), kind);
+            if (!look || look->at("visible") == 0.0f) {
+                return py::none();
+            }
+            return py::cast(Rgba(look->at("r"), look->at("g"), look->at("b"), look->at("alpha")));
+        }
+        using PointList = std::vector<std::pair<float, float>>;
+
+        std::vector<SketchDocument::PathPoint> pathPointsOf(const PointList& points) {
+            std::vector<SketchDocument::PathPoint> result;
+            result.reserve(points.size());
+            for (const auto& point : points) {
+                SketchDocument::PathPoint p;
+                p.x = point.first;
+                p.y = point.second;
+                result.push_back(p);
+            }
+            return result;
+        }
+
+        PointList pointListOf(const std::vector<SketchDocument::PathPoint>& points) {
+            PointList result;
+            result.reserve(points.size());
+            for (const SketchDocument::PathPoint& p : points) {
+                result.emplace_back(p.x, p.y);
+            }
+            return result;
+        }
+
+        SketchDocument::PathLook lookOf(const OptionalRgba& fill, const OptionalRgba& stroke, float strokeWidth) {
+            SketchDocument::PathLook look;
+            look.hasFill = fill.has_value();
+            if (fill) {
+                look.fill = colorOf(*fill);
+            }
+            look.hasStroke = stroke.has_value();
+            if (stroke) {
+                look.stroke = colorOf(*stroke);
+            }
+            look.strokeWidth = strokeWidth;
+            return look;
+        }
+
+        // Closed or open run of cubic segments, built the way the points are stored: anchor, out handle, in handle, anchor ...
+        class CurveBuilder {
+        public:
+            explicit CurveBuilder(float x, float y) { points_.push_back({x, y}); }
+
+            void line(float x, float y) {
+                const SketchDocument::PathPoint from = points_.back();
+                points_.push_back({from.x + (x - from.x) / 3.0f, from.y + (y - from.y) / 3.0f});
+                points_.push_back({from.x + (x - from.x) * 2.0f / 3.0f, from.y + (y - from.y) * 2.0f / 3.0f});
+                points_.push_back({x, y});
+            }
+
+            void cubic(float c1x, float c1y, float c2x, float c2y, float x, float y) {
+                points_.push_back({c1x, c1y});
+                points_.push_back({c2x, c2y});
+                points_.push_back({x, y});
+            }
+
+            // The path comes back to where it started: the last anchor is the first one's twin.
+            std::vector<SketchDocument::PathPoint> closed() {
+                points_.pop_back();
+                return points_;
+            }
+
+        private:
+            std::vector<SketchDocument::PathPoint> points_;
+        };
+
+        constexpr float kCircleHandle = 0.5522847498f;
+
+        std::vector<SketchDocument::PathPoint> ellipsePoints(float cx, float cy, float rx, float ry) {
+            const float kx = rx * kCircleHandle;
+            const float ky = ry * kCircleHandle;
+            CurveBuilder curve(cx + rx, cy);
+            curve.cubic(cx + rx, cy + ky, cx + kx, cy + ry, cx, cy + ry);
+            curve.cubic(cx - kx, cy + ry, cx - rx, cy + ky, cx - rx, cy);
+            curve.cubic(cx - rx, cy - ky, cx - kx, cy - ry, cx, cy - ry);
+            curve.cubic(cx + kx, cy - ry, cx + rx, cy - ky, cx + rx, cy);
+            return curve.closed();
+        }
+
+        std::vector<SketchDocument::PathPoint> roundedRectPoints(float x, float y, float w, float h, float radius) {
+            const float r = std::min(radius, std::min(std::abs(w), std::abs(h)) / 2.0f);
+            const float k = r * (1.0f - kCircleHandle);
+            const float right = x + w;
+            const float bottom = y + h;
+            CurveBuilder curve(x + r, y);
+            curve.line(right - r, y);
+            curve.cubic(right - k, y, right, y + k, right, y + r);
+            curve.line(right, bottom - r);
+            curve.cubic(right, bottom - k, right - k, bottom, right - r, bottom);
+            curve.line(x + r, bottom);
+            curve.cubic(x + k, bottom, x, bottom - k, x, bottom - r);
+            curve.line(x, y + r);
+            curve.cubic(x, y + k, x + k, y, x + r, y);
+            return curve.closed();
+        }
+
+        // `count` vertices round a centre; `inner` > 0 alternates the radius (a star). The first vertex is at `rotation` degrees, which
+        // is straight up by default (y grows downward on the page).
+        std::vector<SketchDocument::PathPoint> polygonPoints(float cx, float cy, float outer, float inner, int count, float rotation) {
+            const int vertices = inner > 0.0f ? count * 2 : count;
+            std::vector<SketchDocument::PathPoint> points;
+            for (int i = 0; i < vertices; ++i) {
+                const float radius = (inner > 0.0f && i % 2 == 1) ? inner : outer;
+                const float angle = (rotation + 360.0f * float(i) / float(vertices)) * 3.14159265358979f / 180.0f;
+                points.push_back({cx + radius * std::cos(angle), cy + radius * std::sin(angle)});
+            }
+            return points;
+        }
+
         void bindObject(py::module_& module) {
             py::class_<ScriptObject>(module, "Object", "A layer or a group. Edits are undo steps of the document.")
                 .def_property("name", [](const ScriptObject& o) { return o.node().name(); },
@@ -235,6 +455,82 @@ namespace curvy {
                          return wrapNode(o.document(), o.document().addCircle(o.ref(), cx, cy, radius, colorOf(fill)));
                      }, py::arg("cx"), py::arg("cy"), py::arg("radius"), py::arg("fill") = Rgba(0.0f, 0.0f, 0.0f, 1.0f),
                      "Adds a filled circle on top and returns its fill node.")
+                .def("add_path", [](const ScriptObject& o, const PointList& points, bool closed, bool curve, const OptionalRgba& fill,
+                                    const OptionalRgba& stroke, float strokeWidth, const std::string& name) {
+                         return wrapNode(o.document(), o.document().addPath(o.ref(), pathPointsOf(points), closed, curve, lookOf(fill, stroke, strokeWidth), name));
+                     }, py::arg("points"), py::arg("closed") = false, py::arg("curve") = false, py::arg("fill") = py::none(),
+                     py::arg("stroke") = OptionalRgba(Rgba(0.0f, 0.0f, 0.0f, 1.0f)), py::arg("stroke_width") = 1.0f, py::arg("name") = "",
+                     "Adds a path through (x, y) points on top and returns the last node of its chain (stroke, else fill, else the points node). "
+                     "With curve=True the points are Bezier control points in SVG order: anchor, out handle, in handle, anchor ... "
+                     "(3n+1 points open, 3n closed). fill and stroke are (r, g, b, a) or None.")
+                .def("add_line", [](const ScriptObject& o, float x1, float y1, float x2, float y2, const OptionalRgba& stroke, float strokeWidth) {
+                         return wrapNode(o.document(), o.document().addPath(o.ref(), pathPointsOf({{x1, y1}, {x2, y2}}), false, false, lookOf(std::nullopt, stroke, strokeWidth)));
+                     }, py::arg("x1"), py::arg("y1"), py::arg("x2"), py::arg("y2"), py::arg("stroke") = OptionalRgba(Rgba(0.0f, 0.0f, 0.0f, 1.0f)),
+                     py::arg("stroke_width") = 1.0f)
+                .def("add_rect", [](const ScriptObject& o, float x, float y, float width, float height, float radius, const OptionalRgba& fill,
+                                    const OptionalRgba& stroke, float strokeWidth) {
+                         const SketchDocument::PathLook look = lookOf(fill, stroke, strokeWidth);
+                         if (radius > 0.0f) {
+                             return wrapNode(o.document(), o.document().addPath(o.ref(), roundedRectPoints(x, y, width, height, radius), true, true, look));
+                         }
+                         return wrapNode(o.document(), o.document().addPath(o.ref(), pathPointsOf({{x, y}, {x + width, y}, {x + width, y + height}, {x, y + height}}), true, false, look));
+                     }, py::arg("x"), py::arg("y"), py::arg("width"), py::arg("height"), py::arg("radius") = 0.0f,
+                     py::arg("fill") = OptionalRgba(Rgba(0.0f, 0.0f, 0.0f, 1.0f)), py::arg("stroke") = py::none(), py::arg("stroke_width") = 1.0f,
+                     "Adds a rectangle (rounded corners when radius > 0, as curves).")
+                .def("add_ellipse", [](const ScriptObject& o, float cx, float cy, float rx, float ry, const OptionalRgba& fill, const OptionalRgba& stroke,
+                                       float strokeWidth) {
+                         return wrapNode(o.document(), o.document().addPath(o.ref(), ellipsePoints(cx, cy, rx, ry), true, true, lookOf(fill, stroke, strokeWidth)));
+                     }, py::arg("cx"), py::arg("cy"), py::arg("rx"), py::arg("ry"), py::arg("fill") = OptionalRgba(Rgba(0.0f, 0.0f, 0.0f, 1.0f)),
+                     py::arg("stroke") = py::none(), py::arg("stroke_width") = 1.0f, "Adds an ellipse made of four Bezier segments.")
+                .def("add_polygon", [](const ScriptObject& o, float cx, float cy, float radius, int sides, float rotation, const OptionalRgba& fill,
+                                       const OptionalRgba& stroke, float strokeWidth) {
+                         if (sides < 3) {
+                             throw std::invalid_argument("a polygon has at least 3 sides");
+                         }
+                         return wrapNode(o.document(), o.document().addPath(o.ref(), polygonPoints(cx, cy, radius, 0.0f, sides, rotation), true, false, lookOf(fill, stroke, strokeWidth)));
+                     }, py::arg("cx"), py::arg("cy"), py::arg("radius"), py::arg("sides"), py::arg("rotation") = -90.0f,
+                     py::arg("fill") = OptionalRgba(Rgba(0.0f, 0.0f, 0.0f, 1.0f)), py::arg("stroke") = py::none(), py::arg("stroke_width") = 1.0f,
+                     "Adds a regular polygon; rotation is the first vertex's angle in degrees (-90 is straight up).")
+                .def("add_star", [](const ScriptObject& o, float cx, float cy, float outer, float inner, int points, float rotation, const OptionalRgba& fill,
+                                    const OptionalRgba& stroke, float strokeWidth) {
+                         if (points < 2 || inner <= 0.0f) {
+                             throw std::invalid_argument("a star needs at least 2 points and an inner radius above 0");
+                         }
+                         return wrapNode(o.document(), o.document().addPath(o.ref(), polygonPoints(cx, cy, outer, inner, points, rotation), true, false, lookOf(fill, stroke, strokeWidth)));
+                     }, py::arg("cx"), py::arg("cy"), py::arg("outer"), py::arg("inner"), py::arg("points") = 5, py::arg("rotation") = -90.0f,
+                     py::arg("fill") = OptionalRgba(Rgba(0.0f, 0.0f, 0.0f, 1.0f)), py::arg("stroke") = py::none(), py::arg("stroke_width") = 1.0f)
+                .def_property_readonly("transform", [](const ScriptObject& o) { return o.document().objectTransform(o.ref()); },
+                                       "The object's transform as a dict: tx ty rot sx sy skew px py (degrees; pivot in the object's space).")
+                .def("set_transform", [](const ScriptObject& o, const py::kwargs& values) {
+                         std::map<std::string, float> changes;
+                         for (const auto& entry : values) {
+                             changes[entry.first.cast<std::string>()] = entry.second.cast<float>();
+                         }
+                         o.document().setObjectTransform(o.ref(), changes);
+                     }, "Sets the named transform parameters, e.g. set_transform(tx=10, rot=45); the others keep their values. One undo step.")
+                .def("translate", [](const ScriptObject& o, float dx, float dy) {
+                         auto t = o.document().objectTransform(o.ref());
+                         o.document().setObjectTransform(o.ref(), {{"tx", t["tx"] + dx}, {"ty", t["ty"] + dy}});
+                     }, py::arg("dx"), py::arg("dy"), "Moves the whole object by (dx, dy) on top of its current transform.")
+                .def("rotate", [](const ScriptObject& o, float degrees, const std::optional<float>& pivotX, const std::optional<float>& pivotY) {
+                         auto t = o.document().objectTransform(o.ref());
+                         std::map<std::string, float> changes{{"rot", t["rot"] + degrees}};
+                         if (pivotX) {
+                             changes["px"] = *pivotX;
+                         }
+                         if (pivotY) {
+                             changes["py"] = *pivotY;
+                         }
+                         o.document().setObjectTransform(o.ref(), changes);
+                     }, py::arg("degrees"), py::arg("px") = py::none(), py::arg("py") = py::none(),
+                     "Adds to the rotation. px, py move the pivot (object space), which also moves the result if the object already has a transform.")
+                .def("scale", [](const ScriptObject& o, float sx, const std::optional<float>& sy) {
+                         auto t = o.document().objectTransform(o.ref());
+                         o.document().setObjectTransform(o.ref(), {{"sx", t["sx"] * sx}, {"sy", t["sy"] * sy.value_or(sx)}});
+                     }, py::arg("sx"), py::arg("sy") = py::none(), "Multiplies the scale (sy defaults to sx).")
+                .def("reset_transform", [](const ScriptObject& o) {
+                    o.document().setObjectTransform(o.ref(), {{"tx", 0.0f}, {"ty", 0.0f}, {"rot", 0.0f}, {"sx", 1.0f}, {"sy", 1.0f}, {"skew", 0.0f}, {"px", 0.0f}, {"py", 0.0f}});
+                })
                 .def("reorder_groups", [](const ScriptObject& o, const py::sequence& order) {
                     o.document().reorderChildren(o.ref(), refsOf(o.document(), order));
                 })
@@ -356,6 +652,160 @@ namespace curvy {
                 .def("set_frozen", [](const ScriptDocument& d, const py::object& node, bool on) { d.get().setNodeFrozen(refOf(d.get(), node), on); })
                 .def("set_displayed", [](const ScriptDocument& d, const py::object& node) { d.get().setNodeDisplayed(refOf(d.get(), node)); })
 
+                .def_property_readonly("selection", [](const ScriptDocument& d) -> py::object {
+                    if (d.selection() == nullptr) {
+                        return py::none();
+                    }
+                    return py::cast(ScriptSelection(d.guard(), *d.selection()));
+                }, "What is selected in the editor, or None when this run has no editor (tests).")
+
+                .def("path_node", [](const ScriptDocument& d, const py::object& node) -> py::object {
+                         SketchDocument& doc = d.get();
+                         const NodeRef found = doc.pathNodeOf(refOf(doc, node));
+                         return found.valid() ? wrapNode(doc, found) : py::none();
+                     }, py::arg("node"), "The points node ('geometry') that feeds this node, or None.")
+                .def("points", [](const ScriptDocument& d, const py::object& node) { return pointListOf(d.get().pathPoints(pathNodeFor(d.get(), node))); },
+                     py::arg("node"), "The (x, y) points of a path: every anchor and handle of a curve. `node` is any node of the path's chain.")
+                .def("set_points", [](const ScriptDocument& d, const py::object& node, const PointList& points) {
+                         d.get().setPathPoints(pathNodeFor(d.get(), node), pathPointsOf(points));
+                     }, py::arg("node"), py::arg("points"),
+                     "Replaces the points (one undo step). The same count moves them; another count needs a path of one piece, which keeps its kind and closed flag.")
+                .def("set_point", [](const ScriptDocument& d, const py::object& node, long index, float x, float y) {
+                         SketchDocument& doc = d.get();
+                         const NodeRef path = pathNodeFor(doc, node);
+                         std::vector<SketchDocument::PathPoint> points = doc.pathPoints(path);
+                         points.at(pointIndex(points.size(), index)) = {x, y};
+                         doc.setPathPoints(path, points);
+                     }, py::arg("node"), py::arg("index"), py::arg("x"), py::arg("y"))
+                .def("move_points", [](const ScriptDocument& d, const py::object& node, float dx, float dy, const py::object& indices) {
+                         SketchDocument& doc = d.get();
+                         const NodeRef path = pathNodeFor(doc, node);
+                         std::vector<SketchDocument::PathPoint> points = doc.pathPoints(path);
+                         const auto move = [&](SketchDocument::PathPoint& p) {
+                             p.x += dx;
+                             p.y += dy;
+                         };
+                         if (indices.is_none()) {
+                             for (SketchDocument::PathPoint& p : points) {
+                                 move(p);
+                             }
+                         } else {
+                             for (const py::handle item : py::reinterpret_borrow<py::sequence>(indices)) {
+                                 move(points.at(pointIndex(points.size(), item.cast<long>())));
+                             }
+                         }
+                         doc.setPathPoints(path, points);
+                     }, py::arg("node"), py::arg("dx"), py::arg("dy"), py::arg("indices") = py::none(),
+                     "Moves the given point indices (all when None) by (dx, dy) as one undo step.")
+                .def("insert_point", [](const ScriptDocument& d, const py::object& node, long index, float x, float y) {
+                         SketchDocument& doc = d.get();
+                         const NodeRef path = pathNodeFor(doc, node);
+                         if (doc.pathCubic(path)) {
+                             throw std::runtime_error("insert_point and remove_point work on straight paths; use set_points on a curve");
+                         }
+                         std::vector<SketchDocument::PathPoint> points = doc.pathPoints(path);
+                         const long size = long(points.size());
+                         const long at = index < 0 ? index + size : index;
+                         if (at < 0 || at > size) {
+                             throw std::out_of_range("point index out of range");
+                         }
+                         points.insert(points.begin() + at, SketchDocument::PathPoint{x, y});
+                         doc.setPathPoints(path, points);
+                     }, py::arg("node"), py::arg("index"), py::arg("x"), py::arg("y"), "Inserts a point before `index` (len(points) appends).")
+                .def("remove_point", [](const ScriptDocument& d, const py::object& node, long index) {
+                         SketchDocument& doc = d.get();
+                         const NodeRef path = pathNodeFor(doc, node);
+                         if (doc.pathCubic(path)) {
+                             throw std::runtime_error("insert_point and remove_point work on straight paths; use set_points on a curve");
+                         }
+                         std::vector<SketchDocument::PathPoint> points = doc.pathPoints(path);
+                         points.erase(points.begin() + long(pointIndex(points.size(), index)));
+                         doc.setPathPoints(path, points);
+                     }, py::arg("node"), py::arg("index"))
+                .def("shape_transform", [](const ScriptDocument& d, const py::object& node) {
+                         return d.get().shapeTransform(refOf(d.get(), node));
+                     }, py::arg("node"),
+                     "The transform of one shape as a dict (tx ty rot sx sy skew px py; identity values when it has none). `node` is any node of the shape's chain.")
+                .def("set_shape_transform", [](const ScriptDocument& d, const py::object& node, const py::kwargs& values) {
+                         std::map<std::string, float> changes;
+                         for (const auto& entry : values) {
+                             changes[entry.first.cast<std::string>()] = entry.second.cast<float>();
+                         }
+                         d.get().setShapeTransform(refOf(d.get(), node), changes);
+                     }, py::arg("node"),
+                     "Sets named transform parameters of one shape, e.g. set_shape_transform(rect, rot=15, tx=10), making its transform node first. One undo step.")
+                .def("translate_shape", [](const ScriptDocument& d, const py::object& node, float dx, float dy) {
+                         SketchDocument& doc = d.get();
+                         const NodeRef ref = refOf(doc, node);
+                         auto t = doc.shapeTransform(ref);
+                         doc.setShapeTransform(ref, {{"tx", t["tx"] + dx}, {"ty", t["ty"] + dy}});
+                     }, py::arg("node"), py::arg("dx"), py::arg("dy"))
+                .def("rotate_shape", [](const ScriptDocument& d, const py::object& node, float degrees, const std::optional<float>& pivotX,
+                                        const std::optional<float>& pivotY) {
+                         SketchDocument& doc = d.get();
+                         const NodeRef ref = refOf(doc, node);
+                         auto t = doc.shapeTransform(ref);
+                         std::map<std::string, float> changes{{"rot", t["rot"] + degrees}};
+                         if (pivotX) {
+                             changes["px"] = *pivotX;
+                         }
+                         if (pivotY) {
+                             changes["py"] = *pivotY;
+                         }
+                         doc.setShapeTransform(ref, changes);
+                     }, py::arg("node"), py::arg("degrees"), py::arg("px") = py::none(), py::arg("py") = py::none(),
+                     "Adds to the rotation; px, py set the pivot in page units (it is the page, not the shape's centre, unless you pass one).")
+                .def("scale_shape", [](const ScriptDocument& d, const py::object& node, float sx, const std::optional<float>& sy) {
+                         SketchDocument& doc = d.get();
+                         const NodeRef ref = refOf(doc, node);
+                         auto t = doc.shapeTransform(ref);
+                         doc.setShapeTransform(ref, {{"sx", t["sx"] * sx}, {"sy", t["sy"] * sy.value_or(sx)}});
+                     }, py::arg("node"), py::arg("sx"), py::arg("sy") = py::none())
+                .def("reset_shape_transform", [](const ScriptDocument& d, const py::object& node) {
+                         d.get().setShapeTransform(refOf(d.get(), node), {{"tx", 0.0f}, {"ty", 0.0f}, {"rot", 0.0f}, {"sx", 1.0f}, {"sy", 1.0f}, {"skew", 0.0f}, {"px", 0.0f}, {"py", 0.0f}});
+                     }, py::arg("node"))
+                .def("fill", [](const ScriptDocument& d, const py::object& node) -> py::object {
+                         return lookColor(d.get(), node, SketchDocument::LookKind::Fill);
+                     }, py::arg("node"), "The shape's fill as (r, g, b, a), or None when it has no visible fill. `node` is any node of the shape's chain.")
+                .def("stroke", [](const ScriptDocument& d, const py::object& node) -> py::object {
+                         return lookColor(d.get(), node, SketchDocument::LookKind::Stroke);
+                     }, py::arg("node"), "The shape's stroke as (r, g, b, a), or None when it has no visible stroke.")
+                .def("stroke_width", [](const ScriptDocument& d, const py::object& node) -> py::object {
+                         const auto look = d.get().shapeLook(refOf(d.get(), node), SketchDocument::LookKind::Stroke);
+                         return look ? py::cast(look->at("width")) : py::none();
+                     }, py::arg("node"), "The width of the shape's stroke node, or None when it has none.")
+                .def("set_fill", [](const ScriptDocument& d, const py::object& node, const OptionalRgba& color, const std::optional<float>& opacity,
+                                    const std::optional<bool>& evenOdd) {
+                         std::map<std::string, float> values = lookValues(color);
+                         if (opacity) {
+                             values["opacity"] = *opacity;
+                         }
+                         if (evenOdd) {
+                             values["evenOdd"] = *evenOdd ? 1.0f : 0.0f;
+                         }
+                         d.get().setShapeLook(refOf(d.get(), node), SketchDocument::LookKind::Fill, values);
+                     }, py::arg("node"), py::arg("color"), py::arg("opacity") = py::none(), py::arg("even_odd") = py::none(),
+                     "Sets the fill as (r, g, b, a); None hides it. Makes the fill node when the shape has none. opacity is 0..1; even_odd picks the "
+                     "even-odd rule for compound paths. One undo step.")
+                .def("set_stroke", [](const ScriptDocument& d, const py::object& node, const OptionalRgba& color, const std::optional<float>& width,
+                                      const std::optional<float>& opacity) {
+                         std::map<std::string, float> values = lookValues(color);
+                         if (width) {
+                             values["width"] = *width;
+                         }
+                         if (opacity) {
+                             values["opacity"] = *opacity;
+                         }
+                         d.get().setShapeLook(refOf(d.get(), node), SketchDocument::LookKind::Stroke, values);
+                     }, py::arg("node"), py::arg("color"), py::arg("width") = py::none(), py::arg("opacity") = py::none(),
+                     "Sets the stroke as (r, g, b, a); None hides it. Makes the stroke node when the shape has none. One undo step.")
+                .def("is_closed", [](const ScriptDocument& d, const py::object& node) { return d.get().pathClosed(pathNodeFor(d.get(), node)); }, py::arg("node"))
+                .def("set_closed", [](const ScriptDocument& d, const py::object& node, bool closed) {
+                         d.get().setPathClosed(pathNodeFor(d.get(), node), closed);
+                     }, py::arg("node"), py::arg("closed") = true)
+                .def("is_curve", [](const ScriptDocument& d, const py::object& node) { return d.get().pathCubic(pathNodeFor(d.get(), node)); }, py::arg("node"),
+                     "True when the path's points are Bezier control points.")
+
                 .def("artwork", [](const ScriptDocument& d) -> py::object {
                     jitnodes::GeometryHandle geometry = d.get().artwork();
                     return geometry ? py::cast(geometry) : py::none();
@@ -399,6 +849,7 @@ namespace curvy {
         module.attr("Cancelled") = py::module_::import("builtins").attr("type")(
             "Cancelled", py::make_tuple(py::handle(PyExc_BaseException)), py::dict());
         bindSwatches(module);
+        bindSelection(module);
         bindObject(module);
         bindDocument(module);
     }
@@ -420,8 +871,8 @@ namespace curvy {
         return document_ == &document && !alive_.expired();
     }
 
-    py::object makeScriptDocument(SketchDocument& document, ScriptTransaction& transaction) {
-        return py::cast(ScriptDocument(document, transaction));
+    py::object makeScriptDocument(SketchDocument& document, ScriptTransaction& transaction, SelectionModel* selection) {
+        return py::cast(ScriptDocument(document, transaction, selection));
     }
 
 }

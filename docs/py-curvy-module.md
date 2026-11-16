@@ -7,7 +7,7 @@ jitnodes bindings) and `docs/py_scripting_plan.md` (the whole feature). User-fac
 
 | File | Role |
 |---|---|
-| `src/scriptmodule.cpp`, `include/curvy/scriptmodule.h` | The `curvy` module: `Document`, `Object`, `Swatch`, `Palette`. Hand-written pybind11. |
+| `src/scriptmodule.cpp`, `include/curvy/scriptmodule.h` | The `curvy` module: `Document`, `Object`, `Selection`, `Swatch`, `Palette`. Hand-written pybind11. |
 | `src/scriptconsole.cpp`, `include/curvy/scriptconsole.h` | `ScriptConsole`: starts the interpreter, owns the one scope console input runs in, runs code with `doc` and `network` bound. |
 | `src/pyconsolepanel.cpp`, `include/curvy/pyconsolepanel.h` | The right-dock panel that feeds `ScriptConsole::run`. |
 | `src/scripteditorpanel.cpp`, `include/curvy/scripteditorpanel.h` | The script editor panel (edit, open, save, run through the console). |
@@ -20,8 +20,9 @@ a lifetime guard, which scriptgen does not produce. The price is that nothing up
 
 ## How a script sees the document
 
-`ScriptConsole::run(code, document)` sets `doc` to `makeScriptDocument(*document)` and `network` to `jitnodes::python::wrapNetwork(
-document->network())` before every run (both `None` when there is no document). Names the script defines persist between runs because
+`ScriptConsole::run(code, document, selection)` sets `doc` to `makeScriptDocument(*document, ..., selection)`, `network` to
+`jitnodes::python::wrapNetwork(document->network())` and `selection` to `doc.selection` before every run (all `None` when there is no
+document). Names the script defines persist between runs because
 there is one scope for the process.
 
 `doc` is a `curvy.Document`; layers and groups come back as `curvy.Object`; graph nodes come back as `jitnodes` `Node` handles.
@@ -88,6 +89,78 @@ exception, so a cancel inside a block takes that block back (edits made before i
 `new_blank()` inside a block moves the history under its mark; the block then merges or rolls back nothing rather than something wrong
 (`mergeSince` and `rollbackTo` ignore a mark at or beyond the current depth). Not undone by a rollback: the non-undoable setters above.
 `rollbackTo` was added to newui's `UndoStack` (carry to `D:\code\newui`).
+
+## Shapes, paths and points
+
+jitnodes has no rectangle, star or path generator (only `circle` and `line`), so every shape added from Python is a **`geometry` node**
+(its `geometry` parameter holds the points and one primitive) followed by a `curvyFill` and/or `curvyStroke`, wired on top of the object's
+merge. `SketchDocument::addPath` builds it as one undo step; the Python shape methods only compute points:
+
+| `Object` method | Points made |
+|---|---|
+| `add_rect(x, y, w, h, radius=0, fill, stroke, stroke_width)` | 4 straight points; with `radius` a closed curve of 8 segments (24 control points) |
+| `add_ellipse(cx, cy, rx, ry, ...)` | closed curve, 4 Bezier segments (12 points, handle factor 0.5523) |
+| `add_polygon(cx, cy, radius, sides, rotation=-90, ...)` | regular polygon, straight points |
+| `add_star(cx, cy, outer, inner, points=5, rotation=-90, ...)` | 2n straight points |
+| `add_line(x1, y1, x2, y2, stroke, stroke_width)` | open, 2 points, no fill |
+| `add_path(points, closed=False, curve=False, fill=None, stroke, stroke_width, name)` | the points as given; `curve=True` takes Bezier control points in SVG order (3n+1 open, 3n closed) |
+
+Each returns the last node of the chain (stroke, else fill, else the points node), like `add_circle` returns its fill. Fill and stroke are
+`(r, g, b, a)` or `None`. The geometry gets the shape key `keyPrefix + uidText` at creation (the same key a generator's cook would give), so
+the canvas can select it; `shapeKeyOf` stays correct because the key is made from the node's own uid.
+
+Point editing works on the `geometry` node found by `SketchDocument::pathNodeOf` (walks input 0 upstream), so any node of the chain can be
+passed. Each is one undo step: `points`, `set_points`, `set_point`, `move_points(dx, dy, indices=None)`, `insert_point`, `remove_point`,
+`is_closed`, `set_closed`, `is_curve`, `path_node`. Rules in `setPathPoints` / `setPathClosed`: the same point count moves the points
+(any number of subpaths); another count needs exactly one primitive, which keeps its kind and closed flag, and a curve must still fit 3n / 3n+1.
+`insert_point` and `remove_point` refuse curves (handles are points: the layout would break); closing a curve drops its last anchor
+(which equals the first) and opening it adds it back. A node that is not a path (a circle's fill, a layer) raises.
+
+## Object transforms
+
+A layer's or group's transform is its `transform` node (tagged `object:xform`, the object's display node), so the whole object, shapes and
+subgroups, moves with it. `SketchDocument::objectTransform` / `setObjectTransform` read and write its parameters (`tx ty rot sx sy skew px py`;
+degrees; pivot in the object's own space; an unknown name throws before anything changes) as one undo step, through `setGraphFloats`. The
+Transform panel's Object tab edits the same node. Python, on `Object`: `transform` (a dict copy), `set_transform(**params)`, and the relative
+helpers `translate(dx, dy)` (adds to tx, ty), `rotate(degrees, px=None, py=None)` (adds to rot; px, py set the pivot) and `scale(sx, sy=None)`
+(multiplies sx, sy), plus `reset_transform()`. The helpers act on the parameters, not on a composed matrix: rotating and then scaling is the
+node's own order (pivot, translate, rotate, skew, scale), and moving the pivot of an already transformed object moves the result.
+
+### Single shapes
+
+A shape's own transform is a `transform` node named `localXform` wired right after its generator (before the fill and stroke, so stroke
+width is not scaled), the same node the Transform panel's Local tab edits. `SketchDocument::localTransformOf`, `addLocalTransform`,
+`shapeTransform` and `setShapeTransform` find the shape from any node of its chain (through `SelectionModel::find(Role::Shape)` on a
+temporary model); a layer or group, or a node that is in no shape, throws. `addLocalTransform` is also what the panel's Add button calls.
+`setShapeTransform` creates the node when missing and sets the values in the same undo step; `shapeTransform` only reads (identity values
+when there is no node yet, nothing is created). Shapes are `jitnodes` node handles, which cannot take methods, so these are `Document`
+calls: `shape_transform(node)`, `set_shape_transform(node, **params)`, `translate_shape`, `rotate_shape`, `scale_shape`,
+`reset_shape_transform`, with the same parameter-level meaning as the object helpers. The pivot defaults to the page origin, not the shape's
+centre: pass `px`/`py` to `rotate_shape`, or set them with `set_shape_transform`.
+
+## Fills and strokes of existing shapes
+
+A shape's look is the `curvyFill` / `curvyStroke` node in its chain. `SketchDocument::shapeLook(node, LookKind)` reads its parameters (`visible r g b
+alpha opacity`, plus `evenOdd` on a fill and `width` on a stroke; nothing when the shape has no such node) and `setShapeLook` sets named ones as
+one undo step, making the node first when needed: a fill goes after the shape's local transform (or its generator), a stroke after the fill. An
+unknown name throws and changes nothing. The shape is found from any node of its chain, as for transforms.
+
+Python, on `Document`: `fill(node)` and `stroke(node)` give `(r, g, b, a)` or `None` (no node, or hidden), `stroke_width(node)` gives the width or
+`None`, `set_fill(node, color, opacity=None, even_odd=None)` and `set_stroke(node, color, width=None, opacity=None)`. `color=None` **hides** the
+look (`visible = 0`) rather than deleting the node, so a later colour needs no new node and keeps its width; a colour makes it visible again. To
+change only the opacity or width, pass the current colour (`doc.set_fill(s, doc.fill(s), opacity=0.5)`). Not exposed: cap, join and miter, which
+the stroke node stores but the canvas does not draw yet (it reads only `stroke.width`); expose them when the renderer honours them.
+
+## Selection
+
+`doc.selection` (also the global `selection`) is a `curvy.Selection` over the editor's `SelectionModel`, so a script reads what the user
+picked and a script's pick shows in the canvas, graph view and panels. `ScriptConsole::run(code, document, selection)` takes the model
+(null in tests and for a run without an editor: `selection` is then `None`); `PyConsolePanel::setSelection` is wired to
+`graphView_->selectionModel()` in `WorkspaceController`. `ScriptSelection` holds the `DocumentGuard` and re-checks
+`model.document() == &guard.get()` on every call, because the model outlives a closed document. Items come back as `Object` (layer/group)
+or `jitnodes` `Node` (`wrapAny`). Members: `items`, `primary`, `len`, iteration, `in`, `set`, `add`, `remove`, `toggle`, `replace`,
+`clear`, `step_up`, and the role queries `object`, `layer`, `fill`, `stroke`, `shape` (the nodes around the primary, or `None`).
+Changing the selection is not an undo step.
 
 ## Values and conversions
 
@@ -187,7 +260,9 @@ If a new C++ class needs to appear in Python, give its wrapper a `DocumentGuard`
 - `tests/test_scriptconsole.cpp`: running code, output capture, errors, document lifetime, foreign-node refusal, cancel (a loop that never ends,
   `except Exception` cannot swallow it, a cancel with nothing running, edits before the cancel stay and undo, a late cancel). The Escape key
   itself is not covered by a unit test.
-- `tests/test_scriptmodule.cpp`: page settings, layers and groups, `add_circle` and `artwork`, nodes inside an object, palettes, gone objects.
+- `tests/test_scriptmodule.cpp`: page settings, layers and groups, `add_circle` and `artwork`, nodes inside an object, palettes, gone objects,
+  the shape methods, point editing (undo, curve layout rules, errors) and the selection (read, change, `None` without an editor, a document
+  that went away).
 - `tests/test_pyconsolepanel.cpp` and `tests/gui/test_curvy_pyconsole.py`: the panel (including the "running" line).
 - `tests/test_scripteditorpanel.cpp`: the script editor (text round trip, non-ASCII, save and load, BOM and CR handling, colours and folds,
   the modified marker, run-selection, Ctrl+Enter and F5, the scratch file, Run / Open / Save callbacks).
@@ -287,5 +362,7 @@ carried in `LexState` (so a line can be lexed on its own); `@` first on a line i
   repaint while a script runs, so a button could not be clicked; Escape is the way). The "running... (Esc cancels)" line is painted before
   the script starts (`PyConsolePanel::onBeforeRun`, wired in `WorkspaceController` to `repaintNow` + `UpdateWindow`) and replaced by the
   result afterwards; nothing animates while it runs.
-- No selection, shapes/primitives or point-level editing in the module yet; `artwork()` gives read-only data.
+- No stroke cap/join/miter, effects, boolean operations or text yet; `artwork()` gives
+  read-only data. Paths are built from the `geometry` node (see "Shapes, paths and points"), so there is no live rectangle or star to
+  re-parameterise: the numbers are baked into the points.
 - Packaging stops at `cmake --install` (no installer or zip, no signing); see "Bundled Python".

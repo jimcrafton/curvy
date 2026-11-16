@@ -437,6 +437,7 @@ namespace curvy {
         };
         if (scriptConsole_ != nullptr) {
             pyConsolePanel_ = new PyConsolePanel(*scriptConsole_, &document_);
+            pyConsolePanel_->setSelection(&graphView_->selectionModel());
             rightDock_->addPanel(pyConsolePanel_);
             pyConsolePanel_->onDestroyed = [this]() { pyConsolePanel_ = nullptr; };
             pyConsolePanel_->onBeforeRun = [this]() {
@@ -1656,6 +1657,16 @@ namespace curvy {
             action.text = bindings[i].forward ? "Redo" : "Undo";
             action.setHotkey(bindings[i].key, bindings[i].mask);
             action.onActionPerformed.add([this, forward = bindings[i].forward](Action&) {
+                // The hotkey is taken before any view sees the key, so a multi-line editor with the focus undoes its own text here (and
+                // the document is left alone). Single-line panel fields keep the document's undo: they commit to the document as they change.
+                if (auto* editor = dynamic_cast<TextControl*>(frame_.rootView().focusedSubView())) {
+                    if (forward) {
+                        editor->redo();
+                    } else {
+                        editor->undo();
+                    }
+                    return SyncReturn::Handled;
+                }
                 stepHistory(forward);
                 return SyncReturn::Handled;
             });

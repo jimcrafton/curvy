@@ -1,5 +1,6 @@
 #include "pythonconsole.h"
 
+#include "curvy/selectionmodel.h"
 #include "curvy/sketchdocument.h"
 
 #include <gtest/gtest.h>
@@ -220,4 +221,316 @@ TEST(ScriptModule, aFailedTransactionBlockDoesNotTouchEarlierEditsOrLeaveRedoSte
     EXPECT_NE(result.error.find("ZeroDivisionError"), std::string::npos);
     EXPECT_EQ(document.childrenOf().size(), 0u);
     EXPECT_FALSE(document.undoStack().canRedo());
+}
+
+TEST(ScriptModule, shapesAndPrimitivesDraw) {
+    curvy::SketchDocument document;
+    document.newBlank("Shapes", 200.0f, 200.0f);
+    auto result = runOn(document,
+                        "layer = doc.add_layer('Art')\n"
+                        "layer.add_rect(10, 10, 50, 30)\n"
+                        "layer.add_rect(10, 60, 50, 30, radius=8, fill=(1, 0, 0, 1), stroke=(0, 0, 0, 1), stroke_width=2)\n"
+                        "layer.add_ellipse(120, 40, 30, 20)\n"
+                        "layer.add_polygon(120, 120, 25, 6)\n"
+                        "layer.add_star(40, 150, 30, 12, points=5)\n"
+                        "layer.add_line(0, 0, 200, 200)\n"
+                        "layer.add_path([(0, 0), (10, 0), (10, 10)], closed=True, fill=(0, 0, 1, 1), stroke=None)\n");
+    EXPECT_TRUE(result.ok) << result.error;
+    jitnodes::GeometryHandle art = document.artwork();
+    ASSERT_NE(art, nullptr);
+    EXPECT_EQ(art->primitiveCount(), 7u);
+    // Each primitive is its own selectable shape.
+    EXPECT_EQ(art->shapes().size(), 7u);
+}
+
+TEST(ScriptModule, curvedShapesAreCubicAndTheCountsAreChecked) {
+    curvy::SketchDocument document;
+    document.newBlank("Curves", 100.0f, 100.0f);
+    auto result = runOn(document,
+                        "layer = doc.add_layer()\n"
+                        "e = layer.add_ellipse(50, 50, 20, 10)\n"
+                        "r = layer.add_rect(0, 0, 10, 10, radius=2)\n"
+                        "s = layer.add_rect(0, 0, 10, 10)\n"
+                        "print(len(doc.points(e)), doc.is_curve(e), doc.is_closed(e))\n"
+                        "print(len(doc.points(r)), doc.is_curve(r))\n"
+                        "print(len(doc.points(s)), doc.is_curve(s))\n");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "12 True True\n24 True\n4 False\n");
+
+    EXPECT_FALSE(runOn(document, "doc.add_layer().add_path([(0, 0), (1, 1), (2, 2)], curve=True)").ok);
+    EXPECT_FALSE(runOn(document, "doc.add_layer().add_path([(0, 0)])").ok);
+    EXPECT_FALSE(runOn(document, "doc.add_layer().add_polygon(0, 0, 5, 2)").ok);
+    EXPECT_FALSE(runOn(document, "doc.add_layer().add_star(0, 0, 5, 0)").ok);
+    result = runOn(document, "doc.add_layer().add_path([(0, 0), (1, 0), (2, 0), (3, 0)], curve=True)");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(ScriptModule, pointEditingIsOneUndoStepEach) {
+    curvy::SketchDocument document;
+    document.newBlank("Points", 100.0f, 100.0f);
+    ASSERT_TRUE(runOn(document, "layer = doc.add_layer()\nshape = layer.add_polygon(50, 50, 20, 4, rotation=0, stroke=(0, 0, 0, 1))").ok);
+
+    auto result = runOn(document, "print(doc.points(shape))");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output.substr(0, 11), "[(70.0, 50.");
+
+    const std::size_t before = document.undoStack().depth();
+    result = runOn(document, "doc.set_point(shape, 0, 90, 50)\nprint(doc.points(shape)[0])\ndoc.move_points(shape, 1, 2, indices=[0, -1])\nprint(doc.points(shape)[0])");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "(90.0, 50.0)\n(91.0, 52.0)\n");
+    EXPECT_EQ(document.undoStack().depth(), before + 1);   // the script is one step
+
+    result = runOn(document, "doc.insert_point(shape, 2, 1, 1)\nprint(len(doc.points(shape)))\ndoc.remove_point(shape, 2)\nprint(len(doc.points(shape)))");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "5\n4\n");
+
+    result = runOn(document, "doc.set_closed(shape, False)\nprint(doc.is_closed(shape))\ndoc.set_points(shape, [(0, 0), (5, 5)])\nprint(doc.points(shape))");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "False\n[(0.0, 0.0), (5.0, 5.0)]\n");
+
+    result = runOn(document, "doc.undo()\nprint(len(doc.points(shape)))");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "4\n");
+
+    EXPECT_FALSE(runOn(document, "doc.set_point(shape, 9, 0, 0)").ok);
+    EXPECT_FALSE(runOn(document, "doc.set_points(shape, [(0, 0)])").ok);
+    EXPECT_FALSE(runOn(document, "doc.points(doc.layers[0])").ok);
+}
+
+TEST(ScriptModule, curvePointEditingKeepsTheLayout) {
+    curvy::SketchDocument document;
+    document.newBlank("Curve", 100.0f, 100.0f);
+    ASSERT_TRUE(runOn(document, "layer = doc.add_layer()\ne = layer.add_ellipse(50, 50, 20, 10)").ok);
+    EXPECT_FALSE(runOn(document, "doc.insert_point(e, 0, 1, 1)").ok);
+    EXPECT_FALSE(runOn(document, "doc.remove_point(e, 0)").ok);
+    EXPECT_FALSE(runOn(document, "doc.set_points(e, doc.points(e)[:5])").ok);
+
+    auto result = runOn(document, "doc.set_closed(e, False)\nprint(len(doc.points(e)), doc.is_closed(e))\ndoc.set_closed(e, True)\nprint(len(doc.points(e)))");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "13 False\n12\n");
+    EXPECT_NE(document.artwork(), nullptr);
+}
+
+TEST(ScriptModule, wholeObjectTransforms) {
+    curvy::SketchDocument document;
+    document.newBlank("Xform", 100.0f, 100.0f);
+    auto result = runOn(document,
+                        "layer = doc.add_layer('L')\n"
+                        "g = layer.add_group('G')\n"
+                        "g.add_rect(0, 0, 10, 10)\n"
+                        "t = g.transform\n"
+                        "print(t['tx'], t['sx'], t['rot'])\n"
+                        "g.translate(5, 7)\n"
+                        "g.translate(1, 1)\n"
+                        "g.rotate(30)\n"
+                        "g.scale(2)\n"
+                        "g.scale(1.5, 1)\n"
+                        "t = g.transform\n"
+                        "print(t['tx'], t['ty'], t['rot'], t['sx'], t['sy'])\n"
+                        "g.set_transform(tx=0, skew=10)\n"
+                        "print(g.transform['tx'], g.transform['skew'], g.transform['rot'])\n"
+                        "layer.rotate(90, 50, 50)\n"
+                        "print(layer.transform['rot'], layer.transform['px'], layer.transform['py'])\n"
+                        "g.reset_transform()\n"
+                        "print(g.transform == dict(tx=0, ty=0, rot=0, sx=1, sy=1, skew=0, px=0, py=0))");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "0.0 1.0 0.0\n6.0 8.0 30.0 3.0 2.0\n0.0 10.0 30.0\n90.0 50.0 50.0\nTrue\n");
+
+    // The moved object really draws elsewhere.
+    ASSERT_TRUE(runOn(document, "g.translate(20, 0)").ok);
+    jitnodes::GeometryHandle art = document.artwork();
+    ASSERT_NE(art, nullptr);
+    EXPECT_GT(art->pointCount(), 0u);
+
+    const std::size_t before = document.undoStack().depth();
+    EXPECT_TRUE(runOn(document, "g.rotate(10)\ng.scale(2)").ok);
+    EXPECT_EQ(document.undoStack().depth(), before + 1);
+    result = runOn(document, "print(g.transform['rot'])\ndoc.undo()\nprint(g.transform['rot'])");
+    EXPECT_EQ(result.output, "10.0\n0.0\n");
+
+    EXPECT_FALSE(runOn(document, "g.set_transform(bogus=1)").ok);
+    ASSERT_TRUE(runOn(document, "g.remove()").ok);
+    EXPECT_FALSE(runOn(document, "g.translate(1, 1)").ok);
+}
+
+TEST(ScriptModule, singleShapeTransforms) {
+    curvy::SketchDocument document;
+    document.newBlank("ShapeXform", 100.0f, 100.0f);
+    ASSERT_TRUE(runOn(document,
+                      "layer = doc.add_layer('L')\n"
+                      "a = layer.add_rect(0, 0, 10, 10, stroke=(0, 0, 0, 1))\n"
+                      "b = layer.add_ellipse(50, 50, 5, 5)\n"
+                      "c = layer.add_circle(20, 20, 3)").ok);
+
+    const std::size_t before = document.undoStack().depth();
+    auto result = runOn(document, "print(doc.shape_transform(a)['sx'], len(network))");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(document.undoStack().depth(), before);   // reading makes no node and no step
+
+    result = runOn(document,
+                   "doc.translate_shape(a, 5, 7)\n"
+                   "doc.translate_shape(a, 1, 1)\n"
+                   "doc.rotate_shape(a, 30)\n"
+                   "doc.scale_shape(a, 2)\n"
+                   "doc.scale_shape(a, 1.5, 1)\n"
+                   "t = doc.shape_transform(a)\n"
+                   "print(t['tx'], t['ty'], t['rot'], t['sx'], t['sy'])\n"
+                   "print(doc.shape_transform(b)['tx'], doc.shape_transform(c)['tx'])\n"
+                   "doc.set_shape_transform(b, tx=3, skew=5)\n"
+                   "print(doc.shape_transform(b)['tx'], doc.shape_transform(b)['skew'])\n"
+                   "doc.set_shape_transform(doc.path_node(a), tx=-1)\n"
+                   "print(doc.shape_transform(a)['tx'])\n"
+                   "doc.reset_shape_transform(a)\n"
+                   "print(doc.shape_transform(a)['rot'], doc.shape_transform(a)['sx'])");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "6.0 8.0 30.0 3.0 2.0\n0.0 0.0\n3.0 5.0\n-1.0\n0.0 1.0\n");
+    EXPECT_EQ(document.undoStack().depth(), before + 1);   // the script is one step
+
+    // The transform node sits between the generator and its look, so the shape moves and the others stay.
+    ASSERT_TRUE(runOn(document, "doc.translate_shape(c, 40, 0)").ok);
+    jitnodes::GeometryHandle art = document.artwork();
+    ASSERT_NE(art, nullptr);
+    float maxX = 0.0f;
+    for (std::size_t i = 0; i < art->pointCount(); ++i) {
+        maxX = std::max(maxX, art->x()[i]);
+    }
+    EXPECT_GT(maxX, 55.0f);   // the circle was at x 20 and went to about 60
+
+    result = runOn(document, "doc.undo()\nprint(doc.shape_transform(c)['tx'])");
+    EXPECT_EQ(result.output, "0.0\n");
+
+    EXPECT_FALSE(runOn(document, "doc.shape_transform(layer)").ok);
+    EXPECT_FALSE(runOn(document, "doc.set_shape_transform(a, bogus=1)").ok);
+    EXPECT_FALSE(runOn(document, "doc.rotate_shape(doc.add_layer(), 5)").ok);
+}
+
+TEST(ScriptModule, fillsAndStrokesOfExistingShapesCanBeEdited) {
+    curvy::SketchDocument document;
+    document.newBlank("Looks", 100.0f, 100.0f);
+    ASSERT_TRUE(runOn(document,
+                      "layer = doc.add_layer('L')\n"
+                      "a = layer.add_rect(0, 0, 10, 10, fill=(1, 0, 0, 1), stroke=None)\n"
+                      "b = layer.add_ellipse(50, 50, 5, 5, fill=None, stroke=(0, 0, 0, 1), stroke_width=2)\n"
+                      "c = layer.add_line(0, 0, 10, 10, stroke=None)").ok);
+
+    auto result = runOn(document, "print(doc.fill(a), doc.stroke(a), doc.fill(b), doc.stroke(b), doc.stroke_width(b), doc.stroke_width(a))");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "(1.0, 0.0, 0.0, 1.0) None None (0.0, 0.0, 0.0, 1.0) 2.0 None\n");
+
+    const std::size_t before = document.undoStack().depth();
+    result = runOn(document,
+                   "doc.set_fill(a, (0, 1, 0, 0.5))\n"
+                   "doc.set_stroke(a, (0, 0, 1, 1), width=3)\n"
+                   "doc.set_fill(b, (1, 1, 0, 1), opacity=0.5, even_odd=True)\n"
+                   "doc.set_stroke(b, None)\n"
+                   "doc.set_stroke(c, (0.25, 0.25, 0.25, 1), width=4)\n"
+                   "print(doc.fill(a), doc.stroke(a), doc.stroke_width(a))\n"
+                   "print(doc.fill(b), doc.stroke(b))\n"
+                   "print(doc.stroke(c), doc.stroke_width(c))");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "(0.0, 1.0, 0.0, 0.5) (0.0, 0.0, 1.0, 1.0) 3.0\n(1.0, 1.0, 0.0, 1.0) None\n(0.25, 0.25, 0.25, 1.0) 4.0\n");
+    EXPECT_EQ(document.undoStack().depth(), before + 1);
+
+    // The new stroke comes after the fill, and each shape's primitives carry their own look.
+    jitnodes::GeometryHandle art = document.artwork();
+    ASSERT_NE(art, nullptr);
+    const jitnodes::AttribArray* width = art->findAttrib(jitnodes::AttribClass::primitive, "stroke.width");
+    ASSERT_NE(width, nullptr);
+    EXPECT_EQ(art->primitiveCount(), 3u);   // rect, ellipse, line
+
+    // A hidden look comes back with a colour again, keeping the width it had.
+    result = runOn(document, "doc.set_stroke(b, (1, 0, 1, 1))\nprint(doc.stroke(b))\nprint(doc.stroke_width(b))");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "(1.0, 0.0, 1.0, 1.0)\n2.0\n");
+
+    result = runOn(document, "doc.undo()\nprint(doc.stroke(b))");
+    EXPECT_EQ(result.output, "None\n");
+
+    // Looks of shapes inside a group, with a local transform in the chain.
+    result = runOn(document,
+                   "g = layer.add_group('G')\n"
+                   "s = g.add_rect(0, 0, 5, 5, fill=None, stroke=None)\n"
+                   "doc.rotate_shape(s, 10)\n"
+                   "doc.set_stroke(s, (1, 0, 0, 1), width=2)\n"
+                   "doc.set_fill(s, (0, 0, 1, 1))\n"
+                   "print(doc.fill(s), doc.stroke(s), doc.shape_transform(s)['rot'])");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "(0.0, 0.0, 1.0, 1.0) (1.0, 0.0, 0.0, 1.0) 10.0\n");
+    EXPECT_NE(document.artwork(), nullptr);
+
+    EXPECT_FALSE(runOn(document, "doc.fill(layer)").ok);
+    EXPECT_FALSE(runOn(document, "doc.set_fill(s, (1, 0, 0))").ok);
+}
+
+TEST(ScriptModule, aPathIsFoundFromAnyNodeOfItsChain) {
+    curvy::SketchDocument document;
+    document.newBlank("Chain", 100.0f, 100.0f);
+    auto result = runOn(document,
+                        "layer = doc.add_layer()\n"
+                        "top = layer.add_rect(0, 0, 10, 10, stroke=(0, 0, 0, 1))\n"
+                        "p = doc.path_node(top)\n"
+                        "print(p.id != top.id, doc.path_node(p).id == p.id, len(doc.points(top)) == len(doc.points(p)))\n"
+                        "print(doc.path_node(layer.add_circle(5, 5, 2)))");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "True True True\nNone\n");
+}
+
+TEST(ScriptModule, theEditorSelectionIsReadAndChangedByScripts) {
+    curvy::SketchDocument document;
+    document.newBlank("Selection", 100.0f, 100.0f);
+    curvy::SelectionModel selection(&document);
+    auto run = [&](const std::string& code) { return curvytest::sharedConsole().run(code, &document, &selection); };
+
+    auto result = run("print(len(selection), selection.primary, doc.selection is not None)");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "0 None True\n");
+
+    result = run("layer = doc.add_layer('L')\n"
+                 "a = layer.add_rect(0, 0, 10, 10, stroke=(0, 0, 0, 1))\n"
+                 "b = layer.add_ellipse(5, 5, 3, 3)\n"
+                 "selection.set(a)\n"
+                 "print(len(selection), selection.primary.id == a.id, selection.object.name, selection.stroke is not None, selection.fill.id != a.id)\n"
+                 "selection.add(b)\n"
+                 "print(len(selection), a in selection, selection.primary.id == b.id)\n"
+                 "selection.remove(a)\n"
+                 "print(len(selection), a in selection)\n"
+                 "selection.toggle(a)\n"
+                 "selection.replace([layer, b])\n"
+                 "print(len(selection), [type(x).__name__ for x in selection])\n"
+                 "selection.clear()\n"
+                 "print(len(selection))");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "1 True L True True\n2 True True\n1 False\n2 ['Object', 'Node']\n0\n");
+    EXPECT_TRUE(selection.empty());
+
+    // What the user picked is what the script sees.
+    ASSERT_TRUE(run("layer = doc.layers[0]").ok);
+    selection.set(document.childrenOf().front());
+    result = run("print(selection.primary.name, selection.object.is_layer, selection.layer.name)");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "L True L\n");
+
+    result = run("g = doc.layers[0].add_group('G')\n"
+                 "c = g.add_circle(1, 1, 1)\n"
+                 "selection.set(c)\n"
+                 "print(selection.step_up(), selection.primary.name)\n"
+                 "selection.set(doc.layers[0])\n"
+                 "print(selection.step_up())");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "True G\nFalse\n");
+}
+
+TEST(ScriptModule, selectionIsNoneWithoutAnEditorAndRefusesAForeignDocument) {
+    curvy::SketchDocument document;
+    document.newBlank("None", 100.0f, 100.0f);
+    auto result = runOn(document, "print(selection, doc.selection)");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "None None\n");
+
+    curvy::SelectionModel selection(&document);
+    ASSERT_TRUE(curvytest::sharedConsole().run("kept = selection", &document, &selection).ok);
+    selection.setDocument(nullptr);
+    result = curvytest::sharedConsole().run("kept.clear()", &document, nullptr);
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error.find("no longer belongs"), std::string::npos);
 }

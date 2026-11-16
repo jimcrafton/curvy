@@ -111,7 +111,7 @@ namespace curvy {
         impl_->cancelOnEscape = enabled;
     }
 
-    ScriptResult ScriptConsole::run(const std::string& code, SketchDocument* document) {
+    ScriptResult ScriptConsole::run(const std::string& code, SketchDocument* document, SelectionModel* selection) {
         ScriptResult result;
         py::module_ sys = py::module_::import("sys");
         py::object oldOut = sys.attr("stdout");
@@ -131,11 +131,13 @@ namespace curvy {
 
         try {
             if (document != nullptr) {
-                impl_->scope["doc"] = makeScriptDocument(*document, impl_->transaction);
+                impl_->scope["doc"] = makeScriptDocument(*document, impl_->transaction, selection);
                 impl_->scope["network"] = jitnodes::python::wrapNetwork(document->network());
+                impl_->scope["selection"] = impl_->scope["doc"].attr("selection");
             } else {
                 impl_->scope["doc"] = py::none();
                 impl_->scope["network"] = py::none();
+                impl_->scope["selection"] = py::none();
             }
 
             py::object builtins = py::module_::import("builtins");

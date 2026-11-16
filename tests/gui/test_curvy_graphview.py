@@ -23,7 +23,6 @@ class GraphViewCase(Samples):
     # and the right dock open beside it (showing the graph opens it); inside a layer the view is fitted to the graph's size.
     LAYER1 = (338, 258)            # the Layer1 box at the root level
     GROUP1 = (328, 404)            # the Group1 box inside Layer1
-    PANEL_SWATCH = (1200, 407)     # the colour swatch of the fill's colour row in the Node panel
 
     def shot(self, name):
         os.makedirs(self.shots, exist_ok=True)
@@ -359,7 +358,7 @@ class ColourCard(GraphViewCase):
         self.app.wait_idle()
         self.app.click_at((root.x + 437, root.y + 430))    # the fill box
         self.app.wait_idle()
-        self.app.click_at((root.x + self.PANEL_SWATCH[0], root.y + self.PANEL_SWATCH[1]))   # the colour swatch of the Node panel
+        self.app.click("nodeSwatch0")                      # the colour swatch of the Node panel: the fill's first parameter
         self.app.wait_idle()
         self.assertTrue(self.app.find("SwatchTiles").visible)
 
@@ -379,8 +378,7 @@ class ColourCard(GraphViewCase):
 
     def panel_colour(self):
         """The fill's colour as the panel's swatch paints it: no node value is readable without saving, which closes the card."""
-        root = self.app.find("rootview")
-        return self.app.screenshot().pixel(root.x + self.PANEL_SWATCH[0], root.y + self.PANEL_SWATCH[1])
+        return self.app.screenshot().pixel(*self.app.find("nodeSwatch0").center)
 
     def tile_colour(self, tile):
         return self.app.screenshot().pixel(*self.tile_point(tile))
@@ -409,10 +407,10 @@ class ColourCard(GraphViewCase):
     def test_link_and_unlink_a_swatch_from_its_menu(self):
         self.open_colour_card_of_the_first_fill()
         self.assertEqual(0, self.links_in_file())
-        self.pick_from_swatch_menu(tile=5, downs=3)      # Use, Replace with current colour, Link
+        self.pick_from_swatch_menu(tile=5, downs=4)      # Use, Select shapes using this, Replace with current colour, Link
         self.save()
         self.assertGreaterEqual(self.links_in_file(), 1, "the swatch is saved as linked")
-        self.pick_from_swatch_menu(tile=5, downs=3)      # the same entry now reads Unlink
+        self.pick_from_swatch_menu(tile=5, downs=4)      # the same entry now reads Unlink
         self.save()
         self.assertEqual(0, self.links_in_file(), "unlinking removes it")
 

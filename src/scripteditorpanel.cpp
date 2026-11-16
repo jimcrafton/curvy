@@ -195,7 +195,7 @@ namespace curvy {
             std::size_t indentWidth_ = 4;
         };
 
-        // The find field's keys that a single-line field does not give the panel: Shift+Enter and Shift+F3 (previous), F3 (next), Esc.
+        // The find field's keys that a single-line field does not give the panel: F3 and Shift+F3 (next, previous) and Esc.
         class FindFieldController : public TextController {
         public:
             FindFieldController(Control& owner, std::function<void(bool)> step, std::function<void()> close) :
@@ -207,7 +207,7 @@ namespace curvy {
                     close_();
                     return SyncReturn::Handled;
                 }
-                if (vkCode == vkF3 || (vkCode == vkReturn && shift)) {
+                if (vkCode == vkF3) {
                     step_(shift);
                     return SyncReturn::Handled;
                 }
@@ -361,7 +361,8 @@ namespace curvy {
             return SyncReturn::Handled;
         };
         findField_->onReturnPressed += [this](TextField&) {
-            findNext(false);
+            // A TextField takes Enter before its controller sees the key (and its modifiers), so Shift is read from the keyboard.
+            findNext((GetKeyState(VK_SHIFT) & 0x8000) != 0);
             return SyncReturn::Handled;
         };
         findField_->model().onChanged.add([this](Model&) {

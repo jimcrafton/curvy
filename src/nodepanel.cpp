@@ -355,6 +355,7 @@ namespace curvy {
         row.field->caret().setColor(Theme::current().textColor());
         viewport_->addChild(row.field);
         row.swatch = new SubView();
+        row.swatch->setName("nodeSwatch" + std::to_string(index));
         row.swatch->setVisible(false);
         row.swatch->setCursor(Cursor(CursorKind::Hand));
         row.swatch->onMouseDown += [this, index](View&, const Point&, std::uint32_t buttons, std::uint32_t) {

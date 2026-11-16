@@ -13,6 +13,10 @@ from curvyCase import CurvyCase
 
 
 class PyConsole(CurvyCase):
+    def setUp(self):
+        self.make_settings_file(self.SCRIPT_PANELS_SETTINGS)
+        super().setUp()
+
     def open_console(self):
         self.new_a4()
         if self.app.find("rightArea").w <= 0:
