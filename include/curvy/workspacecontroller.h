@@ -250,6 +250,7 @@ namespace curvy {
         void stopScriptStatus();
         std::string scriptStatusText(bool finished = false) const;
         newui::RunLoop::TimerHandle scriptTimer_ = newui::RunLoop::kInvalidTimerHandle;
+        bool scriptStatusShown_ = false;
         std::chrono::steady_clock::time_point scriptStarted_;
         std::string taskLabel_;
         int taskPercent_ = -1;

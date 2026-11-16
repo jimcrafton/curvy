@@ -30,7 +30,7 @@ class PyShapes(CurvyCase):
         self.app.click("pyConsoleInput")
         self.app.type(text)
         self.app.key("enter")
-        self.app.wait_idle()
+        self.wait_script_done()
 
     def transcript(self):
         return self.app.text_of("pyConsoleOutput")

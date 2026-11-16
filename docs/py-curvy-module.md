@@ -208,9 +208,10 @@ The script runs on a worker thread; the window stays alive, so the console panel
   (`setScriptDispatchAborting`) because nobody will run their calls, joins the worker and drops `done`.
 - **While it runs**, `WorkspaceController` sets `busy_` (menu commands, open, save and closing are refused, as during a file task), the editor's
   Run button reads "Stop", and the console shows the output so far, `running... 40% message` and a Cancel button.
-- **Status bar.** While a script runs, `WorkspaceController` says "A script is running for 35 s (40%) - message - Esc cancels", refreshed
-  every 5 seconds by a run-loop timer (`startScriptStatus`), and "Script ended after 1 min 5 s" when it ends. The percent and message are
-  what `curvy.progress()` last reported.
+- **Status bar.** A script still running after 2 seconds gets the line "A script is running for 35 s (40%) - message - Esc cancels",
+  refreshed every 5 seconds by run-loop timers (`startScriptStatus`), and "Script ended after 1 min 5 s" when it ends. A shorter script
+  leaves the status bar alone: the line would replace the hint a script's own selection change just set (the `pyshapes` GUI test caught
+  that). The percent and message are what `curvy.progress()` last reported.
 - **`curvy.progress(fraction, message="")`** reports progress (0..1, negative for unknown); it needs no main-thread call.
 - A callback a script gives to jitnodes (a progress function for `cook`) runs on whichever thread jitnodes calls it from, under the GIL.
 

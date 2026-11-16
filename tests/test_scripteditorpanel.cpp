@@ -168,6 +168,45 @@ TEST_F(ScriptEditorPanelTest, controlEnterAndF5RunTheScript) {
     EXPECT_EQ(runs, 2);
 }
 
+TEST_F(ScriptEditorPanelTest, whileAScriptRunsTheRunButtonReadsStopAndRunDoesNothing) {
+    int runs = 0;
+    int stops = 0;
+    panel_->onRun = [&runs](const std::string&, const std::string&) { ++runs; };
+    panel_->onStop = [&stops]() { ++stops; };
+    panel_->setScript("print(1)");
+    EXPECT_EQ(panel_->runButtonText(), "Run");
+
+    panel_->setRunning(true);
+    EXPECT_TRUE(panel_->running());
+    EXPECT_EQ(panel_->runButtonText(), "Stop");
+    auto& controller = panel_->textControl()->controller();
+    controller.handleKeyDown(newui::kmCtrl, 0, 1, newui::vkReturn);
+    controller.handleKeyDown(0, 0, 1, newui::vkF5);
+    EXPECT_EQ(runs, 0) << "Ctrl+Enter and F5 do not start a second run";
+    EXPECT_EQ(stops, 0);
+
+    auto* run = dynamic_cast<newui::Button*>(panel_->findView("pyEditorRun"));
+    ASSERT_NE(run, nullptr);
+    run->onClick(*run);
+    EXPECT_EQ(stops, 1) << "the button is Stop now";
+    EXPECT_EQ(runs, 0);
+
+    panel_->setRunning(false);
+    EXPECT_EQ(panel_->runButtonText(), "Run");
+    run->onClick(*run);
+    EXPECT_EQ(runs, 1);
+    EXPECT_EQ(stops, 1);
+}
+
+TEST_F(ScriptEditorPanelTest, theStopLabelKeepsWinningOverASelectionOrASyntaxProblemUntilTheRunEnds) {
+    panel_->setScript("print(1)\nprint(2)");
+    panel_->setRunning(true);
+    panel_->textControl()->selection().setRange(newui::text::TextRange(0, 5));
+    EXPECT_EQ(panel_->runButtonText(), "Stop");
+    panel_->setRunning(false);
+    EXPECT_EQ(panel_->runButtonText(), "Run Selection");
+}
+
 namespace {
 
     // Puts `text` in the editor with the caret at `caret` (and `length` characters selected from there) and presses a key.

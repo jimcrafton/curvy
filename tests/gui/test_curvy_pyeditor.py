@@ -42,7 +42,7 @@ class PyEditor(CurvyCase):
         self.open_editor()
         self.type_script("print(6 * 7)")
         self.app.key("ctrl+enter")
-        self.app.wait_idle()
+        self.wait_script_done()
         self.assertIn("42", self.app.text_of("pyConsoleOutput"))
 
     def test_ctrl_f_finds_every_match_and_escape_closes_the_bar(self):

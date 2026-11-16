@@ -310,11 +310,18 @@ namespace curvy {
 
     void WorkspaceController::startScriptStatus() {
         scriptStarted_ = std::chrono::steady_clock::now();
-        model_->say(scriptStatusText());
+        scriptStatusShown_ = false;
         stopScriptStatus();
-        scriptTimer_ = loop_->postDelayed(std::chrono::seconds(5), [this]() {
+        // A short script leaves the status bar alone (it would replace the hint a script's own selection change just set); only a
+        // script that is still going after a moment gets the line, then every few seconds.
+        scriptTimer_ = loop_->postDelayed(std::chrono::seconds(2), [this]() {
+            scriptStatusShown_ = true;
             model_->say(scriptStatusText());
-            return false;
+            scriptTimer_ = loop_->postDelayed(std::chrono::seconds(5), [this]() {
+                model_->say(scriptStatusText());
+                return false;
+            });
+            return true;
         });
     }
 
@@ -505,7 +512,9 @@ namespace curvy {
                     startScriptStatus();
                 } else {
                     stopScriptStatus();
-                    model_->say(scriptStatusText(true));
+                    if (scriptStatusShown_) {
+                        model_->say(scriptStatusText(true));
+                    }
                 }
             };
             pyConsolePanel_->onExecuted = [this]() {

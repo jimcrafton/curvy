@@ -38,6 +38,11 @@ class CurvyCase(AppTestCase):
         newui_guitest.App.wait_until = lambda app, cond, what="the condition", timeout=WAIT_SECONDS, **kw: original(app, cond, what, timeout, **kw)
         super().setUp()
 
+    def wait_script_done(self, timeout=WAIT_SECONDS):
+        """Scripts run in the background: the console shows 'running...' until the result arrives."""
+        self.app.wait_until(lambda: "running..." not in self.app.text_of("pyConsoleOutput"), "the script to finish", timeout)
+        self.app.wait_idle()
+
     def ring_open(self):
         return self.app.find("radialMenu").visible
 
