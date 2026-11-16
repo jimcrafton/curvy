@@ -157,10 +157,11 @@ the stroke node stores but the canvas does not draw yet (it reads only `stroke.w
 
 ## Files: `doc.path`, `doc.save()`, `doc.open()`
 
-Only the native `.curvy` format is reachable from scripts. Export (SVG, PDF, EPS, PNG) is not: `src/io` and `include/curvy/io` (identical to the
-copy in `tmp/`) were written for the old Sketch document (`layers()`, `artboards()`, symbols, brushes), include headers that no longer exist
-(`gzip.h`, `imagedata.h`, `textoutline.h`, `sketchexport.h`, `graphbrush.h`) and are not in `CMakeLists.txt`. A script export needs them ported to
-the graph document first, which waits for the import/export branch.
+Only the native `.curvy` format is reachable from scripts. Export (SVG, PDF, EPS, PNG) is not yet. The import/export work is merged on main,
+and `tmp/` holds that whole tree (the old Sketch app with the file-formats and skel-strokes branches merged), but it is written for the old
+Sketch document (`layers()`, `artboards()`, symbols, brush objects). `src/io` and `include/curvy/io` in v2 are identical to the `tmp/` copy, are not in
+`CMakeLists.txt`, and need headers that exist only in `tmp/` (`gzip.h`, `imagedata.h`, `textoutline.h`, `sketchexport.h`, `graphbrush.h`). Offering
+export to scripts therefore means porting the exporters to read the v2 graph document (its cooked geometry), then wrapping them as `doc.export_*`.
 
 - `doc.path`: the file the document was opened from or last saved to, or `None`. `doc.is_modified`: changed since then (the script's own edits count).
 - `doc.save(path=None)`: writes the file and returns the path. No argument saves to `doc.path` (`RuntimeError` when there is none yet); with a
@@ -185,7 +186,8 @@ the graph document first, which waits for the import/export branch.
 - The script runs once the window is up, through the same path as Run in the editor: in the background, shown in the console panel, with
   the status bar, Cancel, Esc and the time limit. `--open file` loads first (the run waits while the open is busy).
 - `args` in the script is the list of what follows a bare `--` (`ScriptConsole::setArguments`; empty for the editor's runs).
-- What the script printed goes to stdout and its error to stderr, when it ends (`PyConsolePanel::onFinished`); not live.
+- What the script prints goes to stdout as it goes (a 100 ms timer forwards `ScriptConsole::outputSoFar()`, flushed each time, so a long
+  job can be watched or piped); the rest and its error (stderr) arrive when it ends (`PyConsolePanel::onFinished`).
 - `--exit-after-run` closes the window when the script ends and sets the exit code: 0 ok, 1 the script raised, 2 cancelled or timed out,
   3 the script file cannot be read, 4 Python is not available. Without it the window stays open and the exit code is 0.
 - The window is closed by posting `WM_CLOSE`, so teardown happens in the normal order (an earlier version ended the run loop directly and
@@ -195,6 +197,22 @@ the graph document first, which waits for the import/export branch.
 - Example: `curvy --open in.curvy --run fix.py --exit-after-run -- out.curvy` with `fix.py` doing the edits and `doc.save(args[0])`.
 - Tests: `ScriptConsole.argsIsTheListGiven...` (unit) and `tests/gui/test_curvy_cli.py` (6 tests, each starts the exe with no input: output, error,
   `args`, exit codes 0 to 3, open-change-save as a batch job).
+
+## The Scripts menu
+
+The top bar's **Scripts** button (`scriptsToggle`, next to Panels) runs a script without opening the editor. It lists, as `PanelMenuEntry` lines
+built by `ScriptsMenu::entries` (the same data-then-popup pattern as the Panels menu, shown through `WorkspaceController::presentMenu`):
+
+1. Your scripts: the `.py` files directly in the `scripts` folder next to the settings file (`WorkspaceController::userScriptsFolder`, so a
+   `--settings` file brings its own folder), ordered by name without regard to case. An empty or missing folder shows a line that says so.
+2. The samples that come with the app (`Resources/samples/scripts` next to the exe), each marked "(sample)".
+3. **Open scripts folder**: creates the folder if needed and opens it in Explorer.
+
+A picked script runs like Run in the editor (`runMenuScript`: console panel, status bar, Cancel, time limit; refused with the usual message while another
+script or a file task is busy). The menu is built each time it opens, so a new file shows at once. `ScriptsMenu::readScript` (shared with `--run`) drops a
+UTF-8 byte order mark. Subfolders are not listed. The button's `.newui` entry was added by hand next to Panels (the file has hand-made parts that a
+regeneration from `workspace.html` would lose); the mockup has the button too. Tests: `ScriptsMenu.*` (unit). The popup itself is native and blocks, so
+it is checked by hand, not by a GUI test.
 
 ## Selection
 

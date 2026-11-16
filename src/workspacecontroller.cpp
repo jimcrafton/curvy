@@ -20,6 +20,7 @@
 #include <newui/uiinputmanager.h>
 
 #include <windows.h>
+#include <shellapi.h>
 
 #include <algorithm>
 #include <cmath>
@@ -335,7 +336,19 @@ namespace curvy {
         }
     }
 
+    void WorkspaceController::flushCommandLineOutput(const std::string& text) {
+        if (text.size() > commandLinePrinted_) {
+            std::fwrite(text.data() + commandLinePrinted_, 1, text.size() - commandLinePrinted_, stdout);
+            std::fflush(stdout);
+            commandLinePrinted_ = text.size();
+        }
+    }
+
     void WorkspaceController::finishCommandLineRun(int code) {
+        if (commandLineTimer_ != RunLoop::kInvalidTimerHandle) {
+            loop_->cancelDelayed(commandLineTimer_);
+            commandLineTimer_ = RunLoop::kInvalidTimerHandle;
+        }
         commandLineRun_ = false;
         exitCode_ = code;
         if (scriptConsole_ != nullptr) {
@@ -364,25 +377,27 @@ namespace curvy {
             });
             return;
         }
-        std::ifstream in(std::filesystem::u8path(path), std::ios::binary);
-        if (!in) {
+        std::string code;
+        if (!ScriptsMenu::readScript(std::filesystem::u8path(path), code)) {
             std::fprintf(stderr, "curvy: cannot read the script %s\n", path.c_str());
             finishCommandLineRun(3);
             return;
-        }
-        std::ostringstream buffer;
-        buffer << in.rdbuf();
-        std::string code = buffer.str();
-        if (code.compare(0, 3, "\xEF\xBB\xBF") == 0) {
-            code.erase(0, 3);   // a UTF-8 byte order mark: Python would refuse the file
         }
         if (code.find_first_not_of(" \t\r\n") == std::string::npos) {
             finishCommandLineRun(0);   // nothing to run
             return;
         }
         commandLineRun_ = true;
+        commandLinePrinted_ = 0;
         scriptConsole_->setArguments(std::move(arguments));
         pyConsolePanel_->runScript(code, fileNameOf(path));
+        // What the script prints reaches stdout as it goes, not only when it ends: a long batch job can be watched or piped.
+        if (commandLineRun_ && scriptConsole_->running()) {
+            commandLineTimer_ = loop_->postDelayed(std::chrono::milliseconds(100), [this]() {
+                flushCommandLineOutput(scriptConsole_->outputSoFar());
+                return false;
+            });
+        }
     }
 
     void WorkspaceController::setScriptConsole(ScriptConsole* console) {
@@ -572,9 +587,7 @@ namespace curvy {
                 if (!commandLineRun_) {
                     return;
                 }
-                if (!result.output.empty()) {
-                    std::fputs(result.output.c_str(), stdout);
-                }
+                flushCommandLineOutput(result.output);   // the rest: what was printed since the last poll
                 if (!result.ok) {
                     std::fputs(result.error.c_str(), stderr);
                 }
@@ -1429,6 +1442,13 @@ namespace curvy {
                 return SyncReturn::Handled;
             };
         }
+        if (auto* button = dynamic_cast<Button*>(frame_.rootView().findView("scriptsToggle"))) {
+            button->onClick += [this, button](Control&) {
+                showScriptsMenu(button->localToScreen(Point(0.0f, button->bounds().height())));
+                focusCanvas();
+                return SyncReturn::Handled;
+            };
+        }
         if (auto* button = dynamic_cast<Button*>(frame_.rootView().findView("graphToggle"))) {
             button->onClick += [this](Control&) {
                 toggleGraph();
@@ -1439,6 +1459,48 @@ namespace curvy {
 
     void WorkspaceController::toggleGraph() {
         showGraph(!graphOverlay_->isVisible());
+    }
+
+    std::filesystem::path WorkspaceController::userScriptsFolder() const {
+        const std::string settingsFile = settingsPath_.empty() ? Settings::defaultPath() : settingsPath_;
+        return std::filesystem::u8path(settingsFile).parent_path() / "scripts";
+    }
+
+    std::vector<PanelMenuEntry> WorkspaceController::scriptsMenuEntries() {
+        return ScriptsMenu::entries(
+            userScriptsFolder(), executableDirectory() / "Resources" / "samples" / "scripts",
+            [this](const ScriptFile& file) { runMenuScript(file); },
+            [this]() {
+                const std::filesystem::path folder = userScriptsFolder();
+                std::error_code ignored;
+                std::filesystem::create_directories(folder, ignored);
+                ::ShellExecuteW(nullptr, L"open", folder.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            });
+    }
+
+    void WorkspaceController::showScriptsMenu(const Point& screen) {
+        if (scriptConsole_ == nullptr || pyConsolePanel_ == nullptr) {
+            model_->say("Python is not available, so scripts cannot run");
+            return;
+        }
+        presentMenu(scriptsMenuEntries(), screen);
+    }
+
+    void WorkspaceController::runMenuScript(const ScriptFile& file) {
+        if (busy_) {
+            model_->say(taskLabel_ + " - wait for it to finish, or press Esc to cancel");
+            return;
+        }
+        std::string code;
+        if (!ScriptsMenu::readScript(file.path, code)) {
+            model_->say("Could not read " + file.name + ".py");
+            return;
+        }
+        if (code.find_first_not_of(" \t\r\n") == std::string::npos) {
+            model_->say(file.name + ".py is empty");
+            return;
+        }
+        pyConsolePanel_->runScript(code, file.name + ".py");
     }
 
     void WorkspaceController::showPanelsMenu(const Point& screen) {

@@ -20,6 +20,7 @@
 #include "curvy/swatchpalettecontroller.h"
 #include "curvy/pyconsolepanel.h"
 #include "curvy/scripteditorpanel.h"
+#include "curvy/scriptsmenu.h"
 #include "curvy/transformpanel.h"
 #include "curvy/workspacemodel.h"
 
@@ -125,6 +126,10 @@ namespace curvy {
         DockLayout& panelLayout() { return panelLayout_; }
         // The lines of the Panels button's menu as they are now (the popup itself blocks, so tests read the lines instead).
         std::vector<PanelMenuEntry> panelsMenuEntries(bool dockShown);
+        // The lines of the Scripts button's menu as they are now: the user's scripts folder (next to the settings file), the samples, and
+        // "Open scripts folder". A picked script runs like Run in the editor, shown in the console panel.
+        std::vector<PanelMenuEntry> scriptsMenuEntries();
+        std::filesystem::path userScriptsFolder() const;
         // How a panel menu is shown (screen point); the native popup unless a test replaces it, because that one blocks until the user picks.
         std::function<void(const std::vector<PanelMenuEntry>&, const newui::Point&)> presentMenu;
         PanelDock& rightDock() { return *rightDock_; }
@@ -193,6 +198,8 @@ namespace curvy {
         void focusCanvas();
         void toggleDock(DockSide side);
         void showPanelsMenu(const newui::Point& screen);
+        void showScriptsMenu(const newui::Point& screen);
+        void runMenuScript(const ScriptFile& file);
         void showPanelMenu(Panel& panel, const newui::Point& screen);
         void buildGraphOverlay();
         void buildRightDock();
@@ -263,6 +270,9 @@ namespace curvy {
         bool forcedClose_ = false;
         int exitCode_ = 0;
         void finishCommandLineRun(int code);
+        void flushCommandLineOutput(const std::string& text);
+        newui::RunLoop::TimerHandle commandLineTimer_ = newui::RunLoop::kInvalidTimerHandle;
+        std::size_t commandLinePrinted_ = 0;
         std::chrono::steady_clock::time_point scriptStarted_;
         std::string taskLabel_;
         int taskPercent_ = -1;

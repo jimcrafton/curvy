@@ -162,6 +162,22 @@
           },
           {
             type: "Button",
+            text: "Scripts",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 1279, y: 5 },
+              size: { type: "Size", width: 75, height: 22 }
+            },
+            name: "scriptsToggle",
+            style: {
+              type: "ThemedButtonStyle",
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+            },
+            desiredSize: { type: "Size", width: 75, height: 22 },
+            desiredSizeOverride: true
+          },
+          {
+            type: "Button",
             text: "Graph",
             bounds: {
               type: "Rect",

@@ -89,6 +89,7 @@ add_library(curvy_core STATIC
     src/backgroundtask.cpp
     src/scriptconsole.cpp
     src/scriptmodule.cpp
+    src/scriptsmenu.cpp
     src/pyconsolepanel.cpp
     src/scripteditorpanel.cpp
     src/pythonhighlight.cpp

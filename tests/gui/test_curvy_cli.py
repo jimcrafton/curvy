@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 
 EXE = r"D:\code\curvy\out\build\x64-release\curvy.exe"
@@ -46,6 +47,24 @@ class CommandLineRun(unittest.TestCase):
         result = self.curvy("--run", self.script("print(args)"), "--exit-after-run", "--", "a.curvy", "two words")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("['a.curvy', 'two words']", result.stdout)
+
+    def test_output_arrives_while_the_script_runs(self):
+        script = self.script("import time\nprint('first', flush=True)\ntime.sleep(4)\nprint('second')")
+        process = subprocess.Popen([EXE, "--settings", self.settings, "--run", script, "--exit-after-run"],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
+        try:
+            lines = []
+            reader = threading.Thread(target=lambda: lines.append(process.stdout.readline()), daemon=True)
+            reader.start()
+            reader.join(timeout=3.5)
+            self.assertEqual(lines, ["first\n"], "the first line should arrive well before the script ends")
+            self.assertIsNone(process.poll(), "the script is still running when the first line arrives")
+            rest, _ = process.communicate(timeout=30)
+            self.assertEqual(rest, "second\n")
+            self.assertEqual(process.returncode, 0)
+        finally:
+            if process.poll() is None:
+                process.kill()
 
     def test_a_missing_script_exits_three(self):
         result = self.curvy("--run", os.path.join(self.folder.name, "nope.py"), "--exit-after-run")
