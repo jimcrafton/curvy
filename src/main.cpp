@@ -16,10 +16,12 @@
 #include "newui/frame.h"
 #include "newui/rootview.h"
 
+#include "curvy/scriptconsole.h"
 #include "curvy/settings.h"
 #include "curvy/workspacecontroller.h"
 
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <typeinfo>
 
@@ -96,7 +98,14 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    std::unique_ptr<curvy::ScriptConsole> scriptConsole;
+    try {
+        scriptConsole = std::make_unique<curvy::ScriptConsole>(CURVY_PYTHON_HOME);
+    } catch (const std::exception& e) {
+        std::printf("curvy: Python is not available (%s)\n", e.what());
+    }
     curvy::WorkspaceController window(frame, settings, settingsPath);   // builds its views when the window is created, inside app.run()
+    window.setScriptConsole(scriptConsole.get());
     window.restoreWindow();
     if (!options.openPath.empty()) {
         app.runLoop().post([&window, path = options.openPath]() { window.openFile(path); });   // the worker and its timer need the loop running

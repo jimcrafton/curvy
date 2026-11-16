@@ -18,6 +18,7 @@
 #include "curvy/sketchdocument.h"
 #include "curvy/swatchestab.h"
 #include "curvy/swatchpalettecontroller.h"
+#include "curvy/pyconsolepanel.h"
 #include "curvy/transformpanel.h"
 #include "curvy/workspacemodel.h"
 
@@ -60,6 +61,8 @@ namespace curvy {
 
         Settings& settings() { return settings_; }
         void setSettingsPath(const std::string& path) { settingsPath_ = path; }
+        // The Python console the right dock's Python panel runs scripts in; call before the window is created. Without one there is no Python panel.
+        void setScriptConsole(ScriptConsole* console) { scriptConsole_ = console; }
         void saveSettings() const;
         // Puts the window where the last session left it (when that is still on a screen), maximized if it was; call before the window is
         // created (it sets the Frame's bounds). The window is saved when it closes.
@@ -216,6 +219,8 @@ namespace curvy {
         std::unique_ptr<PointTable> pointTable_;
         NodePanel* nodePanel_ = nullptr;   // in the right dock, which owns it
         TransformPanel* transformPanel_ = nullptr;   // likewise
+        ScriptConsole* scriptConsole_ = nullptr;   // the application's, outlives the window
+        PyConsolePanel* pyConsolePanel_ = nullptr;   // likewise
         std::array<newui::Action, 3> historyActions_;   // Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z; the run loop matches them whichever view has focus
         std::unique_ptr<GraphCrumbs> graphCrumbs_;
         RadialMenu* menu_ = nullptr;

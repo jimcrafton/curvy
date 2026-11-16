@@ -29,6 +29,7 @@ endif()
 add_subdirectory(3rdparty/newui EXCLUDE_FROM_ALL)
 
 include(cmake/jitnodes.cmake)
+include(cmake/python.cmake)
 
 # Everything but main() is one library, shared by the app and its unit tests.
 add_library(curvy_core STATIC
@@ -77,12 +78,15 @@ add_library(curvy_core STATIC
     src/sketchobjects.cpp
     src/sketchdocument.cpp
     src/backgroundtask.cpp
+    src/scriptconsole.cpp
+    src/scriptmodule.cpp
+    src/pyconsolepanel.cpp
 )
 
 target_include_directories(curvy_core PUBLIC include)
 target_include_directories(curvy_core PRIVATE src)
 target_compile_definitions(curvy_core PUBLIC CURVY_VERSION="${PROJECT_VERSION}")
-target_link_libraries(curvy_core PUBLIC newui jitnodes::jitnodes zlib_static windowscodecs ole32)
+target_link_libraries(curvy_core PUBLIC newui jitnodes::jitnodes jitnodesPython pybind11::embed zlib_static windowscodecs ole32)
 
 if(CURVY_GUI_AUTOMATION)
     target_link_libraries(curvy_core PUBLIC newui_automation)
@@ -91,6 +95,8 @@ endif()
 
 add_executable(curvy src/main.cpp)
 target_link_libraries(curvy PRIVATE curvy_core)
+curvyCopyPython(curvy)
+target_compile_definitions(curvy PRIVATE CURVY_PYTHON_HOME="${CURVY_PYTHON_HOME}")
 
 # newui_add_reflectgen_output() reads these from the scope ReflectGen.cmake was included in (newui's).
 set(NEWUI_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/newui)
@@ -122,4 +128,6 @@ file(GLOB CURVY_TEST_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tests
 add_executable(curvyTests ${CURVY_TEST_SOURCES})
 target_include_directories(curvyTests PRIVATE src)
 target_link_libraries(curvyTests PRIVATE curvy_core GTest::gtest_main)
+curvyCopyPython(curvyTests)
+target_compile_definitions(curvyTests PRIVATE PYTHON_HOME_DIR="${CURVY_PYTHON_HOME}")
 newui_add_resources(curvyTests "${CMAKE_CURRENT_SOURCE_DIR}/Resources")

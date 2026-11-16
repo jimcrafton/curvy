@@ -378,6 +378,13 @@ namespace curvy {
         transformInfo.title = "Transform";
         transformInfo.side = DockSide::Right;
         panelLayout_.add(transformInfo);
+        if (scriptConsole_ != nullptr) {
+            PanelInfo pythonInfo;
+            pythonInfo.id = "pyconsole";
+            pythonInfo.title = "Python";
+            pythonInfo.side = DockSide::Right;
+            panelLayout_.add(pythonInfo);
+        }
 
         rightDock_ = new PanelDock(panelLayout_, DockSide::Right);
         rightDock_->setLayoutParams(std::make_unique<FlexLayoutParams>(1.0f));
@@ -420,6 +427,21 @@ namespace curvy {
             graphView_->style().markDirty();
             canvas_->style().markDirty();
         };
+        if (scriptConsole_ != nullptr) {
+            pyConsolePanel_ = new PyConsolePanel(*scriptConsole_, &document_);
+            rightDock_->addPanel(pyConsolePanel_);
+            pyConsolePanel_->onDestroyed = [this]() { pyConsolePanel_ = nullptr; };
+            pyConsolePanel_->onExecuted = [this]() {
+                graphView_->style().markDirty();
+                canvas_->style().markDirty();
+                if (nodePanel_ != nullptr) {
+                    nodePanel_->show(graphView_->selectionModel().primary());
+                }
+                if (transformPanel_ != nullptr) {
+                    transformPanel_->refresh();
+                }
+            };
+        }
         // Whatever the selection is, picked in the graph view or on the canvas, is what the panel shows.
         graphView_->selectionModel().onChanged += [this](SelectionModel& selection) {
             if (nodePanel_ != nullptr) {
@@ -929,6 +951,9 @@ namespace curvy {
         }
         if (transformPanel_ != nullptr) {
             transformPanel_->onDestroyed = nullptr;
+        }
+        if (pyConsolePanel_ != nullptr) {
+            pyConsolePanel_->onDestroyed = nullptr;
         }
         if (documentPanel_ != nullptr) {
             documentPanel_->onDestroyed = nullptr;
