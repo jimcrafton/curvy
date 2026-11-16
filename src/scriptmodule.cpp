@@ -10,7 +10,12 @@
 #include <pybind11/stl.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 #include <map>
 #include <memory>
 #include <optional>
@@ -842,7 +847,168 @@ namespace curvy {
 
     }
 
+    namespace {
+
+        struct Dispatch {
+            std::mutex mutex;
+            MainThreadPoster poster;
+            std::thread::id mainThread;
+            std::atomic<bool> aborting{false};
+            ScriptProgress progress;
+        };
+
+        Dispatch& dispatch() {
+            static Dispatch instance;
+            return instance;
+        }
+
+        // One call a script thread hands to the main thread. The pointers belong to the waiting thread, which stays blocked until the
+        // call finished or was abandoned before it started, so the main thread never sees them after that.
+        struct MainCall {
+            std::mutex mutex;
+            std::condition_variable finishedCondition;
+            bool started = false;
+            bool finished = false;
+            bool abandoned = false;
+            bool failed = false;
+            PyObject* function = nullptr;
+            PyObject* args = nullptr;
+            PyObject* kwargs = nullptr;
+            // Only touched with the GIL held.
+            py::object result;
+            py::object error;
+        };
+
+        void runMainCall(MainCall& call) {
+            {
+                std::lock_guard<std::mutex> lock(call.mutex);
+                if (call.abandoned) {
+                    return;
+                }
+                call.started = true;
+            }
+            {
+                py::gil_scoped_acquire gil;
+                try {
+                    const py::object function = py::reinterpret_borrow<py::object>(call.function);
+                    const py::args args = py::reinterpret_borrow<py::args>(call.args);
+                    const py::kwargs kwargs = py::reinterpret_borrow<py::kwargs>(call.kwargs);
+                    call.result = function(*args, **kwargs);
+                } catch (py::error_already_set& e) {
+                    call.failed = true;
+                    call.error = e.value();
+                }
+            }
+            {
+                std::lock_guard<std::mutex> lock(call.mutex);
+                call.finished = true;
+            }
+            call.finishedCondition.notify_all();
+        }
+
+        py::object callOnMain(const py::object& function, const py::args& args, const py::kwargs& kwargs) {
+            Dispatch& state = dispatch();
+            MainThreadPoster poster;
+            {
+                std::lock_guard<std::mutex> lock(state.mutex);
+                poster = state.poster;
+            }
+            if (!poster || std::this_thread::get_id() == state.mainThread) {
+                return function(*args, **kwargs);
+            }
+
+            auto call = std::make_shared<MainCall>();
+            call->function = function.ptr();
+            call->args = args.ptr();
+            call->kwargs = kwargs.ptr();
+            {
+                py::gil_scoped_release release;
+                poster([call]() { runMainCall(*call); });
+                std::unique_lock<std::mutex> lock(call->mutex);
+                while (!call->finished) {
+                    call->finishedCondition.wait_for(lock, std::chrono::milliseconds(20));
+                    if (!call->finished && !call->started && state.aborting.load()) {
+                        call->abandoned = true;
+                        break;
+                    }
+                }
+            }
+            if (call->abandoned) {
+                PyErr_SetString(py::module_::import("curvy").attr("Cancelled").ptr(), "the window is closing");
+                throw py::error_already_set();
+            }
+            if (call->failed) {
+                py::object error = std::move(call->error);
+                PyErr_SetObject(reinterpret_cast<PyObject*>(Py_TYPE(error.ptr())), error.ptr());
+                throw py::error_already_set();
+            }
+            return std::move(call->result);
+        }
+
+        py::object guarded(const py::object& original) {
+            if (original.is_none()) {
+                return original;
+            }
+            return py::cpp_function([original](const py::args& args, const py::kwargs& kwargs) { return callOnMain(original, args, kwargs); });
+        }
+
+        // Replaces every method and property of a class with one that runs on the main thread (see setScriptMainThreadPoster). The
+        // constructor and the other construction and pickling hooks stay: they touch nothing shared.
+        void guardClass(const py::object& cls) {
+            py::module_ builtins = py::module_::import("builtins");
+            const py::object propertyType = builtins.attr("property");
+            const py::list members = builtins.attr("list")(cls.attr("__dict__").attr("items")());
+            for (const py::handle item : members) {
+                const py::tuple pair = py::reinterpret_borrow<py::tuple>(item);
+                const std::string name = pair[0].cast<std::string>();
+                const py::object value = py::reinterpret_borrow<py::object>(pair[1]);
+                if (name == "__init__" || name == "__new__" || name == "__del__" || name == "__getstate__" || name == "__setstate__") {
+                    continue;
+                }
+                if (py::isinstance(value, propertyType)) {
+                    cls.attr(name.c_str()) = propertyType(guarded(value.attr("fget")), guarded(value.attr("fset")), guarded(value.attr("fdel")),
+                                                          value.attr("__doc__"));
+                } else if (std::string(py::str(py::type::of(value).attr("__name__"))) == "instancemethod") {
+                    const std::string doc = value.attr("__doc__").is_none() ? std::string() : value.attr("__doc__").cast<std::string>();
+                    cls.attr(name.c_str()) = py::cpp_function(
+                        [value](const py::args& args, const py::kwargs& kwargs) { return callOnMain(value, args, kwargs); },
+                        py::name(name.c_str()), py::is_method(cls), py::doc(doc.c_str()));
+                }
+            }
+        }
+
+    }
+
+    void setScriptMainThreadPoster(MainThreadPoster poster) {
+        Dispatch& state = dispatch();
+        std::lock_guard<std::mutex> lock(state.mutex);
+        state.poster = std::move(poster);
+    }
+
+    bool hasScriptMainThreadPoster() {
+        Dispatch& state = dispatch();
+        std::lock_guard<std::mutex> lock(state.mutex);
+        return static_cast<bool>(state.poster);
+    }
+
+    void setScriptDispatchAborting(bool aborting) {
+        dispatch().aborting = aborting;
+    }
+
+    ScriptProgress scriptProgress() {
+        Dispatch& state = dispatch();
+        std::lock_guard<std::mutex> lock(state.mutex);
+        return state.progress;
+    }
+
+    void resetScriptProgress() {
+        Dispatch& state = dispatch();
+        std::lock_guard<std::mutex> lock(state.mutex);
+        state.progress = ScriptProgress();
+    }
+
     void registerCurvyModule() {
+        dispatch().mainThread = std::this_thread::get_id();
         py::module_ module = py::module_::import("types").attr("ModuleType")("curvy");
         py::module_::import("sys").attr("modules")["curvy"] = module;
         // A BaseException, like KeyboardInterrupt, so a script's `except Exception` does not swallow a cancel.
@@ -852,6 +1018,21 @@ namespace curvy {
         bindSelection(module);
         bindObject(module);
         bindDocument(module);
+        module.def("progress", [](float fraction, const std::string& message) {
+            Dispatch& state = dispatch();
+            std::lock_guard<std::mutex> lock(state.mutex);
+            state.progress.fraction = fraction;
+            state.progress.message = message;
+        }, py::arg("fraction"), py::arg("message") = "",
+           "Reports how far the script is (0..1, or negative for unknown) and what it is doing; the console panel shows it while the script runs.");
+
+        for (const char* name : {"Selection", "Object", "Transaction", "Document"}) {
+            guardClass(module.attr(name));
+        }
+        py::module_ jitnodes = py::module_::import("jitnodes");
+        for (const char* name : {"Network", "Node", "History"}) {
+            guardClass(jitnodes.attr(name));
+        }
     }
 
     void ScriptTransaction::begin(SketchDocument& document) {

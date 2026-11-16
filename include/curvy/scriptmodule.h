@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 #include <memory>
+#include <string>
 
 namespace pybind11 {
     class object;
@@ -13,8 +15,27 @@ namespace curvy {
     class SelectionModel;
 
     // Registers the `curvy` Python module (Document, Object, Selection, Swatch, Palette) in sys.modules. Needs the interpreter to be running and is
-    // called once, by ScriptConsole.
+    // called once, by ScriptConsole, on the main thread.
     void registerCurvyModule();
+
+    // Runs `task` on the main thread, later; callable from any thread (the application passes RunLoop::post).
+    using MainThreadPoster = std::function<void(std::function<void()>)>;
+
+    // Scripts that run on a worker thread reach the document through these: every call into a `curvy` or `jitnodes` class is handed to the
+    // main thread through the poster and the script waits for it, so the document is only ever touched from one thread. Without a poster,
+    // or on the main thread itself, calls run directly.
+    void setScriptMainThreadPoster(MainThreadPoster poster);
+    bool hasScriptMainThreadPoster();
+    // While set, a script waiting for a call the main thread has not started gives up with curvy.Cancelled (the window is closing).
+    void setScriptDispatchAborting(bool aborting);
+
+    // What `curvy.progress(fraction, message)` last reported; fraction is negative until a script reports one.
+    struct ScriptProgress {
+        float fraction = -1.0f;
+        std::string message;
+    };
+    ScriptProgress scriptProgress();
+    void resetScriptProgress();
 
     // Makes everything one script run changes in a document a single undo step: begin() notes the depth of the document's undo stack, end()
     // merges the steps pushed since. The script's own undo, redo and new_blank end the step first and start a new one after (they move or

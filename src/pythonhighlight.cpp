@@ -80,6 +80,11 @@ namespace curvy {
         return styles;
     }
 
+    const std::vector<SyntaxStyleInfo>& pythonBaseColors() {
+        static const std::vector<SyntaxStyleInfo> colors = {{"text", "Text"}, {"background", "Background"}};
+        return colors;
+    }
+
     std::uint32_t pythonDefaultColor(const std::string& style, bool dark) {
         const lex::Theme theme = dark ? lex::Theme::dark() : lex::Theme::light();
         if (style == "text") {

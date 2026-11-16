@@ -6,6 +6,7 @@
 #include "curvy/sketchdocument.h"
 
 #include <newui/controls.h>
+#include <newui/runloop.h>
 
 #include <functional>
 #include <string>
@@ -16,7 +17,8 @@ namespace curvy {
     // The Python console of the right dock: a read-only transcript above one input line. Enter runs the line in the console's scope
     // (`doc` is the document, `network` its graph); what it printed, or the traceback, is appended to the transcript. Up and Down in the
     // input walk the lines run before. The console and the document must outlive the panel's use; the owner calls setDocument() when the
-    // active document changes. Scripts run on the calling (main) thread, so a long script blocks the window until it returns.
+    // active document changes. When the console has a main-thread poster scripts run in the background (the window stays alive, a Cancel
+    // button shows, output and progress appear as they come); without one (tests) they run on the calling thread and block it.
     // @reflect ignore=true
     class PyConsolePanel : public Panel {
     public:
@@ -33,6 +35,13 @@ namespace curvy {
         // is left alone.
         void runScript(const std::string& code, const std::string& name);
         void clear();
+
+        bool running() const { return running_; }
+        // Stops the script that runs in the background (the Cancel button does the same).
+        void cancelRun();
+
+        // Called with true when a background script starts and false when its result is shown.
+        std::function<void(bool)> onRunningChanged;
 
         // Called right before a script starts, after the transcript shows that it is running: the owner paints the window now, because
         // nothing is painted until the script returns.
@@ -52,9 +61,17 @@ namespace curvy {
     private:
         static std::wstring widen(const std::string& text);
         void runAndShow(const std::string& code, const std::string& echo);
+        void showRunning();
+        void finishRun(const ScriptResult& result);
+        static std::string errorText(const ScriptResult& result);
         void setTranscript(const std::wstring& text);
         void layoutParts();
 
+        bool running_ = false;
+        std::wstring before_;
+        std::string echo_;
+        newui::Button* cancel_ = nullptr;
+        newui::RunLoop::TimerHandle timer_ = newui::RunLoop::kInvalidTimerHandle;
         ScriptConsole& console_;
         SketchDocument* document_;
         SelectionModel* selection_ = nullptr;

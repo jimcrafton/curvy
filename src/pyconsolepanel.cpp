@@ -6,6 +6,7 @@
 #include <newui/keyboard_constants.h>
 
 #include <algorithm>
+#include <chrono>
 
 namespace curvy {
 
@@ -14,6 +15,7 @@ namespace curvy {
     namespace {
         constexpr float kPad = 6.0f;
         constexpr float kInputHeight = 26.0f;
+        constexpr float kCancelWidth = 64.0f;
 
         // A single-line field handles Up and Down itself (the caret jumps to either end), before any listener of the field sees them,
         // so the history keys are taken here.
@@ -56,7 +58,20 @@ namespace curvy {
         input_->caret().setColor(theme.textColor());
         body().addChild(input_);
 
+        cancel_ = new Button();
+        cancel_->setName("pyConsoleCancel");
+        cancel_->setText("Cancel");
+        body().addChild(cancel_);
+        cancel_->setVisible(false);
+        cancel_->onClick += [this](Control&) {
+            cancelRun();
+            return SyncReturn::Handled;
+        };
+
         input_->onReturnPressed += [this](TextField&) {
+            if (running_) {
+                return SyncReturn::Handled;
+            }
             const std::string code = input();
             setInput("");
             execute(code);
@@ -71,6 +86,12 @@ namespace curvy {
     }
 
     PyConsolePanel::~PyConsolePanel() {
+        if (timer_ != RunLoop::kInvalidTimerHandle) {
+            RunLoop::current().cancelDelayed(timer_);
+        }
+        if (running_) {
+            console_.abort();   // the script's thread would otherwise outlive the document it edits
+        }
         if (onDestroyed) {
             onDestroyed();
         }
@@ -82,7 +103,9 @@ namespace curvy {
         const float width = (std::max)(own.width() - 2.0f * kPad, 40.0f);
         const float outputHeight = (std::max)(own.height() - kInputHeight - 3.0f * kPad, 20.0f);
         scroll_->setBounds(Rect(kPad, kPad, width, outputHeight));
-        input_->setBounds(Rect(kPad, kPad * 2.0f + outputHeight, width, kInputHeight));
+        const float cancelWidth = running_ ? kCancelWidth + kPad : 0.0f;
+        input_->setBounds(Rect(kPad, kPad * 2.0f + outputHeight, (std::max)(width - cancelWidth, 20.0f), kInputHeight));
+        cancel_->setBounds(Rect(kPad + width - kCancelWidth, kPad * 2.0f + outputHeight, kCancelWidth, kInputHeight));
         // The scroll view sizes its bar from the text's last layout, which is the old text until this; then the newest line is shown.
         output_->controller().ensureLayoutUpToDate();
         scroll_->updateLayout();
@@ -115,17 +138,83 @@ namespace curvy {
         runAndShow(code, ">>> run " + name + "\n");
     }
 
-    void PyConsolePanel::runAndShow(const std::string& code, const std::string& echo) {
-        // The window cannot repaint while the script blocks the thread, so the "running" line is painted first and replaced afterwards.
-        const std::wstring before = output_->text();
-        setTranscript(before + widen(echo + "running... (Esc cancels)\n"));
-        if (onBeforeRun) {
-            onBeforeRun();
+    std::string PyConsolePanel::errorText(const ScriptResult& result) {
+        if (result.ok) {
+            return std::string();
         }
-        const ScriptResult result = console_.run(code, document_, selection_);
-        setTranscript(before + widen(echo + result.output + (result.ok ? "" : result.error + (result.error.empty() || result.error.back() != '\n' ? "\n" : ""))));
+        return result.error + (result.error.empty() || result.error.back() != '\n' ? "\n" : "");
+    }
+
+    void PyConsolePanel::runAndShow(const std::string& code, const std::string& echo) {
+        if (running_) {
+            return;
+        }
+        const std::wstring before = output_->text();
+        if (!console_.canRunInBackground()) {
+            // The window cannot repaint while the script blocks the thread, so the "running" line is painted first and replaced afterwards.
+            setTranscript(before + widen(echo + "running... (Esc cancels)\n"));
+            if (onBeforeRun) {
+                onBeforeRun();
+            }
+            const ScriptResult result = console_.run(code, document_, selection_);
+            setTranscript(before + widen(echo + result.output + errorText(result)));
+            if (onExecuted) {
+                onExecuted();
+            }
+            return;
+        }
+        before_ = before;
+        echo_ = echo;
+        if (!console_.runInBackground(code, document_, selection_, [this](const ScriptResult& result) { finishRun(result); })) {
+            setTranscript(before + widen(echo + "A script is already running\n"));
+            return;
+        }
+        running_ = true;
+        cancel_->setVisible(true);
+        showRunning();
+        RunLoop& loop = RunLoop::current();
+        if (loop) {   // no loop in a test: the transcript is refreshed when the result arrives
+            timer_ = loop.postDelayed(std::chrono::milliseconds(100), [this]() {
+                showRunning();
+                return false;
+            });
+        }
+        if (onRunningChanged) {
+            onRunningChanged(true);
+        }
+    }
+
+    void PyConsolePanel::showRunning() {
+        const ScriptProgress progress = console_.progress();
+        std::string status = "running...";
+        if (progress.fraction >= 0.0f) {
+            status += " " + std::to_string(int(progress.fraction * 100.0f + 0.5f)) + "%";
+        }
+        if (!progress.message.empty()) {
+            status += " " + progress.message;
+        }
+        setTranscript(before_ + widen(echo_ + console_.outputSoFar() + status + " (Esc cancels)\n"));
+    }
+
+    void PyConsolePanel::finishRun(const ScriptResult& result) {
+        if (timer_ != RunLoop::kInvalidTimerHandle) {
+            RunLoop::current().cancelDelayed(timer_);
+            timer_ = RunLoop::kInvalidTimerHandle;
+        }
+        running_ = false;
+        cancel_->setVisible(false);
+        setTranscript(before_ + widen(echo_ + result.output + errorText(result)));
+        if (onRunningChanged) {
+            onRunningChanged(false);
+        }
         if (onExecuted) {
             onExecuted();
+        }
+    }
+
+    void PyConsolePanel::cancelRun() {
+        if (running_) {
+            console_.cancel();
         }
     }
 

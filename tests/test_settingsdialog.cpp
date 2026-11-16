@@ -158,6 +158,22 @@ TEST_F(SettingsDialogTest, everySyntaxStyleHasAHexFieldAndAWell) {
     }
 }
 
+TEST_F(SettingsDialogTest, theTextAndBackgroundColoursCanBeSetAndClearedLikeTheSyntaxColours) {
+    ASSERT_EQ(2u, curvy::pythonBaseColors().size());
+    for (const auto& base : curvy::pythonBaseColors()) {
+        auto* hex = find<newui::TextField>((std::string("syntaxHex_") + base.name).c_str());
+        ASSERT_NE(nullptr, hex) << base.name;
+        EXPECT_NE(nullptr, find<newui::View>((std::string("syntaxWell_") + base.name).c_str())) << base.name;
+        hex->setText(L"#102030");
+        hex->onReturnPressed(*hex);
+        ASSERT_EQ(1u, working_.editorColors.count(base.name)) << base.name;
+        EXPECT_EQ(0x102030u, working_.editorColors[base.name]);
+        hex->setText(L"");
+        hex->onReturnPressed(*hex);
+        EXPECT_EQ(0u, working_.editorColors.count(base.name)) << "empty goes back to the theme's colour";
+    }
+}
+
 TEST_F(SettingsDialogTest, theFontIsChosenFromTheInstalledMonospaceFaces) {
     auto* font = find<newui::DropDownList>("editorFont");
     const auto installed = curvy::installedMonospaceFonts();

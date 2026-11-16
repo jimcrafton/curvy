@@ -15,6 +15,7 @@
 #include <fstream>
 #include <initializer_list>
 #include <iterator>
+#include <regex>
 #include <sstream>
 
 namespace curvy {
@@ -26,6 +27,7 @@ namespace curvy {
         constexpr const char* kBaseTitle = "Python Script Editor";
         constexpr std::chrono::milliseconds kHighlightDelay(60);
         constexpr std::chrono::milliseconds kScratchDelay(800);
+        constexpr std::chrono::milliseconds kSyntaxDelay(400);
 
         // The editing keys of a Python editor, ahead of the text control's own: Ctrl+Enter and F5 run the script, Enter keeps (or adds
         // to) the line's indentation, Tab inserts spaces up to the next tab stop (or indents the selected lines), Shift+Tab takes a
@@ -332,6 +334,26 @@ namespace curvy {
         findCloseButton_->setName("pyEditorFindClose");
         findCloseButton_->setText("X");
         body().addChild(findCloseButton_);
+        problemLabel_ = new Label();
+        problemLabel_->setName("pyEditorProblem");
+        problemLabel_->setTextColor(BLRgba32(0xFFE86A6Au));
+        problemLabel_->setVisible(false);
+        body().addChild(problemLabel_);
+        const auto makeSwitch = [this](const char* name, const char* label) {
+            Button* button = new Button();
+            button->setName(name);
+            button->setText(label);
+            button->setToggleButton(true);
+            body().addChild(button);
+            button->onCheckedChanged += [this](Button&) {
+                findOptionsChanged();
+                return SyncReturn::Handled;
+            };
+            return button;
+        };
+        matchCaseButton_ = makeSwitch("pyEditorMatchCase", "Aa");
+        wholeWordButton_ = makeSwitch("pyEditorWholeWord", "W");
+        regexButton_ = makeSwitch("pyEditorRegex", ".*");
         replaceField_ = new TextField();
         replaceField_->setName("pyEditorReplace");
         replaceField_->setController(std::make_unique<FindFieldController>(*replaceField_, [this](bool backward) { findNext(backward); }, [this]() { hideFind(); }));
@@ -396,11 +418,18 @@ namespace curvy {
             return SyncReturn::Handled;
         };
         runButton_->onClick += [this](Control&) {
+            if (running_) {
+                if (onStop) {
+                    onStop();
+                }
+                return SyncReturn::Handled;
+            }
             run();
             return SyncReturn::Handled;
         };
         text_->model().onChanged.add([this](Model&) {
             scheduleHighlight();
+            scheduleSyntaxCheck();
             return SyncReturn::Ignored;
         });
         // After the edit is in the history: onChanged comes first and would still see the old clean state.
@@ -432,6 +461,9 @@ namespace curvy {
             if (scratchTimer_ != RunLoop::kInvalidTimerHandle) {
                 loop_->cancelDelayed(scratchTimer_);
             }
+            if (syntaxTimer_ != RunLoop::kInvalidTimerHandle) {
+                loop_->cancelDelayed(syntaxTimer_);
+            }
         }
         if (scratchDirty_) {
             writeScratch();   // a pause was still running: do not lose what was typed in it
@@ -444,6 +476,38 @@ namespace curvy {
     void ScriptEditorPanel::applySettings(const Settings& settings) {
         text_->setFont(scriptEditorFont(settings.editorFont, settings.editorFontSize));
         text_->setStyleSheet(pythonStyleSheet(settings.darkTheme(), settings.editorColors));
+
+        // The plain-text and background colours are overrides on top of the app theme's look; when one is cleared the look that was there is
+        // put back (kept when the override first replaced it).
+        const Theme& theme = Theme::current();
+        const auto textColor = settings.editorColors.find("text");
+        const BLRgba32 text = textColor != settings.editorColors.end() ? BLRgba32(0xFF000000u | textColor->second) : theme.textColor();
+        text_->setTextColor(text);
+        text_->caret().setColor(text);
+        const auto background = settings.editorColors.find("background");
+        if (background != settings.editorColors.end()) {
+            if (!themeBackground_) {
+                const auto saved = [](View& view) {
+                    const gfx::Fill& fill = view.style().backgroundFill();
+                    return SavedFill{fill.kind(), fill.color()};
+                };
+                themeBackground_ = std::make_pair(saved(*text_), saved(*scroll_));
+            }
+            const Color color(0xFF000000u | background->second, true);
+            text_->style().setBackgroundColor(color);
+            scroll_->style().setBackgroundColor(color);
+        } else if (themeBackground_) {
+            const auto restore = [](View& view, const SavedFill& saved) {
+                gfx::Fill& fill = view.style().backgroundFill();
+                fill.setColor(saved.color);
+                fill.setKind(saved.kind);
+            };
+            restore(*text_, themeBackground_->first);
+            restore(*scroll_, themeBackground_->second);
+            themeBackground_.reset();
+        }
+        text_->style().markDirty();
+        scroll_->style().markDirty();
         if (auto* controller = dynamic_cast<EditorController*>(&text_->controller())) {
             controller->setIndentWidth(std::size_t(settings.editorTabWidth));
         }
@@ -455,11 +519,13 @@ namespace curvy {
         const Rect own = body().bounds();
         body().setContentSize(Size(own.width(), own.height()));
         const float width = (std::max)(own.width() - 2.0f * kPad, 40.0f);
-        const float findRow = findShown_ ? (kButtonHeight + kPad) * (replaceShown_ ? 2.0f : 1.0f) : 0.0f;
-        const float textHeight = (std::max)(own.height() - kButtonHeight - 3.0f * kPad - findRow, 20.0f);
+        const float findRow = findShown_ ? (kButtonHeight + kPad) * (replaceShown_ ? 3.0f : 2.0f) : 0.0f;
+        const float problemRow = problem_ ? kProblemHeight : 0.0f;
+        const float textHeight = (std::max)(own.height() - kButtonHeight - 3.0f * kPad - findRow - problemRow, 20.0f);
         scroll_->setBounds(Rect(kPad, kPad, width, textHeight));
+        problemLabel_->setBounds(Rect(kPad, kPad + textHeight + 2.0f, width, kProblemHeight - 2.0f));
         if (findShown_) {
-            const float y = kPad * 2.0f + textHeight;
+            const float y = kPad * 2.0f + textHeight + problemRow;
             const float closeWidth = kButtonHeight;
             const float buttonWidth = 44.0f;
             const float statusWidth = 64.0f;
@@ -473,8 +539,15 @@ namespace curvy {
             findLabel_->setBounds(Rect(right - statusWidth, y, statusWidth, kButtonHeight));
             right -= statusWidth + kPad;
             findField_->setBounds(Rect(kPad, y, (std::max)(right - kPad, 30.0f), kButtonHeight));
+            const float switchY = y + kButtonHeight + kPad;
+            const float switchWidth = 34.0f;
+            float switchX = kPad;
+            for (Button* button : {matchCaseButton_, wholeWordButton_, regexButton_}) {
+                button->setBounds(Rect(switchX, switchY, switchWidth, kButtonHeight));
+                switchX += switchWidth + kPad;
+            }
             if (replaceShown_) {
-                const float y2 = y + kButtonHeight + kPad;
+                const float y2 = switchY + kButtonHeight + kPad;
                 const float allWidth = 36.0f;
                 const float oneWidth = 60.0f;
                 float edge = kPad + width - closeWidth - kPad;   // the right edge of the Next button
@@ -485,7 +558,7 @@ namespace curvy {
                 replaceField_->setBounds(Rect(kPad, y2, (std::max)(edge - kPad, 30.0f), kButtonHeight));
             }
         }
-        const float top0 = kPad * 3.0f + textHeight + findRow - kPad;
+        const float top0 = kPad * 3.0f + textHeight + findRow + problemRow - kPad;
         // Run is the wide one: its label can be "Run Selection".
         const float room = width - 2.0f * kPad;
         const float quarter = room * 0.25f;
@@ -508,6 +581,7 @@ namespace curvy {
         updateTitle();
         refreshHighlight();
         layoutParts();
+        scheduleSyntaxCheck();
     }
 
     void ScriptEditorPanel::updateTitle() {
@@ -520,7 +594,15 @@ namespace curvy {
     }
 
     void ScriptEditorPanel::updateRunLabel() {
-        runButton_->setText(hasSelection() ? "Run Selection" : "Run");
+        // A warning sign (U+26A0) while the whole script does not compile: Run will refuse it and say why.
+        const bool selected = hasSelection();
+        if (running_) {
+            runButton_->setText("Stop");
+        } else if (selected) {
+            runButton_->setText("Run Selection");
+        } else {
+            runButton_->setText(problem_ ? "\xE2\x9A\xA0 Run" : "Run");
+        }
     }
 
     bool ScriptEditorPanel::hasSelection() const {
@@ -583,6 +665,79 @@ namespace curvy {
         });
     }
 
+    void ScriptEditorPanel::scheduleSyntaxCheck() {
+        if (!onCheckSyntax) {
+            return;
+        }
+        RunLoop& loop = RunLoop::current();
+        if (!loop) {
+            checkSyntax();   // no run loop (a test): there is nothing to wait for
+            return;
+        }
+        loop_ = &loop;
+        if (syntaxTimer_ != RunLoop::kInvalidTimerHandle) {
+            loop.cancelDelayed(syntaxTimer_);
+        }
+        syntaxTimer_ = loop.postDelayed(kSyntaxDelay, [this]() {
+            syntaxTimer_ = RunLoop::kInvalidTimerHandle;
+            checkSyntax();
+            return true;   // once
+        });
+    }
+
+    void ScriptEditorPanel::checkSyntax() {
+        if (loop_ != nullptr && syntaxTimer_ != RunLoop::kInvalidTimerHandle) {
+            loop_->cancelDelayed(syntaxTimer_);
+            syntaxTimer_ = RunLoop::kInvalidTimerHandle;
+        }
+        std::optional<SyntaxProblem> found;
+        if (onCheckSyntax) {
+            found = onCheckSyntax(script());
+        }
+        problem_ = found;
+        problemLabel_->setText(found ? "Line " + std::to_string(found->line) + ", col " + std::to_string(found->column) + ": " + found->message : std::string());
+        problemLabel_->setVisible(found.has_value());
+        updateRunLabel();
+        layoutParts();
+        applyMarks(findMarks_);
+    }
+
+    void ScriptEditorPanel::applyMarks(std::vector<text::TextDecoration> findMarks) {
+        findMarks_ = findMarks;
+        if (problem_) {
+            // From the reported column to its end (or the end of that line), at least one character and never past the text.
+            const std::wstring& text = text_->text();
+            const auto lineStart = [&text](int line) {
+                std::size_t at = 0;
+                for (int i = 1; i < line && at != std::wstring::npos; ++i) {
+                    const std::size_t newline = text.find(L'\n', at);
+                    at = newline == std::wstring::npos ? std::wstring::npos : newline + 1;
+                }
+                return at;
+            };
+            const std::size_t first = lineStart(problem_->line);
+            if (first != std::wstring::npos) {
+                const std::size_t lineEnd = (std::min)(text.find(L'\n', first), text.size());
+                const std::size_t start = (std::min)(first + std::size_t(problem_->column - 1), lineEnd > first ? lineEnd - 1 : first);
+                std::size_t end = lineEnd;
+                const std::size_t lastStart = lineStart(problem_->endLine);
+                if (problem_->endLine == problem_->line && lastStart != std::wstring::npos && problem_->endColumn - 1 > problem_->column - 1) {
+                    end = (std::min)(lastStart + std::size_t(problem_->endColumn - 1), lineEnd);
+                }
+                text::TextDecoration mark;
+                mark.start = start;
+                mark.length = (std::max)(end, start + 1) - start;
+                mark.kind = text::TextDecorationKind::Squiggle;
+                mark.color = Color(BLRgba32(0xFFE86A6Au));
+                mark.thickness = 1.5f;
+                findMarks.push_back(mark);
+            }
+        }
+        if (!findMarks.empty() || !text_->decorations().empty()) {
+            text_->setDecorations(std::move(findMarks));
+        }
+    }
+
     void ScriptEditorPanel::scheduleScratch() {
         if (scratchFile_.empty()) {
             return;
@@ -637,6 +792,22 @@ namespace curvy {
         updateTitle();
     }
 
+    void ScriptEditorPanel::restoreFile(const std::filesystem::path& path) {
+        if (path.empty()) {
+            return;
+        }
+        if (modified_ && file_.empty()) {
+            file_ = path;   // the text that came back from the scratch copy was this file's
+            updateTitle();
+            return;
+        }
+        std::error_code ignored;
+        if (text_->text().empty() && std::filesystem::exists(path, ignored)) {
+            std::string error;
+            load(path, error);
+        }
+    }
+
     bool ScriptEditorPanel::load(const std::filesystem::path& path, std::string& error) {
         std::ifstream in(path, std::ios::binary);
         if (!in) {
@@ -647,6 +818,9 @@ namespace curvy {
         file_ = path;
         setScript(normalized(bytes));
         scheduleScratch();   // removes a stale scratch copy
+        if (onFileChanged) {
+            onFileChanged(file_);
+        }
         return true;
     }
 
@@ -668,6 +842,9 @@ namespace curvy {
         modified_ = false;
         updateTitle();
         scheduleScratch();
+        if (onFileChanged) {
+            onFileChanged(file_);
+        }
         return true;
     }
 
@@ -700,7 +877,8 @@ namespace curvy {
     }
 
     void ScriptEditorPanel::applyFindVisibility() {
-        for (View* view : std::initializer_list<View*>{findField_, findLabel_, findPrevButton_, findNextButton_, findCloseButton_}) {
+        for (View* view : std::initializer_list<View*>{findField_, findLabel_, findPrevButton_, findNextButton_, findCloseButton_, matchCaseButton_,
+                                                       wholeWordButton_, regexButton_}) {
             view->setVisible(findShown_);
         }
         for (View* view : std::initializer_list<View*>{replaceField_, replaceButton_, replaceAllButton_}) {
@@ -729,57 +907,126 @@ namespace curvy {
         return wideToUtf8(replaceField_->text());
     }
 
-    bool ScriptEditorPanel::selectionIsMatch() const {
+    bool ScriptEditorPanel::collectMatches(std::vector<FindMatch>& matches, bool withReplacements, bool& badPattern) const {
+        matches.clear();
+        badPattern = false;
         const std::wstring query = findField_->text();
-        if (query.empty() || !hasSelection()) {
-            return false;
+        if (query.empty()) {
+            return true;
         }
-        const text::TextRange range = text_->selection().ranges()[0];
-        if (range.length() != query.size()) {
-            return false;
+        const std::wstring& text = text_->text();
+        const std::wstring with = replaceField_->text();
+        const auto isWord = [](wchar_t c) { return c == L'_' || std::iswalnum(wint_t(c)) != 0; };
+        // Whole word: the edges of the match that are word characters must not touch another one.
+        const auto wordOk = [&](std::size_t start, std::size_t length) {
+            if (!wholeWord_) {
+                return true;
+            }
+            const bool leftOk = !isWord(text[start]) || start == 0 || !isWord(text[start - 1]);
+            const std::size_t end = start + length;
+            const bool rightOk = !isWord(text[end - 1]) || end >= text.size() || !isWord(text[end]);
+            return leftOk && rightOk;
+        };
+
+        if (regex_) {
+            try {
+                std::wregex pattern(query, matchCase_ ? std::regex::ECMAScript : std::regex::ECMAScript | std::regex::icase);
+                for (std::wsregex_iterator it(text.begin(), text.end(), pattern), end; it != end; ++it) {
+                    const std::wsmatch& found = *it;
+                    if (found.length(0) == 0 || !wordOk(std::size_t(found.position(0)), std::size_t(found.length(0)))) {
+                        continue;
+                    }
+                    FindMatch match;
+                    match.start = std::size_t(found.position(0));
+                    match.length = std::size_t(found.length(0));
+                    if (withReplacements) {
+                        match.replacement = found.format(with);
+                    }
+                    matches.push_back(std::move(match));
+                }
+            } catch (const std::regex_error&) {
+                matches.clear();
+                badPattern = true;
+                return false;
+            }
+            return true;
         }
-        const std::wstring picked = text_->text().substr(range.start(), range.length());
-        return hasUpper(query) ? picked == query : lowered(picked) == lowered(query);
+
+        const bool exact = matchCase_ || hasUpper(query);
+        const std::wstring hay = exact ? text : lowered(text);
+        const std::wstring needle = exact ? query : lowered(query);
+        for (std::size_t at = hay.find(needle); at != std::wstring::npos; at = hay.find(needle, at + needle.size())) {
+            if (!wordOk(at, needle.size())) {
+                continue;
+            }
+            FindMatch match;
+            match.start = at;
+            match.length = needle.size();
+            if (withReplacements) {
+                match.replacement = with;
+            }
+            matches.push_back(std::move(match));
+        }
+        return true;
+    }
+
+    void ScriptEditorPanel::setFindOptions(bool matchCase, bool wholeWord, bool regex) {
+        matchCase_ = matchCase;
+        wholeWord_ = wholeWord;
+        regex_ = regex;
+        matchCaseButton_->setChecked(matchCase);
+        wholeWordButton_->setChecked(wholeWord);
+        regexButton_->setChecked(regex);
+        findOptionsChanged();
+    }
+
+    void ScriptEditorPanel::findOptionsChanged() {
+        matchCase_ = matchCaseButton_->isChecked();
+        wholeWord_ = wholeWordButton_->isChecked();
+        regex_ = regexButton_->isChecked();
+        if (!findText().empty() && findShown_) {
+            const text::TextRange range = text_->selection().isEmpty() ? text::TextRange(0, 0) : text_->selection().ranges()[0];
+            selectMatch(range.start(), false);
+        }
+        updateFindStatus();
     }
 
     bool ScriptEditorPanel::replaceCurrent() {
         if (findField_->text().empty()) {
             return false;
         }
-        if (selectionIsMatch()) {
+        std::vector<FindMatch> matches;
+        bool bad = false;
+        collectMatches(matches, true, bad);
+        if (hasSelection()) {
             const text::TextRange range = text_->selection().ranges()[0];
-            const std::wstring with = replaceField_->text();
-            text_->selection().clear();
-            text_->model().replace(range, with);
-            text_->caret().setPosition(text::TextPosition(range.start() + with.size()));
+            const auto current = std::find_if(matches.begin(), matches.end(), [&](const FindMatch& match) {
+                return match.start == range.start() && match.length == range.length();
+            });
+            if (current != matches.end()) {
+                text_->selection().clear();
+                text_->model().replace(range, current->replacement);
+                text_->caret().setPosition(text::TextPosition(range.start() + current->replacement.size()));
+            }
         }
         return findNext(false);
     }
 
     std::size_t ScriptEditorPanel::replaceAll() {
-        const std::wstring query = findField_->text();
-        if (query.empty()) {
+        std::vector<FindMatch> matches;
+        bool bad = false;
+        collectMatches(matches, true, bad);
+        if (matches.empty()) {
             return 0;
         }
-        const bool exact = hasUpper(query);
-        const std::wstring hay = exact ? text_->text() : lowered(text_->text());
-        const std::wstring needle = exact ? query : lowered(query);
-        std::vector<std::size_t> hits;
-        for (std::size_t at = hay.find(needle); at != std::wstring::npos; at = hay.find(needle, at + needle.size())) {
-            hits.push_back(at);
-        }
-        if (hits.empty()) {
-            return 0;
-        }
-        const std::wstring with = replaceField_->text();
         text_->selection().clear();
         history_->beginGroup();
-        for (auto it = hits.rbegin(); it != hits.rend(); ++it) {   // from the end, so the earlier offsets stay right
-            text_->model().replace(text::TextRange(*it, needle.size()), with);
+        for (auto it = matches.rbegin(); it != matches.rend(); ++it) {   // from the end, so the earlier offsets stay right
+            text_->model().replace(text::TextRange(it->start, it->length), it->replacement);
         }
         history_->endGroup();
         updateFindStatus();
-        return hits.size();
+        return matches.size();
     }
 
     void ScriptEditorPanel::setFindText(const std::string& text) {
@@ -795,32 +1042,35 @@ namespace curvy {
     }
 
     bool ScriptEditorPanel::selectMatch(std::size_t from, bool backward) {
-        const std::wstring query = findField_->text();
-        if (query.empty()) {
+        std::vector<FindMatch> matches;
+        bool bad = false;
+        collectMatches(matches, false, bad);
+        if (matches.empty()) {
             return false;
         }
-        const bool exact = hasUpper(query);
-        const std::wstring hay = exact ? text_->text() : lowered(text_->text());
-        const std::wstring needle = exact ? query : lowered(query);
-        std::size_t at = std::wstring::npos;
+        const FindMatch* chosen = nullptr;
         if (backward) {
-            if (from > 0) {
-                at = hay.rfind(needle, from - 1);
+            for (const FindMatch& match : matches) {
+                if (match.start < from) {
+                    chosen = &match;
+                }
             }
-            if (at == std::wstring::npos) {
-                at = hay.rfind(needle);
+            if (chosen == nullptr) {
+                chosen = &matches.back();
             }
         } else {
-            at = hay.find(needle, from);
-            if (at == std::wstring::npos) {
-                at = hay.find(needle);
+            for (const FindMatch& match : matches) {
+                if (match.start >= from) {
+                    chosen = &match;
+                    break;
+                }
+            }
+            if (chosen == nullptr) {
+                chosen = &matches.front();
             }
         }
-        if (at == std::wstring::npos) {
-            return false;
-        }
-        text_->selection().setRange(text::TextRange(at, needle.size()));
-        text_->caret().setPosition(text::TextPosition(at + needle.size()));
+        text_->selection().setRange(text::TextRange(chosen->start, chosen->length));
+        text_->caret().setPosition(text::TextPosition(chosen->start + chosen->length));
         revealCaret();
         return true;
     }
@@ -842,27 +1092,30 @@ namespace curvy {
         const std::wstring query = findField_->text();
         if (query.empty() || !findShown_) {
             findLabel_->setText("");
-            if (!text_->decorations().empty()) {
-                text_->setDecorations({});
-            }
+            applyMarks({});
             return;
         }
-        const bool exact = hasUpper(query);
-        const std::wstring hay = exact ? text_->text() : lowered(text_->text());
-        const std::wstring needle = exact ? query : lowered(query);
+        std::vector<FindMatch> matches;
+        bool bad = false;
+        collectMatches(matches, false, bad);
+        if (bad) {
+            applyMarks({});
+            findLabel_->setText("Bad pattern");
+            return;
+        }
         const std::size_t selected = hasSelection() ? text_->selection().ranges()[0].start() : std::wstring::npos;
         std::size_t total = 0;
         std::size_t index = 0;
         std::vector<text::TextDecoration> marks;
-        for (std::size_t at = hay.find(needle); at != std::wstring::npos; at = hay.find(needle, at + needle.size())) {
+        for (const FindMatch& found : matches) {
             ++total;
-            const bool current = at == selected;
+            const bool current = found.start == selected;
             if (current) {
                 index = total;
             }
             text::TextDecoration mark;
-            mark.start = at;
-            mark.length = needle.size();
+            mark.start = found.start;
+            mark.length = found.length;
             mark.kind = text::TextDecorationKind::Background;
             mark.color = Color(BLRgba32(current ? 0xB0FF9A1Au : 0x70E6C229u));
             marks.push_back(mark);
@@ -874,7 +1127,7 @@ namespace curvy {
                 marks.push_back(frame);
             }
         }
-        text_->setDecorations(std::move(marks));
+        applyMarks(std::move(marks));
         if (total == 0) {
             findLabel_->setText("No match");
         } else if (index == 0) {
@@ -921,13 +1174,28 @@ namespace curvy {
         name += " (selection)";
     }
 
+    void ScriptEditorPanel::setRunning(bool running) {
+        running_ = running;
+        updateRunLabel();
+    }
+
     void ScriptEditorPanel::run() {
-        if (!onRun) {
+        if (!onRun || running_) {
             return;
         }
         std::string code;
         std::string name;
         codeToRun(code, name);
+        // Python would only print the error in the console; saying it here, before anything runs, keeps the console's history for real runs.
+        if (onCheckSyntax) {
+            if (const std::optional<SyntaxProblem> problem = onCheckSyntax(code)) {
+                if (onMessage) {
+                    onMessage("Not run - " + std::string(hasSelection() ? "selection " : "") + "line " + std::to_string(problem->line) + ", col " +
+                              std::to_string(problem->column) + ": " + problem->message);
+                }
+                return;
+            }
+        }
         onRun(code, name);
     }
 

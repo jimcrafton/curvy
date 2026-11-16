@@ -21,6 +21,8 @@ namespace curvy {
         const char* label;
     };
     const std::vector<SyntaxStyleInfo>& pythonSyntaxStyles();
+    // The two colours besides the syntax styles that the settings can override: "text" (everything not coloured) and "background".
+    const std::vector<SyntaxStyleInfo>& pythonBaseColors();
 
     // The colour (0xRRGGBB) the light or dark look gives a syntax style, or "text" (everything not coloured) or "background". Only pass
     // names from pythonSyntaxStyles(): any other gives 0, which is also black.

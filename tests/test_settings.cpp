@@ -37,7 +37,8 @@ namespace {
         changed.editorFont = "Hack-Regular";
         changed.editorFontSize = 16;
         changed.editorTabWidth = 2;
-        changed.editorColors = {{"keyword", 0xFF8800}, {"string", 0x00AA55}};
+        changed.editorColors = {{"keyword", 0xFF8800}, {"string", 0x00AA55}, {"text", 0xE0E0E0}, {"background", 0x101820}};
+        changed.editorFile = "D:/scripts/my script.py";
         changed.window = {-1200, 80, 1100, 700, true, "\\\\.\\DISPLAY2"};
         changed.docks[0] = {90.0f, false};
         changed.docks[2] = {300.0f, false};
@@ -90,6 +91,7 @@ TEST(SettingsFile, EverySettingRoundTrips) {
     EXPECT_EQ(16, back.editorFontSize);
     EXPECT_EQ(2, back.editorTabWidth);
     EXPECT_EQ(changed.editorColors, back.editorColors);
+    EXPECT_EQ("D:/scripts/my script.py", back.editorFile);
 }
 
 TEST(SettingsFile, TheWindowRoundTripsWithItsScreen) {
@@ -159,6 +161,7 @@ TEST(SettingsFile, resettingTheScriptEditorPageLeavesTheRestAlone) {
     EXPECT_EQ(4, reset.editorTabWidth);
     EXPECT_TRUE(reset.editorColors.empty());
     EXPECT_EQ(450, reset.spaceTapMs);
+    EXPECT_EQ("D:/scripts/my script.py", reset.editorFile) << "the open file is state, not a preference: a page reset keeps it";
 }
 
 TEST(SettingsFile, ADamagedFileChangesNothing) {

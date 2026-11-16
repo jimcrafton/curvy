@@ -85,9 +85,12 @@ namespace curvy {
         int editorTabWidth = 4;       // spaces per indent level: what Tab inserts and Enter adds after a colon
         // Only the colours the user changed, by syntax style name ("keyword", "string", ...; see pythonSyntaxStyles()), as 0xRRGGBB. Every
         // other style keeps the theme's colour.
+        // Besides the syntax styles' names, "text" (the colour of everything not coloured) and "background" can be overridden too.
         std::map<std::string, std::uint32_t> editorColors;
 
         // State
+        // The script the editor had open when the app closed (a full path; empty when it was untitled). Not a preference, so a page reset keeps it.
+        std::string editorFile;
         WindowPlacement window;
         DockArea docks[dockCount];
         std::vector<PanelState> panels;

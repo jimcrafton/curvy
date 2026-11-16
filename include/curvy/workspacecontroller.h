@@ -63,7 +63,8 @@ namespace curvy {
         Settings& settings() { return settings_; }
         void setSettingsPath(const std::string& path) { settingsPath_ = path; }
         // The Python console the right dock's Python panel runs scripts in; call before the window is created. Without one there is no Python panel.
-        void setScriptConsole(ScriptConsole* console) { scriptConsole_ = console; }
+        // Gives the console the run loop to reach the main thread through, so scripts run in the background.
+        void setScriptConsole(ScriptConsole* console);
         void saveSettings() const;
         // Puts the window where the last session left it (when that is still on a screen), maximized if it was; call before the window is
         // created (it sets the Frame's bounds). The window is saved when it closes.

@@ -249,7 +249,7 @@ namespace curvy::settingsdialog {
             number("editorFontSize", 8, 32, [this](double v) { working_.editorFontSize = int(v); }, [this] { return double(working_.editorFontSize); });
             number("editorTabWidth", 2, 8, [this](double v) { working_.editorTabWidth = int(v); }, [this] { return double(working_.editorTabWidth); });
 
-            for (const SyntaxStyleInfo& info : pythonSyntaxStyles()) {
+            for (const SyntaxStyleInfo& info : editorColorRows()) {
                 const std::string style = info.name;
                 auto* hex = find<TextField>(("syntaxHex_" + style).c_str());
                 if (hex == nullptr) {
@@ -279,6 +279,13 @@ namespace curvy::settingsdialog {
             }
         }
 
+        // Every colour row of the page: the syntax styles, then the text and background colours.
+        static std::vector<SyntaxStyleInfo> editorColorRows() {
+            std::vector<SyntaxStyleInfo> rows = pythonSyntaxStyles();
+            rows.insert(rows.end(), pythonBaseColors().begin(), pythonBaseColors().end());
+            return rows;
+        }
+
         static constexpr const char* kPreviewCode =
             "@decorator\n"
             "def draw(shape, count=3):\n"
@@ -289,7 +296,7 @@ namespace curvy::settingsdialog {
 
         void refreshSyntaxColors() {
             const bool dark = working_.darkTheme();
-            for (const SyntaxStyleInfo& info : pythonSyntaxStyles()) {
+            for (const SyntaxStyleInfo& info : editorColorRows()) {
                 const std::string style = info.name;
                 const auto chosen = working_.editorColors.find(style);
                 const std::uint32_t rgb = chosen != working_.editorColors.end() ? chosen->second : pythonDefaultColor(style, dark);
@@ -313,8 +320,12 @@ namespace curvy::settingsdialog {
             preview->setFont(scriptEditorFont(working_.editorFont, working_.editorFontSize));
             preview->setStyleSheet(pythonStyleSheet(dark, working_.editorColors));
             preview->setStyledRanges(pythonStyleRanges(widen(kPreviewCode)));
-            preview->setTextColor(BLRgba32(0xFF000000u | pythonDefaultColor("text", dark)));
-            preview->style().setBackgroundColor(newui::Color(std::uint32_t(0xFF000000u | pythonDefaultColor("background", dark)), true));
+            const auto colorOf = [this, dark](const char* name) {
+                const auto chosen = working_.editorColors.find(name);
+                return chosen != working_.editorColors.end() ? chosen->second : pythonDefaultColor(name, dark);
+            };
+            preview->setTextColor(BLRgba32(0xFF000000u | colorOf("text")));
+            preview->style().setBackgroundColor(newui::Color(std::uint32_t(0xFF000000u | colorOf("background")), true));
             preview->style().markDirty();
         }
 

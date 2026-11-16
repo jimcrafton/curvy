@@ -239,6 +239,7 @@ namespace curvy {
             text(style.c_str(), hexColor(rgb));
         }
         b["colors"] = b.pop();
+        text("file", editorFile);
         b["scriptEditor"] = b.pop();
 
         if (window.known()) {
@@ -346,6 +347,10 @@ namespace curvy {
             }
             readInt(g, "fontSize", editorFontSize, 8, 32);
             readInt(g, "tabWidth", editorTabWidth, 2, 8);
+            json5::value file;
+            if (find(g, "file", file) && file.is_string()) {
+                editorFile = file.get_c_str();
+            }
             json5::value colors;
             if (group(g, "colors", colors)) {
                 for (auto [name, child] : json5::object_view(colors)) {

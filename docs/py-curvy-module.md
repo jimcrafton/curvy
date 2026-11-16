@@ -173,19 +173,47 @@ Changing the selection is not an undo step.
 
 ## Running code (`ScriptConsole::run`)
 
-1. stdout and stderr are swapped for one `io.StringIO` for the duration of the run, and restored afterwards.
+1. stdout and stderr are swapped for one C++ `OutputSink` (a `curvy._Output` object with a mutex-guarded string) for the duration of the run,
+   and restored afterwards. Being C++, the main thread can read what a background script printed so far (`outputSoFar()`) without the GIL.
 2. The code is compiled as an expression first; on `SyntaxError` it is compiled as statements. An expression whose value is not `None`
    prints its `repr`, like the interactive interpreter.
 3. A Python exception or a C++ exception sets `ok = false` and `error` (the traceback text); `run` never throws for a script error.
 4. Output is whatever the script printed, followed by the `repr` line.
 
-Constraints: one `ScriptConsole` per process (CPython cannot be restarted), created and destroyed on the main thread, and scripts run on the
-main thread. A long script blocks the UI (the panel does not repaint until it ends). Declaration order in `ScriptConsole::Impl` matters: the
-scope (Python objects) must be destroyed before the interpreter.
+Constraints: one `ScriptConsole` per process (CPython cannot be restarted), created and destroyed on the main thread. `run()` runs the script
+on the calling thread and blocks it (tests, and the fallback when no poster is set). The application uses `runInBackground()` (next section).
+Declaration order in `ScriptConsole::Impl` matters: the scope (Python objects) must be destroyed before the interpreter.
+
+### Background runs (`ScriptConsole::runInBackground`)
+
+The script runs on a worker thread; the window stays alive, so the console panel can show a Cancel button, live output and progress.
+
+- **Main-thread rule.** The document, graph, undo stack and selection belong to the main thread. Every method and property of the `curvy`
+  classes (`Document`, `Object`, `Selection`, `Transaction`) and of the `jitnodes` handle classes (`Network`, `Node`, `History`) is replaced at
+  registration (`guardClass` in `scriptmodule.cpp`) by a C++ wrapper that calls `callOnMain`. On the main thread, or with no poster set, it
+  calls straight through. On another thread it releases the GIL, posts a task through the poster (`RunLoop::post` in the app; a queue in
+  tests) and waits; the task takes the GIL on the main thread, calls the original, and hands the result or the exception object back.
+  Wrappers are C++ (`py::cpp_function`), so they add no frames to a traceback. `__init__`, `__new__`, `__del__` and the pickling hooks stay
+  as they are.
+- **New bindings are covered automatically** as long as they are methods or properties of those classes. A *new class* that touches the
+  document must be added to the `guardClass` list in `registerCurvyModule`; a plain-data class (like `Swatch`) needs nothing.
+- **GIL.** The main thread holds it for the interpreter's whole life, so `runInBackground` gives it up (`mainRelease`) until the run is reaped
+  and takes it back in the completion task. While a background script runs, the main thread must not touch Python except inside a posted
+  call; `checkSyntax()` therefore answers "no problem" while one runs.
+- **Calls cost a thread hand-off** (some tenths of a millisecond, more while the UI is busy painting). A script making thousands of tiny
+  calls is slower than on the main thread; batching with `doc.transaction()` does not change that.
+- **Completion.** The worker posts a task that joins it, ends the undo step (`ScriptTransaction::end`), restores stdout and calls `done`
+  on the main thread. A run id guards against a stale completion that arrives after `abort()`.
+- **`abort()`** (window closing, the panel's destructor, `~ScriptConsole`) cancels, makes waiting scripts give up with `curvy.Cancelled`
+  (`setScriptDispatchAborting`) because nobody will run their calls, joins the worker and drops `done`.
+- **While it runs**, `WorkspaceController` sets `busy_` (menu commands, open, save and closing are refused, as during a file task), the editor's
+  Run button reads "Stop", and the console shows the output so far, `running... 40% message` and a Cancel button.
+- **`curvy.progress(fraction, message="")`** reports progress (0..1, negative for unknown); it needs no main-thread call.
+- A callback a script gives to jitnodes (a progress function for `cook`) runs on whichever thread jitnodes calls it from, under the GIL.
 
 ### Cancel
 
-Scripts run on the main thread, so the UI cannot take a Cancel click while one runs. Two triggers stop it instead:
+Triggers (they work the same for both kinds of run):
 
 - `ScriptConsole::cancel()`, callable from any thread (it only sets a flag, and only while a script runs, so a late call cannot hit the next run).
 - The Escape key, polled by the watcher thread (`GetAsyncKeyState`, and the foreground window must belong to this process).
@@ -309,7 +337,7 @@ way cpp_codetools' `CppEditor` is (`TextFoldingControl` + `HistoryTextModel` for
   follows every change. Changes apply live: the workspace's `restyle()` calls `ScriptEditorPanel::applySettings(settings)`, which
   also makes the editor follow the dark/light theme (the style sheet is chosen by `Settings::darkTheme()`). **Reset page** puts the page
   back. Stored in the settings file under `scriptEditor` (`font`, `fontSize`, `tabWidth`, `colors`: only the changed styles). The
-  editor's text colour and background still come from the app theme; only the syntax colours are editable. Settings.cpp ignores
+  editor's text colour and background can be overridden too (see "Text and background colours" below). Settings.cpp ignores
   out-of-range numbers and malformed colours.
 - **Regenerating the dialog:** `settings.newui` is generated from `settings.html` (command in the mockup's header comment). Two
   properties exist only in the `.newui` and must be put back after a regeneration: `cancelControl: true` on `settingsCancel` and
@@ -320,7 +348,7 @@ way cpp_codetools' `CppEditor` is (`TextFoldingControl` + `HistoryTextModel` for
 - **Across sessions:** `setScratchFile(path)` (the workspace passes `scratch.py` next to the settings file; none when there is no
   settings file) writes the text there 800 ms after typing stops while it is modified, and restores it as an untitled, modified script
   when the editor starts empty. The file is deleted when the script is saved or another file is loaded. The panel's destructor flushes a
-  pending write. Which file was open is not remembered: unsaved text comes back as "untitled".
+  pending write. Which file was open is remembered separately (see "Remembered file" below), so unsaved text comes back under that file's name.
 - **Files:** Open and Save ask for a path through `onChooseOpen` / `onChooseSave` (the native dialogs, `*.py`). Files are UTF-8; a BOM and
   carriage returns are dropped on load. The text is converted with `curvy::utf8ToWide` / `wideToUtf8` (`include/curvy/utf8.h`); the
   console panel uses them too (it used to widen byte by byte, which garbled non-ASCII).
@@ -342,8 +370,39 @@ way cpp_codetools' `CppEditor` is (`TextFoldingControl` + `HistoryTextModel` for
   undoes all of it. The replacement is literal text (no regular expressions, no case adaptation). Ctrl+F keeps the replace row if it
   is already open; closing the bar hides both.
 
-Not done: regular expressions and whole-word/case switches in find, a syntax-error check (only lexical problems show), remembering which file was open, editing the editor's
-background and plain-text colours.
+- **Find switches:** the row under the find field has three toggle buttons, **Aa** (match case), **W** (whole word) and **.\*** (regular
+  expression; `pyEditorMatchCase`, `pyEditorWholeWord`, `pyEditorRegex`). One routine, `collectMatches`, finds every match for the
+  status count, the marks, Next/Prev, Replace and All, so they cannot disagree. Plain text is smart-case (case-sensitive only with a
+  capital letter) unless Aa is on; a regular expression (`std::wregex`, ECMAScript) is case-insensitive unless Aa is on. Whole word
+  drops matches whose word-character edges touch another word character (letters, digits, `_`; an edge that is a symbol is not
+  checked, so `(id)` still matches inside `f(id)`). Empty regex matches are skipped. A pattern that does not parse gives the status
+  "Bad pattern" and no matches. The replacement of a regex may use `$1`.. and `$&` (`match_results::format`, computed per match so
+  lookahead context is right); All replaces from the end inside one undo group as before.
+- **Syntax check:** `ScriptEditorPanel::onCheckSyntax` (wired to `ScriptConsole::checkSyntax` in `WorkspaceController`) is asked for the
+  script's first error 400 ms after typing stops (at once without a run loop, and after `setScript`). `checkSyntax` calls Python's
+  `compile(code, "<script>", "exec")` and never runs anything; it reads `msg`, `lineno`, `offset`, `end_lineno`, `end_offset` from the
+  `SyntaxError` (IndentationError and TabError are subclasses). The panel shows `Line N, col M: message` in a red line under the editor
+  (`pyEditorProblem`, `kProblemHeight`; the editor shrinks by that line) and a squiggle from the column to the end of the token (or
+  line). The squiggle goes through `applyMarks`, which also carries the find marks, so neither replaces the other. While a script runs
+  (UI blocked anyway) `checkSyntax` returns nothing. The lexer's own squiggles (unterminated strings, bad numbers) are separate and
+  still there.
+- **Remembered file:** `Settings::editorFile` (under `scriptEditor.file`; not reset by the page's Reset, it is state). The panel's
+  `onFileChanged` fires after a successful Open or Save and the workspace stores it and saves the settings. At start
+  `restoreFile(path)` runs after `setScratchFile`: unsaved text that came back from `scratch.py` becomes the text of that file (title
+  shows it, still modified); otherwise an empty editor loads the file if it still exists; a missing file does nothing.
+- **Text and background colours:** Settings > Script editor > Editor colours (rows `syntaxHex_text` / `syntaxHex_background`, from the
+  mockup like the others; `pythonBaseColors()` lists them next to `pythonSyntaxStyles()`), stored in `editorColors` under the keys
+  `text` and `background`. `applySettings` sets the control's text and caret colour and the background of the text control and its
+  scroll view; when the background override is cleared the theme's fill is put back (its kind and colour are kept when the override
+  first replaces them, because `gfx::Fill` cannot be copied). Gutter colours are still the theme's.
+
+- **Run and syntax errors:** `run()` (button, Ctrl+Enter, F5) asks `onCheckSyntax` about the code it is about to send (the selected whole
+  lines, dedented, or the script) and sends nothing when it does not compile: `onMessage` (the hint bar) gets "Not run - line 4, col 7:
+  invalid syntax", with "selection" in front for a selection (its line is counted from the selection's first line). So a selection that
+  compiles still runs in a script that does not. While the whole script has a problem the button reads "⚠ Run" (U+26A0) instead of
+  "Run"; "Run Selection" is unchanged.
+
+Not done: a find history, editing the gutter and selection colours.
 
 ## The `lex` library
 
@@ -358,10 +417,9 @@ carried in `LexState` (so a line can be lexed on its own); `@` first on a line i
 
 ## Known limits and next steps
 
-- Scripts block the main thread: cancel exists (see Cancel) but there is no timeout and no Cancel button in the panel (the window does not
-  repaint while a script runs, so a button could not be clicked; Escape is the way). The "running... (Esc cancels)" line is painted before
-  the script starts (`PyConsolePanel::onBeforeRun`, wired in `WorkspaceController` to `repaintNow` + `UpdateWindow`) and replaced by the
-  result afterwards; nothing animates while it runs.
+- Scripts run in the background in the app (see "Background runs"); there is no timeout. A long call into C++ made from a script (a cook)
+  runs on the main thread and freezes the window for its duration. `run()` (tests, no poster) still blocks, which is why
+  `PyConsolePanel::onBeforeRun` exists. The script editor's own "Run Selection" and the console input share the one running slot.
 - No stroke cap/join/miter, effects, boolean operations or text yet; `artwork()` gives
   read-only data. Paths are built from the `geometry` node (see "Shapes, paths and points"), so there is no live rectangle or star to
   re-parameterise: the numbers are baked into the points.

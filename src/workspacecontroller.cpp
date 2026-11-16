@@ -283,6 +283,14 @@ namespace curvy {
         loop_ = &RunLoop::current();
     }
 
+    void WorkspaceController::setScriptConsole(ScriptConsole* console) {
+        scriptConsole_ = console;
+        if (console != nullptr) {
+            RunLoop* loop = loop_;
+            console->setMainThreadPoster([loop](std::function<void()> task) { loop->post(std::move(task)); });
+        }
+    }
+
     void WorkspaceController::frameShouldClose(bool& canClose) {
         if (busy_) {
             model_->say(taskLabel_ + " - wait for it to finish, or press Esc to cancel");
@@ -444,6 +452,16 @@ namespace curvy {
                 frame_.rootView().repaintNow();
                 ::UpdateWindow(frame_.rootView().windowHandle());
             };
+            pyConsolePanel_->onRunningChanged = [this](bool running) {
+                busy_ = running;
+                taskLabel_ = "A script is running";
+                if (scriptEditorPanel_ != nullptr) {
+                    scriptEditorPanel_->setRunning(running);
+                }
+                if (running) {
+                    model_->say(taskLabel_ + " - Esc cancels");
+                }
+            };
             pyConsolePanel_->onExecuted = [this]() {
                 graphView_->style().markDirty();
                 canvas_->style().markDirty();
@@ -461,6 +479,11 @@ namespace curvy {
             scriptEditorPanel_->onRun = [this](const std::string& code, const std::string& name) {
                 if (pyConsolePanel_ != nullptr) {
                     pyConsolePanel_->runScript(code, name);
+                }
+            };
+            scriptEditorPanel_->onStop = [this]() {
+                if (pyConsolePanel_ != nullptr) {
+                    pyConsolePanel_->cancelRun();
                 }
             };
             scriptEditorPanel_->onChooseOpen = [this]() {
@@ -485,6 +508,12 @@ namespace curvy {
                 // Next to the settings file, so a run with another --settings file keeps its own script.
                 scriptEditorPanel_->setScratchFile(std::filesystem::path(settingsPath_).parent_path() / "scratch.py");
             }
+            scriptEditorPanel_->onCheckSyntax = [this](const std::string& code) { return scriptConsole_->checkSyntax(code); };
+            scriptEditorPanel_->restoreFile(std::filesystem::u8path(settings_.editorFile));
+            scriptEditorPanel_->onFileChanged = [this](const std::filesystem::path& file) {
+                settings_.editorFile = file.u8string();
+                saveSettings();
+            };
         }
         // Whatever the selection is, picked in the graph view or on the canvas, is what the panel shows.
         graphView_->selectionModel().onChanged += [this](SelectionModel& selection) {
@@ -1011,6 +1040,9 @@ namespace curvy {
         if (nodePanel_ != nullptr) {   // null when the window's teardown already destroyed the panel
             nodePanel_->onDestroyed = nullptr;
             nodePanel_->releaseDocument();   // the dock destroys the panel after the document is gone
+        }
+        if (scriptConsole_ != nullptr) {
+            scriptConsole_->abort();   // a background script edits the document that is about to go
         }
         task_.cancel();
         task_.waitFor(std::chrono::seconds(30));   // the task's own destructor joins; this only bounds how long a stuck job is waited on first
@@ -1701,7 +1733,11 @@ namespace curvy {
         }
         const bool shift = (mask & kmShift) != 0;
         if (busy_ && vk == vkEscape && !menu_->isOpen()) {
-            task_.cancel();
+            if (scriptConsole_ != nullptr && scriptConsole_->running()) {
+                scriptConsole_->cancel();
+            } else {
+                task_.cancel();
+            }
             return true;
         }
         if (menu_->isOpen()) {

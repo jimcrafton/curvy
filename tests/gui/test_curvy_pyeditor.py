@@ -79,6 +79,47 @@ class PyEditor(CurvyCase):
         self.app.wait_idle()
         self.assertEqual(self.script(), "cat dog cat")
 
+    def test_the_find_switches_change_what_matches(self):
+        self.open_editor()
+        self.type_script("Cat cat c.t")
+        self.app.key("ctrl+f")
+        self.app.wait_until(lambda: self.app.find("pyEditorFind").w > 0, "the find field")
+        self.app.type("cat")
+        self.app.wait_idle()
+        self.assertEqual(self.find_status(), "1 of 2")                 # plain text ignores case
+        self.app.click("pyEditorMatchCase")
+        self.app.wait_idle()
+        self.assertEqual(self.find_status(), "1 of 1")                 # only the lowercase one now
+        self.app.click("pyEditorMatchCase")
+        self.app.click("pyEditorRegex")
+        self.app.click("pyEditorFind")
+        self.app.key("ctrl+a")
+        self.app.type("c.t")
+        self.app.wait_idle()
+        self.assertTrue(self.find_status().endswith(" of 3"), self.find_status())   # the dot is any character now (the current match stays)
+        self.app.click("pyEditorWholeWord")
+        self.app.wait_idle()
+        self.assertTrue(self.find_status().endswith(" of 3"), self.find_status())   # all three are whole words
+        self.app.click("pyEditorFind")
+        self.app.key("ctrl+a")
+        self.app.type("(")
+        self.app.wait_idle()
+        self.assertEqual(self.find_status(), "Bad pattern")
+
+    def test_a_syntax_error_is_named_under_the_editor_and_goes_when_fixed(self):
+        self.open_editor()
+        self.type_script("x = 1", "def broken(:")
+        self.app.wait_until(lambda: self.app.prop("pyEditorProblem", "text").startswith("Line 2, col "), "the syntax problem")
+        self.assertIn("Run", self.app.prop("pyEditorRun", "text"))
+        self.assertNotEqual(self.app.prop("pyEditorRun", "text"), "Run")      # it carries the warning sign
+        self.app.key("ctrl+enter")                                             # refused: nothing reaches the console
+        self.app.wait_idle()
+        self.assertNotIn("run script", self.app.text_of("pyConsoleOutput"))
+        self.app.click("pyEditorText")
+        self.app.key("ctrl+a")
+        self.app.type("print('fine')")
+        self.app.wait_until(lambda: self.app.prop("pyEditorProblem", "text") == "", "the problem to clear")
+
 
 if __name__ == "__main__":
     newui_guitest.main()

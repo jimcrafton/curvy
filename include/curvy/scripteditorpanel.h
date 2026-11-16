@@ -1,6 +1,7 @@
 #pragma once
 
 #include "curvy/panel.h"
+#include "curvy/scriptconsole.h"
 #include "curvy/settings.h"
 
 #include <newui/controls.h>
@@ -11,7 +12,10 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace curvy {
 
@@ -48,6 +52,10 @@ namespace curvy {
         // exists and the editor is empty: an untitled, modified script. The file is removed when the script is saved or another file is
         // loaded, because nothing is left to restore then.
         void setScratchFile(const std::filesystem::path& path);
+        // Gives back the script that was open at the end of the last session (call it after setScratchFile): when unsaved text came back it
+        // is the text of that file, still modified; otherwise, if the editor is empty and the file still exists, the file is loaded. An empty
+        // path or a missing file with nothing to restore does nothing.
+        void restoreFile(const std::filesystem::path& path);
 
         // The user's font, size, tab width and syntax colours (and the light or dark colour set, from the theme choice). Call it when the
         // settings or the theme change; it applies at once.
@@ -79,14 +87,43 @@ namespace curvy {
         std::string findText() const;
         // Selects the next (or previous) match after the selection; false when there is none.
         bool findNext(bool backward = false);
-        // "2 of 7", "No match", or empty when nothing is searched for.
+        // "2 of 7", "No match", "Bad pattern" (a regular expression that does not parse), or empty when nothing is searched for.
         std::string findStatus() const;
+
+        // The three switches of the find bar (buttons "Aa", "W" and ".*"). Plain text ignores case unless it has a capital letter or
+        // matchCase is on; a regular expression (ECMAScript) ignores case unless matchCase is on. wholeWord keeps only matches that are not
+        // part of a longer word (letters, digits, underscore). In a regular expression the replacement may use $1 ... and $&; an empty match
+        // is never a match.
+        void setFindOptions(bool matchCase, bool wholeWord, bool regex);
+        bool matchCase() const { return matchCase_; }
+        bool wholeWord() const { return wholeWord_; }
+        bool regex() const { return regex_; }
 
         // Gets the code and the name to show for it (the file name or "script", with " (selection)" for selected lines).
         std::function<void(const std::string&, const std::string&)> onRun;
+        // While the owner says a script runs (setRunning(true)) the Run button reads "Stop" and calls onStop; Run does nothing.
+        void setRunning(bool running);
+        bool running() const { return running_; }
+        std::function<void()> onStop;
         // Return an empty path when the user cancels.
         std::function<std::filesystem::path()> onChooseOpen;
         std::function<std::filesystem::path(const std::filesystem::path& current)> onChooseSave;
+        // Asks the owner for the script's first syntax error (the console compiles it without running it). With it set, a moment after
+        // typing stops the problem is marked in the text with a squiggle and named in a line under the editor ("Line 4: invalid syntax");
+        // without it only lexical problems (an unterminated string, a bad number) show. The squiggle of the find marks and the problem do
+        // not hide each other.
+        std::function<std::optional<SyntaxProblem>(const std::string&)> onCheckSyntax;
+        // Checks now instead of after the pause (what the timer calls); clears the problem when onCheckSyntax is not set.
+        void checkSyntax();
+        const std::optional<SyntaxProblem>& syntaxProblem() const { return problem_; }
+        // The text under the editor: "Line 4, col 7: invalid syntax", or empty when the script compiles. Run (button, Ctrl+Enter, F5) asks
+        // the checker about the code it is about to send, the selected lines or the whole script, and does not send code that does not
+        // compile: onMessage gets "Not run - line 4, col 7: invalid syntax". While the whole script has a problem the Run button shows a
+        // warning sign.
+        std::string problemText() const { return problemLabel_->text(); }
+
+        // Called with the file's path after a successful Open or Save, so the owner can remember it for the next session.
+        std::function<void(const std::filesystem::path&)> onFileChanged;
         // A message for the user (a file that could not be read or written).
         std::function<void(const std::string&)> onMessage;
         std::function<void()> onDestroyed;
@@ -100,6 +137,7 @@ namespace curvy {
 
         static constexpr float kPad = 6.0f;
         static constexpr float kButtonHeight = 24.0f;
+        static constexpr float kProblemHeight = 20.0f;   // the line under the editor that names a syntax problem
 
     private:
         void layoutParts();
@@ -107,19 +145,45 @@ namespace curvy {
         void updateTitle();
         void updateRunLabel();
         void scheduleHighlight();
+        void scheduleSyntaxCheck();
+        // Sets the text's marks: the find marks given plus the syntax problem's squiggle.
+        void applyMarks(std::vector<newui::text::TextDecoration> findMarks);
         void scheduleScratch();
         void writeScratch();
         // The code Run would send, and its name.
         void codeToRun(std::string& code, std::string& name) const;
         bool hasSelection() const;
+        struct FindMatch {
+            std::size_t start = 0;
+            std::size_t length = 0;
+            std::wstring replacement;   // only when asked for
+        };
+        // Every match of the query in the text under the current switches. False with `badPattern` set when a regular expression does not parse.
+        bool collectMatches(std::vector<FindMatch>& matches, bool withReplacements, bool& badPattern) const;
         // Selects the match at or after (or, backward, before) `from`, wrapping round; false when the text has none.
         bool selectMatch(std::size_t from, bool backward);
         void updateFindStatus();
         void revealCaret();
         void openFindBar(bool withReplace);
         void applyFindVisibility();
-        // Whether the selection is a match of the query now.
-        bool selectionIsMatch() const;
+        void findOptionsChanged();
+        // The theme's backgrounds of the text and its scroll view, kept while the user's background colour replaces them.
+        struct SavedFill {
+            newui::gfx::PaintKind kind = newui::gfx::PaintKind::None;
+            newui::Color color;
+        };
+        std::optional<std::pair<SavedFill, SavedFill>> themeBackground_;
+        std::optional<SyntaxProblem> problem_;
+        bool running_ = false;
+        newui::Label* problemLabel_ = nullptr;
+        std::vector<newui::text::TextDecoration> findMarks_;
+        newui::RunLoop::TimerHandle syntaxTimer_ = newui::RunLoop::kInvalidTimerHandle;
+        newui::Button* matchCaseButton_ = nullptr;
+        newui::Button* wholeWordButton_ = nullptr;
+        newui::Button* regexButton_ = nullptr;
+        bool matchCase_ = false;
+        bool wholeWord_ = false;
+        bool regex_ = false;
         newui::TextField* replaceField_ = nullptr;
         newui::Button* replaceButton_ = nullptr;
         newui::Button* replaceAllButton_ = nullptr;

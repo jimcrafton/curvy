@@ -4,6 +4,13 @@
 #include "curvy/pyconsolepanel.h"
 #include "curvy/sketchdocument.h"
 
+#include <chrono>
+#include <deque>
+#include <functional>
+#include <mutex>
+#include <thread>
+#include <vector>
+
 namespace {
 
     class PyConsolePanelTest : public curvytest::WorkspaceTest {
@@ -50,6 +57,45 @@ TEST_F(PyConsolePanelTest, theTranscriptSaysTheScriptIsRunningUntilItReturns) {
     panel_->execute("x = 1");
     EXPECT_EQ(seen, L">>> x = 1\nrunning... (Esc cancels)\n");
     EXPECT_EQ(panel_->transcript(), L">>> x = 1\n");
+}
+
+TEST_F(PyConsolePanelTest, aBackgroundScriptShowsRunningThenItsResultAndTellsTheOwner) {
+    std::mutex mutex;
+    std::deque<std::function<void()>> queue;
+    curvytest::sharedConsole().setMainThreadPoster([&](std::function<void()> task) {
+        std::lock_guard<std::mutex> lock(mutex);
+        queue.push_back(std::move(task));
+    });
+    std::vector<bool> changes;
+    int executed = 0;
+    panel_->onRunningChanged = [&changes](bool running) { changes.push_back(running); };
+    panel_->onExecuted = [&executed]() { ++executed; };
+
+    panel_->execute("print('later')");
+    EXPECT_TRUE(panel_->running());
+    EXPECT_NE(panel_->transcript().find(L"running..."), std::wstring::npos);
+
+    const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (panel_->running() && std::chrono::steady_clock::now() < end) {
+        std::function<void()> task;
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            if (!queue.empty()) {
+                task = std::move(queue.front());
+                queue.pop_front();
+            }
+        }
+        if (task) {
+            task();
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+    EXPECT_FALSE(panel_->running());
+    EXPECT_EQ(panel_->transcript(), L">>> print('later')\nlater\n");
+    EXPECT_EQ(changes, (std::vector<bool>{true, false}));
+    EXPECT_EQ(executed, 1);
+    curvytest::sharedConsole().setMainThreadPoster(nullptr);
 }
 
 TEST_F(PyConsolePanelTest, upAndDownWalkTheHistory) {
