@@ -70,6 +70,11 @@ namespace curvy {
         // One undo step: a new active palette (the name made unique) of plain copies of `swatches`, for a palette made from an image. Throws when
         // the name or the list is empty.
         std::size_t addPaletteFrom(const std::string& name, const std::vector<Swatch>& swatches);
+        // One undo step: adds a palette (the name made unique, plain swatches) for each of these that has colours, and makes the last one active; returns
+        // its index. Throws when none has colours. For palettes read from an .ase or .aco file.
+        std::size_t importPalettes(const std::vector<Palette>& palettes);
+        // One undo step: appends plain copies of `swatches` to the palette; returns the palette's size afterwards. Throws when the list is empty.
+        std::size_t addSwatches(std::size_t palette, const std::vector<Swatch>& swatches);
         // The distinct colours of the colour rows in the graph, most used first (ties keep the order they were found in). `onlyInNoPalette` leaves out
         // the colours some swatch of some palette has. Read from the graph each time, so call it when something needs showing, not while drawing.
         std::vector<ColorUse> colorsInUse(bool onlyInNoPalette = false);

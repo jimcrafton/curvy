@@ -139,6 +139,20 @@ TEST(SettingsFile, ResettingAPagePutsBackOnlyThatPage) {
     EXPECT_EQ(Settings::ThemeChoice::FollowWindows, reset.theme);
 }
 
+TEST(SettingsFile, theOldBodyHeightOfEveryPanelIsIgnoredSoAPanelsOwnPreferredHeightIsUsed) {
+    const std::string text = R"({ panels: { document: { collapsed: false, bodyHeight: 120 }, transform: { userBodyHeight: 260 } } })";
+    Settings back;
+    back.fromText(text);
+    ASSERT_EQ(2u, back.panels.size());
+    for (const auto& panel : back.panels) {
+        if (panel.id == "document") {
+            EXPECT_FLOAT_EQ(0.0f, panel.bodyHeight) << "a height nobody chose was saved under the old name, and must not override the panel";
+        } else {
+            EXPECT_FLOAT_EQ(260.0f, panel.bodyHeight) << "a height the user dragged is kept";
+        }
+    }
+}
+
 TEST(SettingsFile, PanelStatesRoundTripInOrder) {
     Settings changed;
     changed.panels = {{"zeta", true, false, false, 0.0f, 0.0f, 0.0f}, {"alpha", false, true, true, 310.0f, -20.0f, 180.0f}};

@@ -27,9 +27,15 @@ namespace curvy {
     // @reflect ignore=true
     class NodePanel : public Panel {
     public:
-        // How tall the body starts out, and the least height the content is laid out at (a shorter body scrolls).
-        static constexpr float kBodyHeight = 440.0f;
-        static constexpr float kContentHeight = 360.0f;
+        // The panel asks for the height its fixed sections need plus this many parameter rows (most nodes have fewer, and a node with more scrolls them);
+        // a fixed number, so the panel does not change height as the selection changes. A shorter body lays the content out at kLeastParamRows and scrolls.
+        static constexpr std::size_t kPreferredParamRows = 8;
+        static constexpr std::size_t kLeastParamRows = 3;
+        static constexpr float kParamRowHeight = 24.0f;
+        // The height of the content with `paramRows` parameter rows (what layoutContent and the preferred height are worked out from).
+        float contentHeightFor(std::size_t paramRows) const;
+        // The bottom of the lowest visible section of the content, for tests: the body must be at least this tall or the last line is cut off.
+        float contentBottom() const;
 
         NodePanel(SketchDocument& document, newui::SubView& pickerHost);
         ~NodePanel() override;
@@ -126,6 +132,7 @@ namespace curvy {
 
         newui::SubView& loadContent();
         void layoutContent();
+        float fixedContentHeight() const;
 
         newui::SubView& root_;   // the loaded content, in the body
         newui::SubView& pickerHost_;

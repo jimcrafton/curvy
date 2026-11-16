@@ -106,6 +106,52 @@ TEST_F(NodePanelTest, aDockTheUserClosedStaysClosedUntilSomethingNeedsIt) {
     EXPECT_FALSE(window().docks().collapsed(curvy::DockSide::Right));
 }
 
+TEST_F(NodePanelTest, theBodyIsTallEnoughForTheLastLineNotJustMostOfIt) {
+    window().docks().setCollapsed(curvy::DockSide::Right, false);
+    frame_.rootView().updateLayout();
+    ASSERT_TRUE(click(100.0, 100.0));
+    curvy::NodePanel& panel = window().nodePanel();
+    EXPECT_FALSE(panel.userResized());
+    const newui::View* last = panel.findView("graphUsed0");
+    ASSERT_NE(last, nullptr);
+    EXPECT_GE(last->bounds().height(), last->desiredSize().height) << "the last line is squeezed: the panel's preferred height left something out";
+    EXPECT_LE(panel.contentBottom(), panel.body().bounds().height() + 0.5f);
+    EXPECT_GE(panel.bodyHeight(), panel.contentHeightFor(curvy::NodePanel::kPreferredParamRows));
+}
+
+TEST_F(NodePanelTest, theInputsAndUsersNameTheNodesInsteadOfShowingABareNumber) {
+    ASSERT_TRUE(click(100.0, 100.0));
+    window().graph().select(look_);   // the fill: one input, fed by the circle
+    const auto text = [&](const char* id) {
+        const auto* label = dynamic_cast<const newui::Label*>(window().nodePanel().findView(id));
+        return label != nullptr ? label->text() : std::string("(no label)");
+    };
+    EXPECT_EQ(text("graphInput0"), "circle") << "one input: no number, just what feeds it";
+    EXPECT_NE(text("graphUsed0").find("merge"), std::string::npos);
+    EXPECT_NE(text("graphUsed0"), "0  merge") << "the old form read like a count";
+
+    window().graph().select(layer_);   // the layer feeds the root merge
+    EXPECT_NE(text("graphUsed0"), "(not used)");
+}
+
+TEST_F(NodePanelTest, aNodeNothingUsesSaysSo) {
+    ASSERT_TRUE(click(100.0, 100.0));
+    window().graph().select(window().graph().selected());   // keep the circle, then pick the render node, which nothing consumes
+    const curvy::NodeRef render = [&]() {
+        for (const jitnodes::NodeId id : window().document().network().nodeIds()) {
+            if (window().document().network().node(id).typeName() == "curvyRender") {
+                return curvy::NodeRef(id);
+            }
+        }
+        return curvy::NodeRef();
+    }();
+    ASSERT_TRUE(render.valid());
+    window().graph().select(render);
+    const auto* label = dynamic_cast<const newui::Label*>(window().nodePanel().findView("graphUsed0"));
+    ASSERT_NE(label, nullptr);
+    EXPECT_EQ(label->text(), "(not used)");
+}
+
 TEST_F(NodePanelTest, thePanelCanBeCollapsedLikeAnyOther) {
     curvy::Panel& panel = window().nodePanel();
     const float open = panel.desiredHeight();

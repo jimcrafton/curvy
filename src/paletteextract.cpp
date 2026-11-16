@@ -1,5 +1,7 @@
 #include "curvy/paletteextract.h"
 
+#include <blend2d/blend2d.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -203,6 +205,67 @@ namespace curvy {
             result.push_back(swatch);
         }
         return result;
+    }
+
+    std::vector<Swatch> PaletteExtract::fromFile(const std::string& path, const PaletteExtractOptions& options, std::string* error) {
+        Image image;
+        if (!load(path, image, error)) {
+            return std::vector<Swatch>();
+        }
+        std::vector<Swatch> swatches = fromImage(image, options);
+        if (swatches.empty() && error != nullptr) {
+            *error = "the image has no colours to take";
+        }
+        return swatches;
+    }
+
+    std::vector<Swatch> PaletteExtract::fromImage(const Image& image, const PaletteExtractOptions& options) {
+        if (image.width <= 0 || image.height <= 0 || image.rgba.size() < std::size_t(image.width) * std::size_t(image.height) * 4) {
+            return std::vector<Swatch>();
+        }
+        return fromPixels(image.rgba.data(), image.width, image.height, options);
+    }
+
+    bool PaletteExtract::load(const std::string& path, Image& out, std::string* error) {
+        const auto fail = [error](const std::string& message) {
+            if (error != nullptr) {
+                *error = message;
+            }
+            return false;
+        };
+        BLImage image;
+        if (image.read_from_file(path.c_str()) != BL_SUCCESS) {
+            return fail("the file is not an image this program can read");
+        }
+        if (image.format() != BL_FORMAT_PRGB32 && image.convert(BL_FORMAT_PRGB32) != BL_SUCCESS) {
+            return fail("the image could not be converted");
+        }
+        BLImageData data;
+        image.get_data(&data);
+        const int width = data.size.w;
+        const int height = data.size.h;
+        if (width <= 0 || height <= 0) {
+            return fail("the image is empty");
+        }
+        // Blend2D stores premultiplied 0xAARRGGBB; the extraction wants straight red, green, blue and alpha bytes.
+        std::vector<std::uint8_t> rgba(std::size_t(width) * std::size_t(height) * 4);
+        for (int y = 0; y < height; ++y) {
+            const std::uint32_t* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + std::ptrdiff_t(y) * data.stride);
+            for (int x = 0; x < width; ++x) {
+                const std::uint32_t pixel = row[x];
+                const std::uint32_t alpha = pixel >> 24;
+                std::uint8_t* out = &rgba[(std::size_t(y) * std::size_t(width) + std::size_t(x)) * 4];
+                for (int channel = 0; channel < 3; ++channel) {
+                    const std::uint32_t premultiplied = (pixel >> (16 - 8 * channel)) & 0xFF;
+                    out[channel] = alpha == 0 ? 0 : std::uint8_t(std::min<std::uint32_t>(255, (premultiplied * 255 + alpha / 2) / alpha));
+                }
+                out[3] = std::uint8_t(alpha);
+            }
+        }
+        out.width = width;
+        out.height = height;
+        out.rgba = std::move(rgba);
+        return true;
     }
 
 }

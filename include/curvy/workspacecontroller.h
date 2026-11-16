@@ -16,7 +16,9 @@
 #include "curvy/radialmenu.h"
 #include "curvy/settings.h"
 #include "curvy/sketchdocument.h"
+#include "curvy/swatchestab.h"
 #include "curvy/swatchpalettecontroller.h"
+#include "curvy/transformpanel.h"
 #include "curvy/workspacemodel.h"
 
 #include <newui/action.h>
@@ -95,6 +97,8 @@ namespace curvy {
         PointTable& pointTable() { return *pointTable_; }
         // @reflect ignore=true
         NodePanel& nodePanel() { return *nodePanel_; }
+        TransformPanel& transformPanel() { return *transformPanel_; }
+        SwatchesTab& swatchesTab() { return *swatchesTab_; }
         GraphCrumbs& graphCrumbs() { return *graphCrumbs_; }
         // Runs a command of the node ring ("graph.bypass", ...) on the node selected in the graph view.
         bool runGraphCommandFor(const std::string& command) { return runGraphCommand(command); }
@@ -162,6 +166,14 @@ namespace curvy {
         ViewState captureView() const;
         void applyView(const ViewState& view);
         static std::string fileNameOf(const std::string& path);
+        // What a swatch strip's menus ask the workspace for (see SwatchPaletteController): the file dialogs, and the selection.
+        void wireSwatchActions(SwatchPaletteController& swatches);
+        void wireSwatchActions(SwatchesTab& swatches);
+        // "Use as fill" in the Swatches tab: the selected shape's fill takes the swatch's colour (one undo step).
+        void applySwatchToSelection(const Swatch& swatch);
+        void importPalette();
+        void paletteFromImage();
+        void selectColorUsers(const std::vector<NodeRef>& users);
 
         void startDocument(const NewDocumentModel& settings);
         void bindViews();
@@ -203,6 +215,7 @@ namespace curvy {
         std::unique_ptr<newui::ToolFrame> pointFrame_;
         std::unique_ptr<PointTable> pointTable_;
         NodePanel* nodePanel_ = nullptr;   // in the right dock, which owns it
+        TransformPanel* transformPanel_ = nullptr;   // likewise
         std::array<newui::Action, 3> historyActions_;   // Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z; the run loop matches them whichever view has focus
         std::unique_ptr<GraphCrumbs> graphCrumbs_;
         RadialMenu* menu_ = nullptr;
@@ -210,8 +223,8 @@ namespace curvy {
         DockLayout panelLayout_;   // where every panel is; the dock views read it
         PanelDock* rightDock_ = nullptr;   // owned by the right area's view tree
         DocumentPanel* documentPanel_ = nullptr;   // owned by rightDock_ (or by its floating frame)
-        std::unique_ptr<FloatingPanels> floatingPanels_;   // declared before documentSwatches_: that controller is gone first, then the frames and their panels
-        std::unique_ptr<SwatchPaletteController> documentSwatches_;   // declared after the document: gone before it
+        std::unique_ptr<FloatingPanels> floatingPanels_;   // declared before swatchesTab_: that is gone first, then the frames and their panels
+        std::unique_ptr<SwatchesTab> swatchesTab_;   // declared after the document: gone before it (its views belong to the Document panel)
         newui::Label* hintTool_ = nullptr;
         newui::Label* hintKeys_ = nullptr;
         newui::Label* hintInfo_ = nullptr;

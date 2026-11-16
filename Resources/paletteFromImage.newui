@@ -1,0 +1,616 @@
+{
+  meta: {
+    author: "",
+    date: "2026-11-15",
+    copyright: "",
+    version: "0.1.0.900"
+  },
+  type: "Frame",
+  title: "curvy new palette from image (static layout for conversion)",
+  name: "paletteFromImage",
+  bounds: {
+    type: "Rect",
+    pos: { type: "Point", x: 40, y: 40 },
+    size: { type: "Size", width: 290, height: 496 }
+  },
+  rootView: {
+    type: "RootView",
+    bounds: {
+      type: "Rect",
+      pos: { type: "Point", x: 0, y: 0 },
+      size: { type: "Size", width: 290, height: 496 }
+    },
+    visible: true,
+    name: "rootview",
+    layout: {
+      type: "FlexLayout",
+      orientation: "Vertical",
+      spacing: 8,
+      padding: 12
+    },
+    style: {
+      type: "ViewStyle",
+      backgroundFill: { type: "Fill", kind: "Color", color: "#1e1e1e" }
+    },
+    childViews: [
+      {
+        type: "Label",
+        text: "New palette from image",
+        textAlignment: "Left",
+        bounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 12, y: 12 },
+          size: { type: "Size", width: 266, height: 19 }
+        },
+        name: "dialogTitle",
+        style: {
+          type: "LabelStyle",
+          text: "New palette from image",
+          wordWrap: true,
+          font: { type: "Font", name: "Segoe UI", size: 13, bold: false, italic: false, strikeThrough: false, underlined: false },
+          textColor: "#f0f0f0",
+          textAlignment: "Left"
+        }
+      },
+      {
+        type: "SubView",
+        bounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 12, y: 39 },
+          size: { type: "Size", width: 266, height: 150 }
+        },
+        visible: true,
+        name: "picture",
+        style: {
+          type: "ViewStyle",
+          backgroundFill: { type: "Fill", kind: "Color", color: "#121212" },
+          borderWidth: 1,
+          borderFill: "#4a4a4a"
+        },
+        desiredSize: { type: "Size", width: 266, height: 150 },
+        desiredSizeOverride: true,
+        childViews: []
+      },
+      {
+        type: "SubView",
+        bounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 12, y: 197 },
+          size: { type: "Size", width: 266, height: 26 }
+        },
+        visible: true,
+        layout: {
+          type: "FlexLayout",
+          orientation: "Horizontal",
+          crossAxisAlignment: "Center",
+          spacing: 8
+        },
+        childViews: [
+          {
+            type: "Button",
+            text: "Choose image...",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 0, y: 0 },
+              size: { type: "Size", width: 130, height: 26 }
+            },
+            name: "chooseImage",
+            style: {
+              type: "ThemedButtonStyle",
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+            }
+          },
+          {
+            type: "Label",
+            text: "sunsetReference.png",
+            textAlignment: "Left",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 138, y: 4 },
+              size: { type: "Size", width: 128, height: 17 }
+            },
+            name: "imageName",
+            style: {
+              type: "LabelStyle",
+              text: "sunsetReference.png",
+              wordWrap: true,
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+              textColor: "#a0a0a0",
+              textAlignment: "Left"
+            }
+          }
+        ]
+      },
+      {
+        type: "SubView",
+        bounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 12, y: 231 },
+          size: { type: "Size", width: 266, height: 26 }
+        },
+        visible: true,
+        layout: {
+          type: "FlexLayout",
+          orientation: "Horizontal",
+          crossAxisAlignment: "Center",
+          spacing: 8
+        },
+        childViews: [
+          {
+            type: "Label",
+            text: "Colours",
+            textAlignment: "Left",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 0, y: 4 },
+              size: { type: "Size", width: 62, height: 17 }
+            },
+            style: {
+              type: "LabelStyle",
+              text: "Colours",
+              wordWrap: true,
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+              textColor: "#a0a0a0",
+              textAlignment: "Left"
+            },
+            desiredSize: { type: "Size", width: 62, height: 17 },
+            desiredSizeOverride: true
+          },
+          {
+            type: "Slider",
+            value: 50,
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 70, y: 0 },
+              size: { type: "Size", width: 166, height: 26 }
+            },
+            name: "count",
+            layoutParams: { type: "FlexLayoutParams", weight: 1 }
+          },
+          {
+            type: "Label",
+            text: "8",
+            textAlignment: "Left",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 244, y: 4 },
+              size: { type: "Size", width: 22, height: 17 }
+            },
+            name: "countText",
+            style: {
+              type: "LabelStyle",
+              text: "8",
+              wordWrap: true,
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+              textColor: "#f0f0f0",
+              textAlignment: "Left"
+            },
+            desiredSize: { type: "Size", width: 22, height: 17 },
+            desiredSizeOverride: true
+          }
+        ]
+      },
+      {
+        type: "SubView",
+        bounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 12, y: 265 },
+          size: { type: "Size", width: 266, height: 24 }
+        },
+        visible: true,
+        layout: {
+          type: "FlexLayout",
+          orientation: "Horizontal",
+          crossAxisAlignment: "Center",
+          spacing: 8
+        },
+        childViews: [
+          {
+            type: "Label",
+            text: "Order by",
+            textAlignment: "Left",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 0, y: 3 },
+              size: { type: "Size", width: 62, height: 17 }
+            },
+            style: {
+              type: "LabelStyle",
+              text: "Order by",
+              wordWrap: true,
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+              textColor: "#a0a0a0",
+              textAlignment: "Left"
+            },
+            desiredSize: { type: "Size", width: 62, height: 17 },
+            desiredSizeOverride: true
+          },
+          {
+            type: "DropDownList",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 70, y: 0 },
+              size: { type: "Size", width: 196, height: 24 }
+            },
+            name: "order",
+            layoutParams: { type: "FlexLayoutParams", weight: 1 }
+          }
+        ]
+      },
+      {
+        type: "SubView",
+        bounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 12, y: 297 },
+          size: { type: "Size", width: 266, height: 18 }
+        },
+        visible: true,
+        layout: {
+          type: "FlexLayout",
+          orientation: "Horizontal",
+          crossAxisAlignment: "Center",
+          spacing: 8
+        },
+        childViews: [
+          {
+            type: "Toggle",
+            checked: true,
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 0, y: 0 },
+              size: { type: "Size", width: 18, height: 18 }
+            },
+            name: "merge"
+          },
+          {
+            type: "Label",
+            text: "Merge near-duplicates",
+            textAlignment: "Left",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 26, y: 0 },
+              size: { type: "Size", width: 143, height: 17 }
+            },
+            style: {
+              type: "LabelStyle",
+              text: "Merge near-duplicates",
+              wordWrap: true,
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+              textColor: "#f0f0f0",
+              textAlignment: "Left"
+            }
+          }
+        ]
+      },
+      {
+        type: "SubView",
+        bounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 12, y: 323 },
+          size: { type: "Size", width: 266, height: 18 }
+        },
+        visible: true,
+        layout: {
+          type: "FlexLayout",
+          orientation: "Horizontal",
+          crossAxisAlignment: "Center",
+          spacing: 8
+        },
+        childViews: [
+          {
+            type: "Toggle",
+            checked: true,
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 0, y: 0 },
+              size: { type: "Size", width: 18, height: 18 }
+            },
+            name: "skip"
+          },
+          {
+            type: "Label",
+            text: "Ignore near-white and near-black",
+            textAlignment: "Left",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 26, y: 0 },
+              size: { type: "Size", width: 217, height: 17 }
+            },
+            style: {
+              type: "LabelStyle",
+              text: "Ignore near-white and near-black",
+              wordWrap: true,
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+              textColor: "#f0f0f0",
+              textAlignment: "Left"
+            }
+          }
+        ]
+      },
+      {
+        type: "SubView",
+        bounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 12, y: 349 },
+          size: { type: "Size", width: 266, height: 46 }
+        },
+        visible: true,
+        name: "found",
+        layout: {
+          type: "FlexLayout",
+          orientation: "Horizontal",
+          wrap: true,
+          spacing: 3,
+          lineSpacing: 3,
+          padding: 0
+        },
+        desiredSize: { type: "Size", width: 266, height: 46 },
+        desiredSizeOverride: true,
+        childViews: [
+          {
+            type: "SubView",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 0, y: 0 },
+              size: { type: "Size", width: 20, height: 20 }
+            },
+            visible: true,
+            style: {
+              type: "ViewStyle",
+              backgroundFill: { type: "Fill", kind: "Color", color: "#e64d33" },
+              borderWidth: 1,
+              borderFill: "#000000"
+            },
+            desiredSize: { type: "Size", width: 20, height: 20 },
+            desiredSizeOverride: true,
+            childViews: []
+          },
+          {
+            type: "SubView",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 23, y: 0 },
+              size: { type: "Size", width: 20, height: 20 }
+            },
+            visible: true,
+            style: {
+              type: "ViewStyle",
+              backgroundFill: { type: "Fill", kind: "Color", color: "#f2994a" },
+              borderWidth: 1,
+              borderFill: "#000000"
+            },
+            desiredSize: { type: "Size", width: 20, height: 20 },
+            desiredSizeOverride: true,
+            childViews: []
+          },
+          {
+            type: "SubView",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 46, y: 0 },
+              size: { type: "Size", width: 20, height: 20 }
+            },
+            visible: true,
+            style: {
+              type: "ViewStyle",
+              backgroundFill: { type: "Fill", kind: "Color", color: "#f2c94c" },
+              borderWidth: 1,
+              borderFill: "#000000"
+            },
+            desiredSize: { type: "Size", width: 20, height: 20 },
+            desiredSizeOverride: true,
+            childViews: []
+          },
+          {
+            type: "SubView",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 69, y: 0 },
+              size: { type: "Size", width: 20, height: 20 }
+            },
+            visible: true,
+            style: {
+              type: "ViewStyle",
+              backgroundFill: { type: "Fill", kind: "Color", color: "#8e3b46" },
+              borderWidth: 1,
+              borderFill: "#000000"
+            },
+            desiredSize: { type: "Size", width: 20, height: 20 },
+            desiredSizeOverride: true,
+            childViews: []
+          },
+          {
+            type: "SubView",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 92, y: 0 },
+              size: { type: "Size", width: 20, height: 20 }
+            },
+            visible: true,
+            style: {
+              type: "ViewStyle",
+              backgroundFill: { type: "Fill", kind: "Color", color: "#3c2a4d" },
+              borderWidth: 1,
+              borderFill: "#000000"
+            },
+            desiredSize: { type: "Size", width: 20, height: 20 },
+            desiredSizeOverride: true,
+            childViews: []
+          },
+          {
+            type: "SubView",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 115, y: 0 },
+              size: { type: "Size", width: 20, height: 20 }
+            },
+            visible: true,
+            style: {
+              type: "ViewStyle",
+              backgroundFill: { type: "Fill", kind: "Color", color: "#1f1b2e" },
+              borderWidth: 1,
+              borderFill: "#000000"
+            },
+            desiredSize: { type: "Size", width: 20, height: 20 },
+            desiredSizeOverride: true,
+            childViews: []
+          },
+          {
+            type: "SubView",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 138, y: 0 },
+              size: { type: "Size", width: 20, height: 20 }
+            },
+            visible: true,
+            style: {
+              type: "ViewStyle",
+              backgroundFill: { type: "Fill", kind: "Color", color: "#efdac4" },
+              borderWidth: 1,
+              borderFill: "#000000"
+            },
+            desiredSize: { type: "Size", width: 20, height: 20 },
+            desiredSizeOverride: true,
+            childViews: []
+          },
+          {
+            type: "SubView",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 161, y: 0 },
+              size: { type: "Size", width: 20, height: 20 }
+            },
+            visible: true,
+            style: {
+              type: "ViewStyle",
+              backgroundFill: { type: "Fill", kind: "Color", color: "#2d7ff9" },
+              borderWidth: 1,
+              borderFill: "#000000"
+            },
+            desiredSize: { type: "Size", width: 20, height: 20 },
+            desiredSizeOverride: true,
+            childViews: []
+          }
+        ]
+      },
+      {
+        type: "Label",
+        text: "8 colours found",
+        textAlignment: "Left",
+        bounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 12, y: 403 },
+          size: { type: "Size", width: 266, height: 17 }
+        },
+        name: "foundText",
+        style: {
+          type: "LabelStyle",
+          text: "8 colours found",
+          wordWrap: true,
+          font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+          textColor: "#a0a0a0",
+          textAlignment: "Left"
+        }
+      },
+      {
+        type: "SubView",
+        bounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 12, y: 428 },
+          size: { type: "Size", width: 266, height: 24 }
+        },
+        visible: true,
+        layout: {
+          type: "FlexLayout",
+          orientation: "Horizontal",
+          crossAxisAlignment: "Center",
+          spacing: 8
+        },
+        childViews: [
+          {
+            type: "Label",
+            text: "Name",
+            textAlignment: "Left",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 0, y: 3 },
+              size: { type: "Size", width: 62, height: 17 }
+            },
+            style: {
+              type: "LabelStyle",
+              text: "Name",
+              wordWrap: true,
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+              textColor: "#a0a0a0",
+              textAlignment: "Left"
+            },
+            desiredSize: { type: "Size", width: 62, height: 17 },
+            desiredSizeOverride: true
+          },
+          {
+            type: "TextField",
+            text: "sunsetReference",
+            font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+            textColor: "#f0f0f0",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 70, y: 0 },
+              size: { type: "Size", width: 196, height: 24 }
+            },
+            name: "newName",
+            layoutParams: { type: "FlexLayoutParams", weight: 1 }
+          }
+        ]
+      },
+      {
+        type: "SubView",
+        bounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 12, y: 460 },
+          size: { type: "Size", width: 266, height: 24 }
+        },
+        visible: true,
+        layout: {
+          type: "FlexLayout",
+          orientation: "Horizontal",
+          mainAxisAlignment: "End",
+          spacing: 8
+        },
+        childViews: [
+          {
+            type: "Button",
+            text: "Cancel",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 38, y: 0 },
+              size: { type: "Size", width: 110, height: 24 }
+            },
+            name: "cancel",
+            style: {
+              type: "ThemedButtonStyle",
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+            },
+            desiredSize: { type: "Size", width: 110, height: 24 },
+            desiredSizeOverride: true
+          },
+          {
+            type: "Button",
+            text: "Create palette",
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 156, y: 0 },
+              size: { type: "Size", width: 110, height: 24 }
+            },
+            name: "ok",
+            style: {
+              type: "ThemedButtonStyle",
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+            },
+            desiredSize: { type: "Size", width: 110, height: 24 },
+            desiredSizeOverride: true
+          }
+        ]
+      }
+    ]
+  }
+}

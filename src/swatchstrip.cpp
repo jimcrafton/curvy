@@ -559,6 +559,34 @@ namespace curvy {
             });
         };
         entries.push_back(rename);
+        StripMenuEntry gather;
+        gather.separator = true;
+        entries.push_back(gather);
+        StripMenuEntry importFile;
+        importFile.text = "Import palette (.ase, .aco)...";
+        importFile.run = [this]() {
+            if (onImportPalette) {
+                onImportPalette();
+            }
+        };
+        entries.push_back(importFile);
+        StripMenuEntry fromImage;
+        fromImage.text = "New palette from image...";
+        fromImage.run = [this]() {
+            if (onPaletteFromImage) {
+                onPaletteFromImage();
+            }
+        };
+        entries.push_back(fromImage);
+        StripMenuEntry inUse;
+        inUse.text = "Add colours in use";
+        inUse.enabled = !automatic;
+        inUse.run = [this]() {
+            if (onAddColorsInUse) {
+                onAddColorsInUse();
+            }
+        };
+        entries.push_back(inUse);
         StripMenuEntry line;
         line.separator = true;
         entries.push_back(line);
@@ -589,6 +617,14 @@ namespace curvy {
             }
         };
         entries.push_back(use);
+        StripMenuEntry select;
+        select.text = "Select shapes using this";
+        select.run = [this, index]() {
+            if (onSelectUsers) {
+                onSelectUsers(index);
+            }
+        };
+        entries.push_back(select);
         if (activeIsAutomatic()) {
             StripMenuEntry save;
             save.text = "Save to palette";

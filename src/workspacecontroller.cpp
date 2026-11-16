@@ -1,7 +1,10 @@
 #include "curvy/workspacecontroller.h"
 #include "curvy/selectionmodel.h"
 #include "curvy/settingsdialog.h"
+#include "curvy/paletteimagedialog.h"
+#include "curvy/paletteimagemodel.h"
 #include "curvy/shapepaths.h"
+#include "curvy/swatchimport.h"
 #include "curvy/theme.h"
 
 #include <newui/automation.h>
@@ -370,6 +373,11 @@ namespace curvy {
         nodeInfo.title = "Node";
         nodeInfo.side = DockSide::Right;
         panelLayout_.add(nodeInfo);
+        PanelInfo transformInfo;
+        transformInfo.id = "transform";
+        transformInfo.title = "Transform";
+        transformInfo.side = DockSide::Right;
+        panelLayout_.add(transformInfo);
 
         rightDock_ = new PanelDock(panelLayout_, DockSide::Right);
         rightDock_->setLayoutParams(std::make_unique<FlexLayoutParams>(1.0f));
@@ -404,10 +412,21 @@ namespace curvy {
                 return SyncReturn::Handled;
             };
         }
+        transformPanel_ = new TransformPanel(document_, graphView_->selectionModel());
+        rightDock_->addPanel(transformPanel_);
+        transformPanel_->onRefused = [this](const std::string& message) { model_->say(message); };
+        transformPanel_->onDestroyed = [this]() { transformPanel_ = nullptr; };
+        transformPanel_->onEdited = [this]() {
+            graphView_->style().markDirty();
+            canvas_->style().markDirty();
+        };
         // Whatever the selection is, picked in the graph view or on the canvas, is what the panel shows.
         graphView_->selectionModel().onChanged += [this](SelectionModel& selection) {
             if (nodePanel_ != nullptr) {
                 nodePanel_->show(selection.primary());
+            }
+            if (transformPanel_ != nullptr) {
+                transformPanel_->refresh();
             }
             return SyncReturn::Ignored;
         };
@@ -428,8 +447,131 @@ namespace curvy {
             saveSettings();
             return SyncReturn::Handled;
         };
-        documentSwatches_ = std::make_unique<SwatchPaletteController>(document_, documentPanel_->strip());
-        documentSwatches_->onMessage = [this](const std::string& message) { model_->say(message); };
+        swatchesTab_ = std::make_unique<SwatchesTab>(document_, documentPanel_->swatchPage());
+        swatchesTab_->onMessage = [this](const std::string& message) { model_->say(message); };
+        swatchesTab_->presentMenu = [this](const std::vector<PanelMenuEntry>& entries, const Point& screen) {
+            if (presentMenu) {
+                presentMenu(entries, screen);
+            }
+        };
+        wireSwatchActions(*swatchesTab_);
+        documentPanel_->layoutSwatches = [this](float width, float height) {
+            if (swatchesTab_ != nullptr) {
+                swatchesTab_->layoutFor(width, height);
+            }
+        };
+        documentPanel_->swatchesShown = [this]() {
+            if (swatchesTab_ != nullptr) {
+                swatchesTab_->refresh();   // what is in use changes while shapes are drawn: it is read again when the tab is shown
+            }
+        };
+        documentPanel_->swatchesContentHeight = [this]() { return swatchesTab_ != nullptr ? swatchesTab_->contentHeight() : 0.0f; };
+        swatchesTab_->onContentHeightChanged = [this]() {
+            if (documentPanel_ != nullptr) {
+                documentPanel_->fitHeight();
+            }
+        };
+        documentPanel_->onDestroyed = [this]() { documentPanel_ = nullptr; };
+        if (SwatchPaletteController* cardSwatches = nodePanel_->swatches()) {
+            wireSwatchActions(*cardSwatches);
+        }
+    }
+
+    void WorkspaceController::wireSwatchActions(SwatchesTab& swatches) {
+        swatches.onImportPalette = [this]() { importPalette(); };
+        swatches.onPaletteFromImage = [this]() { paletteFromImage(); };
+        swatches.onSelectUsers = [this](const std::vector<NodeRef>& users) { selectColorUsers(users); };
+        swatches.onUse = [this](const Swatch& swatch) { applySwatchToSelection(swatch); };
+    }
+
+    void WorkspaceController::applySwatchToSelection(const Swatch& swatch) {
+        const NodeRef fill = graphView_->selectionModel().fill();
+        if (!fill.valid() || !document_.hasNode(fill)) {
+            model_->say("Select a shape first, then use the swatch on its fill");
+            return;
+        }
+        try {
+            document_.setGraphFloats(fill, {{"r", swatch.r}, {"g", swatch.g}, {"b", swatch.b}, {"alpha", swatch.a}}, "Use Swatch");
+            graphView_->style().markDirty();
+            canvas_->style().markDirty();
+            nodePanel_->show(graphView_->selected());
+            model_->say(swatch.name.empty() ? "Fill set from the swatch" : "Fill set to " + swatch.name);
+        } catch (const std::exception& problem) {
+            model_->say(problem.what());
+        }
+    }
+
+    void WorkspaceController::wireSwatchActions(SwatchPaletteController& swatches) {
+        swatches.onImportPalette = [this]() { importPalette(); };
+        swatches.onPaletteFromImage = [this]() { paletteFromImage(); };
+        swatches.onSelectUsers = [this](const std::vector<NodeRef>& users) { selectColorUsers(users); };
+    }
+
+    void WorkspaceController::importPalette() {
+        if (!model_->documentOpen()) {
+            model_->say("Nothing is open to import into");
+            return;
+        }
+        FileDialogOptions options;
+        options.title = "Import palette";
+        options.filters.push_back({"Swatch files", "*.ase;*.aco"});
+        options.filters.push_back({"All Files", "*.*"});
+        std::string file;
+        if (!Dialog::showOpenFile(frame_.frameHandle(), options, file) || file.empty()) {
+            return;
+        }
+        const SwatchImportResult result = SwatchImport::fromFile(file);
+        if (!result.error.empty()) {
+            model_->say("Could not import " + fileNameOf(file) + ": " + result.error);
+            return;
+        }
+        try {
+            document_.importPalettes(result.palettes);
+            const std::size_t count = result.colorCount();
+            model_->say("Imported " + std::to_string(count) + (count == 1 ? " colour" : " colours") + " from " + fileNameOf(file));
+        } catch (const std::runtime_error& problem) {
+            model_->say(problem.what());
+        }
+    }
+
+    void WorkspaceController::paletteFromImage() {
+        if (!model_->documentOpen()) {
+            model_->say("Nothing is open to add a palette to");
+            return;
+        }
+        FileDialogOptions options;
+        options.title = "New palette from image";
+        options.filters.push_back({"Images", "*.png;*.jpg;*.jpeg;*.bmp"});
+        options.filters.push_back({"All Files", "*.*"});
+        std::string file;
+        if (!Dialog::showOpenFile(frame_.frameHandle(), options, file) || file.empty()) {
+            return;
+        }
+        PaletteImageModel choices;
+        if (!choices.load(file)) {
+            model_->say("Could not make a palette from " + fileNameOf(file) + ": " + choices.error());
+            return;
+        }
+        if (!PaletteImageDialog::run(frame_, choices)) {
+            return;
+        }
+        try {
+            document_.addPaletteFrom(choices.name(), choices.found());
+            model_->say("Made a palette of " + std::to_string(choices.found().size()) + " colours from " + choices.fileName());
+        } catch (const std::runtime_error& problem) {
+            model_->say(problem.what());
+        }
+    }
+
+    void WorkspaceController::selectColorUsers(const std::vector<NodeRef>& users) {
+        SelectionModel& selection = graphView_->selectionModel();
+        std::vector<NodeRef> shapes;
+        for (const NodeRef& user : users) {
+            const NodeRef shape = selection.find(SelectionModel::Role::Shape, user);
+            shapes.push_back(shape.valid() ? shape : user);
+        }
+        selection.replace(shapes);
+        ensureDockShown(DockSide::Right);
     }
 
     void WorkspaceController::applyPanelSettings() {
@@ -440,7 +582,7 @@ namespace curvy {
                 continue;
             }
             if (state.bodyHeight > 0.0f) {
-                panel->setBodyHeight((std::max)(Panel::kMinBodyHeight, state.bodyHeight));
+                panel->restoreBodyHeight((std::max)(Panel::kMinBodyHeight, state.bodyHeight));
             }
             panel->setCollapsed(state.collapsed);
             panelLayout_.setUserHidden(state.id, state.userHidden);
@@ -467,7 +609,7 @@ namespace curvy {
             floatingPanels_->screenPosition(info.id, state.floatX, state.floatY);
             if (const Panel* panel = rightDock_->panel(info.id)) {
                 state.collapsed = panel->collapsed();
-                state.bodyHeight = panel->bodyHeight();
+                state.bodyHeight = panel->userResized() ? panel->bodyHeight() : 0.0f;   // a height the panel chose itself is not saved: its content decides
             }
             states.push_back(state);
         }
@@ -726,6 +868,7 @@ namespace curvy {
             model_->say(error.what());
         }
         nodePanel_->show(graphView_->selected());
+        transformPanel_->refresh();
         graphView_->style().markDirty();
         canvas_->style().markDirty();
         return true;
@@ -783,6 +926,15 @@ namespace curvy {
         *alive_ = false;
         for (Action& action : historyActions_) {
             loop_->unregisterAction(&action);
+        }
+        if (transformPanel_ != nullptr) {
+            transformPanel_->onDestroyed = nullptr;
+        }
+        if (documentPanel_ != nullptr) {
+            documentPanel_->onDestroyed = nullptr;
+            documentPanel_->layoutSwatches = nullptr;
+            documentPanel_->swatchesShown = nullptr;
+            documentPanel_->swatchesContentHeight = nullptr;
         }
         if (nodePanel_ != nullptr) {   // null when the window's teardown already destroyed the panel
             nodePanel_->onDestroyed = nullptr;
@@ -863,7 +1015,7 @@ namespace curvy {
         model_->setDocument(true, document_.name());
         if (documentPanel_ != nullptr) {
             documentPanel_->refresh();
-            documentSwatches_->refresh();   // New and Open change the palettes without telling the strip
+            swatchesTab_->setDocumentOpen(true);   // New and Open change the palettes without telling the tab
         }
         showTitle();
         applyView(document_.viewState());
@@ -1167,6 +1319,10 @@ namespace curvy {
         graphView_->setDocument(&document_);
         canvas_->zoomToFit(1.0f);
         model_->setDocument(true, settings.name());
+        if (documentPanel_ != nullptr) {
+            documentPanel_->refresh();
+            swatchesTab_->setDocumentOpen(true);   // New changes the palettes without telling the tab
+        }
         showTitle();
         canvas_->style().markDirty();
         model_->say("New " + settings.name());
@@ -1222,7 +1378,7 @@ namespace curvy {
         model_->setDocument(true, document_.name());
         if (documentPanel_ != nullptr) {
             documentPanel_->refresh();
-            documentSwatches_->refresh();   // New and Open change the palettes without telling the strip
+            swatchesTab_->setDocumentOpen(true);   // New and Open change the palettes without telling the tab
         }
         showTitle();
         canvas_->style().markDirty();
@@ -1361,7 +1517,10 @@ namespace curvy {
         if (!hit.has_value() || hit->key.empty()) {   // an anonymous shape has no node to name
             return !additive && selection.clear();
         }
-        if (selection.selectShapeKey(hit->key, additive) && selection.primary().valid()) {
+        // A click on what is already selected (or inside the selected group or layer) goes up one level; at the top it starts over at the shape.
+        const bool steppingUp = !additive && selection.items().size() == 1 && selection.isShapeKeySelected(hit->key);
+        const bool changed = steppingUp ? (selection.stepUp() || selection.selectShapeKey(hit->key, false)) : selection.selectShapeKey(hit->key, additive);
+        if (changed && selection.primary().valid()) {
             ensureDockShown(DockSide::Right);
             model_->say(document_.node(selection.primary()).name());
         }
@@ -1447,6 +1606,7 @@ namespace curvy {
         }
         // The panel is not a view of the document: it shows the selected node again (a node an undo removed shows as an empty panel).
         nodePanel_->show(graphView_->selected());
+        transformPanel_->refresh();
         graphView_->style().markDirty();
         canvas_->style().markDirty();
         model_->say((forward ? "Redo " : "Undo ") + what);

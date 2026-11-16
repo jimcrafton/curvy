@@ -39,10 +39,15 @@ add_library(curvy_core STATIC
     src/graphcrumbs.cpp
     src/docklayout.cpp
     src/paletteextract.cpp
+    src/paletteimagedialog.cpp
+    src/paletteimagemodel.cpp
+    src/swatchimport.cpp
+    src/swatchestab.cpp
     src/swatchpalettes.cpp
     src/swatchstrip.cpp
     src/swatchpalettecontroller.cpp
     src/nodepanel.cpp
+    src/transformpanel.cpp
     src/selectionmodel.cpp
     src/shapepaths.cpp
     src/graphoverviews.cpp
@@ -90,6 +95,7 @@ target_link_libraries(curvy PRIVATE curvy_core)
 # newui_add_reflectgen_output() reads these from the scope ReflectGen.cmake was included in (newui's).
 set(NEWUI_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/newui)
 set(NEWUI_REFLECTGEN_DIR ${NEWUI_ROOT}/tools/reflectgen)
+set(NEWUI_REFLECTGEN_LIB_DIR ${NEWUI_ROOT}/tools/reflectgen_lib)
 set(NEWUI_REFLECTGEN_PYTHON ${NEWUI_REFLECTGEN_DIR}/.venv/Scripts/python.exe)
 set(NEWUI_REFLECTGEN_SCAN_DIRS ${NEWUI_ROOT}/include/newui)
 set(NEWUI_REFLECTGEN_BASE_INCLUDE_DIRS

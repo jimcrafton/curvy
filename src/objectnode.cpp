@@ -69,7 +69,7 @@ namespace curvy {
         int count = 0;
         NodeId xform = findByTag(objectXformTag, count);
         if (xform == jitnodes::invalidNodeId) {
-            xform = net.addNode("transform", "xform");
+            xform = net.addNode("transform", "objectXform");   // named for what it is: the transform of the whole layer or group, not of one shape
             net.node(xform).addTag(objectXformTag);
         }
         NodeId merge = findByTag(objectMergeTag, count);

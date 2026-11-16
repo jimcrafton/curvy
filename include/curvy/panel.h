@@ -55,6 +55,8 @@ namespace curvy {
         void setResizable(bool resizable);
         bool resizeHandleVisible() const { return resizer_->isVisible(); }
         static constexpr float kMinBodyHeight = 40.0f;
+        // What a TabControl's strip takes at the top of a panel's body, for a panel that works out the height its tabs need.
+        static constexpr float kTabStripHeight = 36.0f;
         static constexpr float kResizeHeight = 6.0f;
 
         // The scrollable area a derived panel fills; call body().setContentSize() when the content's height changes.
@@ -62,6 +64,13 @@ namespace curvy {
         // How tall the body wants to be when expanded; the panel's desired height follows (title bar, body and borders, or the title bar alone when collapsed).
         float bodyHeight() const { return bodyHeight_; }
         void setBodyHeight(float height);
+        // How tall the panel wants its body (what its content needs). It becomes the panel's desired size, which the dock stacks, unless the user has
+        // dragged the panel's resize strip: then their height stays. Call it whenever the content's natural height changes.
+        void setPreferredBodyHeight(float height);
+        // True once the user resized the body by hand (or a saved height was restored): only then is the height worth saving.
+        bool userResized() const { return userResized_; }
+        // Applies a height the user chose in an earlier session.
+        void restoreBodyHeight(float height);
         float desiredHeight() const;
 
         // What is on show, for tests.
@@ -117,6 +126,7 @@ namespace curvy {
         float resizeStartHeight_ = 0.0f;
         newui::SubView* resizer_ = nullptr;
         float bodyHeight_ = kDefaultBodyHeight;
+        bool userResized_ = false;
 
         newui::SubView* content_ = nullptr;
         newui::SubView* box_ = nullptr;

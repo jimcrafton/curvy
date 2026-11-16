@@ -85,6 +85,49 @@ namespace curvy {
         strip_.onDeletePalette = [this]() {
             guarded([&]() { document_.deletePalette(document_.activePalette()); });
         };
+        strip_.onImportPalette = [this]() {
+            if (onImportPalette) {
+                onImportPalette();
+            }
+        };
+        strip_.onPaletteFromImage = [this]() {
+            if (onPaletteFromImage) {
+                onPaletteFromImage();
+            }
+        };
+        strip_.onAddColorsInUse = [this]() {
+            guarded([&]() {
+                std::vector<Swatch> missing;
+                for (const ColorUse& use : document_.colorsInUse(true)) {
+                    missing.push_back(use.color);
+                }
+                if (missing.empty()) {
+                    say("Every colour in use is already in a palette");
+                    return;
+                }
+                document_.addSwatches(document_.activePalette(), missing);
+                say("Added " + std::to_string(missing.size()) + (missing.size() == 1 ? " colour" : " colours") + " that were in use");
+            });
+        };
+        strip_.onSelectUsers = [this](std::size_t index) {
+            guarded([&]() {
+                if (recent_) {
+                    say("Save the colour to a palette first, then select the shapes that use it");
+                    return;
+                }
+                std::vector<NodeRef> users;
+                const ColorUse use = document_.swatchUse(document_.activePalette(), index, &users);
+                if (users.empty()) {
+                    say("No shape uses this colour");
+                    return;
+                }
+                if (onSelectUsers) {
+                    onSelectUsers(users);
+                }
+                say("Selected " + std::to_string(use.rows) + (use.rows == 1 ? " colour row" : " colour rows") + " in " + std::to_string(use.groups) +
+                    (use.groups == 1 ? " group" : " groups"));
+            });
+        };
         refresh();
     }
 

@@ -46,15 +46,38 @@ namespace curvy {
         auto* swatchTab = new TabPage();
         swatchTab->setTitle("Swatches");
         swatchPage_ = tabs_->addTab("Swatches", swatchTab);
-        strip_ = new SwatchStrip();
-        swatchPage_->addChild(strip_);
-        strip_->onHeightChanged = [this]() { layoutParts(); };
+        tabs_->onTabChanged += [this](TabControl&, std::size_t index) {
+            if (index == 1) {
+                layoutParts();   // the page gets its size as it is shown, after the panel last laid out, so it is laid out again now
+                if (swatchesShown) {
+                    swatchesShown();
+                }
+            }
+            fitHeight();
+            return SyncReturn::Handled;
+        };
 
         body().onSizeChanged += [this](View&, const Size&) {
             layoutParts();
             return SyncReturn::Ignored;
         };
         refresh();
+    }
+
+    void DocumentPanel::fitHeight() {
+        constexpr float kDocumentTab = 150.0f;   // the name, the page and the colour mode
+        constexpr float kMostSwatches = 560.0f;   // beyond this the page scrolls
+        float content = kDocumentTab;
+        if (tabs_->selectedIndex() == 1 && swatchesContentHeight) {
+            content = (std::min)(swatchesContentHeight(), kMostSwatches);
+        }
+        setPreferredBodyHeight(kTabStripHeight + content);
+    }
+
+    DocumentPanel::~DocumentPanel() {
+        if (onDestroyed) {
+            onDestroyed();
+        }
     }
 
     void DocumentPanel::refresh() {
@@ -79,8 +102,11 @@ namespace curvy {
         body().setContentSize(Size(own.width(), own.height()));   // the tab control fills the body: nothing to scroll
         tabs_->setBounds(Rect(0.0f, 0.0f, own.width(), own.height()));
         const float width = (std::max)(40.0f, own.width() - 2.0f * kPad);
-        strip_->setBounds(Rect(kPad, kPad, width, strip_->bounds().height()));
-        strip_->layoutFor(width);
+        if (layoutSwatches && swatchPage_ != nullptr) {
+            const Rect page = swatchPage_->bounds();
+            layoutSwatches(page.width(), page.height());
+        }
+        fitHeight();
         float y = kPad;
         for (std::size_t i = 0; i < rows_.size(); ++i) {
             rows_[i]->setBounds(Rect(kPad, y, width, kLine));

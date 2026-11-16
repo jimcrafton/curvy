@@ -14,6 +14,7 @@ namespace {
             curvytest::WorkspaceTest::SetUp();
             window().presentMenu = [](const std::vector<curvy::PanelMenuEntry>&, const Point&) {};   // the native popup would block
             layout().setUserHidden("node", true);   // these tests are about two panels: Document and the sample
+            layout().setUserHidden("transform", true);
             window().docks().setCollapsed(DockSide::Right, false);   // the dock must have a size for "outside it" to mean something
             frame_.rootView().updateLayout();
         }
@@ -174,8 +175,23 @@ TEST_F(PanelDockTest, PressingAPanelMakesItTheOnlyActiveOne) {
     EXPECT_FALSE(dock().panel("document")->active());
 }
 
+TEST_F(PanelDockTest, aPanelNobodyResizedSavesNoHeightSoItsContentStaysInCharge) {
+    curvy::Panel& panel = *dock().panel("document");
+    ASSERT_FALSE(panel.userResized());
+    panel.setCollapsed(true);   // any change captures every panel's state
+    const curvy::Settings::PanelState* state = nullptr;
+    for (const auto& s : settings_.panels) {
+        if (s.id == "document") {
+            state = &s;
+        }
+    }
+    ASSERT_NE(nullptr, state);
+    EXPECT_FLOAT_EQ(0.0f, state->bodyHeight);
+}
+
 TEST_F(PanelDockTest, ResizingAPanelIsCapturedInTheSettings) {
     curvy::Panel& panel = *dock().panel("document");
+    const float start = panel.bodyHeight();   // what the panel itself asked for
     panel.pressResize(newui::Point(5.0f, 100.0f));
     panel.moveResize(newui::Point(5.0f, 150.0f), true);
     panel.releaseResize();
@@ -186,7 +202,7 @@ TEST_F(PanelDockTest, ResizingAPanelIsCapturedInTheSettings) {
         }
     }
     ASSERT_NE(nullptr, state);
-    EXPECT_FLOAT_EQ(curvy::Panel::kDefaultBodyHeight + 50.0f, state->bodyHeight);
+    EXPECT_FLOAT_EQ(start + 50.0f, state->bodyHeight);
     panel.setCollapsed(true);
     for (const auto& s : settings_.panels) {
         if (s.id == "document") {
@@ -260,7 +276,7 @@ TEST_F(PanelDockTest, DroppingAboveThePanelsPutsTheFloatingPanelFirst) {
 
 TEST_F(PanelDockTest, TheWheelScrollsWhenThePanelsAreTallerThanTheDock) {
     curvy::Panel& document = window().documentPanel();
-    document.setBodyHeight(dock().bounds().height() + 300.0f);
+    document.restoreBodyHeight(dock().bounds().height() + 300.0f);   // a height the user chose: the panel's own preferred height would otherwise replace it
     dock().sync();
     EXPECT_GT(dock().contentHeight(), dock().bounds().height());
     const float top = document.bounds().top();

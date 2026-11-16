@@ -8,6 +8,7 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace curvy {
 
@@ -34,6 +35,11 @@ namespace curvy {
         std::function<void(const Swatch& swatch)> onUse;
         // Something to tell the user (a refused edit, a swatch saved).
         std::function<void(const std::string& message)> onMessage;
+        // What needs a file dialog or the selection, which the strip's owner has: the palette menu's "Import palette..." and "New palette from image...",
+        // and "Select shapes using this" (the nodes of the colour rows that use the swatch).
+        std::function<void()> onImportPalette;
+        std::function<void()> onPaletteFromImage;
+        std::function<void(const std::vector<NodeRef>& users)> onSelectUsers;
 
     private:
         void guarded(const std::function<void()>& edit);

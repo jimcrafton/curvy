@@ -145,7 +145,26 @@ The card the graph panel's colour swatch opens (`ColorPickerCard`) shows the act
   colour row ties the row to it (node tag `swatch:<link>:<group>`, saved with the graph; the swatch's number is saved as `link` in the palette). "Replace with current colour" on a linked swatch recolours
   every tied row, in the same undo step as the swatch. Changing the row's colour any other way (wheel, sliders, hex, a plain swatch, a Recent colour) unties it. Unlinking or deleting the swatch (or its
   palette) unties its rows, which keep their colours. Duplicated palettes, "+" and Save to palette make plain swatches. A keyed colour channel is overwritten, not keyed.
-- Not built yet: import of .ASE / .ACO, palette from an image, a Swatches tab on the document card.
+- Built 2026-11-15 (menu lines, not tried live): the strip's "..." menu has **Import palette (.ase, .aco)...** (`SwatchImport`: ACO v1 and v2, ASE with groups
+  becoming one palette each; RGB, CMYK, Gray, Lab and ACO's HSB turned into RGB by textbook formulas, no colour profile; one undo step, the last palette
+  becomes active), **New palette from image...** (`PaletteExtract::fromFile`: PNG, JPEG, BMP and the other Blend2D codecs, median cut with the defaults: 8
+  colours, most used first, merge near-duplicates, ignore near white and black; the palette is named after the file) and **Add colours in use** (every colour of
+  a colour row that is in no palette, one undo step). A swatch's menu has **Select shapes using this** (selects the shapes whose fill or stroke has the colour,
+  or is tied to the linked swatch). The image options (count, order) are not asked for yet.
+- Not built yet: the Library and Fonts tabs (they need symbols, patterns, styles and brushes, and text, which do not exist), the options step of "New palette
+  from image", and the full layout C of the Swatches tab (palette rows, a details box).
+- Built 2026-11-15 from the mockups (`docs/mockups/swatchesTabPanel.html` -> `Resources/swatchesTab.newui`, `paletteFromImage.html` -> `Resources/paletteFromImage.newui`;
+  `swatchesTab.html` stays the interactive prototype; not yet seen live):
+  - **New palette from image** (`PaletteImageDialog`, session in `paletteimagedialogsession.h`, `PaletteImageModel`): after the file dialog picks the image, the dialog shows it,
+    a Colours slider 4 to 16, Order by, Merge near-duplicates, Ignore near-white and near-black, the colours found as chips (they update as the controls move), a name
+    (the file's, unless typed) and Create palette (disabled without colours or a name). Choose image swaps the picture and the colours. One undo step makes the active palette.
+  - **Swatches tab** (`SwatchesTab`, in the Document panel): the palettes as rows with their colours as a strip (click opens one; Recent is last), the open palette's tiles
+    (click selects, right-click: Use, Select shapes using this, Link/Unlink, Rename, Delete; Recent's has Save to palette), the details of the selected swatch (name and hex
+    commit on Enter or leaving the field, Linked, "Used N times in M groups", Select them, Use as fill), and the colours in use that are in no palette (+ one, Add all). The
+    palette button lists the palettes, "..." has New, Duplicate, Rename, Import, From image, Add colours in use and Delete. The colours in use and the details are read when
+    something is selected or the tab is shown, not while shapes are drawn. Use as fill sets the selected shape's fill colour (one undo step) and does not tie it to a linked
+    swatch (the colour card does that).
+  - Not built: dragging a tile to reorder it (the colour card's strip still does), the Library and Fonts tabs.
 - **Swatches tab and palette from image (mockup `docs/mockups/swatchesTab.html`, layout C chosen, proposal):** the tab shows every palette as a row with its colours as a strip
   (click to make it active, Recent last), then the active palette's grid, a details box (name, hex, Linked, used by N shapes in M groups, Select them) and the colours in use
   that are in no palette (+ Add). It shares the strip's `SwatchPaletteController`, so both views agree. "New palette from image" (the "..." menu) takes a PNG/JPG, shrinks it to
@@ -481,7 +500,7 @@ with the html-mockup-to-newui skill; the top bar's two toggle buttons are in `wo
 tool and the buttons follow the tool when it changes elsewhere. The property dock hosts the Transform, Colour, Text, Shape, Stroke and Opacity boxes (`DockContext::boxesFor` picks them). The **Shape** box (`ShapePanel`) appears for a lone star, polygon, rounded rectangle or arc still in its parameter form (`recogniseLiveShape`, `liveshape.h`: recognised from the outline, nothing extra stored) and edits the numbers the canvas handles drag: Points or Sides, Inner %, Corner, and an arc's Start and Sweep in degrees. Each entry is one undo step; Return followed by losing focus does not make a second one. Both docks
 are off by default, flush to the edges under the rulers, full height, translucent (bgSurface at 60%, retaken from `Theme::current()` when the theme changes), and are switched by the
 **Tools** and **Panels** buttons in the top bar or by the **View** ring (Toolbar T, Properties P, Rulers G, Fit page 0, Theme L), which replaces the Document ring's Fit and Rulers
-slots. Blur behind the panels is not done (see above). Headless checks: `curvy --check-workspace`; real-input tests: `tests/gui/test_curvy_gui.py` (see the newui-gui-driver skill).
+slots. Blur behind the panels is not done (see above). Headless tests: `curvyTests.exe` (GoogleTest); real-input tests: `tests/gui/test_curvy_workspace.py` and the other `tests/gui/test_curvy_*.py` suites (see the newui-gui-driver skill).
 
 ### Implemented so far (WorkspaceController)
 `Resources/workspace.newui` is the window; `WorkspaceController` (MVC: `WorkspaceModel` holds the shell state and the hint bar text, the canvas, ring and labels follow it,

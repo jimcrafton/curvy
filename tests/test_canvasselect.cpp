@@ -63,6 +63,26 @@ TEST_F(CanvasSelectTest, shiftAddsAndEmptyCanvasClears) {
     EXPECT_FALSE(press(600.0, 700.0)) << "nothing to clear: the press is not used";
 }
 
+TEST_F(CanvasSelectTest, clickingTheSelectedShapeAgainGoesUpToItsLayerThenStartsOver) {
+    press(100.0, 100.0);
+    ASSERT_EQ(primaryType(), "circle");
+    EXPECT_TRUE(press(100.0, 100.0));
+    ASSERT_EQ(selection().items().size(), 1u);
+    EXPECT_EQ(selection().primary().id, window().document().childrenOf()[0].id) << "the layer";
+    EXPECT_TRUE(selection().isShapeKeySelected(std::string(window().document().artwork()->shapes().back().key))) << "the layer holds both shapes";
+
+    EXPECT_TRUE(press(300.0, 100.0));
+    EXPECT_EQ(primaryType(), "circle") << "at the top it starts over, at the shape that was clicked";
+    EXPECT_EQ(selection().fill(), second_);
+}
+
+TEST_F(CanvasSelectTest, stepUpDoesNothingWhenNothingEncloses) {
+    EXPECT_FALSE(selection().stepUp());
+    press(100.0, 100.0);
+    press(100.0, 100.0);
+    EXPECT_FALSE(selection().stepUp()) << "a layer is the top";
+}
+
 TEST_F(CanvasSelectTest, theSelectionIsSharedWithTheGraphView) {
     press(100.0, 100.0);
     EXPECT_EQ(window().graph().selectionModel().primary(), selection().primary());

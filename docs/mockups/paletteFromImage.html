@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>curvy new palette from image (static layout for conversion)</title>
+<!-- The options step of "New palette from image", laid out for html-mockup-to-newui (swatchesTab.html has the interactive prototype with a real median cut
+     on three sample pictures). It opens after the file dialog has picked an image, or from the Choose image button. The colours found update as the
+     controls move; Create palette makes plain swatches in a new active palette named after the file (one undo step), Cancel changes nothing.
+     Convert with: html2newui.py paletteFromImage.html --name paletteFromImage -->
+<style>
+  body { margin: 0; padding: 12px; width: 290px; background: #1E1E1E; font-family: "Segoe UI", sans-serif; font-size: 12px; color: #F0F0F0; display: flex; flex-direction: column; gap: 8px; }
+  .row { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+  .label { width: 62px; color: #A0A0A0; }
+  .muted { color: #A0A0A0; }
+  .found { display: flex; flex-direction: row; flex-wrap: wrap; gap: 3px; min-height: 46px; }
+  .found div { width: 20px; height: 20px; border: 1px solid #000000; }
+  .buttons { display: flex; flex-direction: row; justify-content: flex-end; gap: 8px; }
+  .buttons button { width: 110px; height: 24px; }
+</style>
+</head>
+<body>
+  <span id="dialogTitle" style="font-size:13px">New palette from image</span>
+  <div id="picture" style="width:266px;height:150px;background:#121212;border:1px solid #4A4A4A"></div>
+  <div class="row"><button id="chooseImage">Choose image...</button><span id="imageName" class="muted">sunsetReference.png</span></div>
+  <div class="row"><span class="label">Colours</span><input id="count" type="range" value="50" style="flex-grow:1"><span id="countText" style="width:22px">8</span></div>
+  <div class="row"><span class="label">Order by</span><select id="order" style="flex-grow:1"><option>Most used</option><option>Hue</option><option>Lightness</option></select></div>
+  <div class="row"><input id="merge" type="checkbox" checked><span>Merge near-duplicates</span></div>
+  <div class="row"><input id="skip" type="checkbox" checked><span>Ignore near-white and near-black</span></div>
+  <div id="found" class="found">
+    <div style="background:#E64D33"></div><div style="background:#F2994A"></div><div style="background:#F2C94C"></div><div style="background:#8E3B46"></div>
+    <div style="background:#3C2A4D"></div><div style="background:#1F1B2E"></div><div style="background:#EFDAC4"></div><div style="background:#2D7FF9"></div>
+  </div>
+  <span id="foundText" class="muted">8 colours found</span>
+  <div class="row"><span class="label">Name</span><input id="newName" type="text" value="sunsetReference" style="flex-grow:1"></div>
+  <div class="buttons"><button id="cancel">Cancel</button><button id="ok">Create palette</button></div>
+</body>
+</html>

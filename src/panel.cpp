@@ -190,6 +190,7 @@ namespace curvy {
             releaseResize();
             return;
         }
+        userResized_ = true;
         setBodyHeight((std::max)(kMinBodyHeight, resizeStartHeight_ + screen.y - resizeStartY_));
         onBodyHeightChanged(*this);
     }
@@ -227,6 +228,17 @@ namespace curvy {
     void Panel::setBodyHeight(float height) {
         bodyHeight_ = (std::max)(0.0f, height);
         updateSize();
+    }
+
+    void Panel::setPreferredBodyHeight(float height) {
+        if (!userResized_ && height != bodyHeight_) {
+            setBodyHeight(height);
+        }
+    }
+
+    void Panel::restoreBodyHeight(float height) {
+        userResized_ = true;
+        setBodyHeight(height);
     }
 
     float Panel::desiredHeight() const {

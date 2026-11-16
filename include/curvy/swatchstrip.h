@@ -139,6 +139,12 @@ namespace curvy {
         // "Link" or "Unlink" in a swatch's menu: `linked` is what the swatch should become.
         std::function<void(std::size_t index, bool linked)> onSetLinked;
         std::function<void(std::size_t from, std::size_t to)> onMove;
+        // "Import palette..." (an .ase or .aco file), "New palette from image..." and "Add colours in use" in the palette menu.
+        std::function<void()> onImportPalette;
+        std::function<void()> onPaletteFromImage;
+        std::function<void()> onAddColorsInUse;
+        // "Select shapes using this" in a swatch's menu.
+        std::function<void(std::size_t index)> onSelectUsers;
         // Fired when the strip's height changed (a bar opened or closed, the swatches wrapped differently), so the owner can lay out again.
         std::function<void()> onHeightChanged;
 

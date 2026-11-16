@@ -154,8 +154,20 @@ A rig is a node that takes geometry and a list of *bindings*, each a key or a ke
    generator node of the shape under the pointer in the graph view's selection model (so the graph view follows), Shift or Ctrl adds, a press
    on empty canvas clears, Space held still pans. Selected shapes (and the shapes inside a selected layer or group) get a 2 px accent outline
    from `paintTop`, repainted from the model's `onChanged`. Shapes without a key (anonymous) cannot be selected.
-5. `curvyText` emits glyph shapes with counters as continuation primitives of one key.
-6. First rig node on top of the API, to prove the binding story before more is built.
+5. Open: `curvyText` emits glyph shapes with counters as continuation primitives of one key. There is no text node or glyph code anywhere yet
+   (jitnodes or curvy), so this waits for the text feature itself (font choice, layout, outlines); nothing in curvy makes shapes other than
+   the jitnodes generators, which already stamp keys, and the importers, which are the user's separate branch.
+6. Done 2026-11-15: first rig node, `shapeTransform` (jitnodes `topologyNodes.cpp`): parameters `bind` (comma separated keys or prefixes),
+   `tx`, `ty`, `angle`, `scaleX`, `scaleY`, `pivot` (`centre` of the bound shapes, or `point` with `pivotX`, `pivotY`). It scales and turns
+   around the pivot, then moves, only the points of the bound shapes, and leaves every key and every other shape untouched. The matching
+   rule is `shapeKeyMatches(key, binding)` in `geometry.h`: the key itself, or a prefix that ends at a level (`/`, `#` or `@`), so `uid`
+   binds a node and all its copies, `uid@1` one copy, a group's uid everything inside it. A binding that finds nothing leaves the geometry as
+   it was; there is no `Node::warning` yet to report it (the unmatched-binding report in "Animation and rigging" is still to do). 3 tests in
+   `jitnodes/tests/testMain.cpp` (230 pass).
+
+Canvas selection step-up (done 2026-11-15, `SelectionModel::stepUp`, 2 tests in `tests/test_canvasselect.cpp`): a click on a shape that is
+already selected, or inside the selected group or layer, selects the nearest group or layer around it; at the top level the next click starts
+over at the shape that was clicked. Shift/Ctrl, empty canvas and Space-pan are unchanged.
 
 ## Decisions (agreed 2026-11-14)
 

@@ -75,6 +75,14 @@ namespace curvy {
         return set(node);   // a key that names nothing (a click on empty canvas) clears
     }
 
+    bool SelectionModel::stepUp() {
+        if (!documentAlive() || !primary_.valid()) {
+            return false;
+        }
+        const NodeRef up = enclosing(primary_);
+        return up.valid() && set(up);
+    }
+
     bool SelectionModel::isShapeKeySelected(const std::string& key) const {
         if (!documentAlive() || items_.empty()) {
             return false;

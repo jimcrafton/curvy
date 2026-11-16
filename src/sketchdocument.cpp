@@ -489,6 +489,45 @@ namespace curvy {
         return index;
     }
 
+    std::size_t SketchDocument::importPalettes(const std::vector<Palette>& palettes) {
+        std::vector<const Palette*> usable;
+        for (const Palette& palette : palettes) {
+            if (!palette.swatches.empty()) {
+                usable.push_back(&palette);
+            }
+        }
+        if (usable.empty()) {
+            throw std::runtime_error("there are no colours to import");
+        }
+        std::size_t last = 0;
+        editPalettes("Import Palettes", [&]() {
+            for (const Palette* source : usable) {
+                Palette palette{uniqueName(palettes_, source->name.empty() ? std::string("Imported") : source->name), source->swatches};
+                for (Swatch& swatch : palette.swatches) {
+                    swatch.link = 0;
+                }
+                palettes_.push_back(std::move(palette));
+                last = palettes_.size() - 1;
+            }
+            activePalette_ = last;
+        });
+        return last;
+    }
+
+    std::size_t SketchDocument::addSwatches(std::size_t palette, const std::vector<Swatch>& swatches) {
+        Palette& list = paletteAt(palette);
+        if (swatches.empty()) {
+            throw std::runtime_error("there are no colours to add");
+        }
+        editPalettes("Add Swatches", [&]() {
+            for (const Swatch& swatch : swatches) {
+                list.swatches.push_back(swatch);
+                list.swatches.back().link = 0;
+            }
+        });
+        return list.swatches.size();
+    }
+
     std::vector<SketchDocument::ColorRow> SketchDocument::colorRows() {
         std::vector<ColorRow> rows;
         std::vector<jitnodes::NodeId> path;

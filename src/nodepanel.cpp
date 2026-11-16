@@ -31,11 +31,36 @@ namespace curvy {
         return *content;
     }
 
+    // What the content needs besides the parameter rows: every other section's own desired height, read from the loaded view.
+    float NodePanel::fixedContentHeight() const {
+        float height = 0.0f;
+        for (const SubView* child : root_.childViews()) {
+            if (child != scroll_ && child->isVisible()) {
+                height += child->desiredSize().height;
+            }
+        }
+        return height;
+    }
+
+    float NodePanel::contentHeightFor(std::size_t paramRows) const {
+        return fixedContentHeight() + float(paramRows) * kParamRowHeight;
+    }
+
+    float NodePanel::contentBottom() const {
+        float bottom = 0.0f;
+        for (const SubView* child : root_.childViews()) {
+            if (child->isVisible()) {
+                bottom = (std::max)(bottom, child->bounds().top() + child->bounds().height());
+            }
+        }
+        return bottom;
+    }
+
     // The body shows the whole content when it can; a shorter body scrolls it.
     void NodePanel::layoutContent() {
         const Rect own = body().bounds();
         const float width = own.width();
-        const float height = (std::max)(own.height(), kContentHeight);
+        const float height = (std::max)(own.height(), contentHeightFor(kLeastParamRows));
         root_.setBounds(Rect(0.0f, 0.0f, width, height));
         body().setContentSize(Size(width, height));
         root_.updateLayout();
@@ -49,7 +74,8 @@ namespace curvy {
     }
 
     NodePanel::NodePanel(SketchDocument& document, SubView& pickerHost) : Panel("node", "Node"), root_(loadContent()), pickerHost_(pickerHost), document_(document) {
-        setBodyHeight(kBodyHeight);
+        scroll_ = dynamic_cast<ScrollView*>(root_.findView("graphParamScroll"));   // needed now: the preferred height leaves its rows out
+        setPreferredBodyHeight(contentHeightFor(kPreferredParamRows));
         body().onSizeChanged += [this](View&, const Size&) {
             layoutContent();
             return SyncReturn::Handled;
@@ -218,23 +244,29 @@ namespace curvy {
                 l->setText(text);
             }
         };
+        // What feeds each input, and what this node feeds. The input's number is only said when the node has more than one (a bare "0" read like a count).
         std::vector<std::string> inputs, users;
         if (net != nullptr) {
             for (int i = 0; i < shown->inputCount(); ++i) {
                 const jitnodes::NodeId from = net->inputOf(node.id, i);
-                inputs.push_back(std::to_string(i) + "  " + (from == jitnodes::invalidNodeId ? "(empty)" : net->node(from).name()));
+                const std::string source = from == jitnodes::invalidNodeId ? "(nothing wired)" : net->node(from).name();
+                inputs.push_back(shown->inputCount() > 1 ? "input " + std::to_string(i) + ": " + source : source);
             }
             for (const jitnodes::NodeId id : net->nodeIds()) {
                 for (int i = 0; i < net->node(id).inputCount(); ++i) {
                     if (net->inputOf(id, i) == node.id) {
-                        users.push_back(std::to_string(i) + "  " + net->node(id).name());
+                        users.push_back(net->node(id).inputCount() > 1 ? net->node(id).name() + " (input " + std::to_string(i) + ")" : net->node(id).name());
                     }
                 }
             }
         }
+        std::string usedBy;
+        if (net != nullptr) {
+            usedBy = users.empty() ? "(not used)" : users[0] + (users.size() > 1 ? "  and " + std::to_string(users.size() - 1) + " more" : "");
+        }
         link("graphInput0", inputs.size() > 0 ? inputs[0] : "");
         link("graphInput1", inputs.size() > 1 ? inputs[1] : "");
-        link("graphUsed0", users.size() > 0 ? users[0] : "");
+        link("graphUsed0", usedBy);
         root_.style().markDirty();
     }
 

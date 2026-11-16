@@ -252,7 +252,7 @@ namespace curvy {
             flag("floating", panel.floating);
             number("floatX", panel.floatX);
             number("floatY", panel.floatY);
-            number("bodyHeight", panel.bodyHeight);
+            number("userBodyHeight", panel.bodyHeight);   // only a height the user dragged; the old "bodyHeight" held every panel's height and is ignored
             b[panel.id.c_str()] = b.pop();
         }
         b["panels"] = b.pop();
@@ -363,7 +363,7 @@ namespace curvy {
                 readBool(child, "floating", state.floating);
                 readReal(child, "floatX", x, -32000.0, 32000.0);
                 readReal(child, "floatY", y, -32000.0, 32000.0);
-                readReal(child, "bodyHeight", height, 0.0, 32000.0);
+                readReal(child, "userBodyHeight", height, 0.0, 32000.0);
                 state.floatX = float(x);
                 state.floatY = float(y);
                 state.bodyHeight = float(height);

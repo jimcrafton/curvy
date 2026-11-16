@@ -116,7 +116,7 @@
     <h3>Swatches tab of the document card</h3>
     <ul>
       <li><b>Same palettes as the colour card's strip.</b> Both are views of one list (one controller), so a swatch added, renamed or reordered in one shows in the other at once. Every change is one undo step.</li>
-      <li><b>Palettes</b> are rows, each with its colours as a strip: click one to make it active (it is outlined and opens below). The &hellip; button has New, Duplicate, Rename, Delete and <b>New palette from image</b>. Recent is the last row, read-only.</li>
+      <li><b>Palettes</b> are rows, each with its colours as a strip: click one to make it active (it is outlined and opens below). The &hellip; button has New, Duplicate, Rename, <b>Import palette (.ase, .aco)</b>, <b>New palette from image</b>, <b>Add colours in use</b> (all of the list below at once; the + beside one colour adds just that one) and Delete. Recent is the last row, read-only. A swatch's menu also has <b>Select shapes using this</b>, the same as Select them.</li>
       <li><b>Grid:</b> click selects and shows the details; right-click (or hold with a pen) Use, Replace with current colour, Rename, Delete; drag reorders; + adds the current colour. A white corner mark is a <b>linked</b> swatch.</li>
       <li><b>Details:</b> name, hex, Linked, and how many shapes in how many groups use it. <b>Select them</b> selects those shapes on the canvas. Typing a hex on a linked swatch recolours every user at once.</li>
       <li><b>In use, in no palette:</b> every colour found on a colour row that no swatch matches, with its count. + adds it to the active palette. Worked out when the tab opens, not kept up to date while you draw.</li>
@@ -207,15 +207,19 @@ function openMoreMenu(e) {
     { k: 'n', t: 'New palette', f: () => { palettes.push({ name: 'Palette ' + (palettes.length + 1), sw: [] }); active = palettes.length - 1; selected = -1; say('New palette'); render(); } },
     { k: 'd', t: 'Duplicate', f: () => { palettes.push({ name: cur().name + ' copy', sw: cur().sw.map(s => ({ ...s, linked: false, uses: 0, groups: 0 })) }); active = palettes.length - 1; say('Duplicated (plain swatches)'); render(); } },
     { k: 'r', t: 'Rename', f: () => { const n = prompt('Palette name', cur().name); if (n) { cur().name = n; render(); } } },
-    { k: 'x', t: 'Delete', off: palettes.length < 2, f: () => { if (confirm('Delete palette ' + cur().name + '? Undo brings it back.')) { palettes.splice(active, 1); active = 0; selected = 0; render(); } } },
     '-',
-    { k: 'i', t: 'New palette from image&hellip;', f: openDialog }
+    { k: 'f', t: 'Import palette (.ase, .aco)&hellip;', f: () => say('A file dialog picks an Adobe swatch file; each group in it becomes a palette (one undo step)') },
+    { k: 'i', t: 'New palette from image&hellip;', f: openDialog },
+    { k: 'u', t: 'Add colours in use', f: () => { const n = inUse.length; inUse.splice(0).forEach(u => cur().sw.push(sw(u.hex))); say(n ? 'Added ' + n + ' colours that were in use' : 'Every colour in use is already in a palette'); render(); } },
+    '-',
+    { k: 'x', t: 'Delete', off: palettes.length < 2, f: () => { if (confirm('Delete palette ' + cur().name + '? Undo brings it back.')) { palettes.splice(active, 1); active = 0; selected = 0; render(); } } }
   ], at[0] - 130, at[1]);
 }
 function openSwatchMenu(ev) {
   const r = $('#card').getBoundingClientRect();
   menu('#swatchMenu', [
     { k: 'u', t: 'Use', f: () => say('Fill set to ' + cur().sw[selected].hex) },
+    { k: 's', t: 'Select shapes using this', off: !cur().sw[selected].uses, f: () => say('Selected the shapes that use ' + cur().sw[selected].hex) },
     { k: 'c', t: 'Replace with current colour', f: () => { cur().sw[selected].hex = '#E64D33'; say('Replaced'); render(); } },
     { k: 'n', t: 'Rename', f: () => { const n = prompt('Swatch name', cur().sw[selected].name); if (n !== null) { cur().sw[selected].name = n; render(); } } },
     { k: 'd', t: 'Delete', f: () => { cur().sw.splice(selected, 1); selected = Math.min(selected, cur().sw.length - 1); say('Deleted'); render(); } }

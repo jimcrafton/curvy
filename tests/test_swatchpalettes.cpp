@@ -322,3 +322,32 @@ TEST_F(PaletteFile, aFileWithTwoPalettesOfOneNameIsRefusedAndTheDocumentIsUntouc
     EXPECT_NE(loaded.lastError().find("used twice"), std::string::npos) << loaded.lastError();
     EXPECT_EQ(paletteNames(loaded), (std::vector<std::string>{"Swatches", "Mine"}));
 }
+
+TEST(Palettes, importingPalettesAddsThemAllAsOneUndoStepAndActivatesTheLast) {
+    SketchDocument document;
+    const std::size_t before = document.palettes().size();
+    Swatch linked = swatch(1.0f, 0.0f, 0.0f, "Red");
+    linked.link = 7;
+    const std::vector<Palette> imported = {Palette{"Brand", {linked, swatch(0.0f, 1.0f, 0.0f)}}, Palette{"Empty", {}}, Palette{"Swatches", {swatch(0.0f, 0.0f, 1.0f)}}};
+    const std::size_t last = document.importPalettes(imported);
+    ASSERT_EQ(document.palettes().size(), before + 2) << "the empty one is left out";
+    EXPECT_EQ(document.activePalette(), last);
+    EXPECT_EQ(document.palettes()[before].name, "Brand");
+    EXPECT_EQ(document.palettes()[before].swatches[0].link, 0u) << "imported swatches are plain";
+    EXPECT_NE(document.palettes()[before + 1].name, "Swatches") << "the name was taken, so it is made unique";
+
+    document.undoStack().undo();
+    EXPECT_EQ(document.palettes().size(), before);
+    EXPECT_THROW(document.importPalettes({}), std::runtime_error);
+    EXPECT_THROW(document.importPalettes({Palette{"Empty", {}}}), std::runtime_error);
+}
+
+TEST(Palettes, addingSeveralSwatchesIsOneUndoStep) {
+    SketchDocument document;
+    const std::size_t before = document.palettes()[0].swatches.size();
+    EXPECT_EQ(document.addSwatches(0, {swatch(0.1f, 0.2f, 0.3f), swatch(0.4f, 0.5f, 0.6f)}), before + 2);
+    EXPECT_EQ(document.palettes()[0].swatches.size(), before + 2);
+    document.undoStack().undo();
+    EXPECT_EQ(document.palettes()[0].swatches.size(), before);
+    EXPECT_THROW(document.addSwatches(0, {}), std::runtime_error);
+}

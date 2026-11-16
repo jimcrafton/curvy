@@ -1,0 +1,82 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>curvy swatches tab (static layout for conversion)</title>
+<!-- The Swatches tab of the Document panel, laid out for html-mockup-to-newui (no script: swatchesTab.html is the interactive prototype of the same
+     design, layout C). Sample content stands in for what the code fills: the palette rows, the tiles of the active palette, the details of the
+     selected swatch and the colours in use. Width is the right dock's. Convert with: html2newui.py swatchesTabPanel.html --fragment --name swatchesTab -->
+<style>
+  body { margin: 0; padding: 10px; width: 268px; background: #1E1E1E; font-family: "Segoe UI", sans-serif; font-size: 12px; color: #F0F0F0; display: flex; flex-direction: column; gap: 6px; }
+  .row { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+  .head { display: flex; flex-direction: row; align-items: center; gap: 4px; }
+  .title { color: #A0A0A0; font-size: 10px; }
+  .pal { display: flex; flex-direction: column; gap: 4px; padding: 6px; background: #2E2E2E; border: 1px solid #4A4A4A; }
+  .pal.on { border: 1px solid #FFB454; }
+  .palTop { display: flex; flex-direction: row; justify-content: space-between; }
+  .count { color: #A0A0A0; }
+  .mini { display: flex; flex-direction: row; height: 12px; }
+  .mini div { flex: 1; height: 12px; }
+  .tiles { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px; }
+  .tile { display: flex; flex-direction: column; gap: 2px; width: 46px; }
+  .tile .chip { width: 46px; height: 38px; border: 1px solid #000000; }
+  .tile.sel .chip { border: 2px solid #FFB454; }
+  .cap { color: #A0A0A0; font-size: 10px; }
+  .box { display: flex; flex-direction: column; gap: 6px; padding: 8px; background: #2E2E2E; border: 1px solid #4A4A4A; }
+  .big { width: 40px; height: 40px; flex-shrink: 0; border: 1px solid #000000; background: #E64D33; }
+  .label { width: 52px; color: #A0A0A0; }
+  .use { display: flex; flex-direction: row; align-items: center; gap: 8px; height: 26px; }
+  .use .chip { width: 18px; height: 18px; border: 1px solid #000000; }
+  .use .grow { flex-grow: 1; color: #A0A0A0; }
+  .buttons { display: flex; flex-direction: row; gap: 5px; }
+</style>
+</head>
+<body>
+  <div id="head" class="head">
+    <button id="paletteName" style="flex-grow:1">Sunset</button>
+    <button id="moreButton" style="width:26px">...</button>
+  </div>
+
+  <span id="palettesTitle" class="title">PALETTES</span>
+  <div id="paletteRows" style="display:flex;flex-direction:column;gap:4px">
+    <div id="paletteRow0" class="pal on">
+      <div class="palTop"><span id="paletteRowName0">Sunset</span><span id="paletteRowCount0" class="count">7</span></div>
+      <div class="mini"><div style="background:#E64D33"></div><div style="background:#F2994A"></div><div style="background:#F2C94C"></div><div style="background:#8E3B46"></div><div style="background:#3C2A4D"></div><div style="background:#1F1B2E"></div><div style="background:#EFDAC4"></div></div>
+    </div>
+    <div id="paletteRow1" class="pal">
+      <div class="palTop"><span id="paletteRowName1">Greys</span><span id="paletteRowCount1" class="count">5</span></div>
+      <div class="mini"><div style="background:#000000"></div><div style="background:#404040"></div><div style="background:#808080"></div><div style="background:#C0C0C0"></div><div style="background:#FFFFFF"></div></div>
+    </div>
+    <div id="paletteRowRecent" class="pal">
+      <div class="palTop"><span>Recent</span><span class="count">automatic</span></div>
+      <div class="mini"><div style="background:#E64D33"></div><div style="background:#2D7FF9"></div><div style="background:#F2C94C"></div></div>
+    </div>
+  </div>
+
+  <span id="gridTitle" class="title">SUNSET</span>
+  <div id="swatchGrid" class="tiles">
+    <div class="tile sel"><div class="chip" style="background:#E64D33"></div><span class="cap">Ember</span></div>
+    <div class="tile"><div class="chip" style="background:#F2994A"></div><span class="cap">#F2994A</span></div>
+    <div class="tile"><div class="chip" style="background:#F2C94C"></div><span class="cap">#F2C94C</span></div>
+    <div class="tile"><div class="chip" style="background:#8E3B46"></div><span class="cap">Plum</span></div>
+    <div class="tile"><div class="chip" style="background:#3C2A4D"></div><span class="cap">#3C2A4D</span></div>
+  </div>
+
+  <div id="details" class="box">
+    <div class="row"><div id="detailColor" class="big"></div><div style="display:flex;flex-direction:column;gap:4px;flex-grow:1">
+      <div class="row"><span class="label">Name</span><input id="detailName" type="text" value="Ember" style="flex-grow:1;width:40px"></div>
+      <div class="row"><span class="label">Hex</span><input id="detailHex" type="text" value="#E64D33" style="flex-grow:1;width:40px"></div>
+    </div></div>
+    <div class="row"><input id="detailLinked" type="checkbox" checked><span>Linked</span></div>
+    <span id="detailUsedBy" class="count">Used by 14 shapes in 3 groups</span>
+    <div class="buttons"><button id="selectThem">Select them</button><button id="useAsFill">Use as fill</button></div>
+  </div>
+
+  <span id="inUseTitle" class="title">IN USE, IN NO PALETTE</span>
+  <div id="inUseList" style="display:flex;flex-direction:column">
+    <div class="use"><div class="chip" style="background:#2D7FF9"></div><span>#2D7FF9</span><span class="grow">5 shapes, 2 groups</span><button id="addInUse0" style="width:26px">+</button></div>
+    <div class="use"><div class="chip" style="background:#27AE60"></div><span>#27AE60</span><span class="grow">2 shapes, 1 group</span><button id="addInUse1" style="width:26px">+</button></div>
+  </div>
+  <div id="bottomRow" class="row"><button id="addAllInUse">Add all</button><span id="status" class="count">Click a swatch for its details</span></div>
+</body>
+</html>

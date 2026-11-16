@@ -203,6 +203,37 @@ TEST_F(PanelTest, DraggingTheResizeStripChangesTheBodyHeight) {
     EXPECT_EQ(2, changes);
 }
 
+TEST_F(PanelTest, aPanelDeclaresItsPreferredHeightAndTheDocksStackReadsIt) {
+    curvy::Panel& panel = makePanel();
+    EXPECT_FALSE(panel.userResized());
+    panel.setPreferredBodyHeight(300.0f);
+    EXPECT_FLOAT_EQ(300.0f, panel.bodyHeight());
+    EXPECT_FLOAT_EQ(panel.desiredHeight(), panel.desiredSize().height) << "the layout sees the preferred height as the desired size";
+    panel.setPreferredBodyHeight(220.0f);
+    EXPECT_FLOAT_EQ(220.0f, panel.bodyHeight()) << "the content may change its mind";
+    EXPECT_FALSE(panel.userResized());
+}
+
+TEST_F(PanelTest, aHeightTheUserDraggedWinsOverThePreferredOne) {
+    curvy::Panel& panel = makePanel();
+    panel.setPreferredBodyHeight(300.0f);
+    panel.pressResize(Point(50.0f, 200.0f));
+    panel.moveResize(Point(50.0f, 230.0f), true);
+    panel.releaseResize();
+    EXPECT_TRUE(panel.userResized());
+    EXPECT_FLOAT_EQ(330.0f, panel.bodyHeight());
+    panel.setPreferredBodyHeight(150.0f);
+    EXPECT_FLOAT_EQ(330.0f, panel.bodyHeight()) << "the content no longer decides";
+}
+
+TEST_F(PanelTest, aRestoredHeightCountsAsTheUsers) {
+    curvy::Panel& panel = makePanel();
+    panel.restoreBodyHeight(210.0f);
+    EXPECT_TRUE(panel.userResized());
+    panel.setPreferredBodyHeight(400.0f);
+    EXPECT_FLOAT_EQ(210.0f, panel.bodyHeight());
+}
+
 TEST_F(PanelTest, TheResizeStripIsHiddenWhenCollapsedOrNotResizable) {
     curvy::Panel& panel = makePanel();
     panel.setCollapsed(true);
