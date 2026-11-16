@@ -208,6 +208,9 @@ The script runs on a worker thread; the window stays alive, so the console panel
   (`setScriptDispatchAborting`) because nobody will run their calls, joins the worker and drops `done`.
 - **While it runs**, `WorkspaceController` sets `busy_` (menu commands, open, save and closing are refused, as during a file task), the editor's
   Run button reads "Stop", and the console shows the output so far, `running... 40% message` and a Cancel button.
+- **Status bar.** While a script runs, `WorkspaceController` says "A script is running for 35 s (40%) - message - Esc cancels", refreshed
+  every 5 seconds by a run-loop timer (`startScriptStatus`), and "Script ended after 1 min 5 s" when it ends. The percent and message are
+  what `curvy.progress()` last reported.
 - **`curvy.progress(fraction, message="")`** reports progress (0..1, negative for unknown); it needs no main-thread call.
 - A callback a script gives to jitnodes (a progress function for `cook`) runs on whichever thread jitnodes calls it from, under the GIL.
 
@@ -218,6 +221,13 @@ Triggers (they work the same for both kinds of run):
 - `ScriptConsole::cancel()`, callable from any thread (it only sets a flag, and only while a script runs, so a late call cannot hit the next run).
 - The Escape key, polled by the watcher thread (`GetAsyncKeyState`, and the foreground window must belong to this process).
   `setCancelOnEscape(false)` turns it off.
+- A time limit: `ScriptConsole::setTimeout(seconds)` (zero, the default, is no limit). The same watcher compares the elapsed wall time
+  with the limit (read when the run starts) and raises `curvy.Cancelled`. The result has `cancelled = true` and `timedOut = true`, and
+  the error says "Script stopped: it ran longer than N seconds". An explicit cancel that came first is reported as a plain cancel.
+  The limit is the **Stop scripts after** row of Settings, Script editor (`Settings::scriptTimeout`, off by default, and
+  `scriptTimeoutSeconds`, default 60, range 1 to 86400; file keys `scriptEditor.scriptTimeout` and `scriptTimeoutSeconds`).
+  `WorkspaceController` applies it at start-up and whenever settings are applied, so it takes effect for the next run. It counts time
+  waiting for the main thread too, and has Cancel's limits: a long call into C++ or a `time.sleep` is only interrupted when it returns.
 
 How: every `run` starts a watcher thread (25 ms poll). When a cancel is wanted it takes the GIL and calls `PyThreadState_SetAsyncExc(
 scriptThread, curvy.Cancelled)`; the script's thread raises it at its next Python instruction, repeated every poll until the run ends.
@@ -417,7 +427,7 @@ carried in `LexState` (so a line can be lexed on its own); `@` first on a line i
 
 ## Known limits and next steps
 
-- Scripts run in the background in the app (see "Background runs"); there is no timeout. A long call into C++ made from a script (a cook)
+- Scripts run in the background in the app (see "Background runs"). The time limit is opt-in (see Cancel). A long call into C++ made from a script (a cook)
   runs on the main thread and freezes the window for its duration. `run()` (tests, no poster) still blocks, which is why
   `PyConsolePanel::onBeforeRun` exists. The script editor's own "Run Selection" and the console input share the one running slot.
 - No stroke cap/join/miter, effects, boolean operations or text yet; `artwork()` gives

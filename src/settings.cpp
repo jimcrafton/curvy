@@ -164,6 +164,8 @@ namespace curvy {
                 editorFont = defaults.editorFont;
                 editorFontSize = defaults.editorFontSize;
                 editorTabWidth = defaults.editorTabWidth;
+                scriptTimeout = defaults.scriptTimeout;
+                scriptTimeoutSeconds = defaults.scriptTimeoutSeconds;
                 editorColors = defaults.editorColors;
                 break;
         }
@@ -234,6 +236,8 @@ namespace curvy {
         text("font", editorFont);
         number("fontSize", editorFontSize);
         number("tabWidth", editorTabWidth);
+        flag("scriptTimeout", scriptTimeout);
+        number("scriptTimeoutSeconds", scriptTimeoutSeconds);
         b.push_object();
         for (const auto& [style, rgb] : editorColors) {
             text(style.c_str(), hexColor(rgb));
@@ -347,6 +351,8 @@ namespace curvy {
             }
             readInt(g, "fontSize", editorFontSize, 8, 32);
             readInt(g, "tabWidth", editorTabWidth, 2, 8);
+            readBool(g, "scriptTimeout", scriptTimeout);
+            readInt(g, "scriptTimeoutSeconds", scriptTimeoutSeconds, 1, 86400);
             json5::value file;
             if (find(g, "file", file) && file.is_string()) {
                 editorFile = file.get_c_str();

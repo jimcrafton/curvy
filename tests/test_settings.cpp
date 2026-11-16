@@ -37,6 +37,8 @@ namespace {
         changed.editorFont = "Hack-Regular";
         changed.editorFontSize = 16;
         changed.editorTabWidth = 2;
+        changed.scriptTimeout = true;
+        changed.scriptTimeoutSeconds = 120;
         changed.editorColors = {{"keyword", 0xFF8800}, {"string", 0x00AA55}, {"text", 0xE0E0E0}, {"background", 0x101820}};
         changed.editorFile = "D:/scripts/my script.py";
         changed.window = {-1200, 80, 1100, 700, true, "\\\\.\\DISPLAY2"};
@@ -90,6 +92,8 @@ TEST(SettingsFile, EverySettingRoundTrips) {
     EXPECT_EQ("Hack-Regular", back.editorFont);
     EXPECT_EQ(16, back.editorFontSize);
     EXPECT_EQ(2, back.editorTabWidth);
+    EXPECT_TRUE(back.scriptTimeout);
+    EXPECT_EQ(120, back.scriptTimeoutSeconds);
     EXPECT_EQ(changed.editorColors, back.editorColors);
     EXPECT_EQ("D:/scripts/my script.py", back.editorFile);
 }
@@ -142,11 +146,14 @@ TEST(SettingsFile, theScriptEditorDefaultsAreAutomaticFontFourSpacesAndNoColourO
     EXPECT_EQ(14, defaults.editorFontSize);
     EXPECT_EQ(4, defaults.editorTabWidth);
     EXPECT_TRUE(defaults.editorColors.empty());
+    EXPECT_FALSE(defaults.scriptTimeout) << "scripts run until they end unless the user opts in";
+    EXPECT_EQ(60, defaults.scriptTimeoutSeconds);
 }
 
 TEST(SettingsFile, badScriptEditorValuesAreSkipped) {
     Settings bad;
-    bad.fromText("{ scriptEditor: { fontSize: 500, tabWidth: 0, colors: { keyword: '#FF0000', string: 'red', comment: '#12', number: 5 } } }");
+    bad.fromText("{ scriptEditor: { fontSize: 500, tabWidth: 0, scriptTimeoutSeconds: 0, colors: { keyword: '#FF0000', string: 'red', comment: '#12', number: 5 } } }");
+    EXPECT_EQ(60, bad.scriptTimeoutSeconds);
     EXPECT_EQ(14, bad.editorFontSize);
     EXPECT_EQ(4, bad.editorTabWidth);
     ASSERT_EQ(1u, bad.editorColors.size()) << "only the well-formed #RRGGBB colour is kept";
@@ -159,6 +166,8 @@ TEST(SettingsFile, resettingTheScriptEditorPageLeavesTheRestAlone) {
     EXPECT_TRUE(reset.editorFont.empty());
     EXPECT_EQ(14, reset.editorFontSize);
     EXPECT_EQ(4, reset.editorTabWidth);
+    EXPECT_FALSE(reset.scriptTimeout);
+    EXPECT_EQ(60, reset.scriptTimeoutSeconds);
     EXPECT_TRUE(reset.editorColors.empty());
     EXPECT_EQ(450, reset.spaceTapMs);
     EXPECT_EQ("D:/scripts/my script.py", reset.editorFile) << "the open file is state, not a preference: a page reset keeps it";

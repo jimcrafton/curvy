@@ -149,6 +149,9 @@ namespace curvy {
         const bool dark = settings.darkTheme();
         const bool themeChanged = dark != Theme::current().isDark;
         settings_ = settings;
+        if (scriptConsole_ != nullptr) {
+            scriptConsole_->setTimeout(std::chrono::seconds(settings_.scriptTimeout ? settings_.scriptTimeoutSeconds : 0));
+        }
         if (themeChanged) {
             applyTheme(dark);
         }
@@ -283,11 +286,51 @@ namespace curvy {
         loop_ = &RunLoop::current();
     }
 
+    std::string WorkspaceController::scriptStatusText(bool finished) const {
+        const long long seconds = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - scriptStarted_).count();
+        const std::string elapsed = seconds >= 60 ? std::to_string(seconds / 60) + " min " + std::to_string(seconds % 60) + " s" : std::to_string(seconds) + " s";
+        if (finished) {
+            return "Script ended after " + elapsed;
+        }
+        std::string text = "A script is running";
+        if (seconds >= 1) {
+            text += " for " + elapsed;
+        }
+        if (scriptConsole_ != nullptr) {
+            const ScriptProgress progress = scriptConsole_->progress();
+            if (progress.fraction >= 0.0f) {
+                text += " (" + std::to_string(int(progress.fraction * 100.0f + 0.5f)) + "%)";
+            }
+            if (!progress.message.empty()) {
+                text += " - " + progress.message;
+            }
+        }
+        return text + " - Esc cancels";
+    }
+
+    void WorkspaceController::startScriptStatus() {
+        scriptStarted_ = std::chrono::steady_clock::now();
+        model_->say(scriptStatusText());
+        stopScriptStatus();
+        scriptTimer_ = loop_->postDelayed(std::chrono::seconds(5), [this]() {
+            model_->say(scriptStatusText());
+            return false;
+        });
+    }
+
+    void WorkspaceController::stopScriptStatus() {
+        if (scriptTimer_ != RunLoop::kInvalidTimerHandle) {
+            loop_->cancelDelayed(scriptTimer_);
+            scriptTimer_ = RunLoop::kInvalidTimerHandle;
+        }
+    }
+
     void WorkspaceController::setScriptConsole(ScriptConsole* console) {
         scriptConsole_ = console;
         if (console != nullptr) {
             RunLoop* loop = loop_;
             console->setMainThreadPoster([loop](std::function<void()> task) { loop->post(std::move(task)); });
+            console->setTimeout(std::chrono::seconds(settings_.scriptTimeout ? settings_.scriptTimeoutSeconds : 0));
         }
     }
 
@@ -459,7 +502,10 @@ namespace curvy {
                     scriptEditorPanel_->setRunning(running);
                 }
                 if (running) {
-                    model_->say(taskLabel_ + " - Esc cancels");
+                    startScriptStatus();
+                } else {
+                    stopScriptStatus();
+                    model_->say(scriptStatusText(true));
                 }
             };
             pyConsolePanel_->onExecuted = [this]() {
@@ -1044,6 +1090,7 @@ namespace curvy {
         if (scriptConsole_ != nullptr) {
             scriptConsole_->abort();   // a background script edits the document that is about to go
         }
+        stopScriptStatus();
         task_.cancel();
         task_.waitFor(std::chrono::seconds(30));   // the task's own destructor joins; this only bounds how long a stuck job is waited on first
         if (timer_ != RunLoop::kInvalidTimerHandle) {

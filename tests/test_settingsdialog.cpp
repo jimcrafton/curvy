@@ -133,6 +133,8 @@ TEST_F(SettingsDialogTest, theScriptEditorPageShowsTheEditorSettings) {
     EXPECT_EQ(std::optional<std::size_t>(0), find<newui::DropDownList>("editorFont")->selectedIndex()) << "Automatic";
     EXPECT_EQ("14", narrow(find<newui::TextField>("editorFontSize")->text()));
     EXPECT_EQ("4", narrow(find<newui::TextField>("editorTabWidth")->text()));
+    EXPECT_FALSE(find<newui::Toggle>("scriptTimeout")->isChecked());
+    EXPECT_EQ("60", narrow(find<newui::TextField>("scriptTimeoutSeconds")->text()));
     EXPECT_EQ("#569CD6", narrow(find<newui::TextField>("syntaxHex_keyword")->text())) << "the dark theme's keyword colour";
     EXPECT_GT(find<newui::View>("pageScriptEditor")->bounds().height(), 100.0f);
 }
@@ -203,6 +205,19 @@ TEST_F(SettingsDialogTest, sizeAndTabWidthAreTakenOrRefused) {
     tab->onReturnPressed(*tab);
     EXPECT_EQ(2, working_.editorTabWidth);
     EXPECT_EQ("2", narrow(tab->text())) << "the box goes back to the kept value";
+}
+
+TEST_F(SettingsDialogTest, theScriptTimeoutIsOptInAndItsSecondsAreRangeChecked) {
+    showScriptEditorPage(dialog_);
+    find<newui::Toggle>("scriptTimeout")->setChecked(true);
+    EXPECT_TRUE(working_.scriptTimeout);
+    auto* seconds = find<newui::TextField>("scriptTimeoutSeconds");
+    seconds->setText(L"30");
+    seconds->onReturnPressed(*seconds);
+    EXPECT_EQ(30, working_.scriptTimeoutSeconds);
+    seconds->setText(L"0");
+    seconds->onReturnPressed(*seconds);
+    EXPECT_EQ(30, working_.scriptTimeoutSeconds) << "a limit of zero is refused";
 }
 
 TEST_F(SettingsDialogTest, aTypedColourOverridesTheThemeAndTheDefaultClearsIt) {

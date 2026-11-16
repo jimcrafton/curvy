@@ -83,6 +83,10 @@ namespace curvy {
         std::string editorFont;       // a face as newui names it (JetBrainsMono-Medium); empty: the first installed of the editor's preferred ones
         int editorFontSize = 14;
         int editorTabWidth = 4;       // spaces per indent level: what Tab inserts and Enter adds after a colon
+        // Off by default: scripts run until they end or are cancelled. On, a script still running after scriptTimeoutSeconds is stopped
+        // the way Cancel stops it.
+        bool scriptTimeout = false;
+        int scriptTimeoutSeconds = 60;
         // Only the colours the user changed, by syntax style name ("keyword", "string", ...; see pythonSyntaxStyles()), as 0xRRGGBB. Every
         // other style keeps the theme's colour.
         // Besides the syntax styles' names, "text" (the colour of everything not coloured) and "background" can be overridden too.

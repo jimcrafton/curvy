@@ -248,6 +248,9 @@ namespace curvy::settingsdialog {
                 [this, fonts](int v) { working_.editorFont = v <= 0 ? std::string() : (*fonts)[std::size_t(v)]; });
             number("editorFontSize", 8, 32, [this](double v) { working_.editorFontSize = int(v); }, [this] { return double(working_.editorFontSize); });
             number("editorTabWidth", 2, 8, [this](double v) { working_.editorTabWidth = int(v); }, [this] { return double(working_.editorTabWidth); });
+            toggle("scriptTimeout", [this] { return working_.scriptTimeout; }, [this](bool v) { working_.scriptTimeout = v; });
+            number("scriptTimeoutSeconds", 1, 86400, [this](double v) { working_.scriptTimeoutSeconds = int(v); },
+                   [this] { return double(working_.scriptTimeoutSeconds); });
 
             for (const SyntaxStyleInfo& info : editorColorRows()) {
                 const std::string style = info.name;

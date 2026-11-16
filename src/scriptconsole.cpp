@@ -115,6 +115,7 @@ namespace curvy {
             sys.attr("stdout") = sinkObject;
             sys.attr("stderr") = sinkObject;
             cancelRequested = false;
+            timedOut = false;
             running = true;
             resetScriptProgress();
             if (document != nullptr) {
@@ -168,7 +169,13 @@ namespace curvy {
                 result.ok = false;
                 if (e.matches(cancelledType)) {
                     result.cancelled = true;
-                    result.error = "Script cancelled\n";
+                    if (timedOut.load() && !cancelRequested.load()) {
+                        result.timedOut = true;
+                        result.error = "Script stopped: it ran longer than " + std::to_string(timeoutSeconds.load()) +
+                                       " seconds (the limit is in Settings, Script editor)\n";
+                    } else {
+                        result.error = "Script cancelled\n";
+                    }
                 } else {
                     result.error = e.what();
                 }
@@ -198,11 +205,17 @@ namespace curvy {
         // Raises curvy.Cancelled in the script's thread until the run ends. A thread that does not hold the GIL cannot touch the interpreter,
         // so this takes it; the script's thread gives it up every few milliseconds while it runs Python code.
         void watch(unsigned long scriptThread, std::atomic<bool>& stop) {
+            const auto started = std::chrono::steady_clock::now();
+            const std::chrono::seconds limit(timeoutSeconds.load());
             while (!stop.load()) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(25));
-                const bool wanted = cancelRequested.load() || (cancelOnEscape.load() && escapePressedInThisProcess());
+                const bool late = limit.count() > 0 && std::chrono::steady_clock::now() - started >= limit;
+                const bool wanted = late || cancelRequested.load() || (cancelOnEscape.load() && escapePressedInThisProcess());
                 if (!wanted || stop.load()) {
                     continue;
+                }
+                if (late) {
+                    timedOut = true;
                 }
                 py::gil_scoped_acquire gil;
                 if (!stop.load()) {
@@ -234,6 +247,8 @@ namespace curvy {
         std::function<void(const ScriptResult&)> done;
         std::atomic<bool> cancelRequested{false};
         std::atomic<bool> cancelOnEscape{true};
+        std::atomic<long long> timeoutSeconds{0};
+        std::atomic<bool> timedOut{false};
     };
 
     ScriptConsole::ScriptConsole(const std::filesystem::path& pythonHome) : impl_(std::make_unique<Impl>(pythonHome)) {}
@@ -319,6 +334,10 @@ namespace curvy {
         if (impl_->running.load()) {
             impl_->cancelRequested = true;
         }
+    }
+
+    void ScriptConsole::setTimeout(std::chrono::seconds limit) {
+        impl_->timeoutSeconds = limit.count() > 0 ? limit.count() : 0;
     }
 
     void ScriptConsole::setCancelOnEscape(bool enabled) {

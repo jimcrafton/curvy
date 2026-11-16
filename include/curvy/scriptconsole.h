@@ -2,6 +2,7 @@
 
 #include "curvy/scriptmodule.h"
 
+#include <chrono>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -30,6 +31,8 @@ namespace curvy {
         // True when the run was stopped by cancel() or the Escape key (ok is false and error says so). Whatever the script changed before
         // that stays changed, as the run's single undo step.
         bool cancelled = false;
+        // True when the run was stopped because it passed the time limit (cancelled is true then too).
+        bool timedOut = false;
     };
 
     // Where Python refuses to compile a script: 1-based line and column of the offending token (the end is the same place when Python gives
@@ -89,6 +92,10 @@ namespace curvy {
         // Stops the running script (from any thread; does nothing when none runs) by raising `curvy.Cancelled`, a BaseException, in it at the
         // next Python instruction, so `except Exception` does not swallow it. A long call into C++ (a cook, a render) finishes first.
         void cancel();
+
+        // Stops a script that runs longer than this, as cancel() does (and with the same limits: a long call into C++ finishes first). Zero,
+        // the default, means no limit. Applies to the runs that start after the call.
+        void setTimeout(std::chrono::seconds limit);
 
         // While a script runs, Escape pressed with one of this process's windows in front cancels it (a watcher thread polls the key; the
         // script itself runs at full speed). On by default.

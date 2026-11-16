@@ -324,6 +324,49 @@ TEST_F(BackgroundScript, outputAndProgressCanBeReadWhileItRuns) {
     EXPECT_TRUE(queue_.pumpUntil([&] { return finished; }));
 }
 
+TEST_F(BackgroundScript, aScriptPastTheTimeLimitIsStoppedAndSaysSo) {
+    console().setTimeout(std::chrono::seconds(1));
+    const auto started = std::chrono::steady_clock::now();
+    const auto result = runToEnd("while True:\n    pass");
+    const auto took = std::chrono::steady_clock::now() - started;
+    console().setTimeout(std::chrono::seconds(0));
+    EXPECT_TRUE(result.cancelled);
+    EXPECT_TRUE(result.timedOut);
+    EXPECT_NE(result.error.find("longer than 1 seconds"), std::string::npos) << result.error;
+    EXPECT_LT(took, std::chrono::seconds(5));
+}
+
+TEST_F(BackgroundScript, withoutALimitALongScriptIsNotStopped) {
+    console().setTimeout(std::chrono::seconds(0));
+    const auto result = runToEnd("import time\ntime.sleep(1.2)");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_FALSE(result.timedOut);
+}
+
+TEST_F(BackgroundScript, anExplicitCancelIsNotReportedAsATimeout) {
+    console().setTimeout(std::chrono::seconds(1));
+    bool finished = false;
+    curvy::ScriptResult result;
+    ASSERT_TRUE(console().runInBackground("while True:\n    pass", nullptr, nullptr, [&](const curvy::ScriptResult& r) {
+        result = r;
+        finished = true;
+    }));
+    console().cancel();
+    EXPECT_TRUE(queue_.pumpUntil([&] { return finished; }));
+    console().setTimeout(std::chrono::seconds(0));
+    EXPECT_TRUE(result.cancelled);
+    EXPECT_FALSE(result.timedOut);
+    EXPECT_NE(result.error.find("cancelled"), std::string::npos);
+}
+
+TEST(ScriptConsole, theTimeLimitAlsoStopsABlockingRun) {
+    console().setTimeout(std::chrono::seconds(1));
+    const auto result = console().run("while True:\n    pass", nullptr);
+    console().setTimeout(std::chrono::seconds(0));
+    EXPECT_TRUE(result.timedOut);
+    EXPECT_TRUE(console().run("print('fine')", nullptr).ok);
+}
+
 TEST_F(BackgroundScript, onlyOneScriptRunsAtATime) {
     bool finished = false;
     ASSERT_TRUE(console().runInBackground("import time\ntime.sleep(0.2)", nullptr, nullptr, [&](const curvy::ScriptResult&) { finished = true; }));

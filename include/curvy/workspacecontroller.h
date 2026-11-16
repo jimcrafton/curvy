@@ -245,6 +245,12 @@ namespace curvy {
         newui::RunLoop* loop_ = nullptr;
         newui::RunLoop::TimerHandle timer_ = newui::RunLoop::kInvalidTimerHandle;
         bool busy_ = false;
+        // The status bar line of a running script: how long it has run (and its progress), refreshed every few seconds.
+        void startScriptStatus();
+        void stopScriptStatus();
+        std::string scriptStatusText(bool finished = false) const;
+        newui::RunLoop::TimerHandle scriptTimer_ = newui::RunLoop::kInvalidTimerHandle;
+        std::chrono::steady_clock::time_point scriptStarted_;
         std::string taskLabel_;
         int taskPercent_ = -1;
         std::function<void(bool)> taskFinish_;
