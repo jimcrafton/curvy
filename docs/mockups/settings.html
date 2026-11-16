@@ -28,6 +28,11 @@
   .well { width: 22px; height: 22px; border: 1px solid #4A4A4A; }
   .slider { width: 160px; height: 24px; }
   .unit { color: #A0A0A0; width: 40px; }
+  .colorColumns { display: flex; flex-direction: row; gap: 16px; }
+  .colorColumn { display: flex; flex-direction: column; gap: 4px; flex-grow: 1; }
+  .colorRow { display: flex; flex-direction: row; align-items: center; gap: 8px; height: 24px; }
+  .colorLabel { width: 110px; }
+  .preview { flex-grow: 1; height: 120px; background: #121212; color: #F0F0F0; font-family: Consolas, monospace; font-size: 13px; }
   #settingsFooter { display: flex; flex-direction: row; align-items: center; justify-content: flex-end; gap: 8px; height: 46px; padding: 0 16px; background: #181818; border-top: 1px solid #4A4A4A; }
   #settingsFooterNote { flex-grow: 1; color: #A0A0A0; }
   .wideButton { width: 120px; height: 26px; }
@@ -44,6 +49,7 @@
         <button id="navPen" class="navButton">Pen and input</button>
         <button id="navDrawing" class="navButton">Drawing</button>
         <button id="navFiles" class="navButton">Files</button>
+        <button id="navScriptEditor" class="navButton">Script editor</button>
       </div>
       <div id="settingsPages">
 
@@ -86,6 +92,31 @@
           <span class="sectionTitle">Files</span>
           <div class="row"><span class="label">Autosave</span><input id="autosave" type="checkbox" checked><input id="autosaveMinutes" class="field" type="text" value="5"><span class="unit">min</span></div>
           <div class="row"><span class="label">Default export folder</span><input id="exportFolder" class="wide" type="text" value=""><button id="exportFolderBrowse" class="footButton">Browse...</button></div>
+        </div>
+
+        <div id="pageScriptEditor" class="section">
+          <span class="sectionTitle">Script editor</span>
+          <div class="row"><span class="label">Font</span><select id="editorFont" class="wide"><option>Automatic</option></select></div>
+          <div class="row"><span class="label">Size</span><input id="editorFontSize" class="field" type="text" value="14"><span class="unit">pt</span></div>
+          <div class="row"><span class="label">Tab width</span><input id="editorTabWidth" class="field" type="text" value="4"><span class="unit">spaces</span></div>
+          <span class="sectionTitle">Syntax colours</span>
+          <div class="colorColumns">
+            <div class="colorColumn">
+              <div class="colorRow"><canvas id="syntaxWell_keyword" class="well" data-newui-type="SubView"></canvas><input id="syntaxHex_keyword" class="field" type="text" value="#569CD6"><span class="colorLabel">Keyword</span></div>
+              <div class="colorRow"><canvas id="syntaxWell_constant" class="well" data-newui-type="SubView"></canvas><input id="syntaxHex_constant" class="field" type="text" value="#569CD6"><span class="colorLabel">True, False, None</span></div>
+              <div class="colorRow"><canvas id="syntaxWell_string" class="well" data-newui-type="SubView"></canvas><input id="syntaxHex_string" class="field" type="text" value="#CE9178"><span class="colorLabel">String</span></div>
+              <div class="colorRow"><canvas id="syntaxWell_number" class="well" data-newui-type="SubView"></canvas><input id="syntaxHex_number" class="field" type="text" value="#B5CEA8"><span class="colorLabel">Number</span></div>
+              <div class="colorRow"><canvas id="syntaxWell_comment" class="well" data-newui-type="SubView"></canvas><input id="syntaxHex_comment" class="field" type="text" value="#6A9955"><span class="colorLabel">Comment</span></div>
+            </div>
+            <div class="colorColumn">
+              <div class="colorRow"><canvas id="syntaxWell_identifier" class="well" data-newui-type="SubView"></canvas><input id="syntaxHex_identifier" class="field" type="text" value="#9CDCFE"><span class="colorLabel">Name</span></div>
+              <div class="colorRow"><canvas id="syntaxWell_definition" class="well" data-newui-type="SubView"></canvas><input id="syntaxHex_definition" class="field" type="text" value="#9CDCFE"><span class="colorLabel">Function, class</span></div>
+              <div class="colorRow"><canvas id="syntaxWell_decorator" class="well" data-newui-type="SubView"></canvas><input id="syntaxHex_decorator" class="field" type="text" value="#C586C0"><span class="colorLabel">Decorator</span></div>
+              <div class="colorRow"><canvas id="syntaxWell_operator" class="well" data-newui-type="SubView"></canvas><input id="syntaxHex_operator" class="field" type="text" value="#D4D4D4"><span class="colorLabel">Operator</span></div>
+              <div class="colorRow"><canvas id="syntaxWell_punctuation" class="well" data-newui-type="SubView"></canvas><input id="syntaxHex_punctuation" class="field" type="text" value="#D4D4D4"><span class="colorLabel">Punctuation</span></div>
+            </div>
+          </div>
+          <textarea id="editorPreview" class="preview">sample</textarea>
         </div>
 
       </div>

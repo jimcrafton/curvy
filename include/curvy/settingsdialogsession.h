@@ -3,6 +3,8 @@
 // Private to the Settings dialog (settingsdialog.cpp) and its tests: one run of the dialog, which keeps its controls and a working copy of
 // the settings in step. It lives in a header so the tests can drive it without showing a window.
 
+#include "curvy/editorfonts.h"
+#include "curvy/pythonhighlight.h"
 #include "curvy/settings.h"
 
 #include <newui/controls.h>
@@ -11,9 +13,11 @@
 #include <newui/models.h>
 #include <newui/rootview.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -43,7 +47,8 @@ namespace curvy::settingsdialog {
         {"navWorkspace", "pageWorkspace", SettingsPage::Workspace},
         {"navPen", "pagePen", SettingsPage::Pen},
         {"navDrawing", "pageDrawing", SettingsPage::Drawing},
-        {"navFiles", "pageFiles", SettingsPage::Files}};
+        {"navFiles", "pageFiles", SettingsPage::Files},
+        {"navScriptEditor", "pageScriptEditor", SettingsPage::ScriptEditor}};
 
     constexpr int leftDock = 1, rightDock = 2;   // Settings::docks indexes: top, left, right, bottom
 
@@ -139,6 +144,8 @@ namespace curvy::settingsdialog {
             number("gridSize", 0.1, 1000, [this](double v) { working_.gridSize = v; }, [this] { return working_.gridSize; });
             number("autosaveMinutes", 1, 120, [this](double v) { working_.autosaveMinutes = int(v); }, [this] { return double(working_.autosaveMinutes); });
 
+            wireScriptEditor();
+
             if (auto* hexField = find<TextField>("canvasBackgroundHex")) {
                 auto commit = [this, hexField] {
                     std::uint32_t rgb = 0;
@@ -215,10 +222,102 @@ namespace curvy::settingsdialog {
             if (auto* folder = find<TextField>("exportFolder")) {
                 folder->setText(widen(working_.exportFolder));
             }
+            refreshSyntaxColors();
             updating_ = false;
+            updatePreview();
         }
 
     private:
+        // The Script editor page: the font (a list of the installed monospace faces, "Automatic" first), its size, the tab width, one hex
+        // field and colour well per syntax style, and a preview that follows all of it.
+        void wireScriptEditor() {
+            using namespace newui;
+            auto fonts = std::make_shared<std::vector<std::string>>();
+            fonts->push_back("Automatic");
+            for (const std::string& font : installedMonospaceFonts()) {
+                fonts->push_back(font);
+            }
+            if (!working_.editorFont.empty() && std::find(fonts->begin(), fonts->end(), working_.editorFont) == fonts->end()) {
+                fonts->push_back(working_.editorFont);   // a face from a hand-edited file that the heuristic did not list
+            }
+            dropDown("editorFont", *fonts,
+                [this, fonts] {
+                    const auto found = std::find(fonts->begin() + 1, fonts->end(), working_.editorFont);
+                    return working_.editorFont.empty() || found == fonts->end() ? 0 : int(found - fonts->begin());
+                },
+                [this, fonts](int v) { working_.editorFont = v <= 0 ? std::string() : (*fonts)[std::size_t(v)]; });
+            number("editorFontSize", 8, 32, [this](double v) { working_.editorFontSize = int(v); }, [this] { return double(working_.editorFontSize); });
+            number("editorTabWidth", 2, 8, [this](double v) { working_.editorTabWidth = int(v); }, [this] { return double(working_.editorTabWidth); });
+
+            for (const SyntaxStyleInfo& info : pythonSyntaxStyles()) {
+                const std::string style = info.name;
+                auto* hex = find<TextField>(("syntaxHex_" + style).c_str());
+                if (hex == nullptr) {
+                    continue;
+                }
+                auto commit = [this, hex, style] {
+                    if (updating_) {
+                        return;
+                    }
+                    const std::string typed = narrow(hex->text());
+                    std::uint32_t rgb = 0;
+                    if (typed.empty() || (parseHex(typed, rgb) && rgb == pythonDefaultColor(style, working_.darkTheme()))) {
+                        working_.editorColors.erase(style);   // back to the theme's colour
+                    } else if (parseHex(typed, rgb)) {
+                        working_.editorColors[style] = rgb;
+                    }
+                    refresh();
+                    edited();
+                };
+                hex->onReturnPressed += [commit](TextField&) { commit(); return SyncReturn::Handled; };
+                hex->onLostFocus += [commit](View&) { commit(); return SyncReturn::Handled; };
+            }
+
+            if (auto* preview = find<TextControl>("editorPreview")) {
+                preview->inputTraits().setReadOnly(true);
+                preview->setText(widen(kPreviewCode));
+            }
+        }
+
+        static constexpr const char* kPreviewCode =
+            "@decorator\n"
+            "def draw(shape, count=3):\n"
+            "    # one circle per step\n"
+            "    for i in range(count):\n"
+            "        shape.add(i * 10.5, \"ok\", True)\n"
+            "    return None";
+
+        void refreshSyntaxColors() {
+            const bool dark = working_.darkTheme();
+            for (const SyntaxStyleInfo& info : pythonSyntaxStyles()) {
+                const std::string style = info.name;
+                const auto chosen = working_.editorColors.find(style);
+                const std::uint32_t rgb = chosen != working_.editorColors.end() ? chosen->second : pythonDefaultColor(style, dark);
+                if (auto* field = find<newui::TextField>(("syntaxHex_" + style).c_str())) {
+                    field->setText(widen(hex(rgb)));
+                }
+                if (auto* well = root_.findView(("syntaxWell_" + style).c_str())) {
+                    well->style().setBackgroundColor(newui::Color(std::uint32_t(0xFF000000u | rgb), true));
+                    well->redraw();
+                }
+            }
+        }
+
+        // The preview shows the editor as the working settings would draw it.
+        void updatePreview() {
+            auto* preview = find<newui::TextControl>("editorPreview");
+            if (preview == nullptr) {
+                return;
+            }
+            const bool dark = working_.darkTheme();
+            preview->setFont(scriptEditorFont(working_.editorFont, working_.editorFontSize));
+            preview->setStyleSheet(pythonStyleSheet(dark, working_.editorColors));
+            preview->setStyledRanges(pythonStyleRanges(widen(kPreviewCode)));
+            preview->setTextColor(BLRgba32(0xFF000000u | pythonDefaultColor("text", dark)));
+            preview->style().setBackgroundColor(newui::Color(std::uint32_t(0xFF000000u | pythonDefaultColor("background", dark)), true));
+            preview->style().markDirty();
+        }
+
         template <typename T>
         T* find(const char* name) const {
             return dynamic_cast<T*>(root_.findView(name));
@@ -226,6 +325,7 @@ namespace curvy::settingsdialog {
 
         void edited() {
             if (!updating_) {
+                updatePreview();
                 changed_(working_);
             }
         }

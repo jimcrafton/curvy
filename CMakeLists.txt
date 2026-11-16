@@ -32,6 +32,15 @@ include(cmake/jitnodes.cmake)
 include(cmake/python.cmake)
 
 # Everything but main() is one library, shared by the app and its unit tests.
+# Lexing and highlighting (copied from cpp_codetools: the base lexer and highlighter, plus a Python lexer added here). Standard library only.
+add_library(lex STATIC
+    3rdparty/lex/src/lexer_base.cpp
+    3rdparty/lex/src/highlight.cpp
+    3rdparty/lex/src/python_lexer.cpp
+    3rdparty/lex/src/python_language.cpp)
+target_include_directories(lex PUBLIC 3rdparty/lex/include)
+target_compile_features(lex PUBLIC cxx_std_17)
+
 add_library(curvy_core STATIC
     src/canvasview.cpp
     src/geometrytable.cpp
@@ -82,12 +91,15 @@ add_library(curvy_core STATIC
     src/scriptmodule.cpp
     src/pyconsolepanel.cpp
     src/scripteditorpanel.cpp
+    src/pythonhighlight.cpp
+    src/utf8.cpp
+    src/editorfonts.cpp
 )
 
 target_include_directories(curvy_core PUBLIC include)
 target_include_directories(curvy_core PRIVATE src)
 target_compile_definitions(curvy_core PUBLIC CURVY_VERSION="${PROJECT_VERSION}")
-target_link_libraries(curvy_core PUBLIC newui jitnodes::jitnodes jitnodesPython pybind11::embed zlib_static windowscodecs ole32)
+target_link_libraries(curvy_core PUBLIC newui lex jitnodes::jitnodes jitnodesPython pybind11::embed zlib_static windowscodecs ole32)
 
 if(CURVY_GUI_AUTOMATION)
     target_link_libraries(curvy_core PUBLIC newui_automation)

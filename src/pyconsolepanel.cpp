@@ -1,6 +1,7 @@
 #include "curvy/pyconsolepanel.h"
 
 #include "curvy/theme.h"
+#include "curvy/utf8.h"
 
 #include <newui/keyboard_constants.h>
 
@@ -34,7 +35,7 @@ namespace curvy {
     }
 
     std::wstring PyConsolePanel::widen(const std::string& text) {
-        return std::wstring(text.begin(), text.end());
+        return utf8ToWide(text);
     }
 
     PyConsolePanel::PyConsolePanel(ScriptConsole& console, SketchDocument* document) : Panel("pyconsole", "Python Console"), console_(console), document_(document) {
@@ -138,7 +139,7 @@ namespace curvy {
 
     std::string PyConsolePanel::input() const {
         const std::wstring& text = input_->text();
-        return std::string(text.begin(), text.end());
+        return wideToUtf8(text);
     }
 
     void PyConsolePanel::recall(int direction) {

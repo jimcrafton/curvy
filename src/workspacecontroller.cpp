@@ -243,6 +243,9 @@ namespace curvy {
     }
 
     void WorkspaceController::restyle() {
+        if (scriptEditorPanel_ != nullptr) {
+            scriptEditorPanel_->applySettings(settings_);   // font, tab width and colours (the dark or light set follows the theme)
+        }
         const Theme& theme = Theme::current();
         auto fill = [](View* view, std::uint32_t rgbValue) {
             if (view != nullptr) {
@@ -453,6 +456,7 @@ namespace curvy {
             scriptEditorPanel_ = new ScriptEditorPanel();
             rightDock_->addPanel(scriptEditorPanel_);
             scriptEditorPanel_->onDestroyed = [this]() { scriptEditorPanel_ = nullptr; };
+            scriptEditorPanel_->applySettings(settings_);
             scriptEditorPanel_->onRun = [this](const std::string& code, const std::string& name) {
                 if (pyConsolePanel_ != nullptr) {
                     pyConsolePanel_->runScript(code, name);
@@ -476,6 +480,10 @@ namespace curvy {
                 return Dialog::showSaveFile(frame_.frameHandle(), options, file) ? std::filesystem::path(file) : std::filesystem::path();
             };
             scriptEditorPanel_->onMessage = [this](const std::string& message) { model_->say(message); };
+            if (!settingsPath_.empty()) {
+                // Next to the settings file, so a run with another --settings file keeps its own script.
+                scriptEditorPanel_->setScratchFile(std::filesystem::path(settingsPath_).parent_path() / "scratch.py");
+            }
         }
         // Whatever the selection is, picked in the graph view or on the canvas, is what the panel shows.
         graphView_->selectionModel().onChanged += [this](SelectionModel& selection) {

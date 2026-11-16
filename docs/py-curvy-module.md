@@ -11,6 +11,7 @@ jitnodes bindings) and `docs/py_scripting_plan.md` (the whole feature). User-fac
 | `src/scriptconsole.cpp`, `include/curvy/scriptconsole.h` | `ScriptConsole`: starts the interpreter, owns the one scope console input runs in, runs code with `doc` and `network` bound. |
 | `src/pyconsolepanel.cpp`, `include/curvy/pyconsolepanel.h` | The right-dock panel that feeds `ScriptConsole::run`. |
 | `src/scripteditorpanel.cpp`, `include/curvy/scripteditorpanel.h` | The script editor panel (edit, open, save, run through the console). |
+| `src/pythonhighlight.cpp`, `include/curvy/pythonhighlight.h`, `3rdparty/lex` | Python colours and folds for the editor (see "The `lex` library"). |
 | `cmake/python.cmake` | Builds jitnodes' `jitnodesPython`, links pybind11 and the bundled Python (`3rdparty/python`), copies the DLLs. |
 | `3rdparty/jitnodes/python/` | The `jitnodes` module (graph handles, Geometry, NumPy views) and `PythonRuntime`. |
 
@@ -188,17 +189,96 @@ If a new C++ class needs to appear in Python, give its wrapper a `DocumentGuard`
   itself is not covered by a unit test.
 - `tests/test_scriptmodule.cpp`: page settings, layers and groups, `add_circle` and `artwork`, nodes inside an object, palettes, gone objects.
 - `tests/test_pyconsolepanel.cpp` and `tests/gui/test_curvy_pyconsole.py`: the panel (including the "running" line).
-- `tests/test_scripteditorpanel.cpp`: the script editor (text round trip, save and load, BOM and CR handling, Run, Open and Save callbacks).
+- `tests/test_scripteditorpanel.cpp`: the script editor (text round trip, non-ASCII, save and load, BOM and CR handling, colours and folds,
+  the modified marker, run-selection, Ctrl+Enter and F5, the scratch file, Run / Open / Save callbacks).
+- `tests/test_pythonhighlight.cpp`: the lexer's styles (keywords, strings, prefixes, escapes, triple quotes, numbers, decorators) and the
+  folds.
 - `tests/test_scriptmodule.cpp` also covers `with doc.transaction():` (rollback on error, one step on success).
 
 ## The script editor panel
 
-`ScriptEditorPanel` (`include/curvy/scripteditorpanel.h`, id `pyeditor`, title "Script", right dock, created next to the console panel in
-`WorkspaceController`): a multi-line `TextControl` in a `ScrollView` above Open, Save and Run buttons. It knows no console: Run calls
-`onRun(code, name)`, and the owner passes it to `PyConsolePanel::runScript`, which echoes `>>> run <name>` and shows the output in the
-console's transcript (the input history is left alone). Open and Save ask for a path through `onChooseOpen` / `onChooseSave` (the native
-file dialogs, `*.py`); files are UTF-8, a BOM and carriage returns are dropped on load. Not done: syntax highlighting, line numbers, a
-"modified" marker, run-selection, and remembering the script across sessions.
+`ScriptEditorPanel` (`include/curvy/scripteditorpanel.h`, id `pyeditor`, title "Python Script Editor", right dock, created next to the
+console panel in `WorkspaceController`): a `newui::TextFoldingControl` in a `ScrollView` above Open, Save and Run buttons. It is built the
+way cpp_codetools' `CppEditor` is (`TextFoldingControl` + `HistoryTextModel` for undo, in a `ScrollView`).
+
+- **Run:** it knows no console. Run calls `onRun(code, name)`, and the owner passes it to `PyConsolePanel::runScript`, which echoes
+  `>>> run <name>` and shows the output in the console's transcript (the input history is left alone). With text selected the button
+  reads "Run Selection" and sends the *whole lines* the selection touches, dedented (so a block from deep inside a script still runs);
+  the name then ends in " (selection)". Ctrl+Enter and F5 do the same as the button (`EditorController`, a `TextFoldingController`
+  subclass, because a text control would take Enter).
+- **Colours and folds:** `include/curvy/pythonhighlight.h` / `src/pythonhighlight.cpp` turn the text into styled ranges and folds with
+  the `lex` library (see below). They are recomputed 60 ms after typing stops (at once when no run loop runs, as in tests); the control
+  moves the old ones along meanwhile. Folds are indentation blocks (a line ending in `:` to the last line of its block); lines inside
+  triple-quoted strings or brackets, blank lines and comment-only lines do not end a block. A fold that was closed stays closed when
+  the folds are recomputed (matched by where it starts). Malformed tokens (an unterminated string, a bad number) get a squiggle. The
+  sheet is chosen by `Settings::darkTheme()` and re-applied on every restyle, so a theme change is followed.
+- **Gutter:** line numbers and the fold markers come with `TextFoldingControl`.
+- **Editing keys** (`EditorController`, a `TextFoldingController` subclass in `scripteditorpanel.cpp`; each is one edit, so one undo step):
+  Enter keeps the line's indentation, adds four spaces when the code before the caret ends in `:` (a `#` comment, a colon inside a
+  string, or an unclosed bracket does not count; `pythonNewLineIndent`, lexer-based) and takes one level off after a line that starts with
+  `pass`, `return`, `break`, `continue` or `raise`. Tab inserts spaces up to the next multiple of four (replacing a selection within one
+  line) or, with a multi-line selection, indents every selected line (blank lines stay empty). Shift+Tab takes up to four spaces (or one
+  tab character) off the caret's line or the selected lines. The tab character that follows the Tab key press is swallowed
+  (`handleKeyPress`), or it would be typed as well.
+- **Font:** by default ("Automatic", `automaticEditorFont()` in `include/curvy/editorfonts.h`) the first installed of
+  JetBrainsMono-Medium, Hack-Regular, SourceCodePro-Medium, FiraCode-Medium, Fira Mono, Consolas (then newui's default). The system
+  default (Cascadia Mono) looked very thin. newui lists every weight as a face of its own named after the font file
+  (`JetBrainsMono-Medium`), so a heavier weight is a different entry in the list.
+- **Settings page:** Settings > **Script editor** (`pageScriptEditor` in `docs/mockups/settings.html`, converted to
+  `Resources/settings.newui`; wired in `settingsdialogsession.h`, `wireScriptEditor()`). It has the **font** (a drop-down of
+  `installedMonospaceFonts()`: installed faces whose names look monospace, without italics, plus "Automatic"; a face from a hand-edited
+  file that is not in the list is added), the **size** (8-32), the **tab width** (2-8: what Tab inserts, how far Enter indents after a
+  colon, how wide a tab character is drawn), and **one colour per syntax style** (`pythonSyntaxStyles()`: keyword, True/False/None,
+  string, number, comment, name, function/class, decorator, operator, punctuation) as a `#RRGGBB` field with a colour well. Typing the
+  look's own colour, or nothing, removes the override. A **preview** under the colours (a read-only `TextControl` with sample code)
+  follows every change. Changes apply live: the workspace's `restyle()` calls `ScriptEditorPanel::applySettings(settings)`, which
+  also makes the editor follow the dark/light theme (the style sheet is chosen by `Settings::darkTheme()`). **Reset page** puts the page
+  back. Stored in the settings file under `scriptEditor` (`font`, `fontSize`, `tabWidth`, `colors`: only the changed styles). The
+  editor's text colour and background still come from the app theme; only the syntax colours are editable. Settings.cpp ignores
+  out-of-range numbers and malformed colours.
+- **Regenerating the dialog:** `settings.newui` is generated from `settings.html` (command in the mockup's header comment). Two
+  properties exist only in the `.newui` and must be put back after a regeneration: `cancelControl: true` on `settingsCancel` and
+  `defaultControl: true` on `settingsOk`.
+- **Title / modified marker:** `Python Script Editor - <file or untitled>`, plus ` *` while modified. Modified is `!HistoryTextModel::
+  isClean()`, so undoing back to the saved text clears it. It is evaluated on the model's `onHistoryChanged`, not `onChanged`: `onChanged`
+  fires before the edit is recorded and still sees the old clean state.
+- **Across sessions:** `setScratchFile(path)` (the workspace passes `scratch.py` next to the settings file; none when there is no
+  settings file) writes the text there 800 ms after typing stops while it is modified, and restores it as an untitled, modified script
+  when the editor starts empty. The file is deleted when the script is saved or another file is loaded. The panel's destructor flushes a
+  pending write. Which file was open is not remembered: unsaved text comes back as "untitled".
+- **Files:** Open and Save ask for a path through `onChooseOpen` / `onChooseSave` (the native dialogs, `*.py`). Files are UTF-8; a BOM and
+  carriage returns are dropped on load. The text is converted with `curvy::utf8ToWide` / `wideToUtf8` (`include/curvy/utf8.h`); the
+  console panel uses them too (it used to widen byte by byte, which garbled non-ASCII).
+
+- **Find:** Ctrl+F (handled in `EditorController`) opens a find bar between the editor and the buttons: a `TextField`, a match count
+  label ("2 of 7", "No match", "7 found" when the selection is not on a match), Prev, Next and a close button. A selection within one
+  line pre-fills the field. Typing selects the first match at or after the selection start (so the current match stays while the word is
+  extended); Enter, F3 or Next go to the next match, Shift+Enter, Shift+F3 or Prev to the previous one, both wrapping; Esc closes the
+  bar and gives the focus back to the editor. The search is smart-case: case-insensitive unless the query has a capital letter. The
+  match is the editor's selection, so while it is selected Run says "Run Selection" and runs that line. `revealCaret()` scrolls the
+  `ScrollView` bar to the match when it is off screen. The field's own keys (Esc, Shift+Enter, F3) come from `FindFieldController`.
+  **Marks:** a `TextControl` does not draw its selection while another control has the focus, so with the find field focused the
+  match would be invisible. `updateFindStatus()` therefore sets `TextDecoration`s on the editor: a translucent `Background` on every
+  match and a `Box` frame on the current one (the match the selection is on). It runs after every query change, step, selection change
+  and text edit (`refreshHighlight`), and clears the marks when the bar closes.
+- **Replace:** Ctrl+H (or `showReplace()`) adds a second row under the find row: the replacement field, **Replace** and **All**. Replace
+  (also Enter in the replacement field) replaces the selection when it is a match of the query, then selects the next match; **All**
+  replaces every match, working from the end so offsets stay valid, inside `HistoryTextModel::beginGroup()/endGroup()` so one Ctrl+Z
+  undoes all of it. The replacement is literal text (no regular expressions, no case adaptation). Ctrl+F keeps the replace row if it
+  is already open; closing the bar hides both.
+
+Not done: regular expressions and whole-word/case switches in find, a syntax-error check (only lexical problems show), remembering which file was open, editing the editor's
+background and plain-text colours.
+
+## The `lex` library
+
+`3rdparty/lex` is copied from `D:\code\cpp_codetools` (`include/lex`, `src/lex`): the base lexer (`lexer_base`) and the incremental
+highlighter (`highlight`), standard library only, built as the static library `lex` in the root `CMakeLists.txt`. The Python lexer
+(`python_lexer`) and language (`python_language`) were written here, modelled on the library's CMake lexer, and still have to be
+carried back to cpp_codetools. Notes on the lexer: a triple-quoted string, or a string continued with a backslash, is split per line and
+carried in `LexState` (so a line can be lexed on its own); `@` first on a line is a `Decorator` (class Preprocessor, shown as
+"decorator"); the name after `def` / `class` is styled as `PropertyName` ("definition"). f-strings are plain strings. Tests:
+`tests/test_pythonhighlight.cpp`.
 - Run `curvyTests.exe` directly after a build and check that the test count includes the new tests (see CLAUDE.md, Build).
 
 ## Known limits and next steps

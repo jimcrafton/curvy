@@ -34,6 +34,10 @@ namespace {
         changed.autosave = false;
         changed.autosaveMinutes = 15;
         changed.exportFolder = "D:/exports";
+        changed.editorFont = "Hack-Regular";
+        changed.editorFontSize = 16;
+        changed.editorTabWidth = 2;
+        changed.editorColors = {{"keyword", 0xFF8800}, {"string", 0x00AA55}};
         changed.window = {-1200, 80, 1100, 700, true, "\\\\.\\DISPLAY2"};
         changed.docks[0] = {90.0f, false};
         changed.docks[2] = {300.0f, false};
@@ -82,6 +86,10 @@ TEST(SettingsFile, EverySettingRoundTrips) {
     EXPECT_FALSE(back.autosave);
     EXPECT_EQ(15, back.autosaveMinutes);
     EXPECT_EQ("D:/exports", back.exportFolder);
+    EXPECT_EQ("Hack-Regular", back.editorFont);
+    EXPECT_EQ(16, back.editorFontSize);
+    EXPECT_EQ(2, back.editorTabWidth);
+    EXPECT_EQ(changed.editorColors, back.editorColors);
 }
 
 TEST(SettingsFile, TheWindowRoundTripsWithItsScreen) {
@@ -124,6 +132,33 @@ TEST(SettingsFile, UnknownAndOutOfRangeValuesAreSkipped) {
     EXPECT_FALSE(bad.window.known()) << "a tiny window is skipped";
     EXPECT_EQ(220.0f, bad.docks[1].size) << "a tiny dock size is skipped";
     EXPECT_TRUE(bad.docks[1].collapsed);
+}
+
+TEST(SettingsFile, theScriptEditorDefaultsAreAutomaticFontFourSpacesAndNoColourOverrides) {
+    const Settings defaults;
+    EXPECT_TRUE(defaults.editorFont.empty());
+    EXPECT_EQ(14, defaults.editorFontSize);
+    EXPECT_EQ(4, defaults.editorTabWidth);
+    EXPECT_TRUE(defaults.editorColors.empty());
+}
+
+TEST(SettingsFile, badScriptEditorValuesAreSkipped) {
+    Settings bad;
+    bad.fromText("{ scriptEditor: { fontSize: 500, tabWidth: 0, colors: { keyword: '#FF0000', string: 'red', comment: '#12', number: 5 } } }");
+    EXPECT_EQ(14, bad.editorFontSize);
+    EXPECT_EQ(4, bad.editorTabWidth);
+    ASSERT_EQ(1u, bad.editorColors.size()) << "only the well-formed #RRGGBB colour is kept";
+    EXPECT_EQ(0xFF0000u, bad.editorColors.at("keyword"));
+}
+
+TEST(SettingsFile, resettingTheScriptEditorPageLeavesTheRestAlone) {
+    Settings reset = everythingChanged();
+    reset.resetPage(curvy::SettingsPage::ScriptEditor);
+    EXPECT_TRUE(reset.editorFont.empty());
+    EXPECT_EQ(14, reset.editorFontSize);
+    EXPECT_EQ(4, reset.editorTabWidth);
+    EXPECT_TRUE(reset.editorColors.empty());
+    EXPECT_EQ(450, reset.spaceTapMs);
 }
 
 TEST(SettingsFile, ADamagedFileChangesNothing) {

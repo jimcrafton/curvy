@@ -160,6 +160,12 @@ namespace curvy {
                 autosaveMinutes = defaults.autosaveMinutes;
                 exportFolder = defaults.exportFolder;
                 break;
+            case SettingsPage::ScriptEditor:
+                editorFont = defaults.editorFont;
+                editorFontSize = defaults.editorFontSize;
+                editorTabWidth = defaults.editorTabWidth;
+                editorColors = defaults.editorColors;
+                break;
         }
     }
 
@@ -223,6 +229,17 @@ namespace curvy {
         number("autosaveMinutes", autosaveMinutes);
         text("exportFolder", exportFolder);
         b["files"] = b.pop();
+
+        b.push_object();
+        text("font", editorFont);
+        number("fontSize", editorFontSize);
+        number("tabWidth", editorTabWidth);
+        b.push_object();
+        for (const auto& [style, rgb] : editorColors) {
+            text(style.c_str(), hexColor(rgb));
+        }
+        b["colors"] = b.pop();
+        b["scriptEditor"] = b.pop();
 
         if (window.known()) {
             b.push_object();
@@ -320,6 +337,28 @@ namespace curvy {
             json5::value folder;
             if (find(g, "exportFolder", folder) && folder.is_string()) {
                 exportFolder = folder.get_c_str();
+            }
+        }
+        if (group(root, "scriptEditor", g)) {
+            json5::value font;
+            if (find(g, "font", font) && font.is_string()) {
+                editorFont = font.get_c_str();
+            }
+            readInt(g, "fontSize", editorFontSize, 8, 32);
+            readInt(g, "tabWidth", editorTabWidth, 2, 8);
+            json5::value colors;
+            if (group(g, "colors", colors)) {
+                for (auto [name, child] : json5::object_view(colors)) {
+                    std::uint32_t rgb = 0;
+                    const std::string text = child.is_string() ? child.get_c_str() : "";
+                    char* end = nullptr;
+                    if (text.size() == 7 && text[0] == '#') {
+                        rgb = std::uint32_t(std::strtoul(text.c_str() + 1, &end, 16));
+                        if (*end == '\0') {
+                            editorColors[std::string(std::string_view(name))] = rgb;
+                        }
+                    }
+                }
             }
         }
         if (group(root, "window", g)) {

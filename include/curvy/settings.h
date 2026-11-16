@@ -1,12 +1,13 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
 namespace curvy {
 
-    enum class SettingsPage { Appearance, Workspace, Pen, Drawing, Files };
+    enum class SettingsPage { Appearance, Workspace, Pen, Drawing, Files, ScriptEditor };
 
     // The per-user preferences and the state the app keeps between sessions, in one json5 file (<local app data>/curvy/settings.json5, or
     // the path given with --settings). The window and the dock areas are kept here too, so a session starts as the last one ended. Unknown
@@ -77,6 +78,14 @@ namespace curvy {
         bool autosave = true;
         int autosaveMinutes = 5;
         std::string exportFolder;
+
+        // Script editor (the Python Script Editor panel)
+        std::string editorFont;       // a face as newui names it (JetBrainsMono-Medium); empty: the first installed of the editor's preferred ones
+        int editorFontSize = 14;
+        int editorTabWidth = 4;       // spaces per indent level: what Tab inserts and Enter adds after a colon
+        // Only the colours the user changed, by syntax style name ("keyword", "string", ...; see pythonSyntaxStyles()), as 0xRRGGBB. Every
+        // other style keeps the theme's colour.
+        std::map<std::string, std::uint32_t> editorColors;
 
         // State
         WindowPlacement window;

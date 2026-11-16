@@ -117,6 +117,127 @@ TEST_F(SettingsDialogTest, ResetPageResetsOnlyTheShownPage) {
     EXPECT_EQ(Settings::ThemeChoice::Light, working_.theme);
 }
 
+namespace {
+
+    void showScriptEditorPage(newui::Dialog& dialog) {
+        auto* nav = dynamic_cast<newui::Button*>(dialog.rootView().findView("navScriptEditor"));
+        nav->onClick(*nav);
+    }
+
+}
+
+TEST_F(SettingsDialogTest, theScriptEditorPageShowsTheEditorSettings) {
+    showScriptEditorPage(dialog_);
+    EXPECT_TRUE(find<newui::View>("pageScriptEditor")->isVisible());
+    EXPECT_FALSE(find<newui::View>("pageAppearance")->isVisible());
+    EXPECT_EQ(std::optional<std::size_t>(0), find<newui::DropDownList>("editorFont")->selectedIndex()) << "Automatic";
+    EXPECT_EQ("14", narrow(find<newui::TextField>("editorFontSize")->text()));
+    EXPECT_EQ("4", narrow(find<newui::TextField>("editorTabWidth")->text()));
+    EXPECT_EQ("#569CD6", narrow(find<newui::TextField>("syntaxHex_keyword")->text())) << "the dark theme's keyword colour";
+    EXPECT_GT(find<newui::View>("pageScriptEditor")->bounds().height(), 100.0f);
+}
+
+TEST_F(SettingsDialogTest, theScriptEditorPageFitsItsAreaWithRoomForThePreview) {
+    showScriptEditorPage(dialog_);
+    newui::View* page = find<newui::View>("pageScriptEditor");
+    newui::View* preview = find<newui::View>("editorPreview");
+    ASSERT_NE(nullptr, preview);
+    EXPECT_GT(preview->bounds().height(), 60.0f) << "the preview is not squeezed out by the rows above it";
+    EXPECT_LE(preview->bounds().bottom(), page->bounds().height() + 0.5f) << "and it does not run past the page";
+    for (const auto& style : curvy::pythonSyntaxStyles()) {
+        newui::View* well = find<newui::View>((std::string("syntaxWell_") + style.name).c_str());
+        EXPECT_GT(well->bounds().width(), 10.0f) << style.name;
+        EXPECT_LT(well->bounds().bottom(), preview->bounds().top() + page->bounds().top() + 200.0f) << style.name;
+    }
+}
+
+TEST_F(SettingsDialogTest, everySyntaxStyleHasAHexFieldAndAWell) {
+    for (const auto& style : curvy::pythonSyntaxStyles()) {
+        EXPECT_NE(nullptr, find<newui::TextField>((std::string("syntaxHex_") + style.name).c_str())) << style.name;
+        EXPECT_NE(nullptr, find<newui::View>((std::string("syntaxWell_") + style.name).c_str())) << style.name;
+    }
+}
+
+TEST_F(SettingsDialogTest, theFontIsChosenFromTheInstalledMonospaceFaces) {
+    auto* font = find<newui::DropDownList>("editorFont");
+    const auto installed = curvy::installedMonospaceFonts();
+    ASSERT_FALSE(installed.empty());
+    font->setSelectedIndex(std::size_t(1));   // 0 is Automatic
+    EXPECT_EQ(installed[0], working_.editorFont);
+    EXPECT_EQ(1, applied_);
+    font->setSelectedIndex(std::size_t(0));
+    EXPECT_TRUE(working_.editorFont.empty());
+}
+
+TEST_F(SettingsDialogTest, sizeAndTabWidthAreTakenOrRefused) {
+    showScriptEditorPage(dialog_);
+    auto* size = find<newui::TextField>("editorFontSize");
+    size->setText(L"18");
+    size->onReturnPressed(*size);
+    EXPECT_EQ(18, working_.editorFontSize);
+    size->setText(L"100");
+    size->onReturnPressed(*size);
+    EXPECT_EQ(18, working_.editorFontSize) << "a size out of range is refused";
+
+    auto* tab = find<newui::TextField>("editorTabWidth");
+    tab->setText(L"2");
+    tab->onReturnPressed(*tab);
+    EXPECT_EQ(2, working_.editorTabWidth);
+    tab->setText(L"9");
+    tab->onReturnPressed(*tab);
+    EXPECT_EQ(2, working_.editorTabWidth);
+    EXPECT_EQ("2", narrow(tab->text())) << "the box goes back to the kept value";
+}
+
+TEST_F(SettingsDialogTest, aTypedColourOverridesTheThemeAndTheDefaultClearsIt) {
+    showScriptEditorPage(dialog_);
+    auto* keyword = find<newui::TextField>("syntaxHex_keyword");
+    keyword->setText(L"#FF8800");
+    keyword->onReturnPressed(*keyword);
+    ASSERT_EQ(1u, working_.editorColors.count("keyword"));
+    EXPECT_EQ(0xFF8800u, working_.editorColors["keyword"]);
+    EXPECT_GE(applied_, 1);
+
+    keyword->setText(L"not a colour");
+    keyword->onReturnPressed(*keyword);
+    EXPECT_EQ(0xFF8800u, working_.editorColors["keyword"]) << "a bad colour is refused";
+    EXPECT_EQ("#FF8800", narrow(keyword->text()));
+
+    keyword->setText(L"");
+    keyword->onReturnPressed(*keyword);
+    EXPECT_EQ(0u, working_.editorColors.count("keyword")) << "empty goes back to the theme's colour";
+    EXPECT_EQ("#569CD6", narrow(keyword->text()));
+
+    keyword->setText(L"#FF8800");
+    keyword->onReturnPressed(*keyword);
+    keyword->setText(L"#569cd6");   // the theme's own colour again, in lower case
+    keyword->onReturnPressed(*keyword);
+    EXPECT_EQ(0u, working_.editorColors.count("keyword")) << "typing the default is no override";
+}
+
+TEST_F(SettingsDialogTest, theScriptEditorPreviewFollowsTheSettings) {
+    showScriptEditorPage(dialog_);
+    auto* preview = find<newui::TextControl>("editorPreview");
+    ASSERT_NE(nullptr, preview);
+    EXPECT_FALSE(preview->text().empty());
+    EXPECT_FALSE(preview->styledRanges().empty());
+    auto* size = find<newui::TextField>("editorFontSize");
+    size->setText(L"20");
+    size->onReturnPressed(*size);
+    EXPECT_FLOAT_EQ(20.0f, preview->font().size());
+}
+
+TEST_F(SettingsDialogTest, resetPageOnTheScriptEditorPageClearsItsChanges) {
+    showScriptEditorPage(dialog_);
+    working_.editorFontSize = 20;
+    working_.editorColors["keyword"] = 0x112233;
+    auto* reset = find<newui::Button>("settingsReset");
+    reset->onClick(*reset);
+    EXPECT_EQ(14, working_.editorFontSize);
+    EXPECT_TRUE(working_.editorColors.empty());
+    EXPECT_EQ("14", narrow(find<newui::TextField>("editorFontSize")->text()));
+}
+
 TEST_F(SettingsDialogTest, TheKeysDoWhatTheDialogSays) {
     newui::RootView& root = dialog_.rootView();
     auto* hold = find<newui::TextField>("spaceTap");
