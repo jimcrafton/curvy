@@ -1,0 +1,233 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>curvy asset properties</title>
+<!-- Asset Properties dialog (docs/asset-manager-plan.md), the equivalent of Houdini's Type Properties, drawn in the style of nodePanelCode.html and
+     swatchesTab.html: pill tabs (amber when active), small caps section labels, dark fields, pill buttons. Modal, 560 wide. One page per tab; the script below
+     only hides the inactive pages in the browser (the app shows and hides the page views the same way), so the converter sees every page.
+     A new category is typed (an asset's category may be any text), so Category is a text field, not a list. Pages: Basic, Parameters, Contents, Python, Help, Files. The working copy is an AssetDefinition; Apply registers it in memory, Save also writes the
+     .asset.json and bumps the version. Parameters is a drag-reorderable list with the selected row's editor beside it; floats only in version 1.
+     Convert: python .claude/skills/html-mockup-to-newui/scripts/html2newui.py docs/mockups/assetProperties.html -o Resources/assetProperties.newui --name assetProperties -->
+<link rel="stylesheet" href="preview.css">
+<style>
+  body { margin: 0; padding: 0; width: 560px; height: 600px; display: flex; flex-direction: column; font-family: "Segoe UI", sans-serif; font-size: 12px; color: #F0F0F0; }
+  #propsBox { display: flex; flex-direction: column; flex-grow: 1; background: #1E1E1E; }
+  #propsHeader { display: flex; flex-direction: row; align-items: center; gap: 6px; height: 28px; padding: 4px; background: #2E2E2E; }
+  #propsTitle { flex-grow: 1; font-weight: 700; }
+  #propsKind { color: #A0A0A0; }
+  #propsTabs { display: flex; flex-direction: row; gap: 5px; padding: 10px 12px 4px 12px; }
+  .tab { height: 20px; padding: 0 10px; border-radius: 10px; color: #A0A0A0; }
+  .tabOn { background: #FFB454; border-color: #FFB454; color: #1B1B1B; }
+  #propsPages { display: flex; flex-direction: column; flex-grow: 1; padding: 4px 12px; }
+  .page { display: flex; flex-direction: column; gap: 4px; }
+  .sectionLabel { height: 16px; padding-top: 8px; font-size: 10px; letter-spacing: 0.05em; color: #A0A0A0; }
+  .row { display: flex; flex-direction: row; align-items: center; gap: 8px; height: 24px; }
+  .cap { width: 90px; color: #A0A0A0; }
+  .grow { flex-grow: 1; height: 22px; }
+  .field { width: 56px; height: 22px; }
+  .unit { color: #A0A0A0; }
+  .help { color: #A0A0A0; height: 16px; padding-left: 98px; }
+  .pill { height: 20px; padding: 0 10px; border-radius: 10px; }
+  .pillOn { background: #FFB454; border-color: #FFB454; color: #1B1B1B; }
+  #paramColumns { display: flex; flex-direction: row; gap: 12px; height: 170px; }
+  #paramList { display: flex; flex-direction: column; width: 190px; height: 170px; background: #121212; border: 1px solid #4A4A4A; }
+  .paramRow { display: flex; flex-direction: row; align-items: center; gap: 6px; height: 26px; padding: 0 6px; }
+  .paramRowSelected { background: #3A2F1F; border-left: 2px solid #FFB454; }
+  .paramGrip { width: 12px; color: #A0A0A0; }
+  .paramName { flex-grow: 1; }
+  .paramDefault { width: 40px; color: #A0A0A0; text-align: right; }
+  #paramEditor { display: flex; flex-direction: column; gap: 4px; flex-grow: 1; }
+  #paramEditor .cap { width: 52px; }
+  .buttons { display: flex; flex-direction: row; gap: 6px; height: 26px; align-items: center; }
+  .reservedNote { color: #FFB454; height: 16px; }
+  #contentsPreview { height: 170px; background: #121212; border: 1px solid #4A4A4A; }
+  #pythonColumns { display: flex; flex-direction: row; gap: 12px; height: 360px; }
+  #eventList { display: flex; flex-direction: column; width: 170px; height: 360px; background: #121212; border: 1px solid #4A4A4A; }
+  .eventGroup { height: 18px; padding: 6px 8px 0 8px; font-size: 10px; letter-spacing: 0.05em; color: #A0A0A0; }
+  .eventRow { display: flex; flex-direction: row; align-items: center; gap: 6px; height: 24px; padding: 0 8px; }
+  .eventRowSelected { background: #3A2F1F; border-left: 2px solid #FFB454; }
+  .eventName { flex-grow: 1; }
+  #eventDetail { display: flex; flex-direction: column; gap: 4px; flex-grow: 1; }
+  #eventTitle { font-size: 13px; font-weight: 700; height: 20px; }
+  .eventText { color: #A0A0A0; }
+  #eventWhen { height: 92px; }
+  #eventArgs { font-family: Consolas, monospace; flex-grow: 1; }
+  #pythonProblem { height: 18px; color: #FF6B6B; }
+  #pythonEditor { height: 150px; background: #181818; border: 1px solid #4A4A4A; }
+  #helpText { height: 200px; background: #181818; color: #F0F0F0; border: 1px solid #4A4A4A; font: 12px Consolas, monospace; padding: 4px 6px; box-sizing: border-box; }
+  #filesList { display: flex; flex-direction: column; height: 150px; background: #121212; border: 1px solid #4A4A4A; }
+  .fileRow { display: flex; flex-direction: row; align-items: center; gap: 8px; height: 26px; padding: 0 8px; }
+  .fileSize { flex-grow: 1; color: #A0A0A0; text-align: right; }
+  #propsFooter { display: flex; flex-direction: row; align-items: center; gap: 6px; height: 52px; padding: 0 12px; background: #2E2E2E; }
+  #propsFooterNote { flex-grow: 1; height: 36px; color: #FFB454; }
+</style>
+</head>
+<body>
+  <div id="propsBox">
+    <div id="propsHeader"><span id="propsTitle">wobble</span><span id="propsKind">asset, version 2</span></div>
+    <div id="propsTabs">
+      <button id="tabBasic" class="tab tabOn">Basic</button>
+      <button id="tabParameters" class="tab">Parameters</button>
+      <button id="tabContents" class="tab">Contents</button>
+      <button id="tabPython" class="tab">Python</button>
+      <button id="tabHelp" class="tab">Help</button>
+      <button id="tabFiles" class="tab">Files</button>
+    </div>
+    <div id="propsPages">
+
+      <div id="pageBasic" class="page">
+        <span class="sectionLabel">IDENTITY</span>
+        <div class="row"><span class="cap">Type name</span><input id="typeName" class="grow" type="text" value="wobble"></div>
+        <span class="help">Letters, digits and underscores. Cannot match a built-in node.</span>
+        <div class="row"><span class="cap">Label</span><input id="typeLabel" class="grow" type="text" value="Wobble"></div>
+        <div class="row"><span class="cap">Category</span><input id="typeCategory" class="grow" type="text" value="Deform" placeholder="Category"></div>
+        <div class="row"><span class="cap">Author</span><input id="typeAuthor" class="grow" type="text" value=""></div>
+        <span class="sectionLabel">NODE</span>
+        <div class="row"><span class="cap">Inputs</span><input id="inputCount" class="field" type="text" value="1"><span class="unit">0 to 16</span></div>
+        <div class="row"><span class="cap">Version</span><span id="versionText">2 (Save writes 3)</span></div>
+      </div>
+
+      <div id="pageParameters" class="page">
+        <span class="sectionLabel">PROMOTED PARAMETERS</span>
+        <div id="paramColumns">
+          <div id="paramList">
+            <div class="paramRow paramRowSelected"><span class="paramGrip">::</span><span class="paramName">amount</span><span class="paramDefault">0.3</span></div>
+            <div class="paramRow"><span class="paramGrip">::</span><span class="paramName">speed</span><span class="paramDefault">3</span></div>
+          </div>
+          <div id="paramEditor">
+            <div class="row"><span class="cap">Name</span><input id="paramName" class="grow" type="text" value="amount"></div>
+            <div class="row"><span class="cap">Label</span><input id="paramLabel" class="grow" type="text" value="Amount"></div>
+            <div class="row"><span class="cap">Default</span><input id="paramDefault" class="field" type="text" value="0.3"></div>
+            <div class="row"><span class="cap">Min</span><input id="paramMin" class="field" type="text" value="0"><span class="unit">Max</span><input id="paramMax" class="field" type="text" value="1"></div>
+            <div class="row"><span class="cap">Group</span><input id="paramGroup" class="grow" type="text" value=""></div>
+            <div class="row"><span class="cap">Tooltip</span><input id="paramTooltip" class="grow" type="text" value="How far points move"></div>
+          </div>
+        </div>
+        <div class="buttons"><button id="paramAdd" class="pill">Add</button><button id="paramRemove" class="pill">Remove</button></div>
+        <span id="brushNote" class="reservedNote">referenceWidth and guideLength together make an asset a brush.</span>
+      </div>
+
+      <div id="pageContents" class="page">
+        <span class="sectionLabel">CONTENTS</span>
+        <canvas id="contentsPreview" data-newui-type="SubView"></canvas>
+        <span id="contentsInfo" class="help">5 nodes. Instances cannot be entered.</span>
+        <div class="buttons"><button id="matchCurrent" class="pill">Match node</button><button id="editContents" class="pill pillOn">Edit</button></div>
+        <span class="help">Edit unlocks a copy as a subnet; Save then re-creates the asset from it.</span>
+      </div>
+
+      <div id="pagePython" class="page">
+        <span class="sectionLabel">PYTHON: WHEN IT RUNS</span>
+        <div id="pythonColumns">
+          <div id="eventList">
+            <span class="eventGroup">SHARED CODE</span>
+            <div class="eventRow eventRowSelected" data-when="Once per session, the first time the asset is used (an instance is made, a file with one opens, or another script imports it). Defines helper functions; it is not tied to any node." data-args="none">
+              <input class="eventCheck" type="checkbox" checked><span class="eventName">module</span></div>
+            <span class="eventGroup">EACH INSTANCE</span>
+            <div class="eventRow" data-when="An instance exists: Add, paste, undo of a delete, or opening a document (then after the whole document is built, so other nodes can be looked at). reason is added, pasted, undo or loaded; set defaults only for added and pasted." data-args="node, reason">
+              <input class="eventCheck" type="checkbox" checked><span class="eventName">onCreated</span></div>
+            <div class="eventRow" data-when="An older instance is rebuilt from a newer version of the asset (Update, or opening a document saved with an older one). For changes the renames list cannot express, such as a new unit. Must only read old and write fresh: it cannot touch the document, and it may run twice." data-args="old, fresh, inputs, from_version, to_version">
+              <input class="eventCheck" type="checkbox"><span class="eventName">onVersionUpdated</span></div>
+            <div class="eventRow" data-when="An input of the instance was wired, rewired or disconnected." data-args="node, index">
+              <input class="eventCheck" type="checkbox"><span class="eventName">onInputChanged</span></div>
+            <div class="eventRow" data-when="A promoted parameter was edited by the user, a script or undo. Not run for animated values while the timeline plays or scrubs (see onFrameChanged)." data-args="node, name, value">
+              <input class="eventCheck" type="checkbox"><span class="eventName">onParamChanged</span></div>
+            <div class="eventRow" data-when="The playhead moved, after the new frame is shown. Skipped while playing if the previous call has not finished; at most once per displayed frame. Use it to drive other things from the time. It cannot change this asset or anything it reads from: Apply and Save refuse a script that tries to, and it is stopped when it runs." data-args="node, frame, playing">
+              <input class="eventCheck" type="checkbox"><span class="eventName">onFrameChanged</span></div>
+            <div class="eventRow" data-when="The instance is about to be deleted (it still exists). Not run when the whole document closes." data-args="node">
+              <input class="eventCheck" type="checkbox"><span class="eventName">onDeleted</span></div>
+            <span class="eventGroup">LIBRARY</span>
+            <div class="eventRow" data-when="The asset is registered in the library (app start, Load, Reload, Save). Not run for an asset that only arrives embedded in a document until that document is trusted." data-args="name, version">
+              <input class="eventCheck" type="checkbox"><span class="eventName">onInstalled</span></div>
+          </div>
+          <div id="eventDetail">
+            <span id="eventTitle">module</span>
+            <span id="eventWhen" class="eventText">Once per session, the first time the asset is used (an instance is made, a file with one opens, or another script imports it). Defines helper functions; it is not tied to any node.</span>
+            <div class="row"><span class="cap">Arguments</span><span id="eventArgs">none</span></div>
+            <canvas id="pythonEditor" data-newui-type="SubView"></canvas>
+            <span id="pythonProblem">3:5 onFrameChanged cannot change this asset (node.set_float)</span>
+            <span class="eventText">Runs on the main thread, never during a cook. Edits made here are part of the one undo step that caused the event.</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="pageHelp" class="page">
+        <span class="sectionLabel">SUMMARY</span>
+        <div class="row"><input id="helpSummary" class="grow" type="text" value="Moves points along a sine wave."></div>
+        <span class="sectionLabel">HELP TEXT</span>
+        <textarea id="helpText">Wobble moves every point by a sine of its position.
+amount: how far; speed: how fast it animates.</textarea>
+      </div>
+
+      <div id="pageFiles" class="page">
+        <span class="sectionLabel">EXTRA FILES</span>
+        <div id="filesList">
+          <div class="fileRow"><span>icon.png</span><span class="fileSize">2.1 KB</span></div>
+        </div>
+        <div class="buttons"><button id="fileAdd" class="pill">Add...</button><button id="fileRemove" class="pill">Remove</button></div>
+      </div>
+
+    </div>
+    <div id="propsFooter">
+      <span id="propsFooterNote">Unsaved changes: 1 instance will be outdated</span>
+      <button id="propsRevert" class="pill">Revert</button>
+      <button id="propsCancel" class="pill">Cancel</button>
+      <button id="propsApply" class="pill">Apply</button>
+      <button id="propsSave" class="pill pillOn">Save</button>
+    </div>
+  </div>
+<script>
+  var names = ['Basic', 'Parameters', 'Contents', 'Python', 'Help', 'Files'];
+  function show(name) {
+    names.forEach(function (n) {
+      document.getElementById('page' + n).style.display = (n === name) ? 'flex' : 'none';
+      document.getElementById('tab' + n).classList.toggle('tabOn', n === name);
+    });
+  }
+  names.forEach(function (n) {
+    document.getElementById('tab' + n).addEventListener('click', function () { show(n); });
+  });
+  document.querySelectorAll('.eventRow').forEach(function (row) {
+    row.addEventListener('click', function () {
+      document.querySelectorAll('.eventRow').forEach(function (r) { r.classList.remove('eventRowSelected'); });
+      row.classList.add('eventRowSelected');
+      document.getElementById('eventTitle').textContent = row.querySelector('.eventName').textContent;
+      document.getElementById('eventWhen').textContent = row.dataset.when;
+      document.getElementById('eventArgs').textContent = row.dataset.args;
+      showProblem(row.querySelector('.eventName').textContent === 'onFrameChanged');
+    });
+  });
+  function showProblem(has) {
+    document.getElementById('pythonProblem').style.visibility = has ? 'visible' : 'hidden';
+    document.getElementById('propsApply').disabled = has;
+    document.getElementById('propsSave').disabled = has;
+    document.getElementById('propsFooterNote').textContent = has ? 'onFrameChanged has a problem: Apply and Save are blocked' : 'Unsaved changes: 1 instance will be outdated';
+  }
+  showProblem(false);
+  function setText(id, text) { document.getElementById(id).textContent = text; }
+  function setValue(id, value) { document.getElementById(id).value = value; }
+  function blankDefinition() {
+    setText('propsTitle', 'New asset');
+    setText('propsKind', 'not saved yet');
+    ['typeName', 'typeLabel', 'typeAuthor', 'paramName', 'paramLabel', 'paramMin', 'paramMax', 'paramGroup', 'paramTooltip', 'helpSummary', 'helpText'].forEach(function (id) { setValue(id, ''); });
+    setValue('inputCount', '0');
+    setValue('paramDefault', '');
+    setText('versionText', '1 (new)');
+    document.querySelectorAll('.paramRow').forEach(function (row) { row.remove(); });
+    document.querySelectorAll('.fileRow').forEach(function (row) { row.remove(); });
+    setText('contentsInfo', 'Empty: no nodes yet. Save creates the asset; then Add it to a graph and press Edit to build the contents.');
+    document.getElementById('matchCurrent').disabled = true;
+    document.getElementById('editContents').disabled = true;
+    document.querySelectorAll('.eventCheck').forEach(function (box) { box.checked = false; });
+    setText('propsFooterNote', 'Type name is required');
+    setText('propsSave', 'Create');
+    show('Basic');
+  }
+  if (location.hash === '#new') {
+    blankDefinition();
+  } else {
+    show('Parameters');
+  }
+</script>
+</body>
+</html>

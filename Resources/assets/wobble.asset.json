@@ -1,0 +1,30 @@
+// A sample asset: wobbles whatever is wired into it over time. Promoted parameters become parameters of every instance and are read inside as
+// parent.<name> in expressions. Open it with the Assets panel (Edit...) to see how an asset is made.
+{
+  format: "jitnodes-asset",
+  version: 1,
+  type: "wobbleAsset",
+  assetVersion: 1,
+  label: "Wobble",
+  category: "Deform",
+  description: "Moves every point along a sine wave.",
+  inputs: 1,
+  promote: { amount: 0.3, speed: 3 },
+  params: [
+    { name: "amount", label: "Amount", default: 0.3, min: 0, max: 10, tooltip: "How far points move" },
+    { name: "speed", label: "Speed", default: 3, min: 0, tooltip: "How fast it animates" },
+  ],
+  graph: {
+    fps: 24,
+    display: 2,
+    nodes: [
+      { id: 1, type: "subnetInput", name: "in", floats: { index: 0 }, inputs: [] },
+      {
+        id: 2, type: "wrangle", name: "wobble",
+        strings: { code: "x = x + sin(y * 2 + a) * b; y = y + cos(x * 2 + a) * b;" },
+        expressions: { a: "time * parent.speed", b: "parent.amount" },
+        inputs: [1],
+      },
+    ],
+  },
+}

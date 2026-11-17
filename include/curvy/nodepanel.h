@@ -159,7 +159,7 @@ namespace curvy {
         bool codeOpen_ = false;
         std::string loadedCode_;   // the node's text as the editor last took it; an editor holding something else has unsaved edits
         bool sliding_ = false;
-        bool slidingSet_ = false;   // the drag changed the value, so mouse up records it
+        void finishSlide();   // records an open slider gesture as one undo step
         bool updatingSlider_ = false;
         bool updatingChoice_ = false;   // the panel itself is setting a slider
         std::string sliderName_;

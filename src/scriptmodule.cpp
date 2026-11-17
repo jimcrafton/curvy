@@ -1156,6 +1156,14 @@ namespace curvy {
         for (const char* name : {"Network", "Node", "History"}) {
             guardClass(jitnodes.attr(name));
         }
+        // The asset library is process-global and not thread safe, so a script on a worker thread reaches it through the main thread too.
+        py::module_ assets = jitnodes.attr("assets");
+        guardClass(assets.attr("AssetDef"));
+        guardClass(assets.attr("_Restricted"));
+        for (const char* name : {"list", "has", "get", "install", "install_directory", "reload", "uninstall", "update_instances", "create", "unlock",
+                                 "rename_parameter", "check_scripts", "restricted"}) {
+            assets.attr(name) = guarded(assets.attr(name));
+        }
     }
 
     void ScriptTransaction::begin(SketchDocument& document) {

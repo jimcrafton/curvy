@@ -2,6 +2,7 @@
 
 #include <newui/mouse_constants.h>
 #include <newui/pen.h>
+#include <newui/undostack.h>
 
 #include "curvy/wranglecheck.h"
 
@@ -415,4 +416,91 @@ TEST_F(NodePanelTest, aLayerOfTheOpenedSampleShowsOpacityAndBlend) {
     window().nodePanel().show(layer);
     EXPECT_NE(rowOf("opacity"), ~std::size_t(0));
     EXPECT_NE(rowOf("blend"), ~std::size_t(0));
+}
+
+TEST_F(WrangleCodeTest, draggingASliderIsOneUndoStepAndUndoPutsTheValueBack) {
+    curvy::NodePanel& panel = window().nodePanel();
+    panel.setCodeOpen(true);
+    panel.setCodeText("| gain = 2(0, 10) |\ny = y * gain;");
+    panel.commitCode();
+    const std::size_t row = rowOf("gain");
+    ASSERT_NE(row, ~std::size_t(0));
+    auto* slider = dynamic_cast<newui::Slider*>(panel.findView("nodeSlider" + std::to_string(row)));
+    ASSERT_NE(slider, nullptr);
+    ASSERT_TRUE(slider->isVisible());
+
+    newui::UndoStack& undo = window().document().undoStack();
+    const std::size_t before = undo.depth();
+    slider->setValue(4.0f);   // the first change of a gesture, as a click on the track makes before anything else
+    slider->setValue(6.0f);
+    slider->setValue(8.0f);
+    EXPECT_FLOAT_EQ(window().document().node(wrangle_).getFloat("gain"), 8.0f);
+    EXPECT_EQ(undo.depth(), before) << "the drag is still live";
+    slider->onMouseUp(*slider, newui::Point(0.0f, 0.0f), newui::mbmLeftButton, 0);
+    EXPECT_EQ(undo.depth(), before + 1);
+    undo.undo();
+    EXPECT_FLOAT_EQ(window().document().node(wrangle_).getFloat("gain"), 2.0f);
+}
+
+TEST_F(WrangleCodeTest, letGoOfTheThumbEndsTheGestureToo) {
+    curvy::NodePanel& panel = window().nodePanel();
+    panel.setCodeOpen(true);
+    panel.setCodeText("| gain = 2(0, 10) |\ny = y * gain;");
+    panel.commitCode();
+    auto* slider = dynamic_cast<newui::Slider*>(panel.findView("nodeSlider" + std::to_string(rowOf("gain"))));
+    ASSERT_NE(slider, nullptr);
+    ASSERT_NE(slider->thumb(), nullptr);
+    const std::size_t before = window().document().undoStack().depth();
+    slider->setValue(5.0f);
+    slider->setValue(7.0f);
+    EXPECT_EQ(window().document().undoStack().depth(), before);
+    slider->thumb()->onMouseUp(*slider->thumb(), newui::Point(0.0f, 0.0f), newui::mbmLeftButton, 0);
+    EXPECT_EQ(window().document().undoStack().depth(), before + 1);
+    slider->setValue(9.0f);
+    slider->thumb()->onMouseUp(*slider->thumb(), newui::Point(0.0f, 0.0f), newui::mbmLeftButton, 0);
+    EXPECT_EQ(window().document().undoStack().depth(), before + 2) << "the next drag is a step of its own";
+}
+
+TEST_F(WrangleCodeTest, aGestureStillOpenWhenAnotherNodeIsShownIsRecorded) {
+    curvy::NodePanel& panel = window().nodePanel();
+    panel.setCodeOpen(true);
+    panel.setCodeText("| gain = 2(0, 10) |\ny = y * gain;");
+    panel.commitCode();
+    auto* slider = dynamic_cast<newui::Slider*>(panel.findView("nodeSlider" + std::to_string(rowOf("gain"))));
+    ASSERT_NE(slider, nullptr);
+    const std::size_t before = window().document().undoStack().depth();
+    slider->setValue(5.0f);
+    panel.show(look_);
+    EXPECT_EQ(window().document().undoStack().depth(), before + 1);
+}
+
+TEST_F(NodePanelTest, choosingInTheBlendDropdownSetsTheObjectsBlend) {
+    window().docks().setCollapsed(curvy::DockSide::Right, false);
+    frame_.rootView().updateLayout();
+    curvy::NodePanel& panel = window().nodePanel();
+    panel.show(layer_);
+    const std::size_t row = rowOf("blend");
+    ASSERT_NE(row, ~std::size_t(0));
+    auto* list = dynamic_cast<newui::DropDownList*>(panel.findView("nodeChoice" + std::to_string(row)));
+    ASSERT_NE(list, nullptr);
+    ASSERT_TRUE(list->isVisible());
+    list->setSelectedIndex(2);
+    EXPECT_FLOAT_EQ(window().document().node(layer_).getFloat("blend"), 2.0f);
+    EXPECT_EQ(panel.paramChoice(rowOf("blend")), "Screen");
+}
+
+TEST_F(WrangleCodeTest, openingTheCodeSectionWidensTheRightDockAndClosingRestoresIt) {
+    window().docks().setSize(curvy::DockSide::Right, 260.0f);
+    window().nodePanel().setCodeOpen(true);
+    EXPECT_GE(window().docks().size(curvy::DockSide::Right), curvy::NodePanel::kCodeWidth);
+    window().nodePanel().setCodeOpen(false);
+    EXPECT_FLOAT_EQ(window().docks().size(curvy::DockSide::Right), 260.0f);
+}
+
+TEST_F(WrangleCodeTest, aDockAlreadyWideEnoughIsLeftAlone) {
+    window().docks().setSize(curvy::DockSide::Right, 500.0f);
+    window().nodePanel().setCodeOpen(true);
+    EXPECT_FLOAT_EQ(window().docks().size(curvy::DockSide::Right), 500.0f);
+    window().nodePanel().setCodeOpen(false);
+    EXPECT_FLOAT_EQ(window().docks().size(curvy::DockSide::Right), 500.0f);
 }

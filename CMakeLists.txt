@@ -53,6 +53,10 @@ add_library(curvy_core STATIC
     src/paletteimagemodel.cpp
     src/swatchimport.cpp
     src/swatchestab.cpp
+    src/assetmanagermodel.cpp
+    src/assetmanagerpanel.cpp
+    src/assetpropertiesdialog.cpp
+    src/assetpropertiessession.cpp
     src/swatchpalettes.cpp
     src/swatchstrip.cpp
     src/swatchpalettecontroller.cpp

@@ -1,0 +1,105 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>curvy asset manager</title>
+<!-- Asset Manager dock panel (in the app the Panel's own title bar says "Assets"; the header row here is the panel's toolbar) (docs/asset-manager-plan.md), drawn in the same style as nodePanelCode.html and swatchesTab.html: header bar, small caps section
+     labels, pill buttons, amber selection. Right-dock panel, 360 wide: search + category on top, the library grouped by category (name, badges, version),
+     an "outdated" banner, details of the selected asset and the actions. Badges: "Brush" (promotes referenceWidth and guideLength, docs/graph-brushes.md),
+     "Embedded" (only in the document, no library file), "Outdated n" (n instances older than the registered version; Update rebuilds them and clears undo).
+     Click a row to select it. Add puts an instance of the selected asset in the graph (wired to the selected node); + opens the Asset Properties dialog
+     (assetProperties.html): filled from the selected subnet when there is one, blank otherwise (assetProperties.html#new); Edit opens it for the selected asset.
+     Convert: python .claude/skills/html-mockup-to-newui/scripts/html2newui.py docs/mockups/assetManager.html -o Resources/assetManager.newui --name assetManager --fragment -->
+<link rel="stylesheet" href="preview.css">
+<style>
+  body { margin: 0; padding: 0; width: 300px; font-family: "Segoe UI", sans-serif; font-size: 12px; color: #F0F0F0; }
+  #assetPanel { display: flex; flex-direction: column; width: 300px; height: 560px; background: #1E1E1E; }
+  #assetHeader { display: flex; flex-direction: row; align-items: center; gap: 6px; height: 28px; padding: 4px; background: #252525; }
+  #assetTitle { flex-grow: 1; font-weight: 700; }
+  .roundButton { width: 24px; height: 20px; padding: 0; border-radius: 10px; }
+  .pill { height: 20px; padding: 0 10px; border-radius: 10px; }
+  .pillOn { background: #FFB454; border-color: #FFB454; color: #1B1B1B; }
+  #assetFilterBar { display: flex; flex-direction: row; gap: 6px; padding: 8px 8px 4px 8px; }
+  #assetSearch { flex-grow: 1; height: 22px; }
+  #assetCategory { width: 110px; height: 22px; }
+  .sectionLabel { height: 16px; padding: 8px 10px 0 10px; font-size: 10px; letter-spacing: 0.05em; color: #A0A0A0; }
+  #assetList { display: flex; flex-direction: column; flex-grow: 1; margin: 4px 8px; background: #121212; border: 1px solid #4A4A4A; }
+  .category { height: 18px; padding: 8px 8px 0 8px; font-size: 10px; letter-spacing: 0.05em; color: #A0A0A0; }
+  .assetRow { display: flex; flex-direction: row; align-items: center; gap: 6px; height: 26px; padding: 0 8px; }
+  .assetRow:hover { background: #2A2A2A; }
+  .assetRowSelected { background: #3A2F1F; border-left: 2px solid #FFB454; }
+  .assetName { flex-grow: 1; }
+  .assetVersion { width: 26px; color: #A0A0A0; text-align: right; }
+  .badge { height: 16px; padding: 0 7px; font-size: 10px; border: 1px solid #4A4A4A; border-radius: 8px; background: #2E2E2E; color: #A0A0A0; }
+  .badgeWarn { border-color: #FFB454; color: #FFB454; }
+  #detailsBanner { display: flex; flex-direction: row; align-items: center; gap: 8px; height: 28px; margin: 0 8px; padding: 0 8px; background: #3A2F1F; border: 1px solid #FFB454; }
+  #detailsBannerText { flex-grow: 1; color: #FFB454; }
+  #assetDetails { display: flex; flex-direction: column; gap: 3px; margin: 8px; padding: 8px; background: #2E2E2E; border: 1px solid #4A4A4A; }
+  #detailsName { font-size: 13px; font-weight: 700; height: 20px; }
+  .detailRow { display: flex; flex-direction: row; gap: 8px; height: 18px; }
+  .detailKey { width: 70px; color: #A0A0A0; }
+  .detailValue { flex-grow: 1; }
+  #assetActions { display: flex; flex-direction: row; flex-wrap: wrap; gap: 6px; padding: 4px 8px 8px 8px; }
+  #assetStatus { height: 20px; padding: 0 10px; color: #A0A0A0; }
+</style>
+</head>
+<body>
+  <div id="assetPanel">
+    <div id="assetHeader">
+      <span id="assetTitle">Library</span>
+      <button id="assetNewButton" class="roundButton">+</button>
+      <button id="assetFolderButton" class="roundButton">...</button>
+    </div>
+    <div id="assetFilterBar">
+      <input id="assetSearch" type="text" placeholder="Search assets">
+      <select id="assetCategory"><option>All</option><option>Brushes</option><option>Deform</option><option>Embedded</option></select>
+    </div>
+    <div id="assetList">
+      <span class="category">BRUSHES</span>
+      <div class="assetRow"><span class="assetName">inkPen</span><span class="badge">Brush</span><span class="assetVersion">v3</span></div>
+      <div class="assetRow"><span class="assetName">oilBristle</span><span class="badge">Brush</span><span class="badge badgeWarn">Outdated 2</span><span class="assetVersion">v5</span></div>
+      <span class="category">DEFORM</span>
+      <div class="assetRow assetRowSelected"><span class="assetName">wobble</span><span class="badge badgeWarn">Outdated 1</span><span class="assetVersion">v2</span></div>
+      <div class="assetRow"><span class="assetName">scaler</span><span class="assetVersion">v1</span></div>
+      <span class="category">EMBEDDED IN THIS DOCUMENT</span>
+      <div class="assetRow"><span class="assetName">myRipple</span><span class="badge">Embedded</span><span class="assetVersion">v1</span></div>
+    </div>
+    <div id="detailsBanner">
+      <span id="detailsBannerText">1 instance is older than v2</span>
+      <button id="updateInstancesButton" class="pill pillOn">Update</button>
+    </div>
+    <div id="assetDetails">
+      <span id="detailsName">wobble</span>
+      <div class="detailRow"><span class="detailKey">Label</span><span id="detailsLabel" class="detailValue">Wobble</span></div>
+      <div class="detailRow"><span class="detailKey">Inputs</span><span id="detailsInputs" class="detailValue">1</span></div>
+      <div class="detailRow"><span class="detailKey">Parameters</span><span id="detailsParams" class="detailValue">amount, speed</span></div>
+      <div class="detailRow"><span class="detailKey">Instances</span><span id="detailsInstances" class="detailValue">3 in this document</span></div>
+      <div class="detailRow"><span class="detailKey">File</span><span id="detailsSource" class="detailValue">Assets/wobble.asset.json</span></div>
+    </div>
+    <div id="assetActions">
+      <button id="addInstanceButton" class="pill pillOn">Add</button>
+      <button id="editButton" class="pill">Edit...</button>
+      <button id="unlockButton" class="pill">Unlock</button>
+      <button id="reloadButton" class="pill">Reload</button>
+      <button id="saveToLibraryButton" class="pill">Save to library</button>
+      <button id="uninstallButton" class="pill">Uninstall</button>
+    </div>
+    <span id="assetStatus">12 assets, 1 outdated</span>
+  </div>
+<script>
+  function status(text) { document.getElementById('assetStatus').textContent = text; }
+  document.getElementById('assetNewButton').addEventListener('click', function () { window.open('assetProperties.html#new'); });
+  document.getElementById('editButton').addEventListener('click', function () { window.open('assetProperties.html'); });
+  document.getElementById('addInstanceButton').addEventListener('click', function () {
+    status('Added ' + document.getElementById('detailsName').textContent + ' to the graph (one undo step)');
+  });
+  document.querySelectorAll('.assetRow').forEach(function (row) {
+    row.addEventListener('click', function () {
+      document.querySelectorAll('.assetRow').forEach(function (r) { r.classList.remove('assetRowSelected'); });
+      row.classList.add('assetRowSelected');
+      document.getElementById('detailsName').textContent = row.querySelector('.assetName').textContent;
+    });
+  });
+</script>
+</body>
+</html>

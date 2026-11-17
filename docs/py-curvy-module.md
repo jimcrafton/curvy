@@ -510,6 +510,28 @@ Code editor shows the same problem under the text. `curvy.wrangle_functions()` l
 sets a wrangle's text with the existing `doc.set_string(node, "code", text)` (declared `| name = v(min, max) |` parameters appear as the
 node's spare floats), and `Resources/samples/scripts/wrangleNode.py` shows it. Test: `ScriptModule.checkWrangleNamesTheFirstProblemAndListsTheFunctions`.
 
+## Assets: `jitnodes.assets`
+
+The asset API lives in the `jitnodes` module, not in `curvy` (the library is process-global, not per document); `docs/asset-manager-plan.md`
+is the design and `3rdparty/jitnodes/docs/python.md` ("Assets") the API. What curvy adds on top is in `registerCurvyModule`:
+
+- `jitnodes.assets.AssetDef` and `_Restricted` go through `guardClass`, and every function of the submodule (`list`, `has`, `get`, `install`,
+  `install_directory`, `reload`, `uninstall`, `update_instances`, `create`, `unlock`, `rename_parameter`, `check_scripts`, `restricted`) is wrapped
+  with `guarded`, so a script on a worker thread reaches the registry and the library through the main thread. A new function added to
+  `pyAssets.cpp` must be added to that list.
+- `AssetDef.validate()` / `apply()` / `save()` refuse a definition whose scripts break the rules: the script check is installed as
+  `AssetDefinition::setScriptValidator` when the module registers. The same check is `jitnodes.assets.check_scripts(scripts)` and, from C++,
+  `jitnodes::python::checkAssetScripts` (`pyAssets.h`), which the Asset Properties dialog calls for the problem line while the user types.
+- **Not done here (phase E of the plan):** a `doc.assets` that routes `update_instances` / `unlock` through the document's undo stack and
+  shape sync (the functions act on a network and clear jitnodes' own history), firing the events (`onCreated`, `onFrameChanged`, ...), and the
+  trust prompt. An application that runs an event wraps it in `with jitnodes.assets.restricted(node, event)` (or the C++ `EventRestriction`,
+  `pyGuard.h`): `onFrameChanged` then cannot change the node, what is inside it or what it reads from, and `onVersionUpdated` cannot change
+  anything; a second restriction for the same node and event raises. What the node "reads from" is found by following its wiring upstream;
+  a node that only reaches it through a parameter expression (`other.param`) is not seen.
+- Tests: `ScriptModule.anAssetDefinitionIsEditedRegisteredAndInstancedFromPython`, `aDefinitionIsSavedToAFileAndInstalledAgain`,
+  `theScriptCheckNamesWhatAnEventMayNotDo`, `aDefinitionWithAScriptThatBreaksTheRulesIsRefused`,
+  `whileAnEventRunsTheHandlesRefuseEditsToTheAssetAndWhatItReadsFrom`.
+
 ## Object opacity and blend
 
 `Object.opacity` (0..1, clamped) and `Object.blend` (a name from `curvy.blend_modes()`, case-insensitive; an unknown name raises `ValueError`)

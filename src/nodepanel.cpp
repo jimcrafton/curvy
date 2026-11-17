@@ -361,6 +361,7 @@ namespace curvy {
     void NodePanel::show(const NodeRef& node) {
         const bool nodeChanged = !(node == node_);
         if (nodeChanged) {
+            finishSlide();
             closeColorPicker();
         }
         node_ = node;
@@ -606,29 +607,24 @@ namespace curvy {
         };
         viewport_->addChild(row.swatch);
         row.slider = new Slider();
+        row.slider->setName("nodeSlider" + std::to_string(index));
         row.slider->setVisible(false);
         row.slider->onValueChanged += [this, index](Slider&) {
             sliderChanged(index);
             return SyncReturn::Handled;
         };
-        row.slider->onMouseDown += [this](View&, const Point&, std::uint32_t buttons, std::uint32_t) {
-            if ((buttons & mbmLeftButton) != 0 && node_.valid() && document_.hasNode(node_)) {
-                sliding_ = true;
-                sliderBefore_ = document_.snapshotGraph();
-            }
+        // A drag that starts on the thumb sends its mouse events to the thumb, not the slider, so both end the gesture.
+        const auto released = [this](View&, const Point&, std::uint32_t, std::uint32_t) {
+            finishSlide();
             return SyncReturn(SyncReturn::Ignored);
         };
-        row.slider->onMouseUp += [this](View&, const Point&, std::uint32_t, std::uint32_t) {
-            if (sliding_ && sliderBefore_ && slidingSet_) {
-                document_.commitGraphEdit(*sliderBefore_, "Change " + sliderName_);
-            }
-            sliding_ = false;
-            slidingSet_ = false;
-            sliderBefore_.reset();
-            return SyncReturn(SyncReturn::Ignored);
-        };
+        row.slider->onMouseUp += released;
+        if (row.slider->thumb() != nullptr) {
+            row.slider->thumb()->onMouseUp += released;
+        }
         viewport_->addChild(row.slider);
         row.choice = new DropDownList();
+        row.choice->setName("nodeChoice" + std::to_string(index));
         row.choice->setVisible(false);
         row.choice->onSelectionChanged += [this, index](DropDownList& list) {
             if (!updatingChoice_ && list.selectedIndex().has_value()) {
@@ -704,19 +700,28 @@ namespace curvy {
         return row < entries_.size() && row < rows_.size() && rows_[row].slider->isVisible();
     }
 
+    void NodePanel::finishSlide() {
+        if (sliding_ && sliderBefore_) {
+            document_.commitGraphEdit(*sliderBefore_, "Change " + sliderName_);
+        }
+        sliding_ = false;
+        sliderBefore_.reset();
+    }
+
     void NodePanel::sliderChanged(std::size_t row) {
         if (updatingSlider_ || row >= entries_.size() || row >= rows_.size() || entries_[row].color || !node_.valid() || !document_.hasNode(node_)) {
             return;
         }
         const Entry& entry = entries_[row];
         const float value = float(clampTo(entry, double(rows_[row].slider->value())));
-        if (sliding_) {
-            sliderName_ = entry.name;
-            slidingSet_ = true;
-            document_.setGraphFloatLive(node_, entry.name, value);
-        } else {
-            document_.setGraphParam(node_, entry.name, value);
+        // The first change of a gesture takes the snapshot (a click on the track changes the value before any press handler could run); the
+        // mouse release records the whole gesture as one undo step.
+        if (!sliding_) {
+            sliding_ = true;
+            sliderBefore_ = document_.snapshotGraph();
         }
+        sliderName_ = entry.name;
+        document_.setGraphFloatLive(node_, entry.name, value);
         char text[32];
         std::snprintf(text, sizeof(text), "%g", double(value));
         rows_[row].field->setText(widen(text));

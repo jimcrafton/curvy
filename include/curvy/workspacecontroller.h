@@ -14,6 +14,9 @@
 #include "curvy/newdocumentdialog.h"
 #include "curvy/pointtable.h"
 #include "curvy/radialmenu.h"
+#include "curvy/assetmanagermodel.h"
+#include "curvy/assetmanagerpanel.h"
+#include "curvy/assetpropertiessession.h"
 #include "curvy/settings.h"
 #include "curvy/sketchdocument.h"
 #include "curvy/swatchestab.h"
@@ -111,6 +114,14 @@ namespace curvy {
         // @reflect ignore=true
         NodePanel& nodePanel() { return *nodePanel_; }
         TransformPanel& transformPanel() { return *transformPanel_; }
+        AssetManagerPanel& assetPanel() { return *assetPanel_; }
+        AssetManagerModel& assetModel() { return *assetModel_; }
+        // `assets` folder next to the settings file: where a new asset is saved by default and where the editor looks for the user's own.
+        std::filesystem::path userAssetsFolder() const;
+        // The `+` of the Assets panel: opens the Asset Properties dialog on the selected subnet, or on a blank asset when none is selected.
+        void newAsset();
+        // The Edit... button: opens it on the selected asset.
+        void editAsset();
         SwatchesTab& swatchesTab() { return *swatchesTab_; }
         GraphCrumbs& graphCrumbs() { return *graphCrumbs_; }
         // Runs a command of the node ring ("graph.bypass", ...) on the node selected in the graph view.
@@ -184,6 +195,13 @@ namespace curvy {
         void applyView(const ViewState& view);
         static std::string fileNameOf(const std::string& path);
         // What a swatch strip's menus ask the workspace for (see SwatchPaletteController): the file dialogs, and the selection.
+        void createAssetPanel();
+        void openAssetProperties(AssetPropertiesSession& session, bool replaceSubnet);
+        // The graph edits behind the Assets panel's buttons; each is one undo step and returns an error message or "".
+        std::string addAssetInstance(const std::string& type);
+        std::string updateAssetInstances(const std::string& type, std::size_t& count);
+        std::string unlockSelectedInstance();
+        void replaceSubnetWithInstance(const NodeRef& subnet, const std::string& type);
         void wireSwatchActions(SwatchPaletteController& swatches);
         void wireSwatchActions(SwatchesTab& swatches);
         // "Use as fill" in the Swatches tab: the selected shape's fill takes the swatch's colour (one undo step).
@@ -235,6 +253,8 @@ namespace curvy {
         std::unique_ptr<PointTable> pointTable_;
         NodePanel* nodePanel_ = nullptr;   // in the right dock, which owns it
         TransformPanel* transformPanel_ = nullptr;   // likewise
+        std::shared_ptr<AssetManagerModel> assetModel_;   // shared with the panel, which can outlive this
+        AssetManagerPanel* assetPanel_ = nullptr;   // likewise
         ScriptConsole* scriptConsole_ = nullptr;   // the application's, outlives the window
         PyConsolePanel* pyConsolePanel_ = nullptr;   // likewise
         ScriptEditorPanel* scriptEditorPanel_ = nullptr;   // likewise

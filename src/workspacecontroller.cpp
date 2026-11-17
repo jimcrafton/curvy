@@ -1,4 +1,6 @@
 #include "curvy/workspacecontroller.h"
+#include "curvy/assetpropertiesdialog.h"
+#include "curvy/assetpropertiesdialogsession.h"
 #include "curvy/selectionmodel.h"
 #include "curvy/settingsdialog.h"
 #include "curvy/paletteimagedialog.h"
@@ -520,6 +522,12 @@ namespace curvy {
         transformInfo.title = "Transform";
         transformInfo.side = DockSide::Right;
         panelLayout_.add(transformInfo);
+        PanelInfo assetsInfo;
+        assetsInfo.id = "assets";
+        assetsInfo.title = "Assets";
+        assetsInfo.side = DockSide::Right;
+        assetsInfo.collapsed = true;   // a long panel: the title shows until it is opened
+        panelLayout_.add(assetsInfo);
         if (scriptConsole_ != nullptr) {
             PanelInfo pythonInfo;
             pythonInfo.id = "pyconsole";
@@ -585,6 +593,7 @@ namespace curvy {
             graphView_->style().markDirty();
             canvas_->style().markDirty();
         };
+        createAssetPanel();
         if (scriptConsole_ != nullptr) {
             pyConsolePanel_ = new PyConsolePanel(*scriptConsole_, &document_);
             pyConsolePanel_->setSelection(&graphView_->selectionModel());
@@ -1184,6 +1193,16 @@ namespace curvy {
         }
         if (transformPanel_ != nullptr) {
             transformPanel_->onDestroyed = nullptr;
+        }
+        if (assetPanel_ != nullptr) {   // its callbacks name this window
+            assetPanel_->onDestroyed = nullptr;
+            assetPanel_->onNewRequested = nullptr;
+            assetPanel_->onEditRequested = nullptr;
+            assetPanel_->onSaveToLibraryRequested = nullptr;
+            assetPanel_->onLoadFileRequested = nullptr;
+            assetPanel_->onLoadFolderRequested = nullptr;
+            assetPanel_->onMessage = nullptr;
+            assetPanel_->presentMenu = nullptr;
         }
         if (pyConsolePanel_ != nullptr) {
             pyConsolePanel_->onDestroyed = nullptr;
@@ -2023,6 +2042,280 @@ namespace curvy {
         const std::string text = "Tap Space to start";
         ctx.set_fill_style(rgb(Theme::current().textMuted));
         ctx.fill_utf8_text(BLPoint(double(client.width() - font.measureText(text).width) * 0.5, double(client.height()) * 0.5), *blFont, text.c_str(), text.size());
+    }
+
+    // ---- Assets ----
+
+    std::filesystem::path WorkspaceController::userAssetsFolder() const {
+        const std::string settingsFile = settingsPath_.empty() ? Settings::defaultPath() : settingsPath_;
+        return std::filesystem::u8path(settingsFile).parent_path() / "assets";
+    }
+
+    void WorkspaceController::createAssetPanel() {
+        AssetManagerHooks hooks;
+        hooks.network = [this]() { return &document_.network(); };
+        hooks.addInstance = [this](const std::string& type) { return addAssetInstance(type); };
+        hooks.updateInstances = [this](const std::string& type, std::size_t& count) { return updateAssetInstances(type, count); };
+        hooks.unlockSelected = [this]() { return unlockSelectedInstance(); };
+        assetModel_ = std::make_shared<AssetManagerModel>(hooks);
+
+        std::string firstError;
+        for (const std::filesystem::path& folder : {executableDirectory() / "Resources" / "assets", userAssetsFolder()}) {
+            const std::string error = assetModel_->installFolder(folder.u8string());
+            if (firstError.empty()) {
+                firstError = error;
+            }
+        }
+        assetModel_->refresh();
+
+        assetPanel_ = new AssetManagerPanel(assetModel_);
+        rightDock_->addPanel(assetPanel_);
+        assetPanel_->onMessage = [this](const std::string& message) { model_->say(message); };
+        assetPanel_->onDestroyed = [this]() { assetPanel_ = nullptr; };
+        assetPanel_->onNewRequested = [this]() { newAsset(); };
+        assetPanel_->onEditRequested = [this]() { editAsset(); };
+        assetPanel_->presentMenu = [this](const std::vector<PanelMenuEntry>& entries, const Point& screen) {
+            PanelsMenu::popup(frame_.frameHandle(), entries, screen);
+        };
+        assetPanel_->onSaveToLibraryRequested = [this]() {
+            const std::string name = assetModel_->selected();
+            if (name.empty()) {
+                return;
+            }
+            std::error_code ignored;
+            std::filesystem::create_directories(userAssetsFolder(), ignored);
+            FileDialogOptions options;
+            options.title = "Save asset to the library";
+            options.filters.push_back({"Asset files", "*.asset.json"});
+            options.defaultFileName = name + ".asset.json";
+            options.initialDirectory = userAssetsFolder().u8string();
+            std::string file;
+            if (Dialog::showSaveFile(frame_.frameHandle(), options, file) && !file.empty()) {
+                const std::string error = assetModel_->saveToLibrary(file);
+                model_->say(error.empty() ? "Saved " + name + " to " + file : error);
+            }
+        };
+        assetPanel_->onLoadFileRequested = [this]() {
+            FileDialogOptions options;
+            options.title = "Load asset";
+            options.filters.push_back({"Asset files", "*.asset.json"});
+            options.filters.push_back({"All Files", "*.*"});
+            std::string file;
+            if (Dialog::showOpenFile(frame_.frameHandle(), options, file) && !file.empty()) {
+                const std::string error = assetModel_->installFile(file);
+                model_->say(error.empty() ? "Loaded " + file : error);
+            }
+        };
+        assetPanel_->onLoadFolderRequested = [this]() {
+            FileDialogOptions options;
+            options.title = "Load assets from a folder";
+            std::string folder;
+            if (Dialog::showBrowseForFolder(frame_.frameHandle(), options, folder) && !folder.empty()) {
+                std::size_t loaded = 0;
+                const std::string error = assetModel_->installFolder(folder, &loaded);
+                model_->say(error.empty() ? "Loaded " + std::to_string(loaded) + " asset(s) from " + folder : error);
+            }
+        };
+        assetPanel_->onCollapsedChanged += [this](Panel&) {
+            if (assetModel_ != nullptr) {
+                assetModel_->refresh();   // what was skipped while it was collapsed
+            }
+            return SyncReturn::Handled;
+        };
+        // The instance counts follow the graph.
+        document_.onGraphChanged += [this](GraphDocument&) {
+            if (assetModel_ != nullptr && assetPanel_ != nullptr && !assetPanel_->collapsed()) {
+                assetModel_->refresh();
+            }
+            return SyncReturn::Handled;
+        };
+        if (!firstError.empty()) {
+            model_->say(firstError);
+        }
+    }
+
+    std::string WorkspaceController::addAssetInstance(const std::string& type) {
+        try {
+            const std::size_t mark = document_.undoStack().depth();
+            const NodeRef selected = graphView_->selectionModel().primary();
+            const bool wire = selected.valid() && document_.hasNode(selected);
+            const NodeRef added = document_.addGraphNode(type, std::string(), wire ? selected.scope : 0u);
+            if (wire && document_.node(added).inputCount() > 0) {
+                document_.connectGraphNodes(selected, added, 0);
+            }
+            document_.undoStack().mergeSince(mark, "Add " + type);
+            graphView_->selectionModel().set(added);
+            graphView_->style().markDirty();
+            canvas_->style().markDirty();
+        } catch (const std::exception& e) {
+            return e.what();
+        }
+        return {};
+    }
+
+    std::string WorkspaceController::updateAssetInstances(const std::string& type, std::size_t& count) {
+        count = 0;
+        try {
+            const jitnodes::GraphSnapshot before = document_.snapshotGraph();
+            count = jitnodes::updateAssetInstances(document_.network(), type);
+            if (count > 0) {
+                document_.commitGraphEdit(before, "Update assets");
+                graphView_->style().markDirty();
+                canvas_->style().markDirty();
+            }
+        } catch (const std::exception& e) {
+            return e.what();
+        }
+        return {};
+    }
+
+    std::string WorkspaceController::unlockSelectedInstance() {
+        const NodeRef selected = graphView_->selectionModel().primary();
+        if (!selected.valid() || !document_.hasNode(selected)) {
+            return "Select an asset instance in the graph first";
+        }
+        try {
+            jitnodes::Network& network = document_.networkOf(selected.scope);
+            if (!network.node(selected.id).isAssetInstance()) {
+                return "The selected node is not an asset instance";
+            }
+            const jitnodes::GraphSnapshot before = document_.snapshotGraph();
+            jitnodes::unlockAssetInstance(network, selected.id);
+            document_.commitGraphEdit(before, "Unlock asset");
+            graphView_->style().markDirty();
+            canvas_->style().markDirty();
+        } catch (const std::exception& e) {
+            return e.what();
+        }
+        return {};
+    }
+
+    void WorkspaceController::replaceSubnetWithInstance(const NodeRef& subnet, const std::string& type) {
+        jitnodes::Network& network = document_.networkOf(subnet.scope);
+        const jitnodes::GraphSnapshot before = document_.snapshotGraph();
+        const jitnodes::Node& old = network.node(subnet.id);
+        std::unique_ptr<jitnodes::Node> fresh = jitnodes::NodeRegistry::instance().create(type);
+        for (const std::string& name : old.floatNames()) {
+            if (!fresh->hasFloat(name)) {
+                continue;
+            }
+            fresh->setFloat(name, old.baseFloat(name));
+            if (!old.expression(name).empty()) {
+                fresh->setExpression(name, old.expression(name));
+            } else if (!old.keyframes(name).empty()) {
+                fresh->setKeyframes(name, old.keyframes(name));
+            }
+        }
+        std::vector<jitnodes::NodeId> inputs;
+        for (int i = 0; i < old.inputCount(); ++i) {
+            inputs.push_back(network.inputOf(subnet.id, i));
+        }
+        inputs.resize(std::size_t(fresh->inputCount()), jitnodes::invalidNodeId);
+        const bool placed = old.hasPosition();
+        const float x = old.posX();
+        const float y = old.posY();
+        network.replaceNode(subnet.id, std::move(fresh), &inputs);
+        if (placed) {
+            network.node(subnet.id).setPosition(x, y);
+        }
+        document_.commitGraphEdit(before, "Create asset " + type);
+        graphView_->style().markDirty();
+        canvas_->style().markDirty();
+    }
+
+    void WorkspaceController::newAsset() {
+        const AssetPropertiesSession::NetworkProvider network = [this]() { return &document_.network(); };
+        const NodeRef selected = graphView_->selectionModel().primary();
+        if (selected.valid() && document_.hasNode(selected)) {
+            jitnodes::Node& node = document_.node(selected);
+            if (node.childNetwork() != nullptr && !node.isAssetInstance()) {
+                std::string name = node.name();
+                for (char& c : name) {
+                    if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') {
+                        c = '_';
+                    }
+                }
+                if (name.empty() || std::isdigit(static_cast<unsigned char>(name[0]))) {
+                    name = "asset" + name;
+                }
+                try {
+                    AssetPropertiesSession session = AssetPropertiesSession::fromSubnet(document_.networkOf(selected.scope), selected.id, name, network);
+                    openAssetProperties(session, true);
+                } catch (const std::exception& e) {
+                    model_->say(e.what());
+                }
+                return;
+            }
+        }
+        AssetPropertiesSession session = AssetPropertiesSession::blank(network);
+        openAssetProperties(session, false);
+    }
+
+    void WorkspaceController::editAsset() {
+        const std::string name = assetModel_ != nullptr ? assetModel_->selected() : std::string();
+        if (name.empty()) {
+            model_->say("Select an asset first");
+            return;
+        }
+        try {
+            AssetPropertiesSession session = AssetPropertiesSession::forAsset(name, [this]() { return &document_.network(); });
+            openAssetProperties(session, false);
+        } catch (const std::exception& e) {
+            model_->say(e.what());
+        }
+    }
+
+    void WorkspaceController::openAssetProperties(AssetPropertiesSession& session, bool replaceSubnet) {
+        const NodeRef subnet = replaceSubnet ? graphView_->selectionModel().primary() : NodeRef();
+        assetpropsdialog::Callbacks callbacks;
+        callbacks.chooseSavePath = [this](const std::string& suggestedName) {
+            std::error_code ignored;
+            std::filesystem::create_directories(userAssetsFolder(), ignored);
+            FileDialogOptions options;
+            options.title = "Save asset";
+            options.filters.push_back({"Asset files", "*.asset.json"});
+            options.defaultFileName = suggestedName;
+            options.initialDirectory = userAssetsFolder().u8string();
+            std::string file;
+            return Dialog::showSaveFile(frame_.frameHandle(), options, file) ? file : std::string();
+        };
+        callbacks.matchSubnet = [this](AssetPropertiesSession& state) -> std::string {
+            const NodeRef selected = graphView_->selectionModel().primary();
+            if (!selected.valid() || !document_.hasNode(selected)) {
+                return "Select a subnet in the graph first";
+            }
+            return state.matchSubnet(document_.networkOf(selected.scope), selected.id);
+        };
+        callbacks.editContents = [this](const std::string& name) {
+            const std::string error = addAssetInstance(name);
+            return error.empty() ? unlockSelectedInstance() : error;
+        };
+        callbacks.chooseFile = [this](std::string& name, std::string& text) {
+            FileDialogOptions options;
+            options.title = "Add a file to the asset";
+            std::string file;
+            if (!Dialog::showOpenFile(frame_.frameHandle(), options, file) || file.empty()) {
+                return false;
+            }
+            std::ifstream in(std::filesystem::u8path(file), std::ios::binary);
+            text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+            name = std::filesystem::u8path(file).filename().string();
+            return true;
+        };
+        callbacks.changed = [this]() {
+            assetModel_->refresh();
+            model_->say("Asset library updated");
+        };
+        const bool saved = AssetPropertiesDialog::run(frame_, session, callbacks);
+        assetModel_->refresh();
+        if (saved && replaceSubnet && subnet.valid() && document_.hasNode(subnet) && session.kind() == AssetPropertiesSession::Kind::asset) {
+            try {
+                replaceSubnetWithInstance(subnet, session.working().name);
+                assetModel_->refresh();
+            } catch (const std::exception& e) {
+                model_->say(e.what());
+            }
+        }
     }
 
 }

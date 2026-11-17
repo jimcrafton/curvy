@@ -751,3 +751,243 @@ TEST(ScriptModule, anObjectsOpacityAndBlendAreParametersOfItsNode) {
     result = runOn(document, "print(doc.layers[0].opacity)");
     EXPECT_EQ(result.output, "1.0\n");
 }
+
+TEST(ScriptModule, aWrangleNodesDeclaredLimitsAreReadableFromPython) {
+    curvy::SketchDocument document;
+    document.newBlank("Limits", 100.0f, 100.0f);
+    const auto result = runOn(document, "w = doc.add_node('wrangle', 'bend')\ndoc.set_string(w, 'code', '| gain = 2(0, 10), steps(1,) |\\ny = y * gain;')\n"
+                                        "print(w.float_minimum('gain'), w.float_maximum('gain'), w.float_minimum('steps'), w.float_maximum('steps'))");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "(True, 0.0) (True, 10.0) (True, 1.0) (False, 0.0)\n");
+}
+
+namespace {
+
+    const char* assetPrelude = R"py(
+import jitnodes as jn
+a = jn.assets
+TEXT = '''{ format: "jitnodes-asset", version: 1, type: "pyTestAsset", inputs: 1, promote: { amount: 2 },
+  graph: { display: 2, nodes: [
+    { id: 1, type: "subnetInput", name: "in", floats: { index: 0 }, inputs: [] },
+    { id: 2, type: "transform", name: "xf", expressions: { tx: "parent.amount" }, inputs: [1] } ] } }'''
+)py";
+
+}
+
+TEST(ScriptModule, anAssetDefinitionIsEditedRegisteredAndInstancedFromPython) {
+    curvy::SketchDocument document;
+    document.newBlank("Assets", 100.0f, 100.0f);
+    const auto result = runOn(document, std::string(assetPrelude) + R"py(
+d = a.AssetDef.from_text(TEXT)
+d.label = "Test"
+d.category = "Testing"
+p = d.params[0]
+p.minimum = 0
+p.maximum = 5
+p.group = "Main"
+extra = d.add_param("extra", 1.0, label="Extra")
+d.set_script("onCreated", "x = 1")
+print(d.name, d.version, [q.name for q in d.params], d.validate() == "", sorted(d.scripts))
+d.apply()
+info = [i for i in a.list() if i.name == "pyTestAsset"][0]
+print(info.label, info.category, info.params, info.embedded, info.instances)
+
+net = jn.Network()
+line = net.add_node("line", "line")
+inst = net.add_node("pyTestAsset", "inst")
+line >> inst
+print(inst.amount, inst.float_minimum("amount"), inst.float_maximum("amount"), inst.float_minimum("extra"))
+print([i.instances for i in a.list(net) if i.name == "pyTestAsset"])
+try:
+    a.uninstall("pyTestAsset", net)
+except RuntimeError as e:
+    print("refused:", "instance" in str(e))
+
+d2 = a.get("pyTestAsset")
+d2.params[0].default = 4
+d2.apply()
+print([i.outdated for i in a.list(net) if i.name == "pyTestAsset"], a.update_instances(net), [i.outdated for i in a.list(net) if i.name == "pyTestAsset"])
+net.remove_node(inst)
+a.uninstall("pyTestAsset", net)
+print(a.has("pyTestAsset"))
+)py");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output,
+              "pyTestAsset 1 ['amount', 'extra'] True ['onCreated']\n"
+              "Test Testing ['amount', 'extra'] True 0\n"
+              "2.0 (True, 0.0) (True, 5.0) (False, 0.0)\n"
+              "[1]\n"
+              "refused: True\n"
+              "[1] 1 [0]\n"
+              "False\n");
+}
+
+TEST(ScriptModule, aDefinitionIsSavedToAFileAndInstalledAgain) {
+    curvy::SketchDocument document;
+    document.newBlank("Assets", 100.0f, 100.0f);
+    const auto result = runOn(document, std::string(assetPrelude) + R"py(
+import os, tempfile
+folder = tempfile.mkdtemp()
+path = os.path.join(folder, "pyFileAsset.asset.json")
+d = a.AssetDef.from_text(TEXT.replace("pyTestAsset", "pyFileAsset"))
+try:
+    d.save()
+except ValueError as e:
+    print("needs a path")
+d.save(path)
+print(d.version, d.source == path, os.path.exists(path), a.get("pyFileAsset").version)
+d.save()
+print(d.version)
+a.uninstall("pyFileAsset")
+a.install(path)
+print(a.get("pyFileAsset").version, a.get("pyFileAsset").source == path)
+count, error = a.install_directory(folder)
+print(count, error == "")
+a.uninstall("pyFileAsset")
+print(a.has("pyFileAsset"))
+)py");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "needs a path\n1 True True 1\n2\n2 True\n1 True\nFalse\n");
+}
+
+TEST(ScriptModule, theScriptCheckNamesWhatAnEventMayNotDo) {
+    curvy::SketchDocument document;
+    document.newBlank("Check", 100.0f, 100.0f);
+    const auto result = runOn(document, std::string(assetPrelude) + R"py(
+def problems(**scripts):
+    return [(s, line, col) for s, line, col, message in a.check_scripts(scripts)]
+
+# onFrameChanged may not change its node
+print(problems(onFrameChanged="x = node.get_float('amount')\nnode.set_float('amount', x)"))
+print(problems(onFrameChanged="n = kwargs['node']\nm = n\nm.set_expression('amount', '1')"))
+print(problems(onFrameChanged="kwargs.get('node').amount = 3"))
+print(problems(onFrameChanged="for n in node.network().nodes():\n    n.add_tag('x')"))
+print(problems(onFrameChanged="node >> other"), problems(onFrameChanged="other >> node"))
+print(problems(onFrameChanged="print(node.get_float('amount'), node.name())"))
+# things that hide an edit
+print(problems(onFrameChanged="getattr(node, name)()"), problems(onFrameChanged="getattr(node, 'get_float')('amount')"))
+print(problems(onFrameChanged="exec('1')"), problems(onFrameChanged="setattr(node, 'amount', 1)"))
+# helpers in the module
+print(problems(module="def poke(n):\n    n.set_float('amount', 1)\ndef double(v):\n    return v * 2", onFrameChanged="module.poke(node)"))
+print(problems(module="def poke(n):\n    n.set_float('amount', 1)\ndef double(v):\n    return v * 2", onFrameChanged="print(module.double(2))"))
+print(problems(module="def a(n):\n    n.set_float('x', 1)\ndef b(n):\n    a(n)", onFrameChanged="module.b(node)"))
+# other events are free, onVersionUpdated may only read old and write fresh
+print(problems(onCreated="node.set_float('amount', 1)\nnode.amount = 2"))
+print(problems(onVersionUpdated="fresh.set_float('amount', old.get_float('scale') * 2)"))
+print(problems(onVersionUpdated="old.set_float('scale', 1)"), problems(onVersionUpdated="print(doc.name)"), problems(onVersionUpdated="network.node(1)"))
+print(problems(onVersionUpdated="import curvy"))
+# syntax
+print(problems(onCreated="def ("))
+msg = a.check_scripts({"onFrameChanged": "node.set_float('a', 1)"})[0]
+print(msg[3])
+)py");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output,
+              "[('onFrameChanged', 2, 1)]\n"
+              "[('onFrameChanged', 3, 1)]\n"
+              "[('onFrameChanged', 1, 1)]\n"
+              "[('onFrameChanged', 2, 5)]\n"
+              "[] [('onFrameChanged', 1, 1)]\n"
+              "[]\n"
+              "[('onFrameChanged', 1, 1)] []\n"
+              "[('onFrameChanged', 1, 1)] [('onFrameChanged', 1, 1)]\n"
+              "[('onFrameChanged', 1, 1)]\n"
+              "[]\n"
+              "[('onFrameChanged', 1, 1)]\n"
+              "[]\n"
+              "[]\n"
+              "[('onVersionUpdated', 1, 1)] [('onVersionUpdated', 1, 7)] [('onVersionUpdated', 1, 1)]\n"
+              "[('onVersionUpdated', 1, 1)]\n"
+              "[('onCreated', 1, 5)]\n"
+              "cannot change this asset (calls set_float)\n");
+}
+
+TEST(ScriptModule, aDefinitionWithAScriptThatBreaksTheRulesIsRefused) {
+    curvy::SketchDocument document;
+    document.newBlank("Refuse", 100.0f, 100.0f);
+    const auto result = runOn(document, std::string(assetPrelude) + R"py(
+d = a.AssetDef.from_text(TEXT.replace("pyTestAsset", "pyRefusedAsset"))
+d.set_script("onFrameChanged", "x = 1\nnode.set_float('amount', x)")
+print(d.validate())
+try:
+    d.apply()
+except RuntimeError as e:
+    print("apply refused:", str(e).startswith("onFrameChanged 2:1"))
+print(a.has("pyRefusedAsset"))
+d.set_script("onFrameChanged", "print(node.get_float('amount'))")
+print(repr(d.validate()))
+d.apply()
+print(a.has("pyRefusedAsset"))
+a.uninstall("pyRefusedAsset")
+)py");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output,
+              "onFrameChanged 2:1: cannot change this asset (calls set_float)\n"
+              "apply refused: True\n"
+              "False\n''\nTrue\n");
+}
+
+TEST(ScriptModule, whileAnEventRunsTheHandlesRefuseEditsToTheAssetAndWhatItReadsFrom) {
+    curvy::SketchDocument document;
+    document.newBlank("Guard", 100.0f, 100.0f);
+    const auto result = runOn(document, std::string(assetPrelude) + R"py(
+a.AssetDef.from_text(TEXT.replace("pyTestAsset", "pyGuardAsset")).apply()
+net = jn.Network()
+up = net.add_node("line", "up")
+inst = net.add_node("pyGuardAsset", "inst")
+down = net.add_node("transform", "down")
+side = net.add_node("line", "side")
+up >> inst >> down
+
+def refused(fn):
+    try:
+        fn()
+    except PermissionError as e:
+        return True
+    return False
+
+with a.restricted(inst, "onFrameChanged"):
+    print(refused(lambda: setattr(inst, "amount", 3)),
+          refused(lambda: inst.set_float("amount", 3)),
+          refused(lambda: setattr(up, "count", 9)),
+          refused(lambda: up.set_float("count", 9)),
+          refused(lambda: net.disconnect(inst, 0)),
+          refused(lambda: inst.disconnect(0)))
+    # downstream, unrelated nodes and new nodes may change
+    down.tx = 3
+    side.count = 4
+    new = net.add_node("line", "new")
+    new >> down
+    print(refused(lambda: a.update_instances(net)), refused(lambda: a.uninstall("pyGuardAsset")))
+    print(down.tx, side.count, "new" in net)
+inst.amount = 3
+up.count = 9
+print(inst.amount, up.count)
+
+with a.restricted(inst, "onVersionUpdated"):
+    print(refused(lambda: setattr(down, "tx", 1)), refused(lambda: net.add_node("line", "x")), refused(lambda: net.clear()))
+print(down.tx)
+
+with a.restricted(inst, "onFrameChanged"):
+    try:
+        with a.restricted(inst, "onFrameChanged"):
+            print("nested ran")
+    except RuntimeError as e:
+        print("not twice:", "already running" in str(e))
+with a.restricted(inst, "onCreated"):
+    inst.amount = 5
+print(inst.amount, refused(lambda: None))
+net.remove_node(inst)
+a.uninstall("pyGuardAsset")
+)py");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output,
+              "True True True True True True\n"
+              "True True\n"
+              "3.0 4.0 True\n"
+              "3.0 9.0\n"
+              "True True True\n"
+              "3.0\n"
+              "not twice: True\n"
+              "5.0 False\n");
+}
