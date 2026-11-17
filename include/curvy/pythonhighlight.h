@@ -1,5 +1,7 @@
 #pragma once
 
+#include "curvy/codelanguage.h"
+
 #include <newui/text.h>
 #include <newui/textstyle.h>
 
@@ -44,5 +46,17 @@ namespace curvy {
     // A fold for every block: from the end of a line that ends in ':' to the end of the last line of its indented block, none collapsed.
     // Lines inside a multi-line string or brackets, blank lines and comment-only lines do not decide where a block ends.
     std::vector<newui::text::TextFold> pythonFolds(const std::wstring& text);
+
+    // The functions above as a CodeLanguage, for a CodeEditorView.
+    // @reflect ignore=true
+    class PythonLanguage : public CodeLanguage {
+    public:
+        static std::shared_ptr<const CodeLanguage> instance();
+
+        std::shared_ptr<const newui::TextStyleSheet> styleSheet(bool dark, const std::map<std::string, std::uint32_t>& colors) const override;
+        std::vector<newui::text::TextStyleRange> styleRanges(const std::wstring& text) const override;
+        std::wstring newLineIndent(const std::wstring& lineBeforeCaret, std::size_t indentWidth) const override;
+        std::vector<newui::text::TextFold> folds(const std::wstring& text) const override;
+    };
 
 }

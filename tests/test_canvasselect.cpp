@@ -96,3 +96,36 @@ TEST_F(CanvasSelectTest, spaceHeldStillPansInsteadOfSelecting) {
     canvas().onMouseUp(canvas(), at(100.0, 100.0), newui::mbmLeftButton, 0);
     canvas().onKeyUp(canvas(), 0, 0, 1, newui::vkSpaceBar);
 }
+
+TEST_F(CanvasSelectTest, aClosedPathIsSelectedByClickingInsideItAndItsGeometryNodeIsTheSelection) {
+    curvy::SketchDocument::PathLook look;
+    look.fill = newui::Color(0.0f, 1.0f, 0.0f, 1.0f);
+    const curvy::NodeRef last = window().document().addPath(layer_, {{400.0f, 400.0f}, {500.0f, 400.0f}, {500.0f, 500.0f}, {400.0f, 500.0f}}, true, false, look);
+    ASSERT_TRUE(last.valid());
+    EXPECT_TRUE(press(450.0, 450.0));
+    ASSERT_EQ(selection().items().size(), 1u);
+    EXPECT_EQ(primaryType(), "geometry");
+    EXPECT_EQ(selection().primary(), window().document().pathNodeOf(last));
+}
+
+TEST_F(CanvasSelectTest, aStrokedOpenPathIsSelectedOnItsLineNotInTheGapBesideIt) {
+    curvy::SketchDocument::PathLook look;
+    look.hasFill = false;
+    look.hasStroke = true;
+    look.strokeWidth = 6.0f;
+    window().document().addPath(layer_, {{400.0f, 600.0f}, {550.0f, 600.0f}}, false, false, look);
+    EXPECT_FALSE(press(475.0, 640.0));
+    EXPECT_TRUE(selection().empty());
+    EXPECT_TRUE(press(475.0, 601.0));
+    EXPECT_EQ(primaryType(), "geometry");
+}
+
+TEST_F(CanvasSelectTest, aPathStaysSelectableAfterItsPointsAreEdited) {
+    curvy::SketchDocument::PathLook look;
+    const curvy::NodeRef last = window().document().addPath(layer_, {{400.0f, 400.0f}, {500.0f, 400.0f}, {500.0f, 500.0f}}, true, false, look);
+    const curvy::NodeRef geometry = window().document().pathNodeOf(last);
+    window().document().setPathPoints(geometry, {{300.0f, 600.0f}, {400.0f, 600.0f}, {400.0f, 700.0f}});
+    EXPECT_FALSE(press(450.0, 430.0)) << "the old place is empty now";
+    EXPECT_TRUE(press(380.0, 620.0));
+    EXPECT_EQ(selection().primary(), geometry);
+}

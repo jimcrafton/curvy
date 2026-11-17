@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Node panel code section (converter input)</title>
+<style>
+  body { margin: 0; width: 380px; height: 330px; background: #1e1e1e; color: #f0f0f0; font: 12px "Segoe UI", sans-serif; display: flex; flex-direction: column; }
+  .row { display: flex; flex-direction: row; align-items: center; gap: 6px; padding: 4px; height: 24px; }
+  .cap { width: 90px; color: #a0a0a0; }
+  #wrangleCodeRow { height: 26px; }
+  #wrangleCode { display: flex; flex-direction: column; flex-grow: 1; background: #1e1e1e; }
+  #wrangleEditorHost { flex-grow: 1; height: 230px; background: #181818; }
+  #wrangleProblem { height: 20px; padding: 2px 8px; color: #ff6b6b; }
+  .buttons { display: flex; flex-direction: row; align-items: center; gap: 6px; padding: 4px; height: 28px; }
+  .hint { color: #a0a0a0; }
+</style>
+</head>
+<body>
+  <div id="wrangleCodeGap" style="height:8px"></div>
+  <div class="row" id="wrangleCodeRow">
+    <span class="cap">Code</span>
+    <button id="wrangleCodeToggle">Code</button>
+    <span class="cap" style="width:70px;margin-left:12px">Run over</span>
+    <button id="wrangleClassButton">Points</button>
+  </div>
+  <div id="wrangleCode">
+    <div id="wrangleEditorHost"></div>
+    <p id="wrangleProblem" style="margin:0">3:9 unknown function 'sinn'</p>
+    <div class="buttons">
+      <button id="wrangleCommit">Commit</button>
+      <button id="wrangleRevert">Revert</button>
+      <span class="hint">Ctrl+Enter</span>
+    </div>
+  </div>
+</body>
+</html>

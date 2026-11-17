@@ -3,6 +3,14 @@
 #include <newui/mouse_constants.h>
 #include <newui/pen.h>
 
+#include "curvy/wranglecheck.h"
+
+#include <jitnodes/graph/serialize.h>
+
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+
 namespace {
 
     class NodePanelTest : public curvytest::WorkspaceTest {
@@ -157,4 +165,254 @@ TEST_F(NodePanelTest, thePanelCanBeCollapsedLikeAnyOther) {
     const float open = panel.desiredHeight();
     panel.setCollapsed(true);
     EXPECT_LT(panel.desiredHeight(), open);
+}
+
+namespace {
+
+    class WrangleCodeTest : public NodePanelTest {
+    protected:
+        void SetUp() override {
+            NodePanelTest::SetUp();
+            window().docks().setCollapsed(curvy::DockSide::Right, false);
+            frame_.rootView().updateLayout();
+            wrangle_ = window().document().addGraphNode("wrangle");
+            const curvy::NodeRef source = window().document().addGraphNode("circle");
+            window().document().connectGraphNodes(source, wrangle_);
+            window().nodePanel().show(wrangle_);
+        }
+
+        curvy::NodeRef wrangle_;
+    };
+
+}
+
+TEST_F(WrangleCodeTest, theCodeRowIsOnlyForAWrangleNode) {
+    curvy::NodePanel& panel = window().nodePanel();
+    EXPECT_TRUE(panel.codeShown());
+    panel.show(look_);
+    EXPECT_FALSE(panel.codeShown());
+    panel.show(wrangle_);
+    EXPECT_TRUE(panel.codeShown());
+}
+
+TEST_F(WrangleCodeTest, openingTheSectionAsksForAWiderPanelAndClosingGivesItBack) {
+    curvy::NodePanel& panel = window().nodePanel();
+    std::vector<bool> calls;
+    panel.onCodeToggled = [&](bool open) { calls.push_back(open); };
+    const float before = panel.contentHeightFor(3);
+    panel.setCodeOpen(true);
+    EXPECT_TRUE(panel.codeOpen());
+    EXPECT_GT(panel.contentHeightFor(3), before);
+    panel.setCodeOpen(true);
+    panel.setCodeOpen(false);
+    EXPECT_EQ(calls, (std::vector<bool>{true, false}));
+    EXPECT_FLOAT_EQ(panel.contentHeightFor(3), before);
+}
+
+TEST_F(WrangleCodeTest, commitStoresTheTextAsOneUndoStepAndRevertPutsTheNodesTextBack) {
+    curvy::NodePanel& panel = window().nodePanel();
+    panel.setCodeOpen(true);
+    EXPECT_FALSE(panel.codeModified());
+    window().document().setGraphString(wrangle_, "code", "y = 1;");
+    panel.show(wrangle_);
+    EXPECT_EQ(panel.codeText(), "y = 1;");
+
+    panel.codeEditor()->setText("y = 2;");
+    EXPECT_TRUE(panel.codeModified());
+    panel.revertCode();
+    EXPECT_EQ(panel.codeText(), "y = 1;");
+    EXPECT_FALSE(panel.codeModified());
+
+    panel.codeEditor()->setText("y = 3;");
+    EXPECT_TRUE(panel.codeModified());
+    panel.commitCode();
+    EXPECT_EQ(window().document().node(wrangle_).getString("code"), "y = 3;");
+    EXPECT_FALSE(panel.codeModified());
+    window().document().undoStack().undo();
+    EXPECT_EQ(window().document().node(wrangle_).getString("code"), "y = 1;");
+}
+
+TEST_F(WrangleCodeTest, anEditNotCommittedSurvivesARefreshOfThePanel) {
+    curvy::NodePanel& panel = window().nodePanel();
+    panel.setCodeOpen(true);
+    panel.setCodeText("y = 1;");
+    panel.codeEditor()->setText("y = 5;");
+    panel.show(wrangle_);
+    EXPECT_EQ(panel.codeText(), "y = 5;");
+}
+
+TEST_F(WrangleCodeTest, declaredParametersBecomeRowsAndOneWithBothLimitsHasASlider) {
+    curvy::NodePanel& panel = window().nodePanel();
+    panel.setCodeOpen(true);
+    panel.setCodeText("| gain = 1.5(0, 10), steps(1,) |\ny = y * gain;");
+    panel.commitCode();
+    const std::size_t gain = rowOf("gain");
+    const std::size_t steps = rowOf("steps");
+    ASSERT_NE(gain, ~std::size_t(0));
+    ASSERT_NE(steps, ~std::size_t(0));
+    EXPECT_LT(std::max(gain, steps), rowOf("a"));
+    EXPECT_TRUE(panel.paramHasSlider(gain));
+    EXPECT_FALSE(panel.paramHasSlider(steps));
+    EXPECT_EQ(panel.paramValue(gain), "1.5");
+    panel.setParam(gain, "99");
+    EXPECT_EQ(panel.paramValue(gain), "10");
+    panel.setParam(steps, "-4");
+    EXPECT_EQ(panel.paramValue(steps), "1");
+}
+
+TEST_F(WrangleCodeTest, aCookErrorShowsUnderTheEditorAndGoesWhenTheCodeIsFixed) {
+    curvy::NodePanel& panel = window().nodePanel();
+    panel.setCodeOpen(true);
+    panel.setCodeText("y = nosuch(y);");
+    panel.commitCode();
+    EXPECT_FALSE(panel.cookError().empty());
+    panel.setCodeText("y = y + 1;");
+    panel.commitCode();
+    EXPECT_TRUE(panel.cookError().empty());
+}
+
+TEST_F(WrangleCodeTest, theClassButtonSwitchesBetweenPointsAndPrimitivesAsOneUndoStep) {
+    curvy::NodePanel& panel = window().nodePanel();
+    EXPECT_EQ(panel.codeClass(), "point");
+    panel.setCodeClass("primitive");
+    EXPECT_EQ(window().document().node(wrangle_).getString("class"), "primitive");
+    window().document().undoStack().undo();
+    EXPECT_EQ(window().document().node(wrangle_).getString("class"), "point");
+}
+
+TEST_F(NodePanelTest, theParameterListIsAsTallAsItsRowsSoInputsFollowItWithoutAGap) {
+    window().docks().setCollapsed(curvy::DockSide::Right, false);
+    frame_.rootView().updateLayout();
+    ASSERT_TRUE(click(100.0, 100.0));
+    curvy::NodePanel& panel = window().nodePanel();
+    const newui::View* list = panel.findView("graphParamScroll");
+    const newui::View* inputs = panel.findView("graphInput0");
+    ASSERT_NE(list, nullptr);
+    ASSERT_NE(inputs, nullptr);
+    ASSERT_GT(panel.paramCount(), 0u);
+    ASSERT_LT(panel.paramCount(), curvy::NodePanel::kPreferredParamRows);
+    EXPECT_NEAR(list->bounds().height(), float(panel.paramCount()) * curvy::NodePanel::kParamRowHeight, 0.5f);
+    EXPECT_LT(inputs->bounds().top(), list->bounds().top() + list->bounds().height() + 40.0f);
+}
+
+TEST_F(WrangleCodeTest, undoAndRedoTakeTheDeclaredParametersAwayAndBack) {
+    curvy::NodePanel& panel = window().nodePanel();
+    panel.setCodeOpen(true);
+    panel.setCodeText("| gain = 2(0, 10) |\ny = y * gain;");
+    panel.commitCode();
+    jitnodes::Node& node = window().document().node(wrangle_);
+    ASSERT_TRUE(node.hasFloat("gain"));
+    window().document().setGraphParam(wrangle_, "gain", 7.0f);
+
+    window().document().undoStack().undo();
+    EXPECT_FLOAT_EQ(node.getFloat("gain"), 2.0f);
+    window().document().undoStack().undo();
+    panel.show(wrangle_);
+    EXPECT_FALSE(window().document().node(wrangle_).hasFloat("gain"));
+    EXPECT_EQ(rowOf("gain"), ~std::size_t(0));
+    EXPECT_EQ(panel.codeText(), "");
+
+    window().document().undoStack().redo();
+    window().document().undoStack().redo();
+    panel.show(wrangle_);
+    EXPECT_FLOAT_EQ(window().document().node(wrangle_).getFloat("gain"), 7.0f);
+    EXPECT_NE(rowOf("gain"), ~std::size_t(0));
+    EXPECT_TRUE(panel.paramHasSlider(rowOf("gain")));
+}
+
+TEST_F(WrangleCodeTest, editingTheCodeKeepsTheValueOfAParameterThatStays) {
+    curvy::NodePanel& panel = window().nodePanel();
+    panel.setCodeOpen(true);
+    panel.setCodeText("| gain = 2(0, 10), steps = 1 |\ny = y * gain;");
+    panel.commitCode();
+    panel.setParam(rowOf("gain"), "6");
+    panel.setCodeText("| gain = 2(0, 10) |\ny = y * gain * 2;");
+    panel.commitCode();
+    EXPECT_FLOAT_EQ(window().document().node(wrangle_).getFloat("gain"), 6.0f);
+    EXPECT_EQ(rowOf("steps"), ~std::size_t(0));
+}
+
+TEST_F(WrangleCodeTest, aCopyOfTheNodeHasTheDeclaredParametersAndTheirLimits) {
+    curvy::NodePanel& panel = window().nodePanel();
+    panel.setCodeOpen(true);
+    panel.setCodeText("| gain = 2(0, 10) |\ny = y * gain;");
+    panel.commitCode();
+    window().document().setGraphParam(wrangle_, "gain", 5.0f);
+
+    jitnodes::Network& net = window().document().network();
+    const std::vector<jitnodes::NodeId> pasted = jitnodes::pasteNodes(net, {jitnodes::copyNode(net, wrangle_.id)});
+    ASSERT_EQ(pasted.size(), 1u);
+    const curvy::NodeRef copy(pasted.front());
+    ASSERT_TRUE(window().document().hasNode(copy));
+    const jitnodes::Node& node = window().document().node(copy);
+    EXPECT_TRUE(node.hasFloat("gain"));
+    EXPECT_FLOAT_EQ(node.getFloat("gain"), 5.0f);
+    float low = -1.0f, high = -1.0f;
+    EXPECT_TRUE(node.floatMinimum("gain", low));
+    EXPECT_TRUE(node.floatMaximum("gain", high));
+    EXPECT_FLOAT_EQ(low, 0.0f);
+    EXPECT_FLOAT_EQ(high, 10.0f);
+
+    panel.show(copy);
+    EXPECT_EQ(panel.codeText(), "| gain = 2(0, 10) |\ny = y * gain;");
+    ASSERT_NE(rowOf("gain"), ~std::size_t(0));
+    EXPECT_TRUE(panel.paramHasSlider(rowOf("gain")));
+}
+
+TEST_F(WrangleCodeTest, everySampleWrangleParsesDeclaresParametersAndCooks) {
+    namespace fs = std::filesystem;
+    curvy::NodePanel& panel = window().nodePanel();
+    panel.setCodeOpen(true);
+    std::size_t count = 0;
+    ASSERT_TRUE(fs::exists("Resources/samples/wrangle"));
+    for (const fs::directory_entry& entry : fs::directory_iterator("Resources/samples/wrangle")) {
+        if (entry.path().extension() != ".wrangle") {
+            continue;
+        }
+        std::ifstream in(entry.path(), std::ios::binary);
+        const std::string code((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        SCOPED_TRACE(entry.path().string());
+        EXPECT_FALSE(curvy::checkWrangle(code).has_value());
+        panel.setCodeText(code);
+        panel.commitCode();
+        EXPECT_EQ(panel.cookError(), "");
+        EXPECT_FALSE(window().document().node(wrangle_).spareNames().empty());
+        ++count;
+    }
+    EXPECT_GE(count, 4u);
+}
+
+TEST_F(NodePanelTest, aLayerShowsOpacityAndABlendDropdownThatSetsTheBlendIndex) {
+    window().docks().setCollapsed(curvy::DockSide::Right, false);
+    frame_.rootView().updateLayout();
+    curvy::NodePanel& panel = window().nodePanel();
+    panel.show(layer_);
+    const std::size_t opacity = rowOf("opacity");
+    const std::size_t blend = rowOf("blend");
+    ASSERT_NE(opacity, ~std::size_t(0));
+    ASSERT_NE(blend, ~std::size_t(0));
+    EXPECT_TRUE(panel.paramIsChoice(blend));
+    EXPECT_FALSE(panel.paramIsChoice(opacity));
+    EXPECT_EQ(panel.paramChoice(blend), "Normal");
+    panel.chooseParam(blend, 1);
+    EXPECT_FLOAT_EQ(window().document().node(layer_).getFloat("blend"), 1.0f);
+    EXPECT_EQ(panel.paramChoice(rowOf("blend")), "Multiply");
+    window().document().undoStack().undo();
+    panel.show(layer_);
+    EXPECT_EQ(panel.paramChoice(rowOf("blend")), "Normal");
+    panel.setParam(rowOf("opacity"), "3");
+    EXPECT_EQ(panel.paramValue(rowOf("opacity")), "1");
+    panel.setParam(rowOf("opacity"), "0.25");
+    EXPECT_FLOAT_EQ(window().document().node(layer_).getFloat("opacity"), 0.25f);
+}
+
+TEST_F(NodePanelTest, aLayerOfTheOpenedSampleShowsOpacityAndBlend) {
+    const std::string sample = (std::filesystem::path(__FILE__).parent_path().parent_path() / "Resources" / "samples" / "layersAndGroups.curvy").u8string();
+    ASSERT_TRUE(window().document().load(sample)) << window().document().lastError();
+    window().docks().setCollapsed(curvy::DockSide::Right, false);
+    frame_.rootView().updateLayout();
+    const curvy::NodeRef layer = window().document().childrenOf()[0];
+    window().nodePanel().show(layer);
+    EXPECT_NE(rowOf("opacity"), ~std::size_t(0));
+    EXPECT_NE(rowOf("blend"), ~std::size_t(0));
 }

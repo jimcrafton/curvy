@@ -10,7 +10,10 @@ jitnodes bindings) and `docs/py_scripting_plan.md` (the whole feature). User-fac
 | `src/scriptmodule.cpp`, `include/curvy/scriptmodule.h` | The `curvy` module: `Document`, `Object`, `Selection`, `Swatch`, `Palette`. Hand-written pybind11. |
 | `src/scriptconsole.cpp`, `include/curvy/scriptconsole.h` | `ScriptConsole`: starts the interpreter, owns the one scope console input runs in, runs code with `doc` and `network` bound. |
 | `src/pyconsolepanel.cpp`, `include/curvy/pyconsolepanel.h` | The right-dock panel that feeds `ScriptConsole::run`. |
-| `src/scripteditorpanel.cpp`, `include/curvy/scripteditorpanel.h` | The script editor panel (edit, open, save, run through the console). |
+| `src/scripteditorpanel.cpp`, `include/curvy/scripteditorpanel.h` | The script editor panel (open, save, run through the console, scratch file, title); the editor itself is a `CodeEditorView`. |
+| `src/codeeditorview.cpp`, `include/curvy/codeeditorview.h` | `CodeEditorView`: the reusable code editor (text, line numbers, folds, editing keys, find and replace, problem line, highlight and syntax-check timers). Also meant for the wrangle code section of the Node panel. |
+| `src/codelanguage.cpp`, `include/curvy/codelanguage.h` | `CodeLanguage`: what an editor asks of a language (style sheet, style ranges, new-line indent, folds). The base is plain text; `PythonLanguage` (in `pythonhighlight.h`) overrides all four. |
+| `include/curvy/syntaxproblem.h` | `SyntaxProblem` (line, column, message), shared by `ScriptConsole::checkSyntax` and the editor view. |
 | `src/pythonhighlight.cpp`, `include/curvy/pythonhighlight.h`, `3rdparty/lex` | Python colours and folds for the editor (see "The `lex` library"). |
 | `cmake/python.cmake` | Builds jitnodes' `jitnodesPython`, links pybind11 and the bundled Python (`3rdparty/python`), copies the DLLs. |
 | `3rdparty/jitnodes/python/` | The `jitnodes` module (graph handles, Geometry, NumPy views) and `PythonRuntime`. |
@@ -390,7 +393,7 @@ way cpp_codetools' `CppEditor` is (`TextFoldingControl` + `HistoryTextModel` for
   the folds are recomputed (matched by where it starts). Malformed tokens (an unterminated string, a bad number) get a squiggle. The
   sheet is chosen by `Settings::darkTheme()` and re-applied on every restyle, so a theme change is followed.
 - **Gutter:** line numbers and the fold markers come with `TextFoldingControl`.
-- **Editing keys** (`EditorController`, a `TextFoldingController` subclass in `scripteditorpanel.cpp`; each is one edit, so one undo step):
+- **Editing keys** (`EditorController`, a `TextFoldingController` subclass in `codeeditorview.cpp`, whose Enter indent comes from the `CodeLanguage`; each is one edit, so one undo step):
   Enter keeps the line's indentation, adds four spaces when the code before the caret ends in `:` (a `#` comment, a colon inside a
   string, or an unclosed bracket does not count; `pythonNewLineIndent`, lexer-based) and takes one level off after a line that starts with
   `pass`, `return`, `break`, `continue` or `raise`. Tab inserts spaces up to the next multiple of four (replacing a selection within one
@@ -498,3 +501,18 @@ carried in `LexState` (so a line can be lexed on its own); `@` first on a line i
   read-only data. Paths are built from the `geometry` node (see "Shapes, paths and points"), so there is no live rectangle or star to
   re-parameterise: the numbers are baked into the points.
 - Packaging stops at `cmake --install` (no installer or zip, no signing); see "Bundled Python".
+
+## Wrangle helpers
+
+`curvy.check_wrangle(code)` compiles wrangle code (`checkWrangle` in `wranglecheck.h`, which runs `jitnodes::parseWrangle`) without running it
+and returns `None` when it parses, else `(line, column, message)` (1-based, the message without the parser's offset prefix); the Node panel's
+Code editor shows the same problem under the text. `curvy.wrangle_functions()` lists `(name, arity)` of the language's functions. A script
+sets a wrangle's text with the existing `doc.set_string(node, "code", text)` (declared `| name = v(min, max) |` parameters appear as the
+node's spare floats), and `Resources/samples/scripts/wrangleNode.py` shows it. Test: `ScriptModule.checkWrangleNamesTheFirstProblemAndListsTheFunctions`.
+
+## Object opacity and blend
+
+`Object.opacity` (0..1, clamped) and `Object.blend` (a name from `curvy.blend_modes()`, case-insensitive; an unknown name raises `ValueError`)
+read and set the layer's or group's `opacity` and `blend` parameters as one undo step each. They are ordinary float parameters of the
+`curvyObject` node (`doc.set_param(layer, "blend", 1)` works too; `blend` is the index into `BlendModes::names()` in `blendmodes.h`).
+Test: `ScriptModule.anObjectsOpacityAndBlendAreParametersOfItsNode`.

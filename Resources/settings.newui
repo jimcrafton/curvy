@@ -2309,7 +2309,7 @@
                                   },
                                   {
                                     type: "Label",
-                                    text: "True, False, None",
+                                    text: "Constants",
                                     textAlignment: "Left",
                                     bounds: {
                                       type: "Rect",
@@ -2318,7 +2318,7 @@
                                     },
                                     style: {
                                       type: "LabelStyle",
-                                      text: "True, False, None",
+                                      text: "Constants",
                                       wordWrap: true,
                                       font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
                                       textColor: "#f0f0f0",
@@ -2682,7 +2682,7 @@
                                   },
                                   {
                                     type: "Label",
-                                    text: "Function, class",
+                                    text: "Definitions",
                                     textAlignment: "Left",
                                     bounds: {
                                       type: "Rect",
@@ -2691,7 +2691,7 @@
                                     },
                                     style: {
                                       type: "LabelStyle",
-                                      text: "Function, class",
+                                      text: "Definitions",
                                       wordWrap: true,
                                       font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
                                       textColor: "#f0f0f0",

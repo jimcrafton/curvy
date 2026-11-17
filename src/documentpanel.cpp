@@ -26,6 +26,7 @@ namespace curvy {
 
     DocumentPanel::DocumentPanel(SketchDocument& document) : Panel("document", "Document"), document_(document) {
         tabs_ = new TabControl();
+        tabs_->setName("documentTabs");
         body().addChild(tabs_);
 
         auto* documentPage = new TabPage();

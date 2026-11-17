@@ -77,3 +77,12 @@ Split changes no output; tag round-trips through save, snapshot, undo, clip and 
 3. Document operations and the sample file.
 4. Graph tree.
 5. Full graph view and property pane.
+
+## Opacity and blend (2026-11-16)
+
+An object has `opacity` (0 to 1) and `blend` (an index into `BlendModes`, `include/curvy/blendmodes.h`). They are parameters of the `curvyObject`
+node and affect only painting: `CanvasView::renderArtworkAtScale` reads each shape's key (the uids of the subnets around it), asks the document
+for the objects among them that have an opacity below 1 or a blend other than Normal, and paints a run of shapes of one such object into its own
+image before compositing it, so a faded group fades as one and nested objects compose. An object at the defaults is invisible to this: its shapes
+paint directly. The cooked geometry carries nothing extra. The Node panel shows `blend` as a dropdown because the parameter carries the tag
+`choices:Normal,Multiply,...` (any float parameter can). Not covered yet: export (SVG, PDF) of opacity and blend, and single shapes.

@@ -1,0 +1,3 @@
+| low = 0(,), high = 100(,), from = 0(,), to = 1(,) |
+# remaps x from the range [from, to] onto [low, high] and clamps it into the range
+y = lerp(low, high, clamp((x - from) / (to - from), 0, 1));

@@ -3,14 +3,18 @@
 #include <jitnodes/graph/network.h>
 
 #include "curvy/theme.h"
+#include "curvy/wranglecheck.h"
+#include "curvy/wranglehighlight.h"
 
 #include <newui/bundle.h>
 #include <newui/cursor.h>
+#include <newui/models.h>
 #include <newui/mouse_constants.h>
 
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cmath>
 #include <cstdlib>
 #include <map>
 #include <sstream>
@@ -63,6 +67,13 @@ namespace curvy {
         const float height = (std::max)(own.height(), contentHeightFor(kLeastParamRows));
         root_.setBounds(Rect(0.0f, 0.0f, width, height));
         body().setContentSize(Size(width, height));
+        if (scroll_ != nullptr) {
+            // The list is as tall as its rows (up to the room there is), so Inputs and Used by follow it instead of sitting at the bottom of a gap.
+            const float room = (std::max)(kParamRowHeight, height - fixedContentHeight());
+            const float wanted = (std::max)(kParamRowHeight, kParamRowHeight * float(entries_.size()));
+            scroll_->setLayoutParams(std::make_unique<FlexLayoutParams>(0.0f));
+            scroll_->setDesiredSize(Size(width, (std::min)(room, wanted)));
+        }
         root_.updateLayout();
         style().markDirty();
     }
@@ -98,6 +109,7 @@ namespace curvy {
                 return SyncReturn::Handled;
             };
         }
+        buildCodeSection();
         makePicker();
         scroll_ =dynamic_cast<ScrollView*>(root_.findView("graphParamScroll"));
         viewport_ = dynamic_cast<SubView*>(root_.findView("graphParamViewport"));
@@ -121,6 +133,215 @@ namespace curvy {
         show(NodeRef());
     }
 
+    // The fragment is one child of the content, placed after the data button: a row with the toggle, then the editor section when open.
+    void NodePanel::buildCodeSection() {
+        View* loaded = Bundle::instance().loadView("nodePanelCode");
+        auto* section = dynamic_cast<SubView*>(loaded);
+        if (section == nullptr) {
+            delete loaded;
+            throw std::runtime_error("NodePanel: Resources/nodePanelCode.newui did not load");
+        }
+        root_.addChild(section);
+        std::size_t after = 0;
+        const auto& children = root_.childViews();
+        for (std::size_t i = 0; i < children.size(); ++i) {
+            if (children[i]->name() == "graphDataRow") {
+                after = i + 1;
+            }
+        }
+        root_.reorderChild(section, after);
+
+        codeRow_ = section;
+        codeSection_ = dynamic_cast<SubView*>(section->findView("wrangleCode"));
+        editorHost_ = dynamic_cast<SubView*>(section->findView("wrangleEditorHost"));
+        codeToggle_ = dynamic_cast<Button*>(section->findView("wrangleCodeToggle"));
+        classButton_ = dynamic_cast<Button*>(section->findView("wrangleClassButton"));
+        cookErrorLabel_ = dynamic_cast<Label*>(section->findView("wrangleProblem"));
+        auto* commit = dynamic_cast<Button*>(section->findView("wrangleCommit"));
+        auto* revert = dynamic_cast<Button*>(section->findView("wrangleRevert"));
+        if (codeSection_ == nullptr || editorHost_ == nullptr || codeToggle_ == nullptr || classButton_ == nullptr || cookErrorLabel_ == nullptr || commit == nullptr ||
+            revert == nullptr) {
+            throw std::runtime_error("NodePanel: Resources/nodePanelCode.newui lacks a view");
+        }
+        cookErrorLabel_->setText("");
+        codeSection_->setLayoutParams(std::make_unique<FlexLayoutParams>(0.0f));
+        codeSection_->setVisible(false);
+
+        editor_ = new CodeEditorView(WrangleLanguage::instance(), "wrangleEditor");
+        editor_->setVisible(true);
+        editorHost_->addChild(editor_);
+        editorHost_->onSizeChanged += [this](View&, const Size& size) {
+            editor_->setBounds(Rect(0.0f, 0.0f, size.width, size.height));
+            editor_->layoutParts();
+            return SyncReturn::Handled;
+        };
+        editor_->onCheckSyntax = [](const std::string& code) { return checkWrangle(code); };
+        editor_->onExecuteKey = [this]() { commitCode(); };
+        editor_->onHistoryChanged = [this]() { layoutCode(); };
+
+        codeToggle_->onClick += [this](Control&) {
+            setCodeOpen(!codeOpen_);
+            return SyncReturn::Handled;
+        };
+        classButton_->onClick += [this](Control&) {
+            setCodeClass(codeClass() == "primitive" ? "point" : "primitive");
+            return SyncReturn::Handled;
+        };
+        commit->onClick += [this](Control&) {
+            commitCode();
+            return SyncReturn::Handled;
+        };
+        revert->onClick += [this](Control&) {
+            revertCode();
+            return SyncReturn::Handled;
+        };
+        section->setVisible(false);
+    }
+
+    // The row's own height plus the section's when it is open; the content's layout reads this as the section's desired height.
+    void NodePanel::layoutCode() {
+        if (codeRow_ == nullptr) {
+            return;
+        }
+        float rowHeight = 0.0f;
+        for (const SubView* child : codeRow_->childViews()) {
+            if (child != codeSection_) {
+                rowHeight += child->desiredSize().height;
+            }
+        }
+        float sectionHeight = 0.0f;
+        for (const SubView* child : codeSection_->childViews()) {
+            sectionHeight += child->desiredSize().height;
+        }
+        const bool open = codeOpen_ && codeRow_->isVisible();
+        codeSection_->setVisible(open);
+        codeRow_->setDesiredSize(Size(codeRow_->bounds().width(), rowHeight + (open ? sectionHeight : 0.0f)));
+    }
+
+    bool NodePanel::codeShown() const {
+        return codeRow_ != nullptr && codeRow_->isVisible();
+    }
+
+    void NodePanel::setCodeOpen(bool open) {
+        if (open == codeOpen_) {
+            return;
+        }
+        codeOpen_ = open;
+        if (codeToggle_ != nullptr) {
+            codeToggle_->setText(open ? "Code (open)" : "Code");
+        }
+        layoutCode();
+        setPreferredBodyHeight(contentHeightFor(kPreferredParamRows));
+        layoutContent();
+        if (onCodeToggled) {
+            onCodeToggled(open);
+        }
+    }
+
+    std::string NodePanel::committedCode() const {
+        if (node_.valid() && document_.hasNode(node_) && document_.node(node_).typeName() == "wrangle") {
+            return document_.node(node_).getString("code");
+        }
+        return "";
+    }
+
+    std::string NodePanel::codeText() const {
+        return editor_ != nullptr ? editor_->text() : "";
+    }
+
+    void NodePanel::setCodeText(const std::string& text) {
+        if (editor_ != nullptr) {
+            editor_->setText(text);
+            editor_->markClean();
+        }
+    }
+
+    bool NodePanel::codeModified() const {
+        return editor_ != nullptr && codeShown() && editor_->text() != committedCode();
+    }
+
+    void NodePanel::commitCode() {
+        if (!codeShown() || !node_.valid() || !document_.hasNode(node_)) {
+            return;
+        }
+        const std::string text = editor_->text();
+        if (text != committedCode()) {
+            try {
+                document_.setGraphString(node_, "code", text);
+            } catch (const std::exception& error) {
+                if (onRefused) {
+                    onRefused(error.what());
+                }
+                return;
+            }
+            if (onEdited) {
+                onEdited();
+            }
+        }
+        editor_->markClean();
+        loadedCode_ = text;
+        show(node_);
+    }
+
+    void NodePanel::revertCode() {
+        if (codeShown()) {
+            loadedCode_ = committedCode();
+            editor_->setText(loadedCode_);
+        }
+        show(node_);
+    }
+
+    void NodePanel::setCodeClass(const std::string& value) {
+        if (!codeShown() || !node_.valid() || !document_.hasNode(node_) || value == codeClass()) {
+            return;
+        }
+        document_.setGraphString(node_, "class", value);
+        if (onEdited) {
+            onEdited();
+        }
+        show(node_);
+    }
+
+    std::string NodePanel::codeClass() const {
+        if (node_.valid() && document_.hasNode(node_) && document_.node(node_).typeName() == "wrangle") {
+            return document_.node(node_).getString("class");
+        }
+        return "";
+    }
+
+    std::string NodePanel::cookError() const {
+        return cookErrorLabel_ != nullptr ? cookErrorLabel_->text() : "";
+    }
+
+    std::string NodePanel::codeProblem() const {
+        return editor_ != nullptr ? editor_->problemText() : "";
+    }
+
+    // Shows or hides the section for the node, loads its text when it is another node (or the editor holds nothing unsaved), and reports
+    // the cook's error.
+    void NodePanel::updateCode(const jitnodes::Node* shown, bool nodeChanged) {
+        const bool wrangle = shown != nullptr && shown->typeName() == "wrangle";
+        codeRow_->setVisible(wrangle);
+        if (wrangle) {
+            if (nodeChanged || editor_->text() == loadedCode_) {
+                loadedCode_ = shown->getString("code");
+                setCodeText(loadedCode_);
+            }
+            classButton_->setText(shown->getString("class") == "primitive" ? "Primitives" : "Points");
+            std::string error;
+            try {
+                document_.cook(node_);
+            } catch (const std::exception& caught) {
+                error = caught.what();
+            }
+            cookErrorLabel_->setText(error);
+        } else {
+            cookErrorLabel_->setText("");
+        }
+        layoutCode();
+        layoutContent();
+    }
+
     Label* NodePanel::label(const std::string& name) const {
         return dynamic_cast<Label*>(root_.findView(name));
     }
@@ -138,7 +359,8 @@ namespace curvy {
     }
 
     void NodePanel::show(const NodeRef& node) {
-        if (!(node == node_)) {
+        const bool nodeChanged = !(node == node_);
+        if (nodeChanged) {
             closeColorPicker();
         }
         node_ = node;
@@ -196,6 +418,19 @@ namespace curvy {
                 if (const auto high = shown->paramTagValue(n, "max")) {
                     entry.maximum = std::strtod(high->c_str(), nullptr);
                 }
+                if (const auto choices = shown->paramTagValue(n, "choices")) {
+                    std::istringstream in(*choices);
+                    for (std::string word; std::getline(in, word, ',');) {
+                        entry.choices.push_back(word);
+                    }
+                }
+                float limit = 0.0f;
+                if (!entry.minimum && shown->floatMinimum(n, limit)) {
+                    entry.minimum = double(limit);
+                }
+                if (!entry.maximum && shown->floatMaximum(n, limit)) {
+                    entry.maximum = double(limit);
+                }
                 plain.push_back(entry);
             };
             for (const std::string& n : names) {
@@ -227,6 +462,9 @@ namespace curvy {
                     }
                 }
             }
+            if (shown->typeName() == "wrangle") {
+                std::stable_partition(plain.begin(), plain.end(), [&](const Entry& entry) { return shown->isSpare(entry.name); });
+            }
             entries_.insert(entries_.end(), plain.begin(), plain.end());
         }
         while (viewport_ != nullptr && rows_.size() < entries_.size()) {
@@ -237,6 +475,7 @@ namespace curvy {
         }
         layoutRows();
         syncPicker();
+        updateCode(shown, nodeChanged);
 
         const jitnodes::Network* net = have ? document_.findNetwork(node.scope) : nullptr;
         const auto link = [&](const char* id, const std::string& text) {
@@ -366,6 +605,38 @@ namespace curvy {
             return SyncReturn(SyncReturn::Handled);
         };
         viewport_->addChild(row.swatch);
+        row.slider = new Slider();
+        row.slider->setVisible(false);
+        row.slider->onValueChanged += [this, index](Slider&) {
+            sliderChanged(index);
+            return SyncReturn::Handled;
+        };
+        row.slider->onMouseDown += [this](View&, const Point&, std::uint32_t buttons, std::uint32_t) {
+            if ((buttons & mbmLeftButton) != 0 && node_.valid() && document_.hasNode(node_)) {
+                sliding_ = true;
+                sliderBefore_ = document_.snapshotGraph();
+            }
+            return SyncReturn(SyncReturn::Ignored);
+        };
+        row.slider->onMouseUp += [this](View&, const Point&, std::uint32_t, std::uint32_t) {
+            if (sliding_ && sliderBefore_ && slidingSet_) {
+                document_.commitGraphEdit(*sliderBefore_, "Change " + sliderName_);
+            }
+            sliding_ = false;
+            slidingSet_ = false;
+            sliderBefore_.reset();
+            return SyncReturn(SyncReturn::Ignored);
+        };
+        viewport_->addChild(row.slider);
+        row.choice = new DropDownList();
+        row.choice->setVisible(false);
+        row.choice->onSelectionChanged += [this, index](DropDownList& list) {
+            if (!updatingChoice_ && list.selectedIndex().has_value()) {
+                chooseParam(index, *list.selectedIndex());
+            }
+            return SyncReturn::Handled;
+        };
+        viewport_->addChild(row.choice);
 
         row.field->onReturnPressed += [this, index](TextField&) {
             commitParam(index);
@@ -373,7 +644,7 @@ namespace curvy {
         };
         row.scrubber = NumberScrubber::attach(*row.caption, 1.0, -1e9, 1e9);
         row.scrubber->onBegin += [this, index](NumberScrubber&, double& value) {
-            if (index >= entries_.size() || entries_[index].color || !node_.valid() || !document_.hasNode(node_)) {
+            if (index >= entries_.size() || entries_[index].color || !entries_[index].choices.empty() || !node_.valid() || !document_.hasNode(node_)) {
                 return SyncReturn(SyncReturn::Ignored);
             }
             scrubBefore_ = document_.snapshotGraph();
@@ -407,19 +678,90 @@ namespace curvy {
         rows_.push_back(row);
     }
 
+    bool NodePanel::paramIsChoice(std::size_t row) const {
+        return row < entries_.size() && row < rows_.size() && rows_[row].choice->isVisible();
+    }
+
+    std::string NodePanel::paramChoice(std::size_t row) const {
+        if (!paramIsChoice(row) || !rows_[row].choice->selectedIndex().has_value()) {
+            return "";
+        }
+        return entries_[row].choices.at(*rows_[row].choice->selectedIndex());
+    }
+
+    void NodePanel::chooseParam(std::size_t row, std::size_t index) {
+        if (row >= entries_.size() || index >= entries_[row].choices.size() || !node_.valid() || !document_.hasNode(node_)) {
+            return;
+        }
+        document_.setGraphParam(node_, entries_[row].name, float(index));
+        if (onEdited) {
+            onEdited();
+        }
+        show(node_);
+    }
+
+    bool NodePanel::paramHasSlider(std::size_t row) const {
+        return row < entries_.size() && row < rows_.size() && rows_[row].slider->isVisible();
+    }
+
+    void NodePanel::sliderChanged(std::size_t row) {
+        if (updatingSlider_ || row >= entries_.size() || row >= rows_.size() || entries_[row].color || !node_.valid() || !document_.hasNode(node_)) {
+            return;
+        }
+        const Entry& entry = entries_[row];
+        const float value = float(clampTo(entry, double(rows_[row].slider->value())));
+        if (sliding_) {
+            sliderName_ = entry.name;
+            slidingSet_ = true;
+            document_.setGraphFloatLive(node_, entry.name, value);
+        } else {
+            document_.setGraphParam(node_, entry.name, value);
+        }
+        char text[32];
+        std::snprintf(text, sizeof(text), "%g", double(value));
+        rows_[row].field->setText(widen(text));
+        if (onEdited) {
+            onEdited();
+        }
+    }
+
     void NodePanel::fillRow(std::size_t index) {
         Row& row = rows_[index];
         const bool used = index < entries_.size() && node_.valid() && document_.hasNode(node_);
         row.caption->setVisible(used);
         row.field->setVisible(used);
         row.swatch->setVisible(used && entries_[index].color);
+        const bool choiceRow = used && !entries_[index].color && !entries_[index].choices.empty();
+        row.choice->setVisible(choiceRow);
+        if (choiceRow) {
+            row.field->setVisible(false);
+        }
+        const bool sliderRow = used && !choiceRow && !entries_[index].color && entries_[index].minimum && entries_[index].maximum && *entries_[index].maximum > *entries_[index].minimum;
+        row.slider->setVisible(sliderRow);
         if (!used) {
             return;
+        }
+        if (choiceRow) {
+            updatingChoice_ = true;
+            auto model = std::make_unique<StringListModel>();
+            for (const std::string& name : entries_[index].choices) {
+                model->addItem(name);
+            }
+            row.choice->setModel(std::move(model));
+            const long chosen = std::lround(document_.node(node_).getFloat(entries_[index].name));
+            row.choice->setSelectedIndex(std::size_t(std::clamp<long>(chosen, 0, long(entries_[index].choices.size()) - 1)));
+            updatingChoice_ = false;
+        }
+        if (sliderRow) {
+            updatingSlider_ = true;
+            row.slider->setRange(float(*entries_[index].minimum), float(*entries_[index].maximum));
+            row.slider->setValue(document_.node(node_).getFloat(entries_[index].name));
+            updatingSlider_ = false;
         }
         const Entry& entry = entries_[index];
         const jitnodes::Node& shown = document_.node(node_);
         row.caption->setText(entry.name);
-        row.caption->setCursor(Cursor(entry.color ? CursorKind::Arrow : CursorKind::SizeWE));
+        row.caption->setCursor(Cursor(entry.color || !entry.choices.empty() ? CursorKind::Arrow : CursorKind::SizeWE));
         if (entry.color) {
             const float r = shown.getFloat(entry.r), g = shown.getFloat(entry.g), b = shown.getFloat(entry.b);
             row.field->setText(widen(entry.a.empty() ? colorText(r, g, b) : colorText(r, g, b, shown.getFloat(entry.a))));
@@ -449,6 +791,17 @@ namespace curvy {
             if (i < entries_.size() && entries_[i].color) {
                 row.swatch->setBounds(Rect(fieldLeft, y + 4.0f, swatchWidth, 16.0f));
                 fieldLeft += swatchWidth + 6.0f;
+            }
+            if (row.choice->isVisible()) {
+                row.choice->setBounds(Rect(fieldLeft, y + 2.0f, (std::max)(40.0f, width - fieldLeft - margin), 20.0f));
+                continue;
+            }
+            if (row.slider->isVisible()) {
+                constexpr float numberWidth = 56.0f;
+                row.slider->setBounds(Rect(fieldLeft, y + 4.0f, (std::max)(40.0f, width - fieldLeft - margin - numberWidth - 6.0f), 16.0f));
+                fieldLeft = width - margin - numberWidth;
+                row.field->setBounds(Rect(fieldLeft, y + 2.0f, numberWidth, 20.0f));
+                continue;
             }
             row.field->setBounds(Rect(fieldLeft, y + 2.0f, (std::max)(40.0f, width - fieldLeft - margin), 20.0f));
         }
@@ -720,7 +1073,7 @@ namespace curvy {
     }
 
     bool NodePanel::paramShown(std::size_t row) const {
-        return row < entries_.size() && row < rows_.size() && rows_[row].field->isVisible();
+        return row < entries_.size() && row < rows_.size() && (rows_[row].field->isVisible() || rows_[row].choice->isVisible());
     }
 
 }

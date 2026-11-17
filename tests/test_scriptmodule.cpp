@@ -705,3 +705,49 @@ TEST(ScriptModule, selectionIsNoneWithoutAnEditorAndRefusesAForeignDocument) {
     EXPECT_FALSE(result.ok);
     EXPECT_NE(result.error.find("no longer belongs"), std::string::npos);
 }
+
+TEST(ScriptModule, theWrangleNodeSampleScriptMakesAWrangleWithDeclaredParameters) {
+    std::ifstream in("Resources/samples/scripts/wrangleNode.py");
+    ASSERT_TRUE(in.is_open());
+    const std::string code((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    curvy::SketchDocument document;
+    document.newBlank("Wrangle", 100.0f, 100.0f);
+    curvy::SelectionModel selection(&document);
+    const auto result = curvytest::sharedConsole().run(code, &document, &selection);
+    ASSERT_TRUE(result.ok) << result.error;
+    const curvy::NodeRef picked = selection.primary();
+    ASSERT_TRUE(picked.valid());
+    EXPECT_EQ(document.node(picked).typeName(), "wrangle");
+    EXPECT_TRUE(document.node(picked).hasFloat("gain"));
+    EXPECT_TRUE(document.node(picked).hasFloat("steps"));
+    EXPECT_NO_THROW(document.cook(picked));
+}
+
+TEST(ScriptModule, checkWrangleNamesTheFirstProblemAndListsTheFunctions) {
+    curvy::SketchDocument document;
+    document.newBlank("Wrangle check", 100.0f, 100.0f);
+    auto run = [&](const std::string& code) { return runOn(document, "import curvy\n" + code); };
+    auto result = run("print(curvy.check_wrangle('y = y + 1;'))");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "None\n");
+    result = run("p = curvy.check_wrangle('x = 1;\\ny = nosuch(x);')\nprint(p[0], type(p[1]).__name__, bool(p[2]))");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "2 int True\n");
+    result = run("f = dict(curvy.wrangle_functions())\nprint(len(f) > 0, 'sin' in f, f['sin'])");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "True True 1\n");
+}
+
+TEST(ScriptModule, anObjectsOpacityAndBlendAreParametersOfItsNode) {
+    curvy::SketchDocument document;
+    document.newBlank("Effects", 100.0f, 100.0f);
+    auto result = runOn(document, "import curvy\nlayer = doc.add_layer('L')\nlayer.opacity = 0.5\nlayer.blend = 'multiply'\n"
+                                  "print(layer.opacity, layer.blend, curvy.blend_modes()[:2])");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "0.5 Multiply ['Normal', 'Multiply']\n");
+    result = runOn(document, "layer = doc.layers[0]\nlayer.opacity = 7\nprint(layer.opacity)\nlayer.blend = 'nosuch'");
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error.find("unknown blend mode"), std::string::npos);
+    result = runOn(document, "print(doc.layers[0].opacity)");
+    EXPECT_EQ(result.output, "1.0\n");
+}

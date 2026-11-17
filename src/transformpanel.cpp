@@ -43,6 +43,7 @@ namespace curvy {
 
     TransformPanel::TransformPanel(SketchDocument& document, SelectionModel& selection) : Panel("transform", "Transform"), document_(document), selection_(selection) {
         tabs_ = new TabControl();
+        tabs_->setName("transformTabs");
         body().addChild(tabs_);
         buildPage(Part::Object, "Object");
         buildPage(Part::Local, "Local");
@@ -81,6 +82,7 @@ namespace curvy {
 
         if (part == Part::Local) {
             page.add = new Button();
+            page.add->setName("addLocalTransform");
             page.add->setText("Add local transform");
             page.add->onClick += [this](Control&) {
                 addLocalTransform();
@@ -98,6 +100,7 @@ namespace curvy {
             row.caption->setTextColor(BLRgba32(0xFFA0A0A0u));
             page.scroll->addChild(row.caption);
             row.field = new TextField();
+            row.field->setName(std::string(part == Part::Object ? "objectXform_" : "localXform_") + param.name);
             row.field->setTextColor(BLRgba32(0xFFF0F0F0u));
             row.field->caret().setColor(theme.textColor());
             page.scroll->addChild(row.field);

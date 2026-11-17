@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Node panel: wrangle Code section</title>
+<style>
+  :root {
+    --bg: #141414; --panel: #1e1e1e; --head: #2e2e2e; --text: #f0f0f0; --muted: #a0a0a0;
+    --field: #2a2a2a; --line: #4a4d55; --accent: #4c8dff; --amber: #ffb454; --err: #ff6b6b;
+    --code: #181818; --gutter: #222222;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--text); font: 12px "Segoe UI", sans-serif; display: flex; gap: 24px; align-items: flex-start; }
+  .caption { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+  .panel { display: flex; flex-direction: column; background: var(--panel); }
+  .collapsed { width: 260px; height: 520px; }
+  .expanded { width: 380px; height: 760px; }
+  .header { display: flex; flex-direction: row; align-items: center; gap: 6px; padding: 4px; height: 28px; background: var(--head); }
+  .header .title { flex-grow: 1; font-weight: bold; }
+  .header .kind { color: var(--muted); }
+  .section { height: 22px; padding: 4px 5px; color: var(--muted); }
+  .row { display: flex; flex-direction: row; align-items: center; gap: 6px; padding: 4px; height: 24px; }
+  .row .cap { width: 90px; color: var(--muted); }
+  .row .grow { flex-grow: 1; }
+  .field { height: 20px; padding: 2px 6px; background: var(--field); color: var(--text); border: 1px solid var(--line); }
+  button { height: 20px; padding: 0 10px; background: var(--field); color: var(--text); border: 1px solid var(--line); border-radius: 10px; font: 12px "Segoe UI", sans-serif; }
+  button.on { background: var(--accent); border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); }
+  .code { display: flex; flex-direction: column; background: var(--panel); }
+  .editor { display: flex; flex-direction: row; flex-grow: 1; height: 230px; background: var(--code); border: 1px solid var(--line); margin: 0 4px; }
+  .gutter { width: 28px; padding: 4px; background: var(--gutter); color: #6a6a6a; font: 12px Consolas, monospace; text-align: right; }
+  .text { flex-grow: 1; padding: 4px 6px; font: 12px Consolas, monospace; color: var(--text); }
+  .k { color: #c586c0; } .n { color: #b5cea8; } .c { color: #6a9955; } .f { color: #dcdcaa; } .d { color: #4fc1ff; }
+  .problem { height: 20px; padding: 2px 8px; color: var(--err); }
+  .problem.ok { color: var(--muted); }
+  .buttons { display: flex; flex-direction: row; align-items: center; gap: 6px; padding: 4px; height: 28px; }
+  .buttons .hint { flex-grow: 1; color: var(--muted); }
+  .slider { height: 6px; flex-grow: 1; background: var(--field); border: 1px solid var(--line); }
+  .num { width: 56px; text-align: right; }
+  .row .spare { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<div>
+  <div class="caption">Collapsed: a wrangle node selected. Only a "Code" toggle is added.</div>
+  <div class="panel collapsed" id="collapsed">
+    <div class="header"><span class="title">wrangle1</span><span class="kind">wrangle</span></div>
+    <div class="section">Node</div>
+    <div class="row"><span class="cap">Name</span><span class="field grow">wrangle1</span></div>
+    <div class="row"><span class="cap">Tags</span><span class="field grow"></span></div>
+    <div class="row"><button>Display</button><button>Bypass</button><button>Freeze</button></div>
+    <div class="row"><button>View points and attributes...</button></div>
+    <div class="row"><span class="cap">Code</span><button id="codeToggle">Code &#9656;</button></div>
+    <div class="section">Parameters</div>
+    <div class="row"><span class="cap">gain</span><span class="slider"></span><span class="field num">1.5</span></div>
+    <div class="row"><span class="cap">steps</span><span class="field grow">1</span></div>
+    <div class="row"><span class="cap">ratio</span><span class="field grow">0</span></div>
+    <div class="row"><span class="cap">a</span><span class="field grow">0</span></div>
+    <div class="section">Inputs</div>
+    <div class="row"><span class="cap">0 circle1</span></div>
+  </div>
+</div>
+
+<div>
+  <div class="caption">Expanded: the panel grows; Commit (or Ctrl+Enter) pushes the text to the node as one undo step. The declared parameters (blue) become rows.</div>
+  <div class="panel expanded" id="expanded">
+    <div class="header"><span class="title">wrangle1</span><span class="kind">wrangle</span></div>
+    <div class="section">Node</div>
+    <div class="row"><span class="cap">Name</span><span class="field grow">wrangle1</span></div>
+    <div class="row"><span class="cap">Tags</span><span class="field grow"></span></div>
+    <div class="row"><button>Display</button><button>Bypass</button><button>Freeze</button></div>
+    <div class="row"><button>View points and attributes...</button></div>
+    <div class="row"><span class="cap">Code</span><button class="on" id="codeToggleOn">Code &#9662;</button><span class="cap" style="width:auto;margin-left:12px">Run over</span><button id="classButton">Points &#9662;</button></div>
+    <div class="code" id="codeSection">
+      <div class="editor" id="codeEditor">
+        <div class="gutter">1<br>2<br>3<br>4<br>5<br>6<br>7</div>
+        <div class="text"><span class="k">|</span> <span class="d">gain</span> = <span class="n">1.5</span>(<span class="n">0</span>, <span class="n">10</span>), <span class="d">steps</span>(<span class="n">1</span>,), <span class="d">ratio</span>(,<span class="n">1</span>) <span class="k">|</span><br><span class="c"># lift and curl each point</span><br>y = y + <span class="f" style="text-decoration:underline wavy var(--err)">sinn</span>(x * <span class="d">ratio</span>) * <span class="d">gain</span>;<br>x = x * <span class="d">steps</span>;<br>radius = <span class="f">abs</span>(y) * a;<br><br></div>
+      </div>
+      <div class="problem" id="problemLine">3:9 unknown function 'sinn'</div>
+      <div class="buttons"><button class="primary" id="commitButton">Commit</button><button id="revertButton">Revert</button><span class="hint">Ctrl+Enter</span></div>
+    </div>
+    <div class="section">Parameters</div>
+    <div class="row"><span class="cap spare">gain</span><span class="slider"></span><span class="field num">1.5</span></div>
+    <div class="row"><span class="cap spare">steps</span><span class="field grow">1</span></div>
+    <div class="row"><span class="cap spare">ratio</span><span class="field grow">0</span></div>
+    <div class="row"><span class="cap">a</span><span class="field grow">0</span></div>
+    <div class="section">Inputs</div>
+    <div class="row"><span class="cap">0 circle1</span></div>
+  </div>
+</div>
+
+</body>
+</html>

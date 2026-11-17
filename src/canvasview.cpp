@@ -1,5 +1,7 @@
 #include "curvy/canvasview.h"
 
+#include "curvy/blendmodes.h"
+#include "curvy/objectnode.h"
 #include "curvy/shapepaths.h"
 
 #include <newui/rootview.h>
@@ -8,6 +10,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
+#include <map>
+#include <optional>
+#include <vector>
 
 namespace curvy {
 
@@ -173,24 +179,128 @@ namespace curvy {
             return BLRgba32((byte(a) << 24) | (byte(r) << 16) | (byte(g) << 8) | byte(b));
         };
 
-        ctx.save();
-        ctx.clip_to_rect(BLRect(originX, originY, w, h));
         // One path per shape, so the primitives of a compound shape (a ring and its counter) fill together and leave the hole open; the shape
         // takes the look of its first primitive.
-        for (const jitnodes::ShapeRange& shape : geo.shapes()) {
-            const std::size_t i = shape.first;
-            const BLPath path = shapePath(geo, shape, originX, originY, scale);
+        const std::vector<jitnodes::ShapeRange> shapes = geo.shapes();
+        std::vector<BLPath> paths;
+        paths.reserve(shapes.size());
+        for (const jitnodes::ShapeRange& shape : shapes) {
+            paths.push_back(shapePath(geo, shape, originX, originY, scale));
+        }
+
+        // The objects with an opacity below 1 or a blend other than Normal that each shape lies in, outermost first. The shape's key holds the
+        // uids of the subnets around it, so the cooked geometry needs nothing stamped.
+        struct Effect {
+            std::uint32_t uid = 0;
+            float opacity = 1.0f;
+            int blend = 0;
+        };
+        std::map<std::uint32_t, std::optional<Effect>> effectOfUid;
+        const auto effectFor = [&](std::uint32_t uid) -> const std::optional<Effect>& {
+            auto found = effectOfUid.find(uid);
+            if (found != effectOfUid.end()) {
+                return found->second;
+            }
+            std::optional<Effect> effect;
+            const NodeRef ref = document.nodeOfUid(uid);
+            if (ref.valid() && document.hasNode(ref) && document.node(ref).typeName() == objectNodeType) {
+                const jitnodes::Node& node = document.node(ref);
+                Effect candidate;
+                candidate.uid = uid;
+                candidate.opacity = std::clamp(node.getFloat("opacity"), 0.0f, 1.0f);
+                candidate.blend = int(node.getFloat("blend") + 0.5f);
+                if (candidate.opacity < 1.0f || candidate.blend != 0) {
+                    effect = candidate;
+                }
+            }
+            return effectOfUid.emplace(uid, effect).first->second;
+        };
+        std::vector<std::vector<Effect>> effects(shapes.size());
+        bool anyEffect = false;
+        for (std::size_t s = 0; s < shapes.size(); ++s) {
+            const std::vector<std::uint32_t> uids = SketchDocument::uidsOfShapeKey(std::string(shapes[s].key));
+            for (std::size_t k = 0; k + 1 < uids.size(); ++k) {   // the last uid is the generator itself
+                if (const std::optional<Effect>& effect = effectFor(uids[k])) {
+                    effects[s].push_back(*effect);
+                    anyEffect = true;
+                }
+            }
+        }
+
+        const auto paintShape = [&](BLContext& target, std::size_t s) {
+            const std::size_t i = shapes[s].first;
+            const BLPath& path = paths[s];
             if (path.is_empty()) {
-                continue;
+                return;
             }
             if (fillA != nullptr && fillA[i] > 0.0f) {
-                ctx.set_fill_rule(evenOdd != nullptr && evenOdd[i] != 0.0f ? BL_FILL_RULE_EVEN_ODD : BL_FILL_RULE_NON_ZERO);
-                ctx.fill_path(path, packed(fillR[i], fillG[i], fillB[i], fillA[i]));
+                target.set_fill_rule(evenOdd != nullptr && evenOdd[i] != 0.0f ? BL_FILL_RULE_EVEN_ODD : BL_FILL_RULE_NON_ZERO);
+                target.fill_path(path, packed(fillR[i], fillG[i], fillB[i], fillA[i]));
             }
             if (strokeA != nullptr && strokeA[i] > 0.0f && strokeW[i] > 0.0f) {
-                ctx.set_stroke_width(double(strokeW[i]) * scale);
-                ctx.stroke_path(path, packed(strokeR[i], strokeG[i], strokeB[i], strokeA[i]));
+                target.set_stroke_width(double(strokeW[i]) * scale);
+                target.stroke_path(path, packed(strokeR[i], strokeG[i], strokeB[i], strokeA[i]));
             }
+        };
+
+        // Paints shapes [first, last) at `depth` into `target`, whose pixel (0, 0) is (offsetX, offsetY) of the page-space the paths are in.
+        // A run of consecutive shapes in one effect object is painted into a layer of its own (the run's bounds, inside `limit`) and
+        // composited with the object's opacity and blend, so the object fades and blends as one.
+        const std::function<void(BLContext&, std::size_t, std::size_t, std::size_t, const BLBox&)> paintRange =
+            [&](BLContext& target, std::size_t first, std::size_t last, std::size_t depth, const BLBox& limit) {
+                std::size_t s = first;
+                while (s < last) {
+                    if (effects[s].size() <= depth) {
+                        paintShape(target, s);
+                        ++s;
+                        continue;
+                    }
+                    const Effect& effect = effects[s][depth];
+                    std::size_t end = s + 1;
+                    while (end < last && effects[end].size() > depth && effects[end][depth].uid == effect.uid) {
+                        ++end;
+                    }
+                    BLBox box(1e30, 1e30, -1e30, -1e30);
+                    for (std::size_t k = s; k < end; ++k) {
+                        BLBox one;
+                        if (!paths[k].is_empty() && paths[k].get_bounding_box(&one) == BL_SUCCESS) {
+                            const double grow = strokeW != nullptr && strokeA != nullptr && strokeA[shapes[k].first] > 0.0f ? double(strokeW[shapes[k].first]) * scale : 0.0;
+                            box.x0 = (std::min)(box.x0, one.x0 - grow);
+                            box.y0 = (std::min)(box.y0, one.y0 - grow);
+                            box.x1 = (std::max)(box.x1, one.x1 + grow);
+                            box.y1 = (std::max)(box.y1, one.y1 + grow);
+                        }
+                    }
+                    box.x0 = (std::max)(std::floor(box.x0), limit.x0);
+                    box.y0 = (std::max)(std::floor(box.y0), limit.y0);
+                    box.x1 = (std::min)(std::ceil(box.x1), limit.x1);
+                    box.y1 = (std::min)(std::ceil(box.y1), limit.y1);
+                    if (box.x1 > box.x0 && box.y1 > box.y0) {
+                        BLImage layer(int(box.x1 - box.x0), int(box.y1 - box.y0), BL_FORMAT_PRGB32);
+                        BLContext inner(layer);
+                        inner.clear_all();
+                        inner.translate(-box.x0, -box.y0);
+                        paintRange(inner, s, end, depth + 1, box);
+                        inner.end();
+                        target.set_comp_op(BlendModes::compOp(effect.blend));
+                        target.set_global_alpha(double(effect.opacity));
+                        target.blit_image(BLPointI(int(box.x0), int(box.y0)), layer);
+                        target.set_global_alpha(1.0);
+                        target.set_comp_op(BL_COMP_OP_SRC_OVER);
+                    }
+                    s = end;
+                }
+            };
+
+        ctx.save();
+        ctx.clip_to_rect(BLRect(originX, originY, w, h));
+        if (!anyEffect) {
+            for (std::size_t s = 0; s < shapes.size(); ++s) {
+                paintShape(ctx, s);
+            }
+        } else {
+            // Layers are kept inside the page and the target's own pixels; the page is what the clip shows anyway.
+            paintRange(ctx, 0, shapes.size(), 0, BLBox(originX, originY, originX + w, originY + h));
         }
         ctx.restore();
     }

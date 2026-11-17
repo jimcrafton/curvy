@@ -556,6 +556,17 @@ namespace curvy {
         };
         nodePanel_->onRefused = [this](const std::string& message) { model_->say(message); };
         nodePanel_->onDestroyed = [this]() { nodePanel_ = nullptr; };
+        nodePanel_->onCodeToggled = [this](bool open) {
+            if (open) {
+                dockWidthBeforeCode_ = docks_->size(DockSide::Right);
+                if (dockWidthBeforeCode_ < NodePanel::kCodeWidth) {
+                    docks_->setSize(DockSide::Right, NodePanel::kCodeWidth);
+                }
+            } else if (dockWidthBeforeCode_ > 0.0f) {
+                docks_->setSize(DockSide::Right, dockWidthBeforeCode_);
+                dockWidthBeforeCode_ = 0.0f;
+            }
+        };
         nodePanel_->onEdited = [this]() {
             graphView_->style().markDirty();
             canvas_->style().markDirty();

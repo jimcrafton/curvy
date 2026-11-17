@@ -1,6 +1,7 @@
 #include "curvy/objectnode.h"
 
 #include "curvy/appearancenode.h"
+#include "curvy/blendmodes.h"
 #include "curvy/rendernode.h"
 
 #include <jitnodes/graph/network.h>
@@ -14,6 +15,14 @@ namespace curvy {
 
     ObjectNode::ObjectNode() : SubnetNode(objectNodeType, 0) {
         declareFloat("locked", 0.0f);
+        declareFloat("opacity", 1.0f);
+        declareFloat("blend", 0.0f);
+        tagParam("opacity", "unit:0.01");
+        tagParam("opacity", "min:0");
+        tagParam("opacity", "max:1");
+        tagParam("blend", "min:0");
+        tagParam("blend", "max:" + std::to_string(BlendModes::names().size() - 1));
+        tagParam("blend", "choices:" + BlendModes::choicesText());
         repair();
     }
 

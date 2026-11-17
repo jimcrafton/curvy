@@ -1,5 +1,6 @@
 #pragma once
 
+#include "curvy/codeeditorview.h"
 #include "curvy/colorpickercard.h"
 #include "curvy/noderef.h"
 #include "curvy/numberscrubber.h"
@@ -74,6 +75,36 @@ namespace curvy {
         // goes to onRefused and the field goes back).
         void retag(const std::string& text);
 
+        // The wrangle code section (Resources/nodePanelCode.newui), shown for a `wrangle` node: a "Code" toggle row, and when it is open a
+        // CodeEditorView with Commit, Revert and the class button (Points / Primitives). The editor's text is the node's `code` until it is
+        // edited; Commit (or Ctrl+Enter) stores it as one undo step, Revert puts the node's text back, and the cook's error shows under the
+        // editor. Opening it asks the owner for a wider panel (onCodeToggled). Parameters the code declares are ordinary rows; one with both
+        // limits has a slider too.
+        bool codeShown() const;
+        bool codeOpen() const { return codeOpen_; }
+        void setCodeOpen(bool open);
+        std::string codeText() const;
+        void setCodeText(const std::string& text);
+        void commitCode();
+        void revertCode();
+        bool codeModified() const;
+        // "point" or "primitive"; one undo step.
+        void setCodeClass(const std::string& value);
+        std::string codeClass() const;
+        // The message the node's cook fails with (empty when it cooks).
+        std::string cookError() const;
+        // The editor's own syntax problem line.
+        std::string codeProblem() const;
+        CodeEditorView* codeEditor() const { return editor_; }
+        bool paramHasSlider(std::size_t row) const;
+        // A parameter tagged "choices:A,B,C" (an object's blend) is a dropdown of those names; its value is the index.
+        bool paramIsChoice(std::size_t row) const;
+        std::string paramChoice(std::size_t row) const;
+        void chooseParam(std::size_t row, std::size_t index);
+        // The width the code section wants the panel to have, and called with true when it opens and false when it closes.
+        static constexpr float kCodeWidth = 380.0f;
+        std::function<void(bool open)> onCodeToggled;
+
         // The colour card a colour row's swatch opens (a floating box in the node area: wheel, RGB / HSB / CMYK / Gray sliders, alpha when the colour has
         // one, hex); clicking the swatch again closes it. It edits the row's r, g, b (and alpha) live and makes each gesture one undo step. Closed when
         // another node is shown.
@@ -102,14 +133,37 @@ namespace curvy {
             bool color = false;
             double unit = 1.0;
             std::optional<double> minimum, maximum;
+            std::vector<std::string> choices;   // from the "choices:A,B,C" tag: the value is the index, shown as a dropdown of names
             std::string r, g, b, a;
         };
         struct Row {
             newui::Label* caption = nullptr;
             newui::TextField* field = nullptr;
             newui::SubView* swatch = nullptr;
+            newui::Slider* slider = nullptr;
+            newui::DropDownList* choice = nullptr;
             std::shared_ptr<NumberScrubber> scrubber;
         };
+        void buildCodeSection();
+        void layoutCode();
+        void updateCode(const jitnodes::Node* shown, bool nodeChanged);
+        std::string committedCode() const;
+        void sliderChanged(std::size_t row);
+        newui::SubView* codeRow_ = nullptr;
+        newui::SubView* codeSection_ = nullptr;
+        newui::SubView* editorHost_ = nullptr;
+        newui::Button* codeToggle_ = nullptr;
+        newui::Button* classButton_ = nullptr;
+        newui::Label* cookErrorLabel_ = nullptr;
+        CodeEditorView* editor_ = nullptr;
+        bool codeOpen_ = false;
+        std::string loadedCode_;   // the node's text as the editor last took it; an editor holding something else has unsaved edits
+        bool sliding_ = false;
+        bool slidingSet_ = false;   // the drag changed the value, so mouse up records it
+        bool updatingSlider_ = false;
+        bool updatingChoice_ = false;   // the panel itself is setting a slider
+        std::string sliderName_;
+        std::optional<jitnodes::GraphSnapshot> sliderBefore_;
 
         newui::Label* label(const std::string& name) const;
         newui::TextField* field(const std::string& name) const;

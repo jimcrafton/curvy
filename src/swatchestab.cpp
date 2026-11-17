@@ -353,12 +353,31 @@ namespace curvy {
                 }
                 if ((buttons & mbmLeftButton) != 0) {
                     selectSwatch(at);
+                    pressTile(at, toGrid(at, local));
                     return SyncReturn(SyncReturn::Handled);
                 }
                 return SyncReturn(SyncReturn::Ignored);
             };
+            const auto move = [this, at](View&, const Point& local, std::uint32_t buttons, std::uint32_t) {
+                if ((buttons & mbmLeftButton) == 0) {
+                    return SyncReturn(SyncReturn::Ignored);
+                }
+                dragTileTo(toGrid(at, local));
+                return SyncReturn(SyncReturn::Handled);
+            };
+            const auto up = [this, at](View&, const Point& local, std::uint32_t, std::uint32_t) {
+                if (pressedTile_ < 0) {
+                    return SyncReturn(SyncReturn::Ignored);
+                }
+                releaseTileAt(toGrid(at, local));
+                return SyncReturn(SyncReturn::Handled);
+            };
             tile.view->onMouseDown += act;
             tile.chip->onMouseDown += act;
+            tile.view->onMouseMove += move;
+            tile.chip->onMouseMove += move;
+            tile.view->onMouseUp += up;
+            tile.chip->onMouseUp += up;
             tiles_.push_back(tile);
         }
         return tiles_[index];
@@ -388,9 +407,77 @@ namespace curvy {
     void SwatchesTab::paintSelection() {
         for (std::size_t i = 0; i < shownTiles_ && i < tiles_.size(); ++i) {
             const bool selected = int(i) == selected_;
-            tiles_[i].chip->style().setBorderWidth(selected ? 2.0f : 1.0f);
-            tiles_[i].chip->style().setBorderFill(selected ? Color(1.0f, 0.71f, 0.33f) : Color(0.0f, 0.0f, 0.0f));
+            const bool target = dragging_ && int(i) == dropTarget_ && int(i) != pressedTile_;
+            tiles_[i].chip->style().setBorderWidth(selected || target ? 2.0f : 1.0f);
+            tiles_[i].chip->style().setBorderFill(target ? Color(1.0f, 1.0f, 1.0f)
+                                                         : selected ? Color(1.0f, 0.71f, 0.33f) : Color(0.0f, 0.0f, 0.0f));
+            tiles_[i].chip->style().markDirty();
         }
+    }
+
+    Point SwatchesTab::toGrid(std::size_t tile, const Point& local) const {
+        if (tile >= tiles_.size()) {
+            return local;
+        }
+        const Rect frame = tiles_[tile].view->bounds();
+        return Point(local.x + frame.left(), local.y + frame.top());
+    }
+
+    Point SwatchesTab::tileCenter(std::size_t index) const {
+        const std::size_t columns = (std::max<std::size_t>)(1, columns_);
+        return Point(float(index % columns) * (kTileWidth + kTileGap) + kTileWidth * 0.5f,
+                     float(index / columns) * (kTileHeight + kTileGap) + kTileHeight * 0.5f);
+    }
+
+    int SwatchesTab::tileIndexAt(const Point& gridPoint) const {
+        const float stride = kTileWidth + kTileGap;
+        if (gridPoint.x < 0.0f || gridPoint.y < 0.0f) {
+            return -1;
+        }
+        const std::size_t column = std::size_t(gridPoint.x / stride);
+        const std::size_t row = std::size_t(gridPoint.y / (kTileHeight + kTileGap));
+        if (column >= columns_) {
+            return -1;
+        }
+        const std::size_t index = row * columns_ + column;
+        return index < shownTiles_ ? int(index) : -1;
+    }
+
+    void SwatchesTab::pressTile(std::size_t index, const Point& gridPoint) {
+        pressedTile_ = index < shownTiles_ ? int(index) : -1;
+        dragging_ = false;
+        dropTarget_ = -1;
+        pressPoint_ = gridPoint;
+    }
+
+    void SwatchesTab::dragTileTo(const Point& gridPoint) {
+        if (pressedTile_ < 0 || showingRecent_) {
+            return;
+        }
+        if (!dragging_ && std::hypot(gridPoint.x - pressPoint_.x, gridPoint.y - pressPoint_.y) > 4.0f) {
+            dragging_ = true;
+        }
+        if (dragging_) {
+            dropTarget_ = tileIndexAt(gridPoint);
+            paintSelection();
+        }
+    }
+
+    void SwatchesTab::releaseTileAt(const Point& gridPoint) {
+        const int pressed = pressedTile_;
+        const bool dragged = dragging_;
+        pressedTile_ = -1;
+        dragging_ = false;
+        dropTarget_ = -1;
+        if (pressed < 0) {
+            return;
+        }
+        const int target = tileIndexAt(gridPoint);
+        if (dragged && !showingRecent_ && target >= 0 && target != pressed) {
+            selected_ = target;
+            guarded([&]() { document_.moveSwatch(document_.activePalette(), std::size_t(pressed), std::size_t(target)); });
+        }
+        paintSelection();
     }
 
     // ---- Details ----
@@ -545,6 +632,7 @@ namespace curvy {
 
         place(gridTitle_, kTitleHeight);
         const std::size_t columns = (std::max<std::size_t>)(1, std::size_t((inner + kTileGap) / (kTileWidth + kTileGap)));
+        columns_ = columns;
         const std::size_t tileRows = (shownTiles_ + columns - 1) / columns;
         const float gridHeight = tileRows == 0 ? 0.0f : float(tileRows) * kTileHeight + float(tileRows - 1) * kTileGap;
         place(grid_, gridHeight);

@@ -1,0 +1,248 @@
+{
+  meta: {
+    author: "",
+    date: "2026-11-16",
+    copyright: "",
+    version: "0.1.0.900"
+  },
+  type: "SubView",
+  bounds: {
+    type: "Rect",
+    pos: { type: "Point", x: 0, y: 0 },
+    size: { type: "Size", width: 380, height: 330 }
+  },
+  visible: true,
+  name: "nodePanelCode",
+  layout: { type: "FlexLayout", orientation: "Vertical" },
+  style: {
+    type: "ViewStyle",
+    backgroundFill: { type: "Fill", kind: "Color", color: "#1e1e1e" }
+  },
+  childViews: [
+    {
+      type: "SubView",
+      bounds: {
+        type: "Rect",
+        pos: { type: "Point", x: 0, y: 0 },
+        size: { type: "Size", width: 380, height: 8 }
+      },
+      visible: true,
+      name: "wrangleCodeGap",
+      desiredSize: { type: "Size", width: 380, height: 8 },
+      desiredSizeOverride: true,
+      childViews: []
+    },
+    {
+      type: "SubView",
+      bounds: {
+        type: "Rect",
+        pos: { type: "Point", x: 0, y: 8 },
+        size: { type: "Size", width: 380, height: 26 }
+      },
+      visible: true,
+      name: "wrangleCodeRow",
+      layout: {
+        type: "FlexLayout",
+        orientation: "Horizontal",
+        crossAxisAlignment: "Center",
+        spacing: 6,
+        padding: 4
+      },
+      desiredSize: { type: "Size", width: 380, height: 26 },
+      desiredSizeOverride: true,
+      childViews: [
+        {
+          type: "Label",
+          text: "Code",
+          textAlignment: "Left",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 4, y: 4 },
+            size: { type: "Size", width: 90, height: 17 }
+          },
+          style: {
+            type: "LabelStyle",
+            text: "Code",
+            wordWrap: true,
+            font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+            textColor: "#a0a0a0",
+            textAlignment: "Left"
+          },
+          desiredSize: { type: "Size", width: 90, height: 17 },
+          desiredSizeOverride: true
+        },
+        {
+          type: "Button",
+          text: "Code",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 100, y: 0 },
+            size: { type: "Size", width: 75, height: 26 }
+          },
+          name: "wrangleCodeToggle",
+          style: {
+            type: "ThemedButtonStyle",
+            font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+          }
+        },
+        {
+          type: "Label",
+          text: "Run over",
+          textAlignment: "Left",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 181, y: 4 },
+            size: { type: "Size", width: 70, height: 17 }
+          },
+          style: {
+            type: "LabelStyle",
+            text: "Run over",
+            wordWrap: true,
+            font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+            textColor: "#a0a0a0",
+            textAlignment: "Left"
+          },
+          desiredSize: { type: "Size", width: 70, height: 17 },
+          desiredSizeOverride: true
+        },
+        {
+          type: "Button",
+          text: "Points",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 257, y: 0 },
+            size: { type: "Size", width: 75, height: 26 }
+          },
+          name: "wrangleClassButton",
+          style: {
+            type: "ThemedButtonStyle",
+            font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+          }
+        }
+      ]
+    },
+    {
+      type: "SubView",
+      bounds: {
+        type: "Rect",
+        pos: { type: "Point", x: 0, y: 34 },
+        size: { type: "Size", width: 380, height: 296 }
+      },
+      visible: true,
+      name: "wrangleCode",
+      layout: { type: "FlexLayout", orientation: "Vertical" },
+      layoutParams: { type: "FlexLayoutParams", weight: 1 },
+      style: {
+        type: "ViewStyle",
+        backgroundFill: { type: "Fill", kind: "Color", color: "#1e1e1e" }
+      },
+      childViews: [
+        {
+          type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 0 },
+            size: { type: "Size", width: 380, height: 248 }
+          },
+          visible: true,
+          name: "wrangleEditorHost",
+          layoutParams: { type: "FlexLayoutParams", weight: 1 },
+          style: {
+            type: "ViewStyle",
+            backgroundFill: { type: "Fill", kind: "Color", color: "#181818" }
+          },
+          desiredSize: { type: "Size", width: 380, height: 248 },
+          desiredSizeOverride: true,
+          childViews: []
+        },
+        {
+          type: "Label",
+          text: "3:9 unknown function 'sinn'",
+          textAlignment: "Left",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 248 },
+            size: { type: "Size", width: 380, height: 20 }
+          },
+          name: "wrangleProblem",
+          style: {
+            type: "LabelStyle",
+            text: "3:9 unknown function 'sinn'",
+            wordWrap: true,
+            font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+            textColor: "#ff6b6b",
+            textAlignment: "Left"
+          },
+          desiredSize: { type: "Size", width: 380, height: 20 },
+          desiredSizeOverride: true
+        },
+        {
+          type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 268 },
+            size: { type: "Size", width: 380, height: 28 }
+          },
+          visible: true,
+          layout: {
+            type: "FlexLayout",
+            orientation: "Horizontal",
+            crossAxisAlignment: "Center",
+            spacing: 6,
+            padding: 4
+          },
+          desiredSize: { type: "Size", width: 380, height: 28 },
+          desiredSizeOverride: true,
+          childViews: [
+            {
+              type: "Button",
+              text: "Commit",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 4, y: 1 },
+                size: { type: "Size", width: 75, height: 26 }
+              },
+              name: "wrangleCommit",
+              style: {
+                type: "ThemedButtonStyle",
+                font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+              }
+            },
+            {
+              type: "Button",
+              text: "Revert",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 85, y: 1 },
+                size: { type: "Size", width: 75, height: 26 }
+              },
+              name: "wrangleRevert",
+              style: {
+                type: "ThemedButtonStyle",
+                font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+              }
+            },
+            {
+              type: "Label",
+              text: "Ctrl+Enter",
+              textAlignment: "Left",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 166, y: 5 },
+                size: { type: "Size", width: 69, height: 17 }
+              },
+              style: {
+                type: "LabelStyle",
+                text: "Ctrl+Enter",
+                wordWrap: true,
+                font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+                textColor: "#a0a0a0",
+                textAlignment: "Left"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

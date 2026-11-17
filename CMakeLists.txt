@@ -91,8 +91,12 @@ add_library(curvy_core STATIC
     src/scriptmodule.cpp
     src/scriptsmenu.cpp
     src/pyconsolepanel.cpp
+    src/codelanguage.cpp
+    src/codeeditorview.cpp
     src/scripteditorpanel.cpp
     src/pythonhighlight.cpp
+    src/wranglecheck.cpp
+    src/wranglehighlight.cpp
     src/utf8.cpp
     src/editorfonts.cpp
 )

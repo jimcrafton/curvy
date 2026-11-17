@@ -1,6 +1,7 @@
 #pragma once
 
 #include "curvy/scriptmodule.h"
+#include "curvy/syntaxproblem.h"   // where Python refuses to compile a script (checkSyntax)
 
 #include <chrono>
 #include <filesystem>
@@ -34,16 +35,6 @@ namespace curvy {
         bool cancelled = false;
         // True when the run was stopped because it passed the time limit (cancelled is true then too).
         bool timedOut = false;
-    };
-
-    // Where Python refuses to compile a script: 1-based line and column of the offending token (the end is the same place when Python gives
-    // none), and Python's own message ("invalid syntax", "unterminated string literal ...", "expected an indented block ...").
-    struct SyntaxProblem {
-        int line = 1;
-        int column = 1;
-        int endLine = 1;
-        int endColumn = 1;
-        std::string message;
     };
 
     // The embedded Python interpreter and the one scope console input runs in (names persist from one run to the next). Create it on the

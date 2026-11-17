@@ -315,3 +315,47 @@ TEST_F(SwatchesTabTest, theMenusAskTheOwnerToShowThemWhereTheButtonsAre) {
     more->onClick(*more);
     EXPECT_GE(shown, 4u);
 }
+
+TEST_F(SwatchesTabTest, draggingATileOntoAnotherMovesTheSwatchAsOneUndoStepAndKeepsItSelected) {
+    const std::vector<curvy::Swatch> before = document().palettes()[0].swatches;
+    ASSERT_GE(before.size(), 4u);
+    tab().selectSwatch(0);
+    tab().pressTile(0, tab().tileCenter(0));
+    tab().dragTileTo(tab().tileCenter(3));
+    EXPECT_TRUE(tab().tileDragging());
+    EXPECT_EQ(tab().dropTarget(), 3);
+    tab().releaseTileAt(tab().tileCenter(3));
+
+    const std::vector<curvy::Swatch>& after = document().palettes()[0].swatches;
+    EXPECT_EQ(after[3].name, before[0].name);
+    EXPECT_EQ(after[0].name, before[1].name);
+    EXPECT_EQ(tab().selectedIndex(), 3);
+    EXPECT_FALSE(tab().tileDragging());
+
+    document().undoStack().undo();
+    EXPECT_EQ(document().palettes()[0].swatches[0].name, before[0].name);
+}
+
+TEST_F(SwatchesTabTest, aPressThatBarelyMovesIsAClickNotADrag) {
+    const std::vector<curvy::Swatch> before = document().palettes()[0].swatches;
+    tab().pressTile(1, tab().tileCenter(1));
+    tab().dragTileTo(newui::Point(tab().tileCenter(1).x + 1.0f, tab().tileCenter(1).y));
+    EXPECT_FALSE(tab().tileDragging());
+    tab().releaseTileAt(tab().tileCenter(2));
+    EXPECT_EQ(document().palettes()[0].swatches[1].name, before[1].name);
+}
+
+TEST_F(SwatchesTabTest, aDragReleasedOffTheTilesOrInRecentChangesNothing) {
+    const std::vector<curvy::Swatch> before = document().palettes()[0].swatches;
+    tab().pressTile(0, tab().tileCenter(0));
+    tab().dragTileTo(newui::Point(-50.0f, -50.0f));
+    tab().releaseTileAt(newui::Point(-50.0f, -50.0f));
+    EXPECT_EQ(document().palettes()[0].swatches[0].name, before[0].name);
+
+    tab().selectPalette(document().palettes().size());
+    tab().pressTile(0, tab().tileCenter(0));
+    tab().dragTileTo(tab().tileCenter(1));
+    EXPECT_FALSE(tab().tileDragging());
+    tab().releaseTileAt(tab().tileCenter(1));
+    EXPECT_EQ(document().palettes()[0].swatches[0].name, before[0].name);
+}

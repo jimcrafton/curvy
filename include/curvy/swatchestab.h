@@ -69,6 +69,15 @@ namespace curvy {
         void addAllInUse();
         void renameActivePalette(const std::string& name);
 
+        // Dragging a tile onto another moves the swatch there (one undo step) and keeps it selected; points are in the tile grid's coordinates. A drag
+        // does nothing in Recent, which is automatic. They are what the tiles' mouse handlers call, so a test can drive a drag without a window.
+        void pressTile(std::size_t index, const newui::Point& gridPoint);
+        void dragTileTo(const newui::Point& gridPoint);
+        void releaseTileAt(const newui::Point& gridPoint);
+        newui::Point tileCenter(std::size_t index) const;
+        bool tileDragging() const { return dragging_; }
+        int dropTarget() const { return dropTarget_; }
+
         // What is on show, for tests.
         std::size_t paletteRowCount() const;   // the document's palettes and Recent
         std::size_t activeRow() const { return showingRecent_ ? document_.palettes().size() : document_.activePalette(); }
@@ -129,6 +138,8 @@ namespace curvy {
         void layoutAll(float width);
         void popup(const std::vector<PanelMenuEntry>& entries, newui::View& at, const newui::Point& local);
         void paintSelection();
+        int tileIndexAt(const newui::Point& gridPoint) const;
+        newui::Point toGrid(std::size_t tile, const newui::Point& local) const;
 
         PaletteRow& paletteRowAt(std::size_t index);
         Tile& tileAt(std::size_t index);
@@ -168,6 +179,11 @@ namespace curvy {
         std::size_t shownUses_ = 0;
         bool showingRecent_ = false;
         int selected_ = -1;
+        std::size_t columns_ = 1;
+        int pressedTile_ = -1;
+        int dropTarget_ = -1;
+        bool dragging_ = false;
+        newui::Point pressPoint_;
         bool updating_ = false;
         float contentHeight_ = 0.0f;
         float detailsHeight_ = 0.0f;

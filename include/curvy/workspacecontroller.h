@@ -242,6 +242,7 @@ namespace curvy {
         std::unique_ptr<GraphCrumbs> graphCrumbs_;
         RadialMenu* menu_ = nullptr;
         std::unique_ptr<DockController> docks_;
+        float dockWidthBeforeCode_ = 0.0f;   // the right dock's width before the node panel's code section widened it
         DockLayout panelLayout_;   // where every panel is; the dock views read it
         PanelDock* rightDock_ = nullptr;   // owned by the right area's view tree
         DocumentPanel* documentPanel_ = nullptr;   // owned by rightDock_ (or by its floating frame)

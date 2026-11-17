@@ -1,8 +1,10 @@
 #include "curvy/scriptmodule.h"
 
+#include "curvy/blendmodes.h"
 #include "curvy/objectnode.h"
 #include "curvy/selectionmodel.h"
 #include "curvy/sketchdocument.h"
+#include "curvy/wranglecheck.h"
 
 #include <pyHandles.h>
 
@@ -462,6 +464,26 @@ namespace curvy {
                 .def_property("name", [](const ScriptObject& o) { return o.node().name(); },
                               [](const ScriptObject& o, const std::string& name) { o.document().renameGraphNode(o.ref(), name); })
                 .def_property_readonly("id", [](const ScriptObject& o) { return o.ref().id; })
+                .def_property("opacity", [](const ScriptObject& o) { return o.node().getFloat("opacity"); },
+                              [](const ScriptObject& o, float opacity) { o.document().setGraphParam(o.ref(), "opacity", std::clamp(opacity, 0.0f, 1.0f)); },
+                              "0 to 1; the object's shapes fade together.")
+                .def_property("blend", [](const ScriptObject& o) {
+                                  const auto& names = BlendModes::names();
+                                  const long index = std::lround(o.node().getFloat("blend"));
+                                  return names[std::size_t(std::clamp<long>(index, 0, long(names.size()) - 1))];
+                              },
+                              [](const ScriptObject& o, const std::string& name) {
+                                  const auto& names = BlendModes::names();
+                                  const auto found = std::find_if(names.begin(), names.end(), [&](const std::string& candidate) {
+                                      return candidate.size() == name.size() &&
+                                             std::equal(candidate.begin(), candidate.end(), name.begin(), [](char a, char b) { return std::tolower(a) == std::tolower(b); });
+                                  });
+                                  if (found == names.end()) {
+                                      throw py::value_error("unknown blend mode '" + name + "'; see curvy.blend_modes()");
+                                  }
+                                  o.document().setGraphParam(o.ref(), "blend", float(found - names.begin()));
+                              },
+                              "The blend mode's name, one of curvy.blend_modes() (case does not matter).")
                 .def_property_readonly("is_layer", [](const ScriptObject& o) {
                     const auto& tags = o.node().tags();
                     return std::find(tags.begin(), tags.end(), std::string(layerTag)) != tags.end();
@@ -1110,6 +1132,22 @@ namespace curvy {
             state.progress.message = message;
         }, py::arg("fraction"), py::arg("message") = "",
            "Reports how far the script is (0..1, or negative for unknown) and what it is doing; the console panel shows it while the script runs.");
+        module.def("check_wrangle", [](const std::string& code) -> py::object {
+            const std::optional<SyntaxProblem> problem = checkWrangle(code);
+            if (!problem) {
+                return py::none();
+            }
+            return py::make_tuple(problem->line, problem->column, problem->message);
+        }, py::arg("code"),
+           "Compiles wrangle code without running it: None when it parses, else (line, column, message), 1-based. What the Node panel's Code editor shows.");
+        module.def("blend_modes", []() { return BlendModes::names(); }, "The blend modes an object offers, as names (Normal first).");
+        module.def("wrangle_functions", []() {
+            std::vector<std::tuple<std::string, int>> functions;
+            for (const WrangleFunction& function : wrangleFunctions()) {
+                functions.emplace_back(function.name, function.arity);
+            }
+            return functions;
+        }, "The functions the wrangle language has, as (name, number of arguments).");
 
         for (const char* name : {"Selection", "Object", "Transaction", "Document"}) {
             guardClass(module.attr(name));

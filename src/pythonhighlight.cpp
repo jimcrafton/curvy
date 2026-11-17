@@ -73,8 +73,8 @@ namespace curvy {
 
     const std::vector<SyntaxStyleInfo>& pythonSyntaxStyles() {
         static const std::vector<SyntaxStyleInfo> styles = {
-            {"keyword", "Keyword"},       {"constant", "True, False, None"}, {"string", "String"},      {"number", "Number"},
-            {"comment", "Comment"},       {"identifier", "Name"},            {"definition", "Function, class"}, {"decorator", "Decorator"},
+            {"keyword", "Keyword"},       {"constant", "Constants"},         {"string", "String"},      {"number", "Number"},
+            {"comment", "Comment"},       {"identifier", "Name"},            {"definition", "Definitions"},     {"decorator", "Decorator"},
             {"operator", "Operator"},     {"punctuation", "Punctuation"},
         };
         return styles;
@@ -278,6 +278,27 @@ namespace curvy {
             return a.start != b.start ? a.start < b.start : a.length > b.length;
         });
         return folds;
+    }
+
+    std::shared_ptr<const CodeLanguage> PythonLanguage::instance() {
+        static const std::shared_ptr<const CodeLanguage> language = std::make_shared<const PythonLanguage>();
+        return language;
+    }
+
+    std::shared_ptr<const newui::TextStyleSheet> PythonLanguage::styleSheet(bool dark, const std::map<std::string, std::uint32_t>& colors) const {
+        return pythonStyleSheet(dark, colors);
+    }
+
+    std::vector<newui::text::TextStyleRange> PythonLanguage::styleRanges(const std::wstring& text) const {
+        return pythonStyleRanges(text);
+    }
+
+    std::wstring PythonLanguage::newLineIndent(const std::wstring& lineBeforeCaret, std::size_t indentWidth) const {
+        return pythonNewLineIndent(lineBeforeCaret, indentWidth);
+    }
+
+    std::vector<newui::text::TextFold> PythonLanguage::folds(const std::wstring& text) const {
+        return pythonFolds(text);
     }
 
 }

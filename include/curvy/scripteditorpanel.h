@@ -1,5 +1,6 @@
 #pragma once
 
+#include "curvy/codeeditorview.h"
 #include "curvy/panel.h"
 #include "curvy/scriptconsole.h"
 #include "curvy/settings.h"
@@ -7,7 +8,6 @@
 #include <newui/controls.h>
 #include <newui/runloop.h>
 #include <newui/textfolding.h>
-#include <newui/texthistory.h>
 
 #include <filesystem>
 #include <functional>
@@ -19,9 +19,8 @@
 
 namespace curvy {
 
-    // The Python script editor of the right dock: a code editor (line numbers, syntax colours, folding of indented blocks, undo) above
-    // Open, Save and Run buttons. The editor is a newui::TextFoldingControl in a ScrollView, the way cpp_codetools' C++ editor is, with
-    // colours and folds from the lex library (pythonhighlight.h).
+    // The Python script editor of the right dock: a CodeEditorView (line numbers, syntax colours, folding of indented blocks, undo, find and
+    // replace; colours and folds from the lex library, pythonhighlight.h) above Open, Save and Run buttons.
     //
     // It only edits and stores text; Run hands the code to onRun (the owner sends it to the console, which shows the output). With text
     // selected, Run runs the selected lines instead of the whole script (Ctrl+Enter and F5 do the same as the button). Open and Save ask
@@ -66,38 +65,23 @@ namespace curvy {
         void open();
         void saveToFile();
 
-        // The find bar (Ctrl+F) between the editor and the buttons: a field, the match count, Prev, Next and a close button. Typing
-        // selects the first match at or after the caret; Enter or F3 goes to the next one, Shift+Enter or Shift+F3 to the previous one,
-        // both wrapping round; Esc closes the bar. The search ignores case unless the text searched for has a capital letter.
-        //
-        // Every match is marked in the text (the current one with a frame), because the editor does not draw its selection while the find
-        // field has the keyboard focus. Ctrl+H (showReplace) adds a second row: the replacement, Replace (replaces the current match,
-        // then goes to the next) and All (every match, one undo step).
-        void showFind();
-        void showReplace();
-        void hideFind();
-        void setReplaceText(const std::string& text);
-        std::string replaceText() const;
-        // Replaces the selected match (when the selection is one) and selects the next; false when nothing was left to find.
-        bool replaceCurrent();
-        // Returns how many matches were replaced.
-        std::size_t replaceAll();
-        bool findVisible() const { return findShown_; }
-        void setFindText(const std::string& text);
-        std::string findText() const;
-        // Selects the next (or previous) match after the selection; false when there is none.
-        bool findNext(bool backward = false);
-        // "2 of 7", "No match", "Bad pattern" (a regular expression that does not parse), or empty when nothing is searched for.
-        std::string findStatus() const;
-
-        // The three switches of the find bar (buttons "Aa", "W" and ".*"). Plain text ignores case unless it has a capital letter or
-        // matchCase is on; a regular expression (ECMAScript) ignores case unless matchCase is on. wholeWord keeps only matches that are not
-        // part of a longer word (letters, digits, underscore). In a regular expression the replacement may use $1 ... and $&; an empty match
-        // is never a match.
-        void setFindOptions(bool matchCase, bool wholeWord, bool regex);
-        bool matchCase() const { return matchCase_; }
-        bool wholeWord() const { return wholeWord_; }
-        bool regex() const { return regex_; }
+        // The find bar (Ctrl+F) between the editor and the buttons; see CodeEditorView for how it behaves.
+        void showFind() { editor_->showFind(); }
+        void showReplace() { editor_->showReplace(); }
+        void hideFind() { editor_->hideFind(); }
+        void setReplaceText(const std::string& text) { editor_->setReplaceText(text); }
+        std::string replaceText() const { return editor_->replaceText(); }
+        bool replaceCurrent() { return editor_->replaceCurrent(); }
+        std::size_t replaceAll() { return editor_->replaceAll(); }
+        bool findVisible() const { return editor_->findVisible(); }
+        void setFindText(const std::string& text) { editor_->setFindText(text); }
+        std::string findText() const { return editor_->findText(); }
+        bool findNext(bool backward = false) { return editor_->findNext(backward); }
+        std::string findStatus() const { return editor_->findStatus(); }
+        void setFindOptions(bool matchCase, bool wholeWord, bool regex) { editor_->setFindOptions(matchCase, wholeWord, regex); }
+        bool matchCase() const { return editor_->matchCase(); }
+        bool wholeWord() const { return editor_->wholeWord(); }
+        bool regex() const { return editor_->regex(); }
 
         // Gets the code and the name to show for it (the file name or "script", with " (selection)" for selected lines).
         std::function<void(const std::string&, const std::string&)> onRun;
@@ -114,13 +98,13 @@ namespace curvy {
         // not hide each other.
         std::function<std::optional<SyntaxProblem>(const std::string&)> onCheckSyntax;
         // Checks now instead of after the pause (what the timer calls); clears the problem when onCheckSyntax is not set.
-        void checkSyntax();
-        const std::optional<SyntaxProblem>& syntaxProblem() const { return problem_; }
+        void checkSyntax() { editor_->checkSyntax(); }
+        const std::optional<SyntaxProblem>& syntaxProblem() const { return editor_->syntaxProblem(); }
         // The text under the editor: "Line 4, col 7: invalid syntax", or empty when the script compiles. Run (button, Ctrl+Enter, F5) asks
         // the checker about the code it is about to send, the selected lines or the whole script, and does not send code that does not
         // compile: onMessage gets "Not run - line 4, col 7: invalid syntax". While the whole script has a problem the Run button shows a
         // warning sign.
-        std::string problemText() const { return problemLabel_->text(); }
+        std::string problemText() const { return editor_->problemText(); }
 
         // Called with the file's path after a successful Open or Save, so the owner can remember it for the next session.
         std::function<void(const std::filesystem::path&)> onFileChanged;
@@ -129,75 +113,29 @@ namespace curvy {
         std::function<void()> onDestroyed;
 
         // What is on show, for tests.
-        newui::TextFoldingControl* textControl() const { return text_; }
+        newui::TextFoldingControl* textControl() const { return editor_->textControl(); }
         std::string runButtonText() const { return runButton_->text(); }
-        std::string fontName() const { return text_->font().name(); }
+        std::string fontName() const { return editor_->fontName(); }
         // Colours and folds follow the text a moment after an edit; this brings them up to date now.
-        void refreshHighlight();
+        void refreshHighlight() { editor_->refreshHighlight(); }
 
-        static constexpr float kPad = 6.0f;
-        static constexpr float kButtonHeight = 24.0f;
-        static constexpr float kProblemHeight = 20.0f;   // the line under the editor that names a syntax problem
+        static constexpr float kPad = CodeEditorView::kPad;
+        static constexpr float kButtonHeight = CodeEditorView::kButtonHeight;
+        static constexpr float kProblemHeight = CodeEditorView::kProblemHeight;   // the line under the editor that names a syntax problem
 
     private:
         void layoutParts();
         void historyChanged();
         void updateTitle();
         void updateRunLabel();
-        void scheduleHighlight();
-        void scheduleSyntaxCheck();
-        // Sets the text's marks: the find marks given plus the syntax problem's squiggle.
-        void applyMarks(std::vector<newui::text::TextDecoration> findMarks);
         void scheduleScratch();
         void writeScratch();
         // The code Run would send, and its name.
         void codeToRun(std::string& code, std::string& name) const;
-        bool hasSelection() const;
-        struct FindMatch {
-            std::size_t start = 0;
-            std::size_t length = 0;
-            std::wstring replacement;   // only when asked for
-        };
-        // Every match of the query in the text under the current switches. False with `badPattern` set when a regular expression does not parse.
-        bool collectMatches(std::vector<FindMatch>& matches, bool withReplacements, bool& badPattern) const;
-        // Selects the match at or after (or, backward, before) `from`, wrapping round; false when the text has none.
-        bool selectMatch(std::size_t from, bool backward);
-        void updateFindStatus();
-        void revealCaret();
-        void openFindBar(bool withReplace);
-        void applyFindVisibility();
-        void findOptionsChanged();
-        // The theme's backgrounds of the text and its scroll view, kept while the user's background colour replaces them.
-        struct SavedFill {
-            newui::gfx::PaintKind kind = newui::gfx::PaintKind::None;
-            newui::Color color;
-        };
-        std::optional<std::pair<SavedFill, SavedFill>> themeBackground_;
-        std::optional<SyntaxProblem> problem_;
-        bool running_ = false;
-        newui::Label* problemLabel_ = nullptr;
-        std::vector<newui::text::TextDecoration> findMarks_;
-        newui::RunLoop::TimerHandle syntaxTimer_ = newui::RunLoop::kInvalidTimerHandle;
-        newui::Button* matchCaseButton_ = nullptr;
-        newui::Button* wholeWordButton_ = nullptr;
-        newui::Button* regexButton_ = nullptr;
-        bool matchCase_ = false;
-        bool wholeWord_ = false;
-        bool regex_ = false;
-        newui::TextField* replaceField_ = nullptr;
-        newui::Button* replaceButton_ = nullptr;
-        newui::Button* replaceAllButton_ = nullptr;
-        bool replaceShown_ = false;
+        bool hasSelection() const { return editor_->hasSelection(); }
 
-        newui::TextField* findField_ = nullptr;
-        newui::Label* findLabel_ = nullptr;
-        newui::Button* findPrevButton_ = nullptr;
-        newui::Button* findNextButton_ = nullptr;
-        newui::Button* findCloseButton_ = nullptr;
-        bool findShown_ = false;
-        newui::ScrollView* scroll_ = nullptr;
-        newui::TextFoldingControl* text_ = nullptr;
-        newui::text::HistoryTextModel* history_ = nullptr;   // the text control's model
+        bool running_ = false;
+        CodeEditorView* editor_ = nullptr;
         newui::Button* openButton_ = nullptr;
         newui::Button* saveButton_ = nullptr;
         newui::Button* runButton_ = nullptr;
@@ -205,7 +143,6 @@ namespace curvy {
         std::filesystem::path scratchFile_;
         bool modified_ = false;
         bool scratchDirty_ = false;
-        newui::RunLoop::TimerHandle highlightTimer_ = newui::RunLoop::kInvalidTimerHandle;
         newui::RunLoop::TimerHandle scratchTimer_ = newui::RunLoop::kInvalidTimerHandle;
         newui::RunLoop* loop_ = nullptr;
     };
