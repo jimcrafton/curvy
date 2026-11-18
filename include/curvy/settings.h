@@ -87,6 +87,9 @@ namespace curvy {
         // the way Cancel stops it.
         bool scriptTimeout = false;
         int scriptTimeoutSeconds = 60;
+        // How long a `python` node may run before it is stopped (0: no limit). Unlike a script, a node runs while the canvas draws, so it has a
+        // limit by default. Only in the settings file (scriptEditor.pythonNodeSeconds), no dialog row.
+        int pythonNodeSeconds = 10;
         // Only the colours the user changed, by syntax style name ("keyword", "string", ...; see pythonSyntaxStyles()), as 0xRRGGBB. Every
         // other style keeps the theme's colour.
         // Besides the syntax styles' names, "text" (the colour of everything not coloured) and "background" can be overridden too.

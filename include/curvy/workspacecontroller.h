@@ -15,6 +15,7 @@
 #include "curvy/pointtable.h"
 #include "curvy/radialmenu.h"
 #include "curvy/assetevents.h"
+#include "curvy/pythonnodetrust.h"
 #include "curvy/assetmanagermodel.h"
 #include "curvy/assetmanagerpanel.h"
 #include "curvy/assetpropertiessession.h"
@@ -120,6 +121,7 @@ namespace curvy {
         AssetManagerPanel& assetPanel() { return *assetPanel_; }
         AssetManagerModel& assetModel() { return *assetModel_; }
         AssetEvents* assetEvents() { return assetEvents_.get(); }   // null until there is a script console
+        PythonNodeTrust* pythonNodeTrust() { return pythonNodeTrust_.get(); }   // likewise: decides whether a python node's code may run
         // onInstalled for the assets registered or re-registered since the last call. The library's change notice queues it on the run loop;
         // this is the part that runs there.
         void flushInstalledEvents();
@@ -211,6 +213,7 @@ namespace curvy {
         void fireLoadedEvents();   // onCreated('loaded') for the instances of a document that was just opened
         std::string migrationNotes();     // the same as text ("" when there is nothing); asks to allow assets whose script was not trusted
         void reportMigrationProblems();   // what onVersionUpdated scripts did wrong while a document loaded or instances were updated
+        void wirePythonNodeTrust();   // the gate in front of the code of `python` nodes (pythonnodetrust.h)
         void wireAssetEvents();    // the document hooks behind onDeleted, onFrameChanged, onInputChanged and onParamChanged
         void replaceSubnetWithInstance(const NodeRef& subnet, const std::string& type);
         void wireSwatchActions(SwatchPaletteController& swatches);
@@ -268,6 +271,7 @@ namespace curvy {
         AssetManagerPanel* assetPanel_ = nullptr;   // likewise
         ScriptConsole* scriptConsole_ = nullptr;   // the application's, outlives the window
         std::unique_ptr<AssetEvents> assetEvents_;   // made with the console
+        std::unique_ptr<PythonNodeTrust> pythonNodeTrust_;   // likewise
         std::optional<std::size_t> deleteMark_;      // the undo depth when onDeleted started, until the delete's step is recorded
         std::string deleteErrors_;
         std::map<std::string, int> installedSeen_;   // asset name -> version already announced with onInstalled

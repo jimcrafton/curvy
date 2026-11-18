@@ -94,6 +94,7 @@ add_library(curvy_core STATIC
     src/backgroundtask.cpp
     src/scriptconsole.cpp
     src/assetevents.cpp
+    src/pythonnodetrust.cpp
     src/scriptmodule.cpp
     src/scriptsmenu.cpp
     src/pyconsolepanel.cpp

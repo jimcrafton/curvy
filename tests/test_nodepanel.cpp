@@ -1,5 +1,7 @@
 #include "testsupport.h"
 
+#include "pythonconsole.h"
+
 #include <newui/mouse_constants.h>
 #include <newui/pen.h>
 #include <newui/undostack.h>
@@ -503,4 +505,81 @@ TEST_F(WrangleCodeTest, aDockAlreadyWideEnoughIsLeftAlone) {
     EXPECT_FLOAT_EQ(window().docks().size(curvy::DockSide::Right), 500.0f);
     window().nodePanel().setCodeOpen(false);
     EXPECT_FLOAT_EQ(window().docks().size(curvy::DockSide::Right), 500.0f);
+}
+
+namespace {
+
+    class PythonCodeTest : public NodePanelTest {
+    protected:
+        void SetUp() override {
+            NodePanelTest::SetUp();
+            curvytest::sharedConsole().setMainThreadPoster([](std::function<void()>) {});
+            window().setScriptConsole(&curvytest::sharedConsole());
+            window().pythonNodeTrust()->setTrustFile({});
+            window().docks().setCollapsed(curvy::DockSide::Right, false);
+            frame_.rootView().updateLayout();
+            python_ = window().document().addGraphNode("python");
+            window().nodePanel().show(python_);
+        }
+
+        void TearDown() override {
+            NodePanelTest::TearDown();
+            curvytest::sharedConsole().setMainThreadPoster(nullptr);
+        }
+
+        curvy::NodeRef python_;
+    };
+
+}
+
+TEST_F(PythonCodeTest, aPythonNodeGetsTheCodeSectionWithItsOwnEditorAndNoClassButton) {
+    curvy::NodePanel& panel = window().nodePanel();
+    EXPECT_TRUE(panel.codeShown());
+    EXPECT_TRUE(panel.codeIsPython());
+    EXPECT_FALSE(panel.findView("wrangleClassButton")->isVisible());
+
+    const curvy::NodeRef wrangle = window().document().addGraphNode("wrangle");
+    panel.show(wrangle);
+    EXPECT_FALSE(panel.codeIsPython());
+    EXPECT_TRUE(panel.findView("wrangleClassButton")->isVisible());
+    panel.show(python_);
+    EXPECT_TRUE(panel.codeIsPython());
+}
+
+TEST_F(PythonCodeTest, committingTrustsTheTypedTextSoTheNodeCooksWithoutAskingAndIsOneUndoStep) {
+    curvy::NodePanel& panel = window().nodePanel();
+    window().pythonNodeTrust()->setPrompt([](std::size_t) {
+        ADD_FAILURE() << "the user's own text must not be asked about";
+        return false;
+    });
+    panel.setCodeOpen(true);
+    panel.codeEditor()->setText("geo.resize_points(4)");
+    EXPECT_TRUE(panel.codeModified());
+    panel.commitCode();
+
+    EXPECT_EQ(window().document().node(python_).getString("code"), "geo.resize_points(4)");
+    EXPECT_EQ(window().document().cook(python_)->pointCount(), 4u);
+    EXPECT_EQ(panel.cookError(), "");
+    EXPECT_EQ(window().pythonNodeTrust()->pendingCount(), 0u);
+    window().document().undoStack().undo();
+    EXPECT_EQ(window().document().node(python_).getString("code"), "");
+}
+
+TEST_F(PythonCodeTest, aFailingScriptShowsTheLastLineOfItsTraceback) {
+    curvy::NodePanel& panel = window().nodePanel();
+    panel.setCodeOpen(true);
+    panel.codeEditor()->setText("x = 1\nraise ValueError('boom')");
+    panel.commitCode();
+    EXPECT_EQ(panel.cookError(), "ValueError: boom");
+}
+
+TEST_F(PythonCodeTest, aSyntaxErrorIsNamedUnderTheEditor) {
+    curvy::NodePanel& panel = window().nodePanel();
+    panel.setCodeOpen(true);
+    panel.codeEditor()->setText("def (");
+    panel.codeEditor()->checkSyntax();
+    EXPECT_NE(panel.codeProblem(), "");
+    panel.codeEditor()->setText("x = 1");
+    panel.codeEditor()->checkSyntax();
+    EXPECT_EQ(panel.codeProblem(), "");
 }

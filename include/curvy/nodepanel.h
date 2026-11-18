@@ -104,6 +104,13 @@ namespace curvy {
         // The width the code section wants the panel to have, and called with true when it opens and false when it closes.
         static constexpr float kCodeWidth = 380.0f;
         std::function<void(bool open)> onCodeToggled;
+        // The same section edits the code of a `python` node (the editor then colours Python and class button is hidden). The owner supplies
+        // Python's syntax check, and is told the text the user commits before the node gets it: code the user typed is trusted, so the
+        // node's first cook does not ask whether it may run (PythonNodeTrust::trust).
+        std::function<std::optional<SyntaxProblem>(const std::string& code)> onCheckPython;
+        std::function<void(const std::string& code)> onPythonCodeCommitted;
+        // True when the section is showing a python node.
+        bool codeIsPython() const { return pythonShown_; }
 
         // The colour card a colour row's swatch opens (a floating box in the node area: wheel, RGB / HSB / CMYK / Gray sliders, alpha when the colour has
         // one, hex); clicking the swatch again closes it. It edits the row's r, g, b (and alpha) live and makes each gesture one undo step. Closed when
@@ -148,6 +155,8 @@ namespace curvy {
         void layoutCode();
         void updateCode(const jitnodes::Node* shown, bool nodeChanged);
         std::string committedCode() const;
+        void useEditor(CodeEditorView* editor);
+        static bool hasCode(const jitnodes::Node* node);
         void sliderChanged(std::size_t row);
         newui::SubView* codeRow_ = nullptr;
         newui::SubView* codeSection_ = nullptr;
@@ -155,7 +164,10 @@ namespace curvy {
         newui::Button* codeToggle_ = nullptr;
         newui::Button* classButton_ = nullptr;
         newui::Label* cookErrorLabel_ = nullptr;
-        CodeEditorView* editor_ = nullptr;
+        CodeEditorView* editor_ = nullptr;          // the one on show: wrangleEditor_ or pythonEditor_
+        CodeEditorView* wrangleEditor_ = nullptr;
+        CodeEditorView* pythonEditor_ = nullptr;
+        bool pythonShown_ = false;
         bool codeOpen_ = false;
         std::string loadedCode_;   // the node's text as the editor last took it; an editor holding something else has unsaved edits
         bool sliding_ = false;

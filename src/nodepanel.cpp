@@ -2,6 +2,7 @@
 
 #include <jitnodes/graph/network.h>
 
+#include "curvy/pythonhighlight.h"
 #include "curvy/theme.h"
 #include "curvy/wranglecheck.h"
 #include "curvy/wranglehighlight.h"
@@ -167,17 +168,29 @@ namespace curvy {
         codeSection_->setLayoutParams(std::make_unique<FlexLayoutParams>(0.0f));
         codeSection_->setVisible(false);
 
-        editor_ = new CodeEditorView(WrangleLanguage::instance(), "wrangleEditor");
-        editor_->setVisible(true);
-        editorHost_->addChild(editor_);
+        // Two editors share the host, one per language (a view's language is fixed when it is made); the one for the node on show is visible.
+        const auto makeEditor = [this](std::shared_ptr<const CodeLanguage> language, const char* name) {
+            auto* editor = new CodeEditorView(std::move(language), name);
+            editorHost_->addChild(editor);
+            editor->onExecuteKey = [this]() { commitCode(); };
+            editor->onHistoryChanged = [this]() { layoutCode(); };
+            return editor;
+        };
+        wrangleEditor_ = makeEditor(WrangleLanguage::instance(), "wrangleEditor");
+        wrangleEditor_->onCheckSyntax = [](const std::string& code) { return checkWrangle(code); };
+        pythonEditor_ = makeEditor(PythonLanguage::instance(), "pythonNodeEditor");
+        pythonEditor_->onCheckSyntax = [this](const std::string& code) -> std::optional<SyntaxProblem> {
+            return onCheckPython ? onCheckPython(code) : std::nullopt;
+        };
+        editor_ = wrangleEditor_;
+        useEditor(wrangleEditor_);
         editorHost_->onSizeChanged += [this](View&, const Size& size) {
-            editor_->setBounds(Rect(0.0f, 0.0f, size.width, size.height));
-            editor_->layoutParts();
+            for (CodeEditorView* editor : {wrangleEditor_, pythonEditor_}) {
+                editor->setBounds(Rect(0.0f, 0.0f, size.width, size.height));
+                editor->layoutParts();
+            }
             return SyncReturn::Handled;
         };
-        editor_->onCheckSyntax = [](const std::string& code) { return checkWrangle(code); };
-        editor_->onExecuteKey = [this]() { commitCode(); };
-        editor_->onHistoryChanged = [this]() { layoutCode(); };
 
         codeToggle_->onClick += [this](Control&) {
             setCodeOpen(!codeOpen_);
@@ -238,8 +251,20 @@ namespace curvy {
         }
     }
 
+    void NodePanel::useEditor(CodeEditorView* editor) {
+        editor_ = editor;
+        pythonShown_ = editor == pythonEditor_;
+        wrangleEditor_->setVisible(editor == wrangleEditor_);
+        pythonEditor_->setVisible(editor == pythonEditor_);
+        classButton_->setVisible(!pythonShown_);   // a python node has no point/primitive class
+    }
+
+    bool NodePanel::hasCode(const jitnodes::Node* node) {
+        return node != nullptr && (node->typeName() == "wrangle" || node->typeName() == "python");
+    }
+
     std::string NodePanel::committedCode() const {
-        if (node_.valid() && document_.hasNode(node_) && document_.node(node_).typeName() == "wrangle") {
+        if (node_.valid() && document_.hasNode(node_) && hasCode(&document_.node(node_))) {
             return document_.node(node_).getString("code");
         }
         return "";
@@ -266,6 +291,9 @@ namespace curvy {
         }
         const std::string text = editor_->text();
         if (text != committedCode()) {
+            if (pythonShown_ && onPythonCodeCommitted) {
+                onPythonCodeCommitted(text);   // before the edit, whose cook would otherwise ask whether this code may run
+            }
             try {
                 document_.setGraphString(node_, "code", text);
             } catch (const std::exception& error) {
@@ -320,19 +348,31 @@ namespace curvy {
     // Shows or hides the section for the node, loads its text when it is another node (or the editor holds nothing unsaved), and reports
     // the cook's error.
     void NodePanel::updateCode(const jitnodes::Node* shown, bool nodeChanged) {
-        const bool wrangle = shown != nullptr && shown->typeName() == "wrangle";
-        codeRow_->setVisible(wrangle);
-        if (wrangle) {
+        const bool hasCodeSection = hasCode(shown);
+        codeRow_->setVisible(hasCodeSection);
+        if (hasCodeSection) {
+            CodeEditorView* wanted = shown->typeName() == "python" ? pythonEditor_ : wrangleEditor_;
+            if (wanted != editor_) {
+                useEditor(wanted);
+                nodeChanged = true;
+            }
             if (nodeChanged || editor_->text() == loadedCode_) {
                 loadedCode_ = shown->getString("code");
                 setCodeText(loadedCode_);
             }
-            classButton_->setText(shown->getString("class") == "primitive" ? "Primitives" : "Points");
+            if (!pythonShown_) {
+                classButton_->setText(shown->getString("class") == "primitive" ? "Primitives" : "Points");
+            }
             std::string error;
             try {
                 document_.cook(node_);
             } catch (const std::exception& caught) {
                 error = caught.what();
+            }
+            if (pythonShown_) {
+                // pybind's message is the exception line followed by "At:" and the frames; the first line is the one worth showing.
+                const std::size_t end = error.find('\n');
+                error = error.substr(0, end);
             }
             cookErrorLabel_->setText(error);
         } else {

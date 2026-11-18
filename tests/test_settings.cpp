@@ -39,6 +39,7 @@ namespace {
         changed.editorTabWidth = 2;
         changed.scriptTimeout = true;
         changed.scriptTimeoutSeconds = 120;
+        changed.pythonNodeSeconds = 0;
         changed.editorColors = {{"keyword", 0xFF8800}, {"string", 0x00AA55}, {"text", 0xE0E0E0}, {"background", 0x101820}};
         changed.editorFile = "D:/scripts/my script.py";
         changed.window = {-1200, 80, 1100, 700, true, "\\\\.\\DISPLAY2"};
@@ -94,6 +95,7 @@ TEST(SettingsFile, EverySettingRoundTrips) {
     EXPECT_EQ(2, back.editorTabWidth);
     EXPECT_TRUE(back.scriptTimeout);
     EXPECT_EQ(120, back.scriptTimeoutSeconds);
+    EXPECT_EQ(0, back.pythonNodeSeconds) << "0 (no limit) survives the file";
     EXPECT_EQ(changed.editorColors, back.editorColors);
     EXPECT_EQ("D:/scripts/my script.py", back.editorFile);
 }
@@ -148,6 +150,7 @@ TEST(SettingsFile, theScriptEditorDefaultsAreAutomaticFontFourSpacesAndNoColourO
     EXPECT_TRUE(defaults.editorColors.empty());
     EXPECT_FALSE(defaults.scriptTimeout) << "scripts run until they end unless the user opts in";
     EXPECT_EQ(60, defaults.scriptTimeoutSeconds);
+    EXPECT_EQ(10, defaults.pythonNodeSeconds) << "a python node runs while the canvas draws, so it has a limit unless the user lifts it";
 }
 
 TEST(SettingsFile, badScriptEditorValuesAreSkipped) {

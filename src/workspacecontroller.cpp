@@ -1,4 +1,5 @@
 #include "curvy/workspacecontroller.h"
+#include <pyPythonNode.h>
 #include "curvy/assetpropertiesdialog.h"
 #include "curvy/assetpropertiesdialogsession.h"
 #include "curvy/selectionmodel.h"
@@ -158,6 +159,7 @@ namespace curvy {
         settings_ = settings;
         if (scriptConsole_ != nullptr) {
             scriptConsole_->setTimeout(std::chrono::seconds(settings_.scriptTimeout ? settings_.scriptTimeoutSeconds : 0));
+            jitnodes::python::setPythonNodeTimeLimit(std::chrono::seconds(settings_.pythonNodeSeconds));
         }
         if (themeChanged) {
             applyTheme(dark);
@@ -404,8 +406,14 @@ namespace curvy {
     }
 
     void WorkspaceController::setScriptConsole(ScriptConsole* console) {
+        if (scriptConsole_ != nullptr && scriptConsole_ != console) {
+            scriptConsole_->setDocumentFileHook(nullptr);   // the old console must not call into this window any more
+        }
         scriptConsole_ = console;
         assetEvents_.reset();
+        jitnodes::python::setPythonNodePolicy(nullptr);
+        jitnodes::python::setPythonNodeInterruptCheck(nullptr);
+        pythonNodeTrust_.reset();
         if (libraryListener_ != 0) {
             jitnodes::AssetLibrary::instance().removeListener(libraryListener_);
             libraryListener_ = 0;
@@ -430,6 +438,7 @@ namespace curvy {
                     }
                 });
             });
+            wirePythonNodeTrust();
             assetEvents_->addTrustedFolder(executableDirectory() / "Resources" / "assets");
             assetEvents_->addTrustedFolder(userAssetsFolder());
             assetEvents_->setTrustFile(userAssetsFolder().parent_path() / "trustedAssets.txt");
@@ -617,6 +626,14 @@ namespace curvy {
         nodePanel_->onEdited = [this]() {
             graphView_->style().markDirty();
             canvas_->style().markDirty();
+        };
+        nodePanel_->onCheckPython = [this](const std::string& code) -> std::optional<SyntaxProblem> {
+            return scriptConsole_ != nullptr ? scriptConsole_->checkSyntax(code) : std::nullopt;
+        };
+        nodePanel_->onPythonCodeCommitted = [this](const std::string& code) {
+            if (pythonNodeTrust_) {
+                pythonNodeTrust_->trust(code);
+            }
         };
         if (auto* data = dynamic_cast<Button*>(nodePanel_->findView("graphDataButton"))) {
             data->onClick += [this](Control&) {
@@ -1241,6 +1258,8 @@ namespace curvy {
 
     WorkspaceController::~WorkspaceController() {
         *alive_ = false;
+        jitnodes::python::setPythonNodePolicy(nullptr);
+        jitnodes::python::setPythonNodeInterruptCheck(nullptr);
         if (libraryListener_ != 0) {
             jitnodes::AssetLibrary::instance().removeListener(libraryListener_);
         }
@@ -2260,6 +2279,44 @@ namespace curvy {
             text += (text.empty() ? "" : "\n") + std::string("Allowed: its migration script runs the next time instances are brought up to date.");
         }
         return text;
+    }
+
+    void WorkspaceController::wirePythonNodeTrust() {
+        pythonNodeTrust_ = std::make_unique<PythonNodeTrust>();
+        PythonNodeTrust* trust = pythonNodeTrust_.get();
+        trust->setTrustFile(userAssetsFolder().parent_path() / "trustedPythonNodes.txt");
+        trust->setPrompt([this](std::size_t count) {
+            const DialogResult answer = Dialog::showMessageBox(frame_.frameHandle(),
+                std::to_string(count) + (count == 1 ? " Python node in this document has" : " Python nodes in this document have") +
+                    " code that has not been allowed yet. The code can do anything a program can do. Only allow it when you trust where it came from.\n\nAllow it to run?",
+                "Run Python node code?", MessageBoxButtons::YesNo, MessageBoxIcon::Warning);
+            return answer == DialogResult::Yes;
+        });
+        // A cook refuses on a worker thread; the question is asked from the run loop, and the views recook once it is allowed.
+        trust->setRefusedNotice([this, alive = alive_, loop = loop_]() {
+            loop->post([this, alive]() {
+                if (!*alive || !pythonNodeTrust_) {
+                    return;
+                }
+                if (pythonNodeTrust_->askPending()) {
+                    graphView_->style().markDirty();
+                    canvas_->style().markDirty();
+                } else {
+                    model_->say("Python nodes with code that is not allowed stay disabled");
+                }
+            });
+        });
+        jitnodes::python::setPythonNodePolicy([trust](const jitnodes::Node& node) { return trust->allows(node.getString("code")); });
+        // A node runs while the canvas draws, on the main thread: Esc (in this application) stops a runaway one, as it stops a script.
+        jitnodes::python::setPythonNodeTimeLimit(std::chrono::seconds(settings_.pythonNodeSeconds));
+        jitnodes::python::setPythonNodeInterruptCheck([]() {
+            if ((GetAsyncKeyState(VK_ESCAPE) & 0x8000) == 0) {
+                return false;
+            }
+            DWORD owner = 0;
+            GetWindowThreadProcessId(GetForegroundWindow(), &owner);
+            return owner == GetCurrentProcessId();
+        });
     }
 
     void WorkspaceController::wireAssetEvents() {

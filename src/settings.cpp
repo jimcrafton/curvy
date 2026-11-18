@@ -166,6 +166,7 @@ namespace curvy {
                 editorTabWidth = defaults.editorTabWidth;
                 scriptTimeout = defaults.scriptTimeout;
                 scriptTimeoutSeconds = defaults.scriptTimeoutSeconds;
+                pythonNodeSeconds = defaults.pythonNodeSeconds;
                 editorColors = defaults.editorColors;
                 break;
         }
@@ -238,6 +239,7 @@ namespace curvy {
         number("tabWidth", editorTabWidth);
         flag("scriptTimeout", scriptTimeout);
         number("scriptTimeoutSeconds", scriptTimeoutSeconds);
+        number("pythonNodeSeconds", pythonNodeSeconds);
         b.push_object();
         for (const auto& [style, rgb] : editorColors) {
             text(style.c_str(), hexColor(rgb));
@@ -353,6 +355,7 @@ namespace curvy {
             readInt(g, "tabWidth", editorTabWidth, 2, 8);
             readBool(g, "scriptTimeout", scriptTimeout);
             readInt(g, "scriptTimeoutSeconds", scriptTimeoutSeconds, 1, 86400);
+            readInt(g, "pythonNodeSeconds", pythonNodeSeconds, 0, 86400);
             json5::value file;
             if (find(g, "file", file) && file.is_string()) {
                 editorFile = file.get_c_str();

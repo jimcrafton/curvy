@@ -531,9 +531,60 @@ is the design and `3rdparty/jitnodes/docs/python.md` ("Assets") the API. What cu
   `pyGuard.h`): `onFrameChanged` then cannot change the node, what is inside it or what it reads from, and `onVersionUpdated` cannot change
   anything; a second restriction for the same node and event raises. What the node "reads from" is found by following its wiring upstream;
   a node that only reaches it through a parameter expression (`other.param`) is not seen.
+- **Event scripts and parameters.** An event is a script body (statements, no `def`) stored in the asset's `scripts`; the names it gets are listed in
+  the plan (`node`, `kwargs`, and for `onVersionUpdated` `old`, `fresh`, `inputs`, `from_version`, `to_version`). `node`, `old` and `fresh` are
+  `jitnodes.Node` handles, and a handle has no `parm()` object: it forwards the engine's `Node` methods under snake_case names (the list is
+  generated from `node.h`, `3rdparty/jitnodes/docs/python.md`, "How the binding is built"). The ones an event uses for parameters:
+
+  | Call | Meaning |
+  |---|---|
+  | `get_float(name)`, `base_float(name)` | the value resolved at the last cook, or the stored value ignoring expressions and keyframes; in `onVersionUpdated` nothing has cooked, so `base_float` is the safer read |
+  | `set_float(name, v)` | set the stored value (an edit: refused on a restricted node) |
+  | `has_float(name)`, `float_names()`, `spare_names()`, `is_spare(name)` | what the node has; a promoted asset parameter is a spare float |
+  | `add_spare_float(name, default)`, `remove_spare_float(name)`, `rename_spare_float(from, to)` | change the spare parameters |
+  | `get_string(name)`, `set_string(name, v)`, `string_names()` | string parameters |
+  | `set_expression(name, text)`, `expression(name)`, `is_animated(name)` | expression, also keyframes (`set_keyframes`, `clear_animation`) |
+  | `float_minimum(name)` / `float_maximum(name)` | `(ok, value)`, the limit a node type declares |
+
+  For a rename that only moves a value, list it in the asset's `renames` instead of writing a script. A script such as
+  `fresh.set_float("sizeCm", old.get_float("size") * 2.54)` is what `onVersionUpdated` is for (`tests/test_assetpanel.cpp`,
+  `updatingInstancesRunsOnVersionUpdatedWithTheOldAndTheNewInstance`). Reading `old` and writing `fresh` is allowed; every other node, the document and
+  `network` are out of reach (see the restriction above).
 - Tests: `ScriptModule.anAssetDefinitionIsEditedRegisteredAndInstancedFromPython`, `aDefinitionIsSavedToAFileAndInstalledAgain`,
   `theScriptCheckNamesWhatAnEventMayNotDo`, `aDefinitionWithAScriptThatBreaksTheRulesIsRefused`,
   `whileAnEventRunsTheHandlesRefuseEditsToTheAssetAndWhatItReadsFrom`.
+
+## Python nodes: the trust gate
+
+jitnodes' `python` node (see `3rdparty/jitnodes/docs/python.md`) runs the code in its `code` parameter, and refuses to until the application
+allows it. curvy's answer is `PythonNodeTrust` (`include/curvy/pythonnodetrust.h`), made by `WorkspaceController::wirePythonNodeTrust` whenever a
+script console is set (without a console there is no Python and no policy, so the nodes fail):
+
+- The policy is `jitnodes::python::setPythonNodePolicy`, asking `PythonNodeTrust::allows(code)` on every cook, from any thread. It is allowed by
+  the exact text of the code (a hash, kept in `trustedPythonNodes.txt` next to `trustedAssets.txt`), so an edited text asks again. There is no
+  folder rule: a node's code lives in the document.
+- The first refused text queues `askPending()` on the run loop (the cook that refused is on a worker thread and cannot show a dialog). One
+  prompt covers every refused text at that moment ("N Python nodes in this document have code that has not been allowed yet"). Yes: the texts
+  are remembered and the canvas and graph view recook (the nodes that failed are still dirty). No: they are declined for the session, are not
+  asked about again and are not saved; the status line says they stay disabled.
+- This covers every way code arrives (open, paste, an asset's contents, undo, a script that writes the text), because it is the cook that asks.
+  `PythonNodeTrust::trust(code)` allows a text without asking; blank code is always allowed (a node that was just made has none).
+- **Node panel editor.** The code row of `NodePanel` (the wrangle one, `Resources/nodePanelCode.newui`) also edits a `python` node: the panel holds
+  two `CodeEditorView`s in the one host (a view's language is fixed when it is made), `wrangleEditor_` and `pythonEditor_` (`PythonLanguage`), and
+  shows the one for the node on show; the class button is hidden for Python. `NodePanel::onCheckPython` is the syntax check
+  (`ScriptConsole::checkSyntax`) and `onPythonCodeCommitted` is called with the text before the edit, so the controller trusts what the user typed and
+  the cook that follows does not prompt. Commit, Revert and Ctrl+Enter work as for a wrangle. The cook error line is the first line of the
+  exception message (`ValueError: boom`; pybind puts the frames after it). Selecting a python node cooks it, as for a wrangle, so its code runs then
+  (and an untrusted text asks). Tests: `PythonCodeTest` in `tests/test_nodepanel.cpp`.
+- A script can call `jitnodes.allow_python_nodes(True)`, which replaces the policy: scripts are code the user ran, so this is not a
+  boundary. The window resets the policy when it closes or its console changes.
+- **Time limit and Esc.** A python node runs while the canvas draws, on the main thread, so a runaway script would freeze the application. The window sets
+  `jitnodes::python::setPythonNodeTimeLimit` from `Settings::pythonNodeSeconds` (default 10, 0 = no limit; only in the settings file as
+  `scriptEditor.pythonNodeSeconds`, there is no dialog row, and it is separate from the script time limit, which is off by default) and
+  `setPythonNodeInterruptCheck` to "Esc is down while this application has the focus" (the check the script console uses). A node that was stopped
+  stays stopped until its code, a parameter or an input changes (docs in `3rdparty/jitnodes/docs/python.md`). Tests: `PythonNodeTest` (limit,
+  `except Exception`, stopped node, cancel, host check) and the default in `tests/test_settings.cpp`.
+- Tests: `tests/test_pythonnodetrust.cpp` (the class, and a window refusing and then allowing).
 
 ## Object opacity and blend
 
