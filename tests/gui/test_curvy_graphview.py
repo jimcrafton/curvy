@@ -267,6 +267,65 @@ class GraphEditing(GraphViewCase):
         return self.first_fill_inputs()
 
 
+class CopyPaste(GraphViewCase):
+    """Ctrl+C, Ctrl+X and Ctrl+V in Group1. These use the real system clipboard, so they replace whatever it holds."""
+
+    FILL = GraphEditing.FILL
+    enter_group = GraphEditing.enter_group
+    fills_in_file = GraphEditing.fills_in_file
+
+    def select_fill(self):
+        root = self.enter_group()
+        self.app.click_at((root.x + self.FILL[0], root.y + self.FILL[1]))
+        self.app.wait_idle()
+        return root
+
+    def test_copy_then_paste_adds_a_second_fill_and_undo_takes_it_out(self):
+        self.select_fill()
+        self.app.key("ctrl+c")
+        self.app.key("ctrl+v")
+        self.app.wait_idle()
+        self.save()
+        self.assertEqual(5, self.fills_in_file(), "the pasted copy")
+        self.app.key("ctrl+z")
+        self.app.wait_idle()
+        self.save()
+        self.assertEqual(4, self.fills_in_file(), "one undo removes the whole paste")
+
+    def test_copy_alone_changes_nothing(self):
+        self.select_fill()
+        self.app.key("ctrl+c")
+        self.app.wait_idle()
+        self.save()
+        self.assertEqual(4, self.fills_in_file())
+
+    def test_cut_removes_the_fill_and_paste_brings_it_back(self):
+        self.select_fill()
+        self.app.key("ctrl+x")
+        self.app.wait_idle()
+        self.save()
+        self.assertEqual(3, self.fills_in_file(), "cut deletes the selection")
+        self.app.key("ctrl+v")
+        self.app.wait_idle()
+        self.save()
+        self.assertEqual(4, self.fills_in_file(), "paste puts a copy back")
+
+    def test_a_layer_cannot_be_copied(self):
+        layer = self.open_graph()
+        self.app.click_at(layer)
+        self.app.wait_idle()
+        self.app.key("ctrl+c")
+        self.app.key("ctrl+v")
+        self.app.wait_idle()
+        self.save()
+        self.assertEqual(4, self.fills_in_file(), "no layer, and so no fills, were duplicated")
+        self.assertEqual(1, self.layers_in_file())
+
+    def layers_in_file(self):
+        with open(self.path, encoding="utf-8") as f:
+            return f.read().count('name: "Layer1"')
+
+
 class DataWindow(GraphViewCase):
     """The Data window is a floating tool window of its own. The driver's own typing brings the main window to the front, which would take the
     keyboard back from it, so these tests click with to_front=False and send the characters themselves."""

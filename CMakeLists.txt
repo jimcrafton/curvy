@@ -92,6 +92,7 @@ add_library(curvy_core STATIC
     src/sketchdocument.cpp
     src/backgroundtask.cpp
     src/scriptconsole.cpp
+    src/assetevents.cpp
     src/scriptmodule.cpp
     src/scriptsmenu.cpp
     src/pyconsolepanel.cpp

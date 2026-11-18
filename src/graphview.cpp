@@ -5,6 +5,7 @@
 
 #include <jitnodes/graph/network.h>
 #include <jitnodes/graph/subnet.h>
+#include <newui/clipboardmgr.h>
 #include <newui/font.h>
 #include <newui/fontmanager.h>
 #include <newui/keyboard_constants.h>
@@ -544,6 +545,90 @@ namespace curvy {
         return true;
     }
 
+    namespace {
+
+        std::string readSystemClipboard() {
+            std::wstring wide;
+            if (!ClipboardManager::getText(wide) || wide.empty()) {
+                return {};
+            }
+            const int size = WideCharToMultiByte(CP_UTF8, 0, wide.data(), int(wide.size()), nullptr, 0, nullptr, nullptr);
+            std::string text(std::size_t(size), '\0');
+            WideCharToMultiByte(CP_UTF8, 0, wide.data(), int(wide.size()), text.data(), size, nullptr, nullptr);
+            return text;
+        }
+
+        void writeSystemClipboard(const std::string& text) {
+            const int size = MultiByteToWideChar(CP_UTF8, 0, text.data(), int(text.size()), nullptr, 0);
+            std::wstring wide(std::size_t(size), L'\0');
+            MultiByteToWideChar(CP_UTF8, 0, text.data(), int(text.size()), wide.data(), size);
+            ClipboardManager::setText(wide);
+        }
+
+    }
+
+    bool GraphView::copySelected() {
+        if (document_ == nullptr) {
+            return false;
+        }
+        std::vector<jitnodes::NodeId> ids;
+        for (const NodeRef& ref : model_->items()) {
+            if (ref.scope == scope_ && document_->hasNode(ref)) {
+                ids.push_back(ref.id);
+            }
+        }
+        std::size_t skipped = 0;
+        const std::string text = document_->copyGraphNodes(scope_, ids, &skipped);
+        if (text.empty()) {
+            if (skipped > 0) {
+                say("Cannot copy: layers, groups and the document's own nodes cannot be copied");
+            }
+            return false;
+        }
+        if (setClipboard) {
+            setClipboard(text);
+        } else {
+            writeSystemClipboard(text);
+        }
+        const std::size_t copied = ids.size() - skipped;
+        say((copied == 1 ? std::string("Node copied") : std::to_string(copied) + " nodes copied") +
+            (skipped > 0 ? " (" + std::to_string(skipped) + " left out)" : std::string()));
+        return true;
+    }
+
+    bool GraphView::cutSelected() {
+        return copySelected() && deleteSelected();
+    }
+
+    bool GraphView::pasteClipboard() {
+        if (document_ == nullptr) {
+            return false;
+        }
+        const std::string text = getClipboard ? getClipboard() : readSystemClipboard();
+        if (text.empty()) {
+            return false;
+        }
+        std::vector<NodeRef> pasted;
+        try {
+            const std::size_t mark = document_->undoStack().depth();
+            pasted = document_->pasteGraphNodes(text, scope_);
+            if (pasted.empty()) {
+                return false;   // the clipboard holds something else
+            }
+            if (onPasted) {
+                onPasted(scope_, pasted);
+            }
+            document_->undoStack().mergeSince(mark, pasted.size() == 1 ? "Paste Node" : "Paste Nodes");
+        } catch (const std::exception& e) {
+            say(std::string("Cannot paste: ") + e.what());
+            return false;
+        }
+        model_->replace(pasted);
+        style().markDirty();
+        say(pasted.size() == 1 ? "Node pasted" : std::to_string(pasted.size()) + " nodes pasted");
+        return true;
+    }
+
     void GraphView::endDrag() {
         if (dragMoved_ && dragBefore_ && document_ != nullptr) {
             document_->commitGraphEdit(*dragBefore_, "Move Node");
@@ -652,6 +737,20 @@ namespace curvy {
     SyncReturn GraphView::handleKeyDown(View&, std::uint32_t keyMask, int, int, std::uint32_t vkCode) {
         if (onKeyFilter && onKeyFilter(keyMask, vkCode)) {
             return SyncReturn::Handled;
+        }
+        if ((keyMask & kmCtrl) != 0 && (keyMask & (kmAlt | kmShift)) == 0) {
+            if (vkCode == vkLetterC) {
+                copySelected();
+                return SyncReturn::Handled;
+            }
+            if (vkCode == vkLetterX) {
+                cutSelected();
+                return SyncReturn::Handled;
+            }
+            if (vkCode == vkLetterV) {
+                pasteClipboard();
+                return SyncReturn::Handled;
+            }
         }
         if (vkCode == vkTab && onCloseRequested) {
             onCloseRequested();

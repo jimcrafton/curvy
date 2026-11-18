@@ -5,7 +5,9 @@
 
 #include <chrono>
 #include <filesystem>
+#include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -60,6 +62,13 @@ namespace curvy {
         // editor's selection when one is given (None otherwise). Never throws for a script error. Returns a failed result at once when a
         // background script is running.
         ScriptResult run(const std::string& code, SketchDocument* document, SelectionModel* selection = nullptr);
+
+        // Runs the script `event` of the asset `asset` for the instance `node` (a node of the network of scope `scope`, as in NodeRef) with
+        // `kwargs` = {"node": the handle, plus `values`}, `module` bound to the asset's shared module (run once per session and version),
+        // and the event's runtime restriction in force (jitnodes.assets.restricted). Does nothing, ok, when the asset has no such script. Whatever
+        // the script changes joins the undo step already open in `document` (the caller merges it). Main thread, never in a background run.
+        ScriptResult runAssetEvent(SketchDocument& document, SelectionModel* selection, std::uint32_t scope, std::uint32_t node,
+                                   const std::string& asset, const std::string& event, const std::map<std::string, std::string>& values);
 
         // The list scripts see as `args` (empty by default): what follows `--` on the command line of a `--run`. Takes effect for the
         // runs that start after the call.

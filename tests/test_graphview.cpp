@@ -71,6 +71,131 @@ TEST(GraphViewTest, describesTheSelectedNode) {
     EXPECT_EQ(view.describeSelected(), "Layer2 (curvyObject) #layer");
 }
 
+namespace {
+
+    struct ClipboardFixture {
+        curvy::SketchDocument document;
+        curvy::GraphView view;
+        std::string clipboard;
+        std::vector<std::string> messages;
+
+        ClipboardFixture() {
+            document.newBlank("Clip", 612.0f, 792.0f);
+            view.setDocument(&document);
+            view.setClipboard = [this](const std::string& text) { clipboard = text; };
+            view.getClipboard = [this]() { return clipboard; };
+            view.onMessage = [this](const std::string& text) { messages.push_back(text); };
+        }
+
+        std::size_t countOf(const std::string& type) {
+            std::size_t count = 0;
+            for (jitnodes::NodeId id : document.network().nodeIds()) {
+                count += document.network().node(id).typeName() == type ? 1 : 0;
+            }
+            return count;
+        }
+    };
+
+}
+
+TEST(GraphViewTest, copyAndPasteDuplicatesTheSelectedNodesKeepsTheirWireAndIsOneUndoStep) {
+    ClipboardFixture f;
+    const curvy::NodeRef line = f.document.addGraphNode("line");
+    const curvy::NodeRef xf = f.document.addGraphNode("transform");
+    f.document.connectGraphNodes(line, xf, 0);
+    f.view.selectionModel().replace({line, xf});
+
+    EXPECT_TRUE(f.view.copySelected());
+    EXPECT_FALSE(f.clipboard.empty());
+    const std::size_t depth = f.document.undoStack().depth();
+    EXPECT_TRUE(f.view.pasteClipboard());
+    EXPECT_EQ(f.document.undoStack().depth(), depth + 1);
+    EXPECT_EQ(f.countOf("line"), 2u);
+    EXPECT_EQ(f.countOf("transform"), 2u);
+
+    ASSERT_EQ(f.view.selection().size(), 2u);
+    const curvy::NodeRef newLine = f.view.selection()[0];
+    const curvy::NodeRef newXf = f.view.selection()[1];
+    EXPECT_NE(newLine, line);
+    EXPECT_EQ(f.document.network().inputOf(newXf.id, 0), newLine.id);   // the copy is wired to the copy, not the original
+
+    f.document.undoStack().undo();
+    EXPECT_EQ(f.countOf("line"), 1u);
+    EXPECT_EQ(f.countOf("transform"), 1u);
+}
+
+TEST(GraphViewTest, pastedNodesWithAPositionAreMovedOffTheOriginals) {
+    ClipboardFixture f;
+    const curvy::NodeRef line = f.document.addGraphNode("line");
+    f.document.network().node(line.id).setPosition(100.0f, 50.0f);
+    f.view.selectionModel().set(line);
+    ASSERT_TRUE(f.view.copySelected());
+    ASSERT_TRUE(f.view.pasteClipboard());
+    const jitnodes::Node& copy = f.document.node(f.view.selected());
+    ASSERT_TRUE(copy.hasPosition());
+    EXPECT_GT(copy.posX(), 100.0f);
+    EXPECT_GT(copy.posY(), 50.0f);
+}
+
+TEST(GraphViewTest, cutRemovesTheNodesAndPasteBringsThemBack) {
+    ClipboardFixture f;
+    const curvy::NodeRef line = f.document.addGraphNode("line");
+    f.view.selectionModel().set(line);
+    EXPECT_TRUE(f.view.cutSelected());
+    EXPECT_EQ(f.countOf("line"), 0u);
+    EXPECT_TRUE(f.view.pasteClipboard());
+    EXPECT_EQ(f.countOf("line"), 1u);
+}
+
+TEST(GraphViewTest, layersAndTheDocumentsOwnNodesAreNotCopied) {
+    ClipboardFixture f;
+    f.document.buildSampleLayers();
+    f.view.selectionModel().set(f.document.childrenOf()[0]);
+    EXPECT_FALSE(f.view.copySelected());
+    EXPECT_TRUE(f.clipboard.empty());
+    ASSERT_FALSE(f.messages.empty());
+    EXPECT_NE(f.messages.back().find("cannot be copied"), std::string::npos);
+}
+
+TEST(GraphViewTest, pasteIgnoresClipboardTextThatIsNotACopyOfNodesAndReportsAnUnknownType) {
+    ClipboardFixture f;
+    f.clipboard = "just some words";
+    const std::size_t depth = f.document.undoStack().depth();
+    EXPECT_FALSE(f.view.pasteClipboard());
+    EXPECT_EQ(f.document.undoStack().depth(), depth);
+
+    const curvy::NodeRef line = f.document.addGraphNode("line");
+    f.view.selectionModel().set(line);
+    ASSERT_TRUE(f.view.copySelected());
+    const std::string marker = "\"line\"";
+    const std::size_t at = f.clipboard.find(marker);
+    ASSERT_NE(at, std::string::npos);
+    f.clipboard.replace(at, marker.size(), "\"noSuchNodeType\"");
+    const std::size_t nodes = f.document.network().nodeIds().size();
+    EXPECT_FALSE(f.view.pasteClipboard());
+    EXPECT_EQ(f.document.network().nodeIds().size(), nodes);
+    EXPECT_NE(f.messages.back().find("Cannot paste"), std::string::npos);
+}
+
+TEST(GraphViewTest, whatReactsToPastedNodesJoinsThePasteUndoStep) {
+    ClipboardFixture f;
+    const curvy::NodeRef line = f.document.addGraphNode("line");
+    f.view.selectionModel().set(line);
+    ASSERT_TRUE(f.view.copySelected());
+    std::size_t seen = 0;
+    f.view.onPasted = [&](std::uint32_t scope, const std::vector<curvy::NodeRef>& pasted) {
+        seen = pasted.size();
+        f.document.addGraphNode("null", "reaction", scope);
+    };
+    const std::size_t depth = f.document.undoStack().depth();
+    ASSERT_TRUE(f.view.pasteClipboard());
+    EXPECT_EQ(seen, 1u);
+    EXPECT_EQ(f.document.undoStack().depth(), depth + 1);
+    f.document.undoStack().undo();
+    EXPECT_EQ(f.countOf("null"), 0u);
+    EXPECT_EQ(f.countOf("line"), 1u);
+}
+
 class GraphOverlayTest : public curvytest::WorkspaceTest {};
 
 TEST_F(GraphOverlayTest, theGraphViewReplacesTheCanvasUntilToggledBack) {

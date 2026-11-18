@@ -229,6 +229,7 @@ namespace curvy {
         // The nodes that hold a layer, a group and the document together (a layer's or group's own transform and merge, the root merge and the
         // render node) cannot be deleted, and the transform's and the render node's input is fixed. Wiring into a merge stays free: that is how shapes join.
         std::string refuseGraphEdit(const NodeRef& node, bool removing) const override;
+        std::string refuseGraphCopy(const NodeRef& node) const override;
         // The tags that mark layers, groups and the document's own nodes cannot be added to or taken off a node: the document finds them by tag.
         std::string refuseTagEdit(const NodeRef& node, const std::vector<std::string>& tags) const override;
         // The .curvy file (format version 3): meta, then the page and other non-node information, the optional view, then the node graph.

@@ -14,6 +14,7 @@
 #include "curvy/newdocumentdialog.h"
 #include "curvy/pointtable.h"
 #include "curvy/radialmenu.h"
+#include "curvy/assetevents.h"
 #include "curvy/assetmanagermodel.h"
 #include "curvy/assetmanagerpanel.h"
 #include "curvy/assetpropertiessession.h"
@@ -39,7 +40,9 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -116,6 +119,10 @@ namespace curvy {
         TransformPanel& transformPanel() { return *transformPanel_; }
         AssetManagerPanel& assetPanel() { return *assetPanel_; }
         AssetManagerModel& assetModel() { return *assetModel_; }
+        AssetEvents* assetEvents() { return assetEvents_.get(); }   // null until there is a script console
+        // onInstalled for the assets registered or re-registered since the last call. The library's change notice queues it on the run loop;
+        // this is the part that runs there.
+        void flushInstalledEvents();
         // `assets` folder next to the settings file: where a new asset is saved by default and where the editor looks for the user's own.
         std::filesystem::path userAssetsFolder() const;
         // The `+` of the Assets panel: opens the Asset Properties dialog on the selected subnet, or on a blank asset when none is selected.
@@ -201,6 +208,8 @@ namespace curvy {
         std::string addAssetInstance(const std::string& type);
         std::string updateAssetInstances(const std::string& type, std::size_t& count);
         std::string unlockSelectedInstance();
+        void fireLoadedEvents();   // onCreated('loaded') for the instances of a document that was just opened
+        void wireAssetEvents();    // the document hooks behind onDeleted, onFrameChanged, onInputChanged and onParamChanged
         void replaceSubnetWithInstance(const NodeRef& subnet, const std::string& type);
         void wireSwatchActions(SwatchPaletteController& swatches);
         void wireSwatchActions(SwatchesTab& swatches);
@@ -256,6 +265,12 @@ namespace curvy {
         std::shared_ptr<AssetManagerModel> assetModel_;   // shared with the panel, which can outlive this
         AssetManagerPanel* assetPanel_ = nullptr;   // likewise
         ScriptConsole* scriptConsole_ = nullptr;   // the application's, outlives the window
+        std::unique_ptr<AssetEvents> assetEvents_;   // made with the console
+        std::optional<std::size_t> deleteMark_;      // the undo depth when onDeleted started, until the delete's step is recorded
+        std::string deleteErrors_;
+        std::map<std::string, int> installedSeen_;   // asset name -> version already announced with onInstalled
+        int libraryListener_ = 0;
+        bool installFlushQueued_ = false;
         PyConsolePanel* pyConsolePanel_ = nullptr;   // likewise
         ScriptEditorPanel* scriptEditorPanel_ = nullptr;   // likewise
         std::array<newui::Action, 3> historyActions_;   // Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z; the run loop matches them whichever view has focus

@@ -3,6 +3,7 @@
 #include "curvy/scriptmodule.h"
 #include "curvy/sketchdocument.h"
 
+#include <pybind11/eval.h>
 #include <pyHandles.h>
 #include <pyRuntime.h>
 
@@ -234,6 +235,7 @@ namespace curvy {
         // Declared in this order so the scope (Python objects) goes before the interpreter.
         jitnodes::python::PythonRuntime runtime;
         py::dict scope;
+        py::object eventRunner;
         py::object cancelledType;
         py::object sinkObject;
         OutputSink* sink = nullptr;
@@ -383,6 +385,79 @@ namespace curvy {
             problem.message = message.is_none() ? std::string("invalid syntax") : py::str(message).cast<std::string>();
             return problem;
         }
+    }
+
+    namespace {
+
+        const char* const kAssetEventRunner = R"PY(
+import types
+import jitnodes
+_modules = {}
+_kinds = {"index": int, "frame": int, "version": int, "value": float, "playing": lambda text: text == "1"}
+
+def run_event(node, asset, event, values, document, curvy):
+    definition = jitnodes.assets.get(asset)
+    source = definition.scripts.get(event)
+    if not source:
+        return
+    key = (asset, definition.version)
+    module = _modules.get(key)
+    if module is None:
+        module = types.ModuleType("curvy.assets." + asset)
+        text = definition.scripts.get("module")
+        if text:
+            exec(compile(text, "<%s module>" % asset, "exec"), module.__dict__)
+        _modules[key] = module
+    kwargs = {}
+    for key, text in values.items():
+        kind = _kinds.get(key)
+        kwargs[key] = kind(text) if kind else text
+    kwargs["node"] = node
+    names = {"kwargs": kwargs, "node": node, "network": node.network if node is not None else None, "doc": document, "module": module,
+             "curvy": curvy, "jitnodes": jitnodes}
+    code = compile(source, "<%s.%s>" % (asset, event), "exec")
+    if node is None:
+        exec(code, names)
+    else:
+        with jitnodes.assets.restricted(node, event):
+            exec(code, names)
+)PY";
+
+    }
+
+    ScriptResult ScriptConsole::runAssetEvent(SketchDocument& document, SelectionModel* selection, std::uint32_t scope, std::uint32_t node,
+                                              const std::string& asset, const std::string& event, const std::map<std::string, std::string>& values) {
+        ScriptResult result;
+        if (impl_->running.load()) {
+            result.ok = false;
+            result.error = "A script is already running\n";
+            return result;
+        }
+        impl_->begin(&document, selection);
+        try {
+            if (!impl_->eventRunner) {
+                py::dict runnerScope;
+                py::exec(kAssetEventRunner, runnerScope);
+                impl_->eventRunner = runnerScope["run_event"];
+            }
+            py::object handle = py::none();
+            if (node != jitnodes::invalidNodeId) {
+                handle = jitnodes::python::wrapNetwork(document.networkOf(scope)).attr("node")(node);
+            }
+            py::dict extra;
+            for (const auto& [name, text] : values) {
+                extra[py::str(name)] = text;
+            }
+            impl_->eventRunner(handle, asset, event, extra, impl_->scope["doc"], impl_->scope["curvy"]);
+        } catch (const py::error_already_set& e) {
+            result.ok = false;
+            result.error = e.what();
+        } catch (const std::exception& e) {
+            result.ok = false;
+            result.error = e.what();
+        }
+        impl_->end(result);
+        return result;
     }
 
     ScriptResult ScriptConsole::run(const std::string& code, SketchDocument* document, SelectionModel* selection) {

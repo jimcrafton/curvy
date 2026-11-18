@@ -9,6 +9,7 @@
 #include "curvy/swatchimport.h"
 #include "curvy/theme.h"
 
+#include <jitnodes/graph/assetLibrary.h>
 #include <newui/automation.h>
 #include <newui/bundle.h>
 #include <newui/dialogs.h>
@@ -404,7 +405,43 @@ namespace curvy {
 
     void WorkspaceController::setScriptConsole(ScriptConsole* console) {
         scriptConsole_ = console;
+        assetEvents_.reset();
+        if (libraryListener_ != 0) {
+            jitnodes::AssetLibrary::instance().removeListener(libraryListener_);
+            libraryListener_ = 0;
+        }
         if (console != nullptr) {
+            assetEvents_ = std::make_unique<AssetEvents>(console);
+            assetEvents_->remember(document_);
+            installedSeen_.clear();
+            for (const jitnodes::AssetEntry& entry : jitnodes::AssetLibrary::instance().list()) {
+                installedSeen_[entry.name] = entry.version;   // what is registered now was installed before anything could listen
+            }
+            // The library may change on another thread (a document load): only a task on the main thread looks at what changed.
+            libraryListener_ = jitnodes::AssetLibrary::instance().addListener([this, alive = alive_, loop = loop_]() {
+                if (installFlushQueued_) {
+                    return;
+                }
+                installFlushQueued_ = true;
+                loop->post([this, alive]() {
+                    if (*alive) {
+                        flushInstalledEvents();
+                    }
+                });
+            });
+            assetEvents_->addTrustedFolder(executableDirectory() / "Resources" / "assets");
+            assetEvents_->addTrustedFolder(userAssetsFolder());
+            assetEvents_->setTrustFile(userAssetsFolder().parent_path() / "trustedAssets.txt");
+            assetEvents_->setTrustPrompt([this](const std::string& asset, const std::vector<std::string>& scripts) {
+                std::string list;
+                for (const std::string& name : scripts) {
+                    list += (list.empty() ? "" : ", ") + name;
+                }
+                const DialogResult answer = Dialog::showMessageBox(frame_.frameHandle(),
+                    "The asset \"" + asset + "\" comes with Python code (" + list + ") that would run on your document. Only allow it when you trust where it came from.\n\nAllow it to run?",
+                    "Run asset scripts?", MessageBoxButtons::YesNo, MessageBoxIcon::Warning);
+                return answer == DialogResult::Yes;
+            });
             RunLoop* loop = loop_;
             console->setMainThreadPoster([loop](std::function<void()> task) { loop->post(std::move(task)); });
             console->setTimeout(std::chrono::seconds(settings_.scriptTimeout ? settings_.scriptTimeoutSeconds : 0));
@@ -414,6 +451,7 @@ namespace curvy {
                     const std::size_t damaged = document_.objectProblems().size();
                     model_->say("A script opened " + fileNameOf(document_.filePath()) +
                                 (damaged > 0 ? " (" + std::to_string(damaged) + " damaged object(s), not repaired)" : std::string()));
+                    fireLoadedEvents();
                 } else {
                     showTitle();
                 }
@@ -910,6 +948,20 @@ namespace curvy {
         graphView_->onMessage = [this](const std::string& text) { model_->say(text); };
         registerHistoryActions();
         graphView_->onKeyFilter = [this](std::uint32_t mask, std::uint32_t vk) { return filterGraphKey(mask, vk); };
+        graphView_->onPasted = [this](std::uint32_t scope, const std::vector<NodeRef>& pasted) {
+            if (!assetEvents_) {
+                return;
+            }
+            std::vector<jitnodes::NodeId> ids;
+            for (const NodeRef& ref : pasted) {
+                ids.push_back(ref.id);
+            }
+            const std::string errors = assetEvents_->fireCreatedFor(document_, &graphView_->selectionModel(), scope, ids, "pasted");
+            if (!errors.empty()) {
+                model_->say(errors);
+            }
+        };
+        wireAssetEvents();
         graphView_->onKeyUp.add(this, &WorkspaceController::handleKeyUp);
         graphView_->onMouseDown.add(this, &WorkspaceController::handleGraphMouseDown);
         graphView_->onMouseMove.add(this, &WorkspaceController::handleGraphMouseMove);
@@ -1188,6 +1240,13 @@ namespace curvy {
 
     WorkspaceController::~WorkspaceController() {
         *alive_ = false;
+        if (libraryListener_ != 0) {
+            jitnodes::AssetLibrary::instance().removeListener(libraryListener_);
+        }
+        document_.afterEdit = nullptr;
+        document_.beforeRemove = nullptr;
+        document_.afterRemove = nullptr;
+        document_.onTimeMoved = nullptr;
         for (Action& action : historyActions_) {
             loop_->unregisterAction(&action);
         }
@@ -1298,6 +1357,9 @@ namespace curvy {
         canvas_->setDocument(&document_);
         graphView_->setDocument(&document_);
         model_->setDocument(true, document_.name());
+        if (assetEvents_) {
+            assetEvents_->remember(document_);
+        }
         if (documentPanel_ != nullptr) {
             documentPanel_->refresh();
             swatchesTab_->setDocumentOpen(true);   // New and Open change the palettes without telling the tab
@@ -1364,6 +1426,7 @@ namespace curvy {
             if (ok) {
                 showDocument();
                 model_->say("Opened " + fileNameOf(file));
+                fireLoadedEvents();
                 offerObjectRepair();
             } else {
                 if (wasOpen) {
@@ -1943,17 +2006,31 @@ namespace curvy {
             return false;
         }
         const std::string what = forward ? stack.redoDescription() : stack.undoDescription();
+        std::set<NodeRef> instancesBefore;
+        if (assetEvents_) {
+            instancesBefore = AssetEvents::instancesOf(document_);
+        }
         if (forward) {
             stack.redo();
         } else {
             stack.undo();
+        }
+        std::string eventErrors;
+        if (assetEvents_) {
+            // Instances this step brought back (the undo of a delete, or a redo of an add). A script that edits the document makes a new step,
+            // which ends the redo history, so this runs inside one merged step only when something was asked of the document.
+            const std::size_t mark = stack.depth();
+            eventErrors = assetEvents_->fireChanges(document_, &graphView_->selectionModel());   // wiring and parameters the step put back
+            const std::string created = assetEvents_->fireCreatedForNew(document_, &graphView_->selectionModel(), instancesBefore, "undo");
+            eventErrors += (eventErrors.empty() || created.empty() ? "" : "\n") + created;
+            stack.mergeSince(mark, "Asset events");
         }
         // The panel is not a view of the document: it shows the selected node again (a node an undo removed shows as an empty panel).
         nodePanel_->show(graphView_->selected());
         transformPanel_->refresh();
         graphView_->style().markDirty();
         canvas_->style().markDirty();
-        model_->say((forward ? "Redo " : "Undo ") + what);
+        model_->say(eventErrors.empty() ? (forward ? "Redo " : "Undo ") + what : eventErrors);
         return true;
     }
 
@@ -2143,7 +2220,14 @@ namespace curvy {
             if (wire && document_.node(added).inputCount() > 0) {
                 document_.connectGraphNodes(selected, added, 0);
             }
+            std::string eventError;
+            if (assetEvents_) {
+                eventError = assetEvents_->fireCreated(document_, &graphView_->selectionModel(), added, "added");
+            }
             document_.undoStack().mergeSince(mark, "Add " + type);
+            if (!eventError.empty()) {
+                model_->say(eventError);
+            }
             graphView_->selectionModel().set(added);
             graphView_->style().markDirty();
             canvas_->style().markDirty();
@@ -2151,6 +2235,109 @@ namespace curvy {
             return e.what();
         }
         return {};
+    }
+
+    void WorkspaceController::wireAssetEvents() {
+        const auto idle = [this]() { return assetEvents_ && scriptConsole_ != nullptr && !scriptConsole_->running(); };
+        document_.afterEdit = [this, idle](const std::string& description) {
+            if (!idle()) {
+                return;
+            }
+            newui::UndoStack& stack = document_.undoStack();
+            const std::size_t mark = stack.depth() - 1;   // the edit's own step: what the scripts change joins it
+            const std::string errors = assetEvents_->fireChanges(document_, &graphView_->selectionModel());
+            if (stack.depth() > mark + 1) {
+                stack.mergeSince(mark, description);
+            }
+            if (!errors.empty()) {
+                model_->say(errors);
+            }
+        };
+        document_.beforeRemove = [this, idle](const std::vector<NodeRef>& nodes) {
+            deleteMark_.reset();
+            deleteErrors_.clear();
+            if (!idle()) {
+                return;
+            }
+            deleteMark_ = document_.undoStack().depth();
+            deleteErrors_ = assetEvents_->fireDeletedFor(document_, &graphView_->selectionModel(), nodes);
+        };
+        document_.afterRemove = [this]() {
+            if (deleteMark_ && document_.undoStack().depth() > *deleteMark_ + 1) {
+                document_.undoStack().mergeSince(*deleteMark_, "Delete");   // the scripts' steps and the delete are one
+            }
+            deleteMark_.reset();
+            if (!deleteErrors_.empty()) {
+                model_->say(deleteErrors_);
+                deleteErrors_.clear();
+            }
+        };
+        document_.onTimeMoved = [this, idle]() {
+            if (!idle()) {
+                return;   // the previous call is still running
+            }
+            const std::size_t mark = document_.undoStack().depth();
+            const int frame = int(std::lround(document_.time() * document_.network().fps()));
+            const std::string errors = assetEvents_->fireFrameChanged(document_, &graphView_->selectionModel(), frame, false);
+            document_.undoStack().mergeSince(mark, "Asset events");
+            if (!errors.empty()) {
+                model_->say(errors);
+            }
+        };
+    }
+
+    void WorkspaceController::flushInstalledEvents() {
+        installFlushQueued_ = false;
+        if (!assetEvents_ || scriptConsole_ == nullptr) {
+            return;
+        }
+        if (scriptConsole_->running()) {
+            return;   // asset changes made by a script are not announced to the assets' own scripts
+        }
+        std::vector<std::string> fresh;
+        for (const jitnodes::AssetEntry& entry : jitnodes::AssetLibrary::instance().list()) {
+            const auto seen = installedSeen_.find(entry.name);
+            if (seen == installedSeen_.end() || seen->second != entry.version) {
+                installedSeen_[entry.name] = entry.version;
+                fresh.push_back(entry.name);
+            }
+        }
+        if (!model_->documentOpen()) {
+            return;
+        }
+        std::string errors;
+        const std::size_t mark = document_.undoStack().depth();
+        for (const std::string& name : fresh) {
+            const std::string error = assetEvents_->fireInstalled(document_, &graphView_->selectionModel(), name);
+            if (!error.empty()) {
+                errors += (errors.empty() ? "" : "\n") + error;
+            }
+        }
+        document_.undoStack().mergeSince(mark, "Asset events");
+        if (!errors.empty()) {
+            model_->say(errors);
+        }
+    }
+
+    void WorkspaceController::fireLoadedEvents() {
+        if (!assetEvents_ || scriptConsole_ == nullptr) {
+            return;
+        }
+        if (scriptConsole_->running()) {
+            // A script opened the document and is still running: the events wait for it to end (the interpreter is busy until then).
+            loop_->postDelayed(std::chrono::milliseconds(100), [this]() {
+                fireLoadedEvents();
+                return true;   // true ends the timer (see tickTask)
+            });
+            return;
+        }
+        const std::size_t mark = document_.undoStack().depth();
+        const std::string errors = assetEvents_->fireCreatedInDocument(document_, &graphView_->selectionModel(), "loaded");
+        document_.undoStack().mergeSince(mark, "Asset events");
+        assetEvents_->remember(document_);
+        if (!errors.empty()) {
+            model_->say(errors);
+        }
     }
 
     std::string WorkspaceController::updateAssetInstances(const std::string& type, std::size_t& count) {

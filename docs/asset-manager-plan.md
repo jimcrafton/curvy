@@ -246,6 +246,53 @@ The cost test of section 8 is not written yet.
 - **Not done:** Edit... on the contents (adds an instance and unlocks it, the user then uses `+` with the same name to re-create the asset) works through callbacks but has not been tried by hand; the file dialogs (Save, Load, add file) are native windows the GUI driver cannot drive, so they are untested; the other GUI suites were not re-run after the new panel joined the dock.
 - **Tests:** `tests/test_assetmanager.cpp` (9, models), `tests/test_assetpanel.cpp` (6 panel/controller, 5 dialog) and `tests/gui/test_curvy_assets.py` (8, real input; run by hand: `python D:\code\curvy	ests\gui	est_curvy_assets.py --exe <curvy.exe>`).
 
+### Built in phase E (first part, 2026-11-17)
+
+- **Running an event:** `ScriptConsole::runAssetEvent` (`scriptconsole.h`) runs the asset's event text with `kwargs` (`node`, plus string values such as `reason`),
+  `node`, `network`, `doc`, `module`, `curvy` and `jitnodes` as globals, inside `jitnodes.assets.restricted(node, event)`. `module` is a
+  `types.ModuleType` named `curvy.assets.<name>`, built once per session and asset version. Edits made through `doc` join the undo step that is open in
+  the document; edits through the raw `network` handle are not undoable (the general rule for scripts).
+- **Who decides:** `AssetEvents` (`assetevents.h`, headless): `fire` / `fireCreated`, the trust rule (an asset whose source file is under a trusted folder runs;
+  anything else, embedded included, asks once through the trust prompt, a refusal lasts for the session) and the allowance, remembered by a hash of the
+  scripts in `trustedAssets.txt` next to the settings file, so an edited script asks again. The controller trusts `Resources/assets` and the user's
+  `assets` folder, and its prompt is a Yes/No message box.
+- **Fired so far:** `onCreated` with reason `added`, from the panel's Add, before the step is merged, so a script's `doc` edits are part of "Add". An error shows
+  in the status line.
+- **`loaded` and `pasted`:** `AssetEvents::fireCreatedFor` (nodes of one scope, plus the contents of the subnets among them, inner first) and
+  `fireCreatedInDocument`. `loaded` fires from `WorkspaceController::fireLoadedEvents` after File > Open succeeds and after a script's `doc.open` (waits
+  for the script to end, since the interpreter is busy), as one undo step "Asset events" with errors in the status line. `pasted` fires from the graph
+  editor's Ctrl+V (`GraphView::onPasted`, set by `WorkspaceController`), inside the paste's one undo step.
+- **Graph copy/paste (added with it):** `GraphDocument::copyGraphNodes` / `pasteGraphNodes` (clipboard text is jitnodes' `jitnodes-nodes` JSON, so a copy
+  also pastes into another document; wires between the copied nodes are kept, wires to other nodes are not; layout positions move by 30 so the
+  copy does not sit on the original), `GraphView::copySelected` / `cutSelected` / `pasteClipboard` on Ctrl+C / X / V. Layers, groups and the document's own
+  nodes are not copied (`SketchDocument::refuseGraphCopy`). Pasting an asset the document has not registered fails with a status-line message.
+  Instances inside an asset instance are not visited (instances cannot be entered).
+- **`undo` reason:** `WorkspaceController::stepHistory` lists the document's asset instances before an undo or redo and, afterwards, fires `onCreated('undo')`
+  for each one that is new (`AssetEvents::instancesOf` / `fireCreatedForNew`); a redo of an Add counts too. A script that edits the document makes a new
+  undo step (merged as "Asset events"), which ends the redo history; a script that edits nothing leaves redo alone.
+- **The other events** (all in `WorkspaceController::wireAssetEvents` / `AssetEvents`; values reach the script typed: `index`, `frame`, `version` int, `value`
+  float, `playing` bool):
+  - `onDeleted(node)`: `GraphDocument::beforeRemove` / `afterRemove` wrap `removeGraphNode(s)`; the event runs with the nodes still in place (also for
+    instances inside subnets that go with the delete), and the script's steps are merged with the delete into one step. Deleting from inside a running script
+    does not fire it (the interpreter is busy); undoing an Add does not fire it either.
+  - `onInputChanged(node, index)` and `onParamChanged(node, name, value)` work by comparison, not by hooks: `AssetEvents::remember` records the wiring and the
+    stored values (`baseFloat`, so animation never counts) of the instances whose asset has such a script, `fireChanges` diffs and fires. `fireChanges` runs from
+    `GraphDocument::afterEdit` (after `commitGraphEdit` pushed the step; the script's steps are merged into it) and after an undo or redo (`stepHistory`), so
+    an undo that unwires an input fires the event. `remember` also runs when a document is shown or its `loaded` events are done. What an event script itself
+    changes is not reported back to it. Edits made while a user script runs are reported by the next edit, not at once.
+  - `onFrameChanged(node, frame, playing)`: `GraphDocument::onTimeMoved` (after the views were told), skipped while a script runs. There is no timeline UI or
+    playback yet, so `playing` is always false and nothing sets the time but `GraphDocument::setTime`.
+  - `onInstalled(name, version)` (`node` is None): a library listener queues `flushInstalledEvents` on the run loop; it announces every asset whose name or
+    version was not seen yet (what was installed before the console existed is not announced). An asset authored in the dialog asks the trust prompt once
+    when it has scripts, like any other asset outside the trusted folders.
+- **Still to do:** `onVersionUpdated` (see below); `doc.assets` and its undo routing; the guard cost test.
+- **`onVersionUpdated` is not built.** It is the core's migration hook (`NodeRegistry::setAssetMigration`), called from `updateAssetsIn` and from loading a
+  graph, with `const Node& old` and `Node& fresh` that belong to no network, while the Python handles (`PyNode`) are a network plus an id, and the read-only
+  guard mode refuses every edit in every network, `fresh` included. Needs: a way to hand Python those two nodes (a scratch network holding copies, or a
+  loose-node handle), a guard mode that allows `fresh` only, and an answer to which thread a document load runs the hook on.
+- **Tests:** `tests/test_assetevents.cpp` and the controller tests in `tests/test_assetpanel.cpp` (the `AssetPanelTest.addScripted` helper makes an asset with
+  scripts and a console).
+
 ## 6. UI (phase D)
 
 ### Asset Manager panel (`assetManager.html`)

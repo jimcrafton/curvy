@@ -203,6 +203,9 @@ namespace curvy {
                 graphChanged();
             },
             [this, a, b]() { jitnodes::restoreSnapshot(*network_, *b, a.get()); graphChanged(); }});
+        if (afterEdit) {
+            afterEdit(description);
+        }
     }
 
     namespace {
@@ -298,6 +301,50 @@ namespace curvy {
         return ref;
     }
 
+    std::string GraphDocument::copyGraphNodes(std::uint32_t scope, const std::vector<jitnodes::NodeId>& ids, std::size_t* skipped) const {
+        if (skipped != nullptr) {
+            *skipped = 0;
+        }
+        const jitnodes::Network* network = findNetwork(scope);
+        if (network == nullptr) {
+            return {};
+        }
+        std::vector<jitnodes::NodeClip> clips;
+        for (const jitnodes::NodeId id : ids) {
+            if (!network->hasNode(id)) {
+                continue;
+            }
+            if (!refuseGraphCopy(NodeRef(scope, id)).empty()) {
+                if (skipped != nullptr) {
+                    ++*skipped;
+                }
+                continue;
+            }
+            clips.push_back(jitnodes::copyNode(*network, id));
+        }
+        return clips.empty() ? std::string() : jitnodes::clipsToText(clips);
+    }
+
+    std::vector<NodeRef> GraphDocument::pasteGraphNodes(const std::string& text, std::uint32_t scope, float offset) {
+        const std::vector<jitnodes::NodeClip> clips = jitnodes::clipsFromText(text);
+        if (clips.empty()) {
+            return {};
+        }
+        jitnodes::Network& network = networkOf(scope);
+        const jitnodes::GraphSnapshot before = snapshotGraph();
+        const std::vector<jitnodes::NodeId> added = jitnodes::pasteNodes(network, clips);
+        std::vector<NodeRef> refs;
+        for (const jitnodes::NodeId id : added) {
+            jitnodes::Node& node = network.node(id);
+            if (node.hasPosition()) {
+                node.setPosition(node.posX() + offset, node.posY() + offset);
+            }
+            refs.push_back(NodeRef(scope, id));
+        }
+        commitGraphEdit(before, added.size() == 1 ? "Paste Node" : "Paste Nodes");
+        return refs;
+    }
+
     void GraphDocument::removeGraphNode(const NodeRef& ref) {
         if (!hasNode(ref)) {
             throw std::runtime_error("no such node");
@@ -305,9 +352,17 @@ namespace curvy {
         if (const std::string why = refuseGraphEdit(ref, true); !why.empty()) {
             throw std::runtime_error(why);
         }
+        if (beforeRemove) {
+            beforeRemove({ref});
+        }
         const jitnodes::GraphSnapshot before = snapshotGraph();
-        networkOf(ref.scope).removeNode(ref.id);
+        if (networkOf(ref.scope).hasNode(ref.id)) {   // an event may have removed it
+            networkOf(ref.scope).removeNode(ref.id);
+        }
         commitGraphEdit(before, "Delete Node");
+        if (afterRemove) {
+            afterRemove();
+        }
     }
 
     void GraphDocument::removeGraphNodes(const std::vector<NodeRef>& refs) {
@@ -322,13 +377,19 @@ namespace curvy {
         if (refs.empty()) {
             return;
         }
+        if (beforeRemove) {
+            beforeRemove(refs);
+        }
         const jitnodes::GraphSnapshot before = snapshotGraph();
         for (const NodeRef& ref : refs) {
-            if (networkOf(ref.scope).hasNode(ref.id)) {   // removing a subnet takes its contents with it
+            if (hasNode(ref)) {   // removing a subnet takes its contents with it
                 networkOf(ref.scope).removeNode(ref.id);
             }
         }
         commitGraphEdit(before, refs.size() == 1 ? "Delete Node" : "Delete Nodes");
+        if (afterRemove) {
+            afterRemove();
+        }
     }
 
     void GraphDocument::moveGraphWire(const NodeRef& oldTo, int oldIndex, const NodeRef& newTo, int newIndex) {
@@ -417,6 +478,9 @@ namespace curvy {
             return;
         }
         timeChanged(network_->setTime(seconds));
+        if (onTimeMoved) {
+            onTimeMoved();
+        }
     }
 
     void GraphDocument::setGraphString(const NodeRef& ref, const std::string& name, const std::string& value) {

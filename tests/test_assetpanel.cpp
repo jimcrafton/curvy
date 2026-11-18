@@ -34,11 +34,35 @@ namespace {
                 }
             }
             WorkspaceTest::TearDown();
+            curvytest::sharedConsole().setMainThreadPoster(nullptr);   // a window that had the console gave it a poster of its own run loop
         }
 
         void addEmbedded(const std::string& name) {
             AssetLibrary::instance().apply(AssetDefinition::fromText(assetText(name)));
             names_.push_back(name);
+        }
+
+        // An asset with one promoted parameter, `amount`, and the given scripts (event -> Python source), with a console that runs them.
+        void addScripted(const std::string& name, const std::string& scripts) {
+            curvytest::sharedConsole().setMainThreadPoster([](std::function<void()>) {});
+            window().setScriptConsole(&curvytest::sharedConsole());
+            window().assetEvents()->setTrustPrompt([](const std::string&, const std::vector<std::string>&) { return true; });
+            AssetLibrary::instance().apply(AssetDefinition::fromText(
+                "{ format: 'jitnodes-asset', version: 1, type: '" + name + "', inputs: 1, promote: { amount: 1 },\n"
+                "  scripts: { " + scripts + " },\n"
+                "  graph: { display: 2, nodes: [\n"
+                "    { id: 1, type: 'subnetInput', name: 'in', floats: { index: 0 }, inputs: [] },\n"
+                "    { id: 2, type: 'transform', name: 'xf', inputs: [1] } ] } }"));
+            names_.push_back(name);
+        }
+
+        bool hasNamed(const std::string& name) {
+            for (jitnodes::NodeId id : document().network().nodeIds()) {
+                if (document().network().node(id).name() == name) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         curvy::AssetManagerPanel& panel() { return window().assetPanel(); }
@@ -127,6 +151,149 @@ TEST_F(AssetPanelTest, addPutsAnInstanceInTheGraphWiredFromTheSelectedNodeAsOneU
     document().undoStack().undo();
     EXPECT_EQ(countOf("wobbleAsset"), 0u);
     EXPECT_EQ(panel().detail("instances"), "0 in this document");
+}
+
+TEST_F(AssetPanelTest, addRunsOnCreatedAndItsEditsJoinTheAddUndoStep) {
+    curvytest::sharedConsole().setMainThreadPoster([](std::function<void()>) {});
+    window().setScriptConsole(&curvytest::sharedConsole());
+    ASSERT_NE(window().assetEvents(), nullptr);
+    window().assetEvents()->setTrustPrompt([](const std::string&, const std::vector<std::string>&) { return true; });
+    AssetLibrary::instance().apply(AssetDefinition::fromText(
+        "{ format: 'jitnodes-asset', version: 1, type: 'evtAdd', inputs: 1, promote: {},\n"
+        "  scripts: { onCreated: \"doc.add_node('null', 'after_' + kwargs['reason'])\" },\n"
+        "  graph: { display: 2, nodes: [\n"
+        "    { id: 1, type: 'subnetInput', name: 'in', floats: { index: 0 }, inputs: [] },\n"
+        "    { id: 2, type: 'transform', name: 'xf', inputs: [1] } ] } }"));
+    names_.push_back("evtAdd");
+
+    panel().clickRow("evtAdd");
+    const std::size_t depth = document().undoStack().depth();
+    panel().clickButton("addInstanceButton");
+    EXPECT_EQ(document().undoStack().depth(), depth + 1);
+    EXPECT_EQ(countOf("null"), 1u);
+
+    document().undoStack().undo();
+    EXPECT_EQ(countOf("evtAdd"), 0u);
+    EXPECT_EQ(countOf("null"), 0u);
+}
+
+TEST_F(AssetPanelTest, pastingAnInstanceRunsItsOnCreatedWithReasonPastedInsideThePasteStep) {
+    curvytest::sharedConsole().setMainThreadPoster([](std::function<void()>) {});
+    window().setScriptConsole(&curvytest::sharedConsole());
+    ASSERT_NE(window().assetEvents(), nullptr);
+    window().assetEvents()->setTrustPrompt([](const std::string&, const std::vector<std::string>&) { return true; });
+    AssetLibrary::instance().apply(AssetDefinition::fromText(
+        "{ format: 'jitnodes-asset', version: 1, type: 'evtCopy', inputs: 1, promote: {},\n"
+        "  scripts: { onCreated: \"doc.add_node('null', 'after_' + kwargs['reason'])\" },\n"
+        "  graph: { display: 2, nodes: [\n"
+        "    { id: 1, type: 'subnetInput', name: 'in', floats: { index: 0 }, inputs: [] },\n"
+        "    { id: 2, type: 'transform', name: 'xf', inputs: [1] } ] } }"));
+    names_.push_back("evtCopy");
+    std::string clipboard;
+    window().graph().setClipboard = [&](const std::string& text) { clipboard = text; };
+    window().graph().getClipboard = [&]() { return clipboard; };
+
+    const curvy::NodeRef instance = document().addGraphNode("evtCopy");   // added with the API: no event
+    selection().set(instance);
+    ASSERT_TRUE(window().graph().copySelected());
+    const std::size_t depth = document().undoStack().depth();
+    ASSERT_TRUE(window().graph().pasteClipboard());
+    EXPECT_EQ(document().undoStack().depth(), depth + 1);
+    EXPECT_EQ(countOf("evtCopy"), 2u);
+    bool found = false;
+    for (jitnodes::NodeId id : document().network().nodeIds()) {
+        found = found || document().network().node(id).name() == "after_pasted";
+    }
+    EXPECT_TRUE(found);
+
+    document().undoStack().undo();
+    EXPECT_EQ(countOf("evtCopy"), 1u);
+    EXPECT_EQ(countOf("null"), 0u);
+}
+
+TEST_F(AssetPanelTest, undoingTheDeleteOfAnInstanceRunsItsOnCreatedWithReasonUndo) {
+    curvytest::sharedConsole().setMainThreadPoster([](std::function<void()>) {});
+    window().setScriptConsole(&curvytest::sharedConsole());
+    ASSERT_NE(window().assetEvents(), nullptr);
+    window().assetEvents()->setTrustPrompt([](const std::string&, const std::vector<std::string>&) { return true; });
+    AssetLibrary::instance().apply(AssetDefinition::fromText(
+        "{ format: 'jitnodes-asset', version: 1, type: 'evtUndo', inputs: 1, promote: {},\n"
+        "  scripts: { onCreated: \"doc.add_node('null', 'after_' + kwargs['reason'])\" },\n"
+        "  graph: { display: 2, nodes: [\n"
+        "    { id: 1, type: 'subnetInput', name: 'in', floats: { index: 0 }, inputs: [] },\n"
+        "    { id: 2, type: 'transform', name: 'xf', inputs: [1] } ] } }"));
+    names_.push_back("evtUndo");
+    auto hasNamed = [&](const std::string& name) {
+        for (jitnodes::NodeId id : document().network().nodeIds()) {
+            if (document().network().node(id).name() == name) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    const curvy::NodeRef instance = document().addGraphNode("evtUndo");   // added with the API: no event
+    document().removeGraphNode(instance);
+    ASSERT_EQ(countOf("evtUndo"), 0u);
+    ASSERT_TRUE(window().undo());
+    EXPECT_EQ(countOf("evtUndo"), 1u);
+    EXPECT_TRUE(hasNamed("after_undo"));
+
+    ASSERT_TRUE(window().undo());   // the script's edit is a step of its own: undoing it leaves the instance
+    EXPECT_FALSE(hasNamed("after_undo"));
+    EXPECT_EQ(countOf("evtUndo"), 1u);
+}
+
+TEST_F(AssetPanelTest, deletingAnInstanceRunsOnDeletedInsideTheDeleteStepAndUndoTakesBothBack) {
+    addScripted("evtDel", "onDeleted: \"doc.add_node('null', 'saw_' + node.name())\"");
+    const curvy::NodeRef instance = document().addGraphNode("evtDel", "gone");
+    const std::size_t depth = document().undoStack().depth();
+    document().removeGraphNode(instance);
+    EXPECT_EQ(document().undoStack().depth(), depth + 1);
+    EXPECT_EQ(countOf("evtDel"), 0u);
+    EXPECT_TRUE(hasNamed("saw_gone"));
+
+    document().undoStack().undo();
+    EXPECT_EQ(countOf("evtDel"), 1u);
+    EXPECT_FALSE(hasNamed("saw_gone"));
+}
+
+TEST_F(AssetPanelTest, wiringAndEditingAnInstanceRunOnInputChangedAndOnParamChangedInsideTheEditStep) {
+    addScripted("evtWatch", "onInputChanged: \"doc.add_node('null', 'input_%d' % kwargs['index'])\",\n"
+                            "onParamChanged: \"doc.add_node('null', 'param_%s_%g' % (kwargs['name'], kwargs['value']))\"");
+    const curvy::NodeRef line = document().addGraphNode("line");
+    const curvy::NodeRef instance = document().addGraphNode("evtWatch");
+    EXPECT_FALSE(hasNamed("input_0")) << "adding is not a change of the input";
+
+    std::size_t depth = document().undoStack().depth();
+    document().connectGraphNodes(line, instance, 0);
+    EXPECT_TRUE(hasNamed("input_0"));
+    EXPECT_EQ(document().undoStack().depth(), depth + 1) << "the script's node is in the wiring step";
+
+    depth = document().undoStack().depth();
+    document().setGraphFloats(instance, {{"amount", 3.0f}}, "Edit amount");
+    EXPECT_TRUE(hasNamed("param_amount_3"));
+    EXPECT_EQ(document().undoStack().depth(), depth + 1);
+}
+
+TEST_F(AssetPanelTest, movingTheTimeRunsOnFrameChangedWithTheFrameNumber) {
+    addScripted("evtFrame", "onFrameChanged: \"doc.add_node('null', 'frame_%d_%s' % (kwargs['frame'], kwargs['playing']))\"");
+    document().addGraphNode("evtFrame");
+    const int frame = int(std::lround(2.0 * document().network().fps()));
+    document().setTime(2.0);
+    EXPECT_TRUE(hasNamed("frame_" + std::to_string(frame) + "_False"));
+}
+
+TEST_F(AssetPanelTest, registeringAnAssetRunsItsOnInstalledOnceWithoutAnInstance) {
+    addScripted("evtInstalled", "onInstalled: \"doc.add_node('null', 'installed_%s_%d' % (kwargs['name'], kwargs['version']))\"");
+    window().flushInstalledEvents();
+    EXPECT_TRUE(hasNamed("installed_evtInstalled_1"));
+    window().flushInstalledEvents();
+    std::size_t count = 0;
+    for (jitnodes::NodeId id : document().network().nodeIds()) {
+        count += document().network().node(id).name().rfind("installed_", 0) == 0 ? 1 : 0;
+    }
+    EXPECT_EQ(count, 1u) << "the same version is announced once";
 }
 
 TEST_F(AssetPanelTest, anOutdatedInstanceShowsTheBannerAndUpdateRebuildsItAsOneUndoStep) {

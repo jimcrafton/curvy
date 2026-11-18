@@ -6,6 +6,7 @@
 #include <newui/models.h>
 #include <newui/undostack.h>
 
+#include <functional>
 #include <memory>
 #include <map>
 #include <string>
@@ -23,6 +24,14 @@ namespace curvy {
         newui::UndoStack& undoStack() { return undoStack_; }
         // Fired after every change of the graph (an edit, undo or redo, a load that replaced it, a clear); what holds NodeRefs prunes them here.
         newui::Delegate<GraphDocument> onGraphChanged;
+        // Fired after the time moved and the views were told (not an undo step).
+        std::function<void()> onTimeMoved;
+        // removeGraphNode(s) calls these around a delete that was accepted: beforeRemove with the nodes still in place (before the edit is
+        // recorded), afterRemove once the step is recorded. Used to run the onDeleted events inside the delete's undo step.
+        std::function<void(const std::vector<NodeRef>&)> beforeRemove;
+        std::function<void()> afterRemove;
+        // Called by commitGraphEdit once the step is on the undo stack (not for undo or redo), with the step's description.
+        std::function<void(const std::string&)> afterEdit;
         // Expires when the document is destroyed, so something that observes it from a longer-lived view can tell not to touch it.
         std::weak_ptr<void> lifetime() const { return alive_; }
         jitnodes::Network& network() { return *network_; }
@@ -57,6 +66,14 @@ namespace curvy {
 
         // Each of these is one undo step. New nodes go into `scope`.
         NodeRef addGraphNode(const std::string& type, const std::string& name = {}, std::uint32_t scope = 0);
+        // The nodes as clipboard text (the jitnodes "jitnodes-nodes" document), connections between them kept. Nodes the document does not let
+        // be copied are left out (`skipped` counts them); the text is empty when nothing was left. Nodes must be in `scope`.
+        std::string copyGraphNodes(std::uint32_t scope, const std::vector<jitnodes::NodeId>& ids, std::size_t* skipped = nullptr) const;
+        // Adds copies of the nodes in `text` to `scope` as one undo step, moved by `offset` in the editor when they have a layout position (so they
+        // do not sit on the originals). Returns the new nodes. Text that is not a copy of nodes adds nothing and returns none; throws
+        // std::runtime_error (and changes nothing) for a copy that cannot be pasted, such as an asset that is not installed.
+        std::vector<NodeRef> pasteGraphNodes(const std::string& text, std::uint32_t scope, float offset = 30.0f);
+
         // Each of the three throws std::runtime_error when the document refuses it (see refuseGraphEdit), and changes nothing then.
         void removeGraphNode(const NodeRef& ref);
         // Deletes all of them as one undo step; when the document refuses any of them, none is deleted.
@@ -137,6 +154,11 @@ namespace curvy {
         virtual std::string refuseGraphEdit(const NodeRef& node, bool removing) const {
             (void)node;
             (void)removing;
+            return {};
+        }
+        // Why the document will not copy `node` to the clipboard (a node it relies on cannot exist twice); empty when it is allowed.
+        virtual std::string refuseGraphCopy(const NodeRef& node) const {
+            (void)node;
             return {};
         }
         // Why the document will not give `node` these tags; empty when it is allowed. A derived document protects the tags it relies on.

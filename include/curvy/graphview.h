@@ -57,6 +57,18 @@ namespace curvy {
         const std::vector<NodeRef>& selection() const { return model_->items(); }
         // Deletes the selected nodes; false when none, or when the document refuses (onMessage then says why).
         bool deleteSelected();
+        // Copies the selected nodes of the shown network to the clipboard as text (nodes the document does not let be copied are left out, and
+        // the message says so); false when nothing was copied. Cut copies and then deletes them.
+        bool copySelected();
+        bool cutSelected();
+        // Adds what the clipboard holds (if it is a copy of nodes) to the shown network as one undo step, selects the new nodes and fires
+        // onPasted inside the step; false when there was nothing to paste or the paste failed (the message says why).
+        bool pasteClipboard();
+        // The clipboard as UTF-8 text; the system clipboard unless the owner (or a test) replaces them.
+        std::function<void(const std::string&)> setClipboard;
+        std::function<std::string()> getClipboard;
+        // Called inside the paste's undo step with the new nodes, so what reacts to new nodes (asset scripts) is part of the step.
+        std::function<void(std::uint32_t scope, const std::vector<NodeRef>& pasted)> onPasted;
         // "root > Layer1 > Group1" for the shown network.
         std::string path() const;
         // The names that make up path(): "root" first, the shown subnet last; empty without a document.

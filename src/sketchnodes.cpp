@@ -55,6 +55,14 @@ namespace curvy {
             ? "the input of a layer's or group's transform and of the document's render is fixed" : std::string();
     }
 
+    std::string SketchDocument::refuseGraphCopy(const NodeRef& ref) const {
+        const jitnodes::Node& target = node(ref);
+        if (NodeUsers::isStructural(target) || target.hasTag(layerTag) || target.hasTag(groupTag)) {
+            return "layers, groups and the document's own nodes cannot be copied";
+        }
+        return {};
+    }
+
     std::string SketchDocument::refuseTagEdit(const NodeRef& ref, const std::vector<std::string>& tags) const {
         const std::set<std::string> reserved = {objectXformTag, objectMergeTag, layerTag, groupTag, rootMergeTag, rootRenderTag};
         const auto reservedOf = [&](const std::vector<std::string>& all) {
