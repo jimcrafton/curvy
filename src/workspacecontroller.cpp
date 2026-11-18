@@ -635,6 +635,7 @@ namespace curvy {
                 pythonNodeTrust_->trust(code);
             }
         };
+        nodePanel_->onPythonCodeAllowed = nodePanel_->onPythonCodeCommitted;
         if (auto* data = dynamic_cast<Button*>(nodePanel_->findView("graphDataButton"))) {
             data->onClick += [this](Control&) {
                 showPointTable();

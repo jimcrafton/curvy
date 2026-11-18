@@ -2,6 +2,8 @@
 
 #include <jitnodes/graph/network.h>
 
+#include <pyPythonNode.h>
+
 #include "curvy/pythonhighlight.h"
 #include "curvy/theme.h"
 #include "curvy/wranglecheck.h"
@@ -158,13 +160,19 @@ namespace curvy {
         codeToggle_ = dynamic_cast<Button*>(section->findView("wrangleCodeToggle"));
         classButton_ = dynamic_cast<Button*>(section->findView("wrangleClassButton"));
         cookErrorLabel_ = dynamic_cast<Label*>(section->findView("wrangleProblem"));
+        allowButton_ = dynamic_cast<Button*>(section->findView("wrangleAllow"));
         auto* commit = dynamic_cast<Button*>(section->findView("wrangleCommit"));
         auto* revert = dynamic_cast<Button*>(section->findView("wrangleRevert"));
-        if (codeSection_ == nullptr || editorHost_ == nullptr || codeToggle_ == nullptr || classButton_ == nullptr || cookErrorLabel_ == nullptr || commit == nullptr ||
+        if (codeSection_ == nullptr || editorHost_ == nullptr || codeToggle_ == nullptr || classButton_ == nullptr || cookErrorLabel_ == nullptr || allowButton_ == nullptr || commit == nullptr ||
             revert == nullptr) {
             throw std::runtime_error("NodePanel: Resources/nodePanelCode.newui lacks a view");
         }
         cookErrorLabel_->setText("");
+        allowButton_->setVisible(false);
+        allowButton_->onClick += [this](Control&) {
+            allowCode();
+            return SyncReturn::Handled;
+        };
         codeSection_->setLayoutParams(std::make_unique<FlexLayoutParams>(0.0f));
         codeSection_->setVisible(false);
 
@@ -319,6 +327,23 @@ namespace curvy {
         show(node_);
     }
 
+    bool NodePanel::allowShown() const {
+        return allowButton_ != nullptr && allowButton_->isVisible();
+    }
+
+    void NodePanel::allowCode() {
+        if (!allowShown() || !node_.valid() || !document_.hasNode(node_)) {
+            return;
+        }
+        if (onPythonCodeAllowed) {
+            onPythonCodeAllowed(committedCode());
+        }
+        if (onEdited) {
+            onEdited();   // the views cook again
+        }
+        show(node_);
+    }
+
     void NodePanel::setCodeClass(const std::string& value) {
         if (!codeShown() || !node_.valid() || !document_.hasNode(node_) || value == codeClass()) {
             return;
@@ -375,8 +400,10 @@ namespace curvy {
                 error = error.substr(0, end);
             }
             cookErrorLabel_->setText(error);
+            allowButton_->setVisible(pythonShown_ && error.rfind(jitnodes::python::pythonNodeNotAllowedMessage, 0) == 0);
         } else {
             cookErrorLabel_->setText("");
+            allowButton_->setVisible(false);
         }
         layoutCode();
         layoutContent();

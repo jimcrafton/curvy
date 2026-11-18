@@ -109,6 +109,11 @@ namespace curvy {
         // node's first cook does not ask whether it may run (PythonNodeTrust::trust).
         std::function<std::optional<SyntaxProblem>(const std::string& code)> onCheckPython;
         std::function<void(const std::string& code)> onPythonCodeCommitted;
+        // The Allow button on the error line, shown when the cook of a python node was refused because its code is not allowed: the owner allows
+        // this text (the node's own, not what the editor holds); the panel then shows the node again.
+        std::function<void(const std::string& code)> onPythonCodeAllowed;
+        bool allowShown() const;
+        void allowCode();
         // True when the section is showing a python node.
         bool codeIsPython() const { return pythonShown_; }
 
@@ -164,6 +169,7 @@ namespace curvy {
         newui::Button* codeToggle_ = nullptr;
         newui::Button* classButton_ = nullptr;
         newui::Label* cookErrorLabel_ = nullptr;
+        newui::Button* allowButton_ = nullptr;
         CodeEditorView* editor_ = nullptr;          // the one on show: wrangleEditor_ or pythonEditor_
         CodeEditorView* wrangleEditor_ = nullptr;
         CodeEditorView* pythonEditor_ = nullptr;

@@ -583,3 +583,48 @@ TEST_F(PythonCodeTest, aSyntaxErrorIsNamedUnderTheEditor) {
     panel.codeEditor()->checkSyntax();
     EXPECT_EQ(panel.codeProblem(), "");
 }
+
+TEST_F(PythonCodeTest, aRefusedNodeShowsAnAllowButtonThatAllowsItsCodeAndCooksIt) {
+    curvy::NodePanel& panel = window().nodePanel();
+    EXPECT_FALSE(panel.allowShown()) << "an empty node needs no allowance";
+    window().document().setGraphString(python_, "code", "geo.resize_points(2)");   // written by something other than the user's typing
+    panel.show(python_);
+
+    EXPECT_EQ(panel.cookError().rfind("Python nodes are not allowed here", 0), 0u);
+    EXPECT_TRUE(panel.allowShown());
+
+    panel.allowCode();
+    EXPECT_EQ(panel.cookError(), "");
+    EXPECT_FALSE(panel.allowShown());
+    EXPECT_TRUE(window().pythonNodeTrust()->isTrusted("geo.resize_points(2)"));
+    EXPECT_EQ(window().document().cook(python_)->pointCount(), 2u);
+}
+
+TEST_F(PythonCodeTest, allowWorksAfterTheQuestionWasDeclined) {
+    curvy::NodePanel& panel = window().nodePanel();
+    window().pythonNodeTrust()->setPrompt([](std::size_t) { return false; });
+    window().document().setGraphString(python_, "code", "geo.resize_points(3)");
+    panel.show(python_);
+    EXPECT_FALSE(window().pythonNodeTrust()->askPending());
+    panel.show(python_);
+    ASSERT_TRUE(panel.allowShown()) << "declined code stays refused for the session, and the button is the way back";
+
+    panel.allowCode();
+    EXPECT_EQ(panel.cookError(), "");
+    EXPECT_EQ(window().document().cook(python_)->pointCount(), 3u);
+}
+
+TEST_F(PythonCodeTest, theAllowButtonIsOnlyForARefusalNotForOtherErrorsOrOtherNodes) {
+    curvy::NodePanel& panel = window().nodePanel();
+    panel.setCodeOpen(true);
+    panel.codeEditor()->setText("raise ValueError('boom')");
+    panel.commitCode();
+    EXPECT_EQ(panel.cookError(), "ValueError: boom");
+    EXPECT_FALSE(panel.allowShown());
+
+    const curvy::NodeRef wrangle = window().document().addGraphNode("wrangle");
+    panel.show(wrangle);
+    EXPECT_FALSE(panel.allowShown());
+    panel.allowCode();   // nothing to allow: no effect, no crash
+    EXPECT_EQ(window().pythonNodeTrust()->pendingCount(), 0u);
+}

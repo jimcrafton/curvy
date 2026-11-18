@@ -10,7 +10,8 @@
   #wrangleCodeRow { height: 26px; }
   #wrangleCode { display: flex; flex-direction: column; flex-grow: 1; background: #1e1e1e; }
   #wrangleEditorHost { flex-grow: 1; height: 230px; background: #181818; }
-  #wrangleProblem { height: 20px; padding: 2px 8px; color: #ff6b6b; }
+  #wrangleProblemRow { display: flex; flex-direction: row; align-items: center; gap: 6px; height: 26px; padding: 0 4px; }
+  #wrangleProblem { flex-grow: 1; height: 20px; color: #ff6b6b; }
   .buttons { display: flex; flex-direction: row; align-items: center; gap: 6px; padding: 4px; height: 28px; }
   .hint { color: #a0a0a0; }
 </style>
@@ -25,7 +26,10 @@
   </div>
   <div id="wrangleCode">
     <div id="wrangleEditorHost"></div>
-    <p id="wrangleProblem" style="margin:0">3:9 unknown function 'sinn'</p>
+    <div id="wrangleProblemRow">
+      <p id="wrangleProblem" style="margin:0">3:9 unknown function 'sinn'</p>
+      <button id="wrangleAllow">Allow</button>
+    </div>
     <div class="buttons">
       <button id="wrangleCommit">Commit</button>
       <button id="wrangleRevert">Revert</button>
