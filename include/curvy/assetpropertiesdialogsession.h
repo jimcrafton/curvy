@@ -10,6 +10,7 @@
 #include <newui/controls.h>
 #include <newui/cursor.h>
 #include <newui/dialogs.h>
+#include <newui/groupedlist.h>
 #include <newui/layout.h>
 #include <newui/models.h>
 #include <newui/mouse_constants.h>
@@ -237,17 +238,9 @@ namespace curvy::assetpropsdialog {
 
         void start() {
             using namespace newui;
-            // A list with no children would shrink to nothing in its page's layout: keep the size the mockup gave it.
-            for (const char* name : {"paramList", "eventList", "filesList"}) {
-                if (SubView* list = listOf(name)) {
-                    list->setDesiredSize(list->bounds().size());
-                }
-            }
-            for (SubView* child : std::vector<SubView*>(listOf("paramList")->childViews())) {
-                listOf("paramList")->removeChild(child);
-                delete child;
-            }
             buildEventRows();
+            buildParamList();
+            buildFilesList();
             showPage(0);
             refresh();
         }
@@ -337,6 +330,7 @@ namespace curvy::assetpropsdialog {
                 return;
             }
             event_ = name;
+            syncEventSelection();
             updating_ = true;
             if (editor_ != nullptr) {
                 editor_->setText(state_.script(event_));
@@ -368,15 +362,18 @@ namespace curvy::assetpropsdialog {
             const auto* label = find<newui::Label>("propsFooterNote");
             return label == nullptr ? std::string() : label->text();
         }
-        std::size_t eventRowCount() const { return eventRows_.size(); }
+        std::size_t eventRowCount() const { return std::size(kEvents); }
         std::string eventWhen() const {
             const auto* label = find<newui::Label>("eventWhen");
             return label == nullptr ? std::string() : label->text();
         }
         bool eventHasScriptMark(const std::string& name) const {
-            for (const EventRow& row : eventRows_) {
-                if (row.name == name) {
-                    return row.label->text().rfind("* ", 0) == 0;
+            if (eventList_ == nullptr || eventList_->model() == nullptr) {
+                return false;
+            }
+            for (std::size_t row = 0; row < rowEvents_.size(); ++row) {
+                if (rowEvents_[row] >= 0 && name == kEvents[rowEvents_[row]].name) {
+                    return std::any_cast<std::string>(eventList_->model()->valueAt(row)).rfind("* ", 0) == 0;
                 }
             }
             return false;
@@ -406,12 +403,6 @@ namespace curvy::assetpropsdialog {
         }
 
     private:
-        struct EventRow {
-            std::string name;
-            newui::SubView* view = nullptr;
-            newui::Label* label = nullptr;
-        };
-
         static std::string number(float value) {
             char buffer[32];
             std::snprintf(buffer, sizeof(buffer), "%g", double(value));
@@ -545,110 +536,154 @@ namespace curvy::assetpropsdialog {
         // The rows of the parameter list: one per parameter, the selected one highlighted.
         void updateParamRows() {
             using namespace newui;
-            SubView* list = listOf("paramList");
-            if (list == nullptr) {
-                return;
-            }
             if (param_ >= int(state_.paramCount())) {
                 param_ = int(state_.paramCount()) - 1;
             }
             if (param_ < 0 && state_.paramCount() > 0) {
                 param_ = 0;
             }
-            while (paramRows_.size() < state_.paramCount()) {
-                const std::size_t at = paramRows_.size();
-                auto* row = new SubView();
-                row->setVisible(true);
-                row->setName("paramRow_" + std::to_string(at));
-                row->setCursor(Cursor(CursorKind::Hand));
-                list->addChild(row);
-                auto* label = new Label();
-                label->setTextAlignment(TextAlignment::Left);
-                label->setTextColor(BLRgba32(0xFFF0F0F0u));
-                row->addChild(label);
-                const auto choose = [this, at](View&, const Point&, std::uint32_t buttons, std::uint32_t) {
-                    if ((buttons & mbmLeftButton) != 0) {
-                        selectParam(int(at));
-                        return SyncReturn(SyncReturn::Handled);
-                    }
-                    return SyncReturn(SyncReturn::Ignored);
-                };
-                row->onMouseDown += choose;
-                label->onMouseDown += choose;
-                paramRows_.push_back({row, label});
+            if (paramList_ == nullptr) {
+                return;
             }
-            const float width = list->bounds().width();
-            for (std::size_t i = 0; i < paramRows_.size(); ++i) {
-                const bool shown = i < state_.paramCount();
-                paramRows_[i].first->setVisible(shown);
-                if (!shown) {
-                    continue;
-                }
+            std::vector<std::string> rows;
+            for (std::size_t i = 0; i < state_.paramCount(); ++i) {
                 const jitnodes::AssetParam& p = state_.param(i);
-                paramRows_[i].second->setText(p.name + "    " + number(p.defaultValue));
-                paramRows_[i].first->style().setBackgroundColor(BLRgba32(int(i) == param_ ? 0xFF3A2F1Fu : 0x00000000u));
-                paramRows_[i].first->setBounds(Rect(0.0f, float(i) * 26.0f, width, 26.0f));
-                paramRows_[i].second->setBounds(Rect(8.0f, 4.0f, (std::max)(width - 16.0f, 20.0f), 18.0f));
+                rows.push_back(p.name + "    " + number(p.defaultValue));
             }
+            setListRows(*paramList_, rows, param_ < 0 ? std::optional<std::size_t>() : std::optional<std::size_t>(std::size_t(param_)));
+        }
+
+        // Fills a ListView's rows. The same count keeps the model and only rewrites the text, so a list being clicked is not rebuilt under the mouse.
+        void setListRows(newui::ListView& list, const std::vector<std::string>& rows, std::optional<std::size_t> selected) {
+            using namespace newui;
+            syncingLists_ = true;
+            if (list.model() == nullptr || list.model()->size() != rows.size()) {
+                auto items = std::make_unique<StringListModel>();
+                for (const std::string& row : rows) {
+                    items->addItem(row);
+                }
+                list.setModel(std::move(items));
+            } else {
+                for (std::size_t i = 0; i < rows.size(); ++i) {
+                    list.model()->setValueAt(i, rows[i]);
+                }
+            }
+            list.setSelectedIndex(selected);
+            syncingLists_ = false;
+        }
+
+        void buildParamList() {
+            using namespace newui;
+            paramList_ = find<ListView>("paramList");
+            if (paramList_ == nullptr) {
+                return;
+            }
+            paramList_->setRowHeight(26.0f);
+            paramList_->onSelectionChanged += [this](ListView& changed) {
+                if (syncingLists_) {
+                    return SyncReturn(SyncReturn::Handled);
+                }
+                const std::optional<std::size_t> index = changed.selectedIndex();
+                if (index.has_value() && *index < state_.paramCount()) {
+                    selectParam(int(*index));
+                } else {
+                    refreshParams();   // Ctrl+click can empty the selection; a parameter stays chosen
+                }
+                return SyncReturn(SyncReturn::Handled);
+            };
+        }
+
+        void buildFilesList() {
+            using namespace newui;
+            filesList_ = find<ListView>("filesList");
+            if (filesList_ == nullptr) {
+                return;
+            }
+            filesList_->setRowHeight(26.0f);
+            filesList_->onSelectionChanged += [this](ListView& changed) {
+                if (syncingLists_) {
+                    return SyncReturn(SyncReturn::Handled);
+                }
+                const std::optional<std::size_t> index = changed.selectedIndex();
+                file_ = index.has_value() && *index < fileNames_.size() ? fileNames_[*index] : std::string();
+                return SyncReturn(SyncReturn::Handled);
+            };
         }
 
         void buildEventRows() {
             using namespace newui;
-            SubView* list = listOf("eventList");
-            if (list == nullptr) {
+            eventList_ = find<ListView>("eventList");
+            if (eventList_ == nullptr) {
                 return;
             }
-            for (SubView* child : std::vector<SubView*>(list->childViews())) {
-                list->removeChild(child);
-                delete child;
-            }
-            list->setLayout(nullptr);
-            const float width = list->bounds().width();
-            float y = 0.0f;
+            // A row per event with a heading row before each group; rowEvents_ maps a row to its kEvents index (-1 for a heading).
+            std::vector<bool> headings;
+            auto items = std::make_unique<StringListModel>();
             std::string group;
-            for (const EventInfo& info : kEvents) {
-                if (group != info.group) {
-                    group = info.group;
-                    auto* heading = new Label();
-                    heading->setText(group);
-                    heading->setTextAlignment(TextAlignment::Left);
-                    heading->setTextColor(BLRgba32(0xFFA0A0A0u));
-                    list->addChild(heading);
-                    heading->setBounds(Rect(8.0f, y + 6.0f, width - 16.0f, 16.0f));
-                    y += 24.0f;
+            for (std::size_t i = 0; i < std::size(kEvents); ++i) {
+                if (group != kEvents[i].group) {
+                    group = kEvents[i].group;
+                    items->addItem(group);
+                    headings.push_back(true);
+                    rowEvents_.push_back(-1);
                 }
-                auto* row = new SubView();
-                row->setVisible(true);
-                row->setCursor(Cursor(CursorKind::Hand));
-                list->addChild(row);
-                auto* label = new Label();
-                label->setTextAlignment(TextAlignment::Left);
-                label->setTextColor(BLRgba32(0xFFF0F0F0u));
-                row->addChild(label);
-                row->setBounds(Rect(0.0f, y, width, 24.0f));
-                label->setBounds(Rect(8.0f, 3.0f, width - 16.0f, 18.0f));
-                const std::string name = info.name;
-                row->setName("eventRow_" + name);
-                const auto choose = [this, name](View&, const Point&, std::uint32_t buttons, std::uint32_t) {
-                    if ((buttons & mbmLeftButton) != 0) {
-                        selectEvent(name);
-                        return SyncReturn(SyncReturn::Handled);
-                    }
-                    return SyncReturn(SyncReturn::Ignored);
-                };
-                row->onMouseDown += choose;
-                label->onMouseDown += choose;
-                eventRows_.push_back({name, row, label});
-                y += 24.0f;
+                items->addItem(kEvents[i].name);
+                headings.push_back(false);
+                rowEvents_.push_back(int(i));
             }
+            eventController_ = std::make_shared<GroupedListController>();
+            eventController_->setHeadings(std::move(headings));
+            eventList_->setController(eventController_);
+            eventList_->setModel(std::move(items));
+            eventList_->setRowHeight(24.0f);
+            eventList_->onSelectionChanged += [this](ListView& changed) {
+                if (syncingEventList_) {
+                    return SyncReturn(SyncReturn::Handled);
+                }
+                const std::optional<std::size_t> index = changed.selectedIndex();
+                if (index.has_value() && *index < rowEvents_.size()) {
+                    std::size_t row = *index;
+                    if (rowEvents_[row] < 0) {
+                        row = eventController_->nextSelectable(row, selectedEventRow());   // a heading cannot be chosen
+                    }
+                    if (rowEvents_[row] >= 0) {
+                        selectEvent(kEvents[rowEvents_[row]].name);
+                    }
+                }
+                syncEventSelection();   // also puts the selection back when Ctrl+click emptied it
+                return SyncReturn(SyncReturn::Handled);
+            };
             event_ = kEvents[0].name;
+            syncEventSelection();
+        }
+
+        std::size_t selectedEventRow() const {
+            for (std::size_t row = 0; row < rowEvents_.size(); ++row) {
+                if (rowEvents_[row] >= 0 && event_ == kEvents[rowEvents_[row]].name) {
+                    return row;
+                }
+            }
+            return 0;
+        }
+
+        void syncEventSelection() {
+            if (eventList_ == nullptr) {
+                return;
+            }
+            syncingEventList_ = true;
+            eventList_->setSelectedIndex(selectedEventRow());
+            syncingEventList_ = false;
         }
 
         void refreshEvents() {
             using namespace newui;
-            for (const EventRow& row : eventRows_) {
-                row.label->setText((state_.hasScript(row.name) ? "* " : "  ") + row.name);
-                row.view->style().setBackgroundColor(BLRgba32(row.name == event_ ? 0xFF3A2F1Fu : 0x00000000u));
+            if (eventList_ != nullptr && eventList_->model() != nullptr) {
+                for (std::size_t row = 0; row < rowEvents_.size(); ++row) {
+                    if (rowEvents_[row] >= 0) {
+                        const char* name = kEvents[rowEvents_[row]].name;
+                        eventList_->model()->setValueAt(row, std::string(state_.hasScript(name) ? "* " : "  ") + name);
+                    }
+                }
             }
             if (editor_ != nullptr && !updating_) {
                 editor_->checkSyntax();
@@ -668,35 +703,23 @@ namespace curvy::assetpropsdialog {
 
         void refreshFiles() {
             using namespace newui;
-            SubView* list = listOf("filesList");
-            if (list == nullptr) {
+            if (filesList_ == nullptr) {
                 return;
             }
-            for (SubView* child : std::vector<SubView*>(list->childViews())) {
-                list->removeChild(child);
-                delete child;
-            }
-            list->setLayout(nullptr);
-            float y = 0.0f;
+            fileNames_.clear();
+            std::vector<std::string> rows;
+            std::optional<std::size_t> selected;
             for (const auto& [name, text] : state_.working().files) {
-                auto* label = new Label();
-                label->setText(name + "    " + std::to_string(text.size()) + " bytes");
-                label->setTextAlignment(TextAlignment::Left);
-                label->setTextColor(BLRgba32(name == file_ ? 0xFFFFB454u : 0xFFF0F0F0u));
-                label->setCursor(Cursor(CursorKind::Hand));
-                list->addChild(label);
-                label->setBounds(Rect(8.0f, y + 4.0f, (std::max)(list->bounds().width() - 16.0f, 20.0f), 18.0f));
-                const std::string chosen = name;
-                label->onMouseDown += [this, chosen](View&, const Point&, std::uint32_t buttons, std::uint32_t) {
-                    if ((buttons & mbmLeftButton) != 0) {
-                        file_ = chosen;
-                        refreshFiles();
-                        return SyncReturn(SyncReturn::Handled);
-                    }
-                    return SyncReturn(SyncReturn::Ignored);
-                };
-                y += 26.0f;
+                if (name == file_) {
+                    selected = fileNames_.size();
+                }
+                fileNames_.push_back(name);
+                rows.push_back(name + "    " + std::to_string(text.size()) + " bytes");
             }
+            if (!selected.has_value()) {
+                file_.clear();
+            }
+            setListRows(*filesList_, rows, selected);
         }
 
         // The script editor sits inside the mockup's placeholder and follows its size.
@@ -759,8 +782,14 @@ namespace curvy::assetpropsdialog {
         Callbacks callbacks_;
         std::function<void(newui::DialogResult)> closeWith_;
         std::vector<std::function<void()>> syncs_;
-        std::vector<std::pair<newui::SubView*, newui::Label*>> paramRows_;
-        std::vector<EventRow> eventRows_;
+        newui::ListView* paramList_ = nullptr;
+        newui::ListView* filesList_ = nullptr;
+        std::vector<std::string> fileNames_;   // list row -> file name
+        bool syncingLists_ = false;
+        newui::ListView* eventList_ = nullptr;
+        std::shared_ptr<newui::GroupedListController> eventController_;
+        std::vector<int> rowEvents_;
+        bool syncingEventList_ = false;
         CodeEditorView* editor_ = nullptr;
         std::size_t page_ = 0;
         int param_ = -1;

@@ -17,7 +17,7 @@ class CurvyCase(AppTestCase):
 
     # The default window is too short for every panel of the right dock to show at once (the lower ones fall below the window), so a suite
     # that works in the script panels puts them on top and starts the other panels collapsed.
-    SCRIPT_PANELS_SETTINGS = "{ panels: { pyeditor: {}, pyconsole: {}, document: { collapsed: true }, node: { collapsed: true }, transform: { collapsed: true } } }"
+    SCRIPT_PANELS_SETTINGS = "{ panels: { pyeditor: {}, pyconsole: {}, document: { collapsed: true }, node: { collapsed: true }, transform: { collapsed: true }, assets: { collapsed: true } } }"
 
     def make_settings_file(self, text=""):
         self._settings_dir = tempfile.TemporaryDirectory()

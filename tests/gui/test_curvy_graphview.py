@@ -2,6 +2,7 @@ r"""GUI check of the node graph view: a real double-click on a node box enters i
 
     python D:\code\curvy\tests\gui\test_curvy_graphview.py --exe D:\code\curvy\out\build\x64-release\curvy.exe
 """
+import ctypes
 import os
 import re
 import sys
@@ -273,6 +274,13 @@ class CopyPaste(GraphViewCase):
     FILL = GraphEditing.FILL
     enter_group = GraphEditing.enter_group
     fills_in_file = GraphEditing.fills_in_file
+
+    def setUp(self):
+        user32 = ctypes.windll.user32
+        user32.OpenClipboard(0)
+        user32.EmptyClipboard()
+        user32.CloseClipboard()
+        super().setUp()
 
     def select_fill(self):
         root = self.enter_group()

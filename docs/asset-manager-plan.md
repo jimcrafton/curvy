@@ -45,7 +45,7 @@ Manager (libraries, embedded vs file), `hou.hda` (`installFile`, `definitionsInF
 | Phase | Work | Where |
 |---|---|---|
 | C | HTML mockups (**done**) | `docs/mockups/` |
-| A | Core: `AssetDefinition`, `AssetLibrary`, format extension, spare-parameter API | `3rdparty/jitnodes` (branch `python`, carry to `D:\code\jitnodes`) |
+| A | Core: `AssetDefinition`, `AssetLibrary`, format extension, spare-parameter API | `3rdparty/jitnodes` (branch `python`; not carried to `D:\code\jitnodes`) |
 | B | Python: `jitnodes.assets`, curvy wrapper, tests, `docs/py-curvy-module.md` update | jitnodes `python/`, `src/scriptmodule.cpp` |
 | D | UI: `AssetManagerModel`, `AssetManagerPanel`, `AssetPropertiesDialog` (convert the mockups, then wire) | `include/curvy/`, `src/`, `Resources/` |
 | E | Curvy integration: panels menu, node palette, graph-brush badge, create-from-selection | curvy |
@@ -300,7 +300,9 @@ The cost test of section 8 is not written yet.
     status line says so, and `WorkspaceController::migrationNotes` asks the prompt afterwards so the next update runs it.
   - Any failure (an exception, the time limit, a bad `inputs`, a running script) keeps the core's default result and is shown on the status line after the
     load, or as the Update button's message (`takeMigrationProblems`).
-- **Still to do:** `doc.assets` and its undo routing; the guard cost test.
+- `doc.assets` (update_instances, unlock) routed through the document undo stack: done (`docs/py-curvy-module.md`).
+- Guard cost test: `ScriptModule.theEventGuardCostsLittleForAllowedEditsAndNothingForReads` (100 allowed edits among 1000 nodes under `onFrameChanged`:
+  overhead per edit under 0.5 ms; reads unchanged). Phase E is complete.
 - **Tests:** `tests/test_assetevents.cpp` and the controller tests in `tests/test_assetpanel.cpp` (the `AssetPanelTest.addScripted` helper makes an asset with
   scripts and a console).
 
@@ -360,7 +362,7 @@ Following `NewDocumentModel` / `...Session`: the GUI binds to a model, tests dri
 
 ## 9. Open decisions
 
-1. Core work in jitnodes (branch `python`) and carried to `D:\code\jitnodes`: confirm.
+1. Core work in jitnodes (`3rdparty/jitnodes`, committed on its own branch `python`). Decided: nothing is carried to `D:\code\jitnodes` (that folder is the "audio" branch).
 2. Float-only parameters in the first version, with range, label and group: confirm (strings, ints and colours would reach into the cook path).
 3. Python (module and event scripts) inside the definition file (one file, trust prompt) or beside it as `.py` files (several files): the plan assumes inside.
 6. (Decided) If measurement shows the upstream walk of the runtime guard is too slow, version 1 ships with the O(1) rule only (the instance and its

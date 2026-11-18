@@ -522,9 +522,12 @@ is the design and `3rdparty/jitnodes/docs/python.md` ("Assets") the API. What cu
 - `AssetDef.validate()` / `apply()` / `save()` refuse a definition whose scripts break the rules: the script check is installed as
   `AssetDefinition::setScriptValidator` when the module registers. The same check is `jitnodes.assets.check_scripts(scripts)` and, from C++,
   `jitnodes::python::checkAssetScripts` (`pyAssets.h`), which the Asset Properties dialog calls for the problem line while the user types.
-- **Not done here (phase E of the plan):** a `doc.assets` that routes `update_instances` / `unlock` through the document's undo stack and
-  shape sync (the functions act on a network and clear jitnodes' own history), firing the events (`onCreated`, `onFrameChanged`, ...), and the
-  trust prompt. An application that runs an event wraps it in `with jitnodes.assets.restricted(node, event)` (or the C++ `EventRestriction`,
+- **`doc.assets`** (`ScriptAssets`, holds the `DocumentGuard`): `update_instances(name=None) -> int` and `unlock(node) -> node` do what the
+  Assets panel does: snapshot the graph, call `jitnodes::updateAssetInstances` / `unlockAssetInstance`, then `commitGraphEdit`, so the change is
+  an undo step of the document (merged into the script's single step) and the shapes resync. Use these instead of `jitnodes.assets.update_instances`
+  / `unlock` for the open document, which act on a bare network and bypass the undo stack. Both honour `EventRestriction`. Test:
+  `ScriptModule.docAssetsUpdateAndUnlockAreUndoStepsOfTheDocument`.
+- Events are fired by `AssetEvents` (see the plan). An application that runs an event wraps it in `with jitnodes.assets.restricted(node, event)` (or the C++ `EventRestriction`,
   `pyGuard.h`): `onFrameChanged` then cannot change the node, what is inside it or what it reads from, and `onVersionUpdated` cannot change
   anything; a second restriction for the same node and event raises. What the node "reads from" is found by following its wiring upstream;
   a node that only reaches it through a parameter expression (`other.param`) is not seen.

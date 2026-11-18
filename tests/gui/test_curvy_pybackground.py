@@ -125,7 +125,7 @@ class PyBackground(BackgroundCase):
 
 
 class PyBackgroundTimeout(BackgroundCase):
-    SETTINGS = "{ panels: { pyeditor: {}, pyconsole: {}, document: { collapsed: true }, node: { collapsed: true }, transform: { collapsed: true } }, scriptEditor: { scriptTimeout: true, scriptTimeoutSeconds: 2 } }"
+    SETTINGS = "{ panels: { pyeditor: {}, pyconsole: {}, document: { collapsed: true }, node: { collapsed: true }, transform: { collapsed: true }, assets: { collapsed: true } }, scriptEditor: { scriptTimeout: true, scriptTimeoutSeconds: 2 } }"
 
     def test_a_script_past_the_time_limit_is_stopped_and_says_so(self):
         self.open_panels()

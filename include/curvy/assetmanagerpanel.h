@@ -1,10 +1,12 @@
 #pragma once
 
+#include "curvy/assetlist.h"
 #include "curvy/assetmanagermodel.h"
 #include "curvy/panel.h"
 #include "curvy/panelsmenu.h"
 
 #include <newui/controls.h>
+#include <newui/groupedlist.h>
 
 #include <functional>
 #include <memory>
@@ -56,28 +58,18 @@ namespace curvy {
         void chooseCategory(const std::string& category);
 
     private:
-        struct Row {
-            newui::SubView* view = nullptr;
-            newui::Label* name = nullptr;
-            newui::Label* version = nullptr;
-            newui::Label* badges[2] = {nullptr, nullptr};
-            std::string asset;   // empty for a group heading
-            std::vector<std::string> badgeTexts;
-        };
-
         template <typename T>
         T* find(const char* name) const {
             return dynamic_cast<T*>(root_->findView(name));
         }
 
-        Row& rowAt(std::size_t index);
         void wire();
+        void wireList();
         void say(const std::string& message);
         void refreshCategories();
         void refreshRows();
         void refreshDetails();
         void layoutAll();
-        void layoutRows(float width);
         void report(const std::string& error, const std::string& done = {});
 
         std::shared_ptr<AssetManagerModel> modelHolder_;   // the model may be gone before the window's views are
@@ -87,7 +79,9 @@ namespace curvy {
         newui::SubView* filter_ = nullptr;
         newui::SubView* list_ = nullptr;
         newui::ScrollView* listScroll_ = nullptr;
-        newui::SubView* rowsRoot_ = nullptr;
+        newui::ListView* assets_ = nullptr;
+        std::shared_ptr<newui::GroupedListController> controller_;
+        AssetListModel* listModel_ = nullptr;   // owned by assets_
         newui::SubView* banner_ = nullptr;
         newui::SubView* details_ = nullptr;
         newui::SubView* actions_ = nullptr;
@@ -95,8 +89,7 @@ namespace curvy {
         newui::Label* bannerText_ = nullptr;
         newui::TextField* search_ = nullptr;
         newui::DropDownList* category_ = nullptr;
-        std::vector<Row> rows_;
-        std::size_t shownRows_ = 0;
+        bool syncingList_ = false;
         std::vector<std::string> categories_;
         float headerHeight_ = 0.0f;
         float filterHeight_ = 0.0f;

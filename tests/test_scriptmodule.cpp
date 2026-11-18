@@ -5,6 +5,7 @@
 #include "curvy/sketchdocument.h"
 
 #include <gtest/gtest.h>
+#include <jitnodes/graph/assetLibrary.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -822,6 +823,48 @@ print(a.has("pyTestAsset"))
               "False\n");
 }
 
+TEST(ScriptModule, docAssetsUpdateAndUnlockAreUndoStepsOfTheDocument) {
+    curvy::SketchDocument document;
+    document.newBlank("DocAssets", 100.0f, 100.0f);
+    auto result = runOn(document, std::string(assetPrelude) + R"py(
+d = a.AssetDef.from_text(TEXT.replace("pyTestAsset", "pyDocAsset"))
+d.apply()
+inst = doc.add_node("pyDocAsset", "inst")
+d2 = a.get("pyDocAsset")
+d2.params[0].default = 4
+d2.apply()
+print([i.outdated for i in a.list(inst.network) if i.name == "pyDocAsset"])
+)py");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "[1]\n");
+
+    const std::size_t before = document.undoStack().depth();
+    result = runOn(document, R"py(
+print(doc.assets.update_instances("pyDocAsset"), doc.assets.update_instances())
+)py");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "1 0\n");
+    EXPECT_EQ(document.undoStack().depth(), before + 1);
+    document.undoStack().undo();
+    EXPECT_EQ(document.undoStack().depth(), before);
+
+    result = runOn(document, R"py(
+import jitnodes as jn
+inst = doc.add_node("pyDocAsset", "second")
+count = lambda: [i.instances for i in jn.assets.list(inst.network) if i.name == "pyDocAsset"]
+print(count())
+doc.assets.unlock(inst)
+print(count())
+try:
+    doc.assets.unlock(doc.add_node("transform", "plain"))
+except RuntimeError:
+    print("not an instance")
+)py");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "[2]\n[1]\nnot an instance\n");
+    jitnodes::AssetLibrary::instance().uninstall("pyDocAsset");
+}
+
 TEST(ScriptModule, aDefinitionIsSavedToAFileAndInstalledAgain) {
     curvy::SketchDocument document;
     document.newBlank("Assets", 100.0f, 100.0f);
@@ -954,6 +997,45 @@ a.uninstall("pyMigAsset")
 )py");
     ASSERT_TRUE(result.ok) << result.error;
     EXPECT_EQ(result.output, "True True True\n4.0 True\n");
+}
+
+TEST(ScriptModule, theEventGuardCostsLittleForAllowedEditsAndNothingForReads) {
+    curvy::SketchDocument document;
+    document.newBlank("GuardCost", 100.0f, 100.0f);
+    const auto result = runOn(document, std::string(assetPrelude) + R"py(
+import time
+a.AssetDef.from_text(TEXT.replace("pyTestAsset", "pyCostAsset")).apply()
+net = jn.Network()
+up = net.add_node("line", "up")
+inst = net.add_node("pyCostAsset", "inst")
+up >> inst
+others = [net.add_node("line", "n%d" % i) for i in range(1000)]
+targets = others[:100]
+
+def edits():
+    start = time.perf_counter()
+    for i, n in enumerate(targets):
+        n.count = 3 + i % 5
+    return time.perf_counter() - start
+
+def reads():
+    start = time.perf_counter()
+    for n in others:
+        n.count
+    return time.perf_counter() - start
+
+edits()
+reads()
+plainEdits = min(edits() for _ in range(3))
+plainReads = min(reads() for _ in range(3))
+with a.restricted(inst, "onFrameChanged"):
+    guardedEdits = min(edits() for _ in range(3))
+    guardedReads = min(reads() for _ in range(3))
+print("per-edit overhead under 0.5 ms:", (guardedEdits - plainEdits) / len(targets) < 0.0005)
+print("reads unchanged:", guardedReads < plainReads * 1.5 + 0.002)
+)py");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "per-edit overhead under 0.5 ms: True\nreads unchanged: True\n");
 }
 
 TEST(ScriptModule, whileAnEventRunsTheHandlesRefuseEditsToTheAssetAndWhatItReadsFrom) {

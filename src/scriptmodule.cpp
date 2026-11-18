@@ -6,6 +6,7 @@
 #include "curvy/sketchdocument.h"
 #include "curvy/wranglecheck.h"
 
+#include <pyGuard.h>
 #include <pyHandles.h>
 
 #include <pybind11/pybind11.h>
@@ -99,6 +100,44 @@ namespace curvy {
         private:
             std::shared_ptr<DocumentGuard> guard_;
             SelectionModel* selection_;
+        };
+
+        NodeRef refOf(SketchDocument& document, const py::object& value);
+        py::object wrapNode(SketchDocument& document, const NodeRef& ref);
+
+        // `doc.assets`: the asset operations that rewrite nodes, as undo steps of the document (the functions of jitnodes.assets act on a bare
+        // network and would bypass the document's undo stack and shape sync).
+        class ScriptAssets {
+        public:
+            explicit ScriptAssets(std::shared_ptr<DocumentGuard> guard) : guard_(std::move(guard)) {}
+
+            std::size_t updateInstances(const std::optional<std::string>& name) const {
+                jitnodes::python::EventRestriction::checkLibrary("update_instances");
+                SketchDocument& doc = guard_->get();
+                const jitnodes::GraphSnapshot before = doc.snapshotGraph();
+                const std::size_t count = jitnodes::updateAssetInstances(doc.network(), name ? *name : std::string());
+                if (count > 0) {
+                    doc.commitGraphEdit(before, "Update assets");
+                }
+                return count;
+            }
+
+            py::object unlock(const py::object& node) const {
+                SketchDocument& doc = guard_->get();
+                const NodeRef ref = refOf(doc, node);
+                jitnodes::python::EventRestriction::checkNode(node.cast<const jitnodes::python::PyNode&>().network(), ref.id, "unlock");
+                jitnodes::Network& network = doc.networkOf(ref.scope);
+                if (!doc.hasNode(ref) || !network.node(ref.id).isAssetInstance()) {
+                    throw std::runtime_error("the node is not an asset instance");
+                }
+                const jitnodes::GraphSnapshot before = doc.snapshotGraph();
+                jitnodes::unlockAssetInstance(network, ref.id);
+                doc.commitGraphEdit(before, "Unlock asset");
+                return wrapNode(doc, ref);
+            }
+
+        private:
+            std::shared_ptr<DocumentGuard> guard_;
         };
 
         // A layer or a group.
@@ -649,7 +688,13 @@ namespace curvy {
                     return false;
                 });
 
-            py::class_<ScriptDocument>(module, "Document", "The open document. A whole script run is one undo step.")
+            py::class_<ScriptAssets>(module, "Assets", "doc.assets: update_instances and unlock as undo steps of the document.")
+                .def("update_instances", &ScriptAssets::updateInstances, py::arg("name") = py::none(),
+                     "Rebuilds the instances built from an older version of their asset (all assets, or one); returns how many. One undo step.")
+                .def("unlock", &ScriptAssets::unlock, py::arg("node"),
+                     "Turns an asset instance back into an ordinary subnet with a copy of the contents; returns the node. One undo step.");
+
+            py::class_<ScriptDocument>(module, "Document","The open document. A whole script run is one undo step.")
                 .def("transaction", [](const ScriptDocument& d, const std::string& name) { return ScriptBlock(d.guard(), name); },
                      py::arg("name") = "Script step",
                      "Use as `with doc.transaction('name'):`. If the block raises, everything it changed is undone and the error continues.")
@@ -716,6 +761,8 @@ namespace curvy {
                          return wrapNode(doc, doc.addGraphNode(type, name, scopeFor(doc, parent)));
                      }, py::arg("type"), py::arg("name") = "", py::arg("parent") = py::none(),
                      "Adds a node to the document's graph, or inside `parent` (a layer or group).")
+                .def_property_readonly("assets", [](const ScriptDocument& d) { return ScriptAssets(d.guard()); },
+                                       "Asset operations that rewrite nodes (update_instances, unlock) as undo steps of the document.")
                 .def("remove_node", [](const ScriptDocument& d, const py::object& node) { d.get().removeGraphNode(refOf(d.get(), node)); })
                 .def("connect", [](const ScriptDocument& d, const py::object& from, const py::object& to, int input) {
                          d.get().connectGraphNodes(refOf(d.get(), from), refOf(d.get(), to), input);
@@ -1149,7 +1196,7 @@ namespace curvy {
             return functions;
         }, "The functions the wrangle language has, as (name, number of arguments).");
 
-        for (const char* name : {"Selection", "Object", "Transaction", "Document"}) {
+        for (const char* name : {"Selection", "Object", "Transaction", "Document", "Assets"}) {
             guardClass(module.attr(name));
         }
         py::module_ jitnodes = py::module_::import("jitnodes");

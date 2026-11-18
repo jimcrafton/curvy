@@ -17,7 +17,7 @@
   #propsTitle { flex-grow: 1; font-weight: 700; }
   #propsKind { color: #A0A0A0; }
   #propsTabs { display: flex; flex-direction: row; gap: 5px; padding: 10px 12px 4px 12px; }
-  .tab { height: 20px; padding: 0 10px; border-radius: 10px; color: #A0A0A0; }
+  .tab { height: 26px; padding: 0 12px; border-radius: 13px; color: #A0A0A0; }
   .tabOn { background: #FFB454; border-color: #FFB454; color: #1B1B1B; }
   #propsPages { display: flex; flex-direction: column; flex-grow: 1; padding: 4px 12px; }
   .page { display: flex; flex-direction: column; gap: 4px; }
@@ -28,10 +28,10 @@
   .field { width: 56px; height: 22px; }
   .unit { color: #A0A0A0; }
   .help { color: #A0A0A0; height: 16px; padding-left: 98px; }
-  .pill { height: 20px; padding: 0 10px; border-radius: 10px; }
+  .pill { height: 28px; width: 88px; }
   .pillOn { background: #FFB454; border-color: #FFB454; color: #1B1B1B; }
   #paramColumns { display: flex; flex-direction: row; gap: 12px; height: 170px; }
-  #paramList { display: flex; flex-direction: column; width: 190px; height: 170px; background: #121212; border: 1px solid #4A4A4A; }
+  #paramScroll { width: 190px; height: 170px; overflow: auto; background: #121212; border: 1px solid #4A4A4A; }
   .paramRow { display: flex; flex-direction: row; align-items: center; gap: 6px; height: 26px; padding: 0 6px; }
   .paramRowSelected { background: #3A2F1F; border-left: 2px solid #FFB454; }
   .paramGrip { width: 12px; color: #A0A0A0; }
@@ -39,11 +39,11 @@
   .paramDefault { width: 40px; color: #A0A0A0; text-align: right; }
   #paramEditor { display: flex; flex-direction: column; gap: 4px; flex-grow: 1; }
   #paramEditor .cap { width: 52px; }
-  .buttons { display: flex; flex-direction: row; gap: 6px; height: 26px; align-items: center; }
+  .buttons { display: flex; flex-direction: row; gap: 6px; height: 32px; align-items: center; }
   .reservedNote { color: #FFB454; height: 16px; }
   #contentsPreview { height: 170px; background: #121212; border: 1px solid #4A4A4A; }
   #pythonColumns { display: flex; flex-direction: row; gap: 12px; height: 360px; }
-  #eventList { display: flex; flex-direction: column; width: 170px; height: 360px; background: #121212; border: 1px solid #4A4A4A; }
+  #eventScroll { width: 170px; height: 360px; overflow: auto; background: #121212; border: 1px solid #4A4A4A; }
   .eventGroup { height: 18px; padding: 6px 8px 0 8px; font-size: 10px; letter-spacing: 0.05em; color: #A0A0A0; }
   .eventRow { display: flex; flex-direction: row; align-items: center; gap: 6px; height: 24px; padding: 0 8px; }
   .eventRowSelected { background: #3A2F1F; border-left: 2px solid #FFB454; }
@@ -56,7 +56,7 @@
   #pythonProblem { height: 18px; color: #FF6B6B; }
   #pythonEditor { height: 150px; background: #181818; border: 1px solid #4A4A4A; }
   #helpText { height: 200px; background: #181818; color: #F0F0F0; border: 1px solid #4A4A4A; font: 12px Consolas, monospace; padding: 4px 6px; box-sizing: border-box; }
-  #filesList { display: flex; flex-direction: column; height: 150px; background: #121212; border: 1px solid #4A4A4A; }
+  #filesScroll { height: 150px; overflow: auto; background: #121212; border: 1px solid #4A4A4A; }
   .fileRow { display: flex; flex-direction: row; align-items: center; gap: 8px; height: 26px; padding: 0 8px; }
   .fileSize { flex-grow: 1; color: #A0A0A0; text-align: right; }
   #propsFooter { display: flex; flex-direction: row; align-items: center; gap: 6px; height: 52px; padding: 0 12px; background: #2E2E2E; }
@@ -91,10 +91,7 @@
       <div id="pageParameters" class="page">
         <span class="sectionLabel">PROMOTED PARAMETERS</span>
         <div id="paramColumns">
-          <div id="paramList">
-            <div class="paramRow paramRowSelected"><span class="paramGrip">::</span><span class="paramName">amount</span><span class="paramDefault">0.3</span></div>
-            <div class="paramRow"><span class="paramGrip">::</span><span class="paramName">speed</span><span class="paramDefault">3</span></div>
-          </div>
+          <div id="paramScroll"><canvas id="paramList" data-newui-type="ListView"></canvas></div>
           <div id="paramEditor">
             <div class="row"><span class="cap">Name</span><input id="paramName" class="grow" type="text" value="amount"></div>
             <div class="row"><span class="cap">Label</span><input id="paramLabel" class="grow" type="text" value="Amount"></div>
@@ -119,27 +116,7 @@
       <div id="pagePython" class="page">
         <span class="sectionLabel">PYTHON: WHEN IT RUNS</span>
         <div id="pythonColumns">
-          <div id="eventList">
-            <span class="eventGroup">SHARED CODE</span>
-            <div class="eventRow eventRowSelected" data-when="Once per session, the first time the asset is used (an instance is made, a file with one opens, or another script imports it). Defines helper functions; it is not tied to any node." data-args="none">
-              <input class="eventCheck" type="checkbox" checked><span class="eventName">module</span></div>
-            <span class="eventGroup">EACH INSTANCE</span>
-            <div class="eventRow" data-when="An instance exists: Add, paste, undo of a delete, or opening a document (then after the whole document is built, so other nodes can be looked at). reason is added, pasted, undo or loaded; set defaults only for added and pasted." data-args="node, reason">
-              <input class="eventCheck" type="checkbox" checked><span class="eventName">onCreated</span></div>
-            <div class="eventRow" data-when="An older instance is rebuilt from a newer version of the asset (Update, or opening a document saved with an older one). For changes the renames list cannot express, such as a new unit. Must only read old and write fresh: it cannot touch the document, and it may run twice." data-args="old, fresh, inputs, from_version, to_version">
-              <input class="eventCheck" type="checkbox"><span class="eventName">onVersionUpdated</span></div>
-            <div class="eventRow" data-when="An input of the instance was wired, rewired or disconnected." data-args="node, index">
-              <input class="eventCheck" type="checkbox"><span class="eventName">onInputChanged</span></div>
-            <div class="eventRow" data-when="A promoted parameter was edited by the user, a script or undo. Not run for animated values while the timeline plays or scrubs (see onFrameChanged)." data-args="node, name, value">
-              <input class="eventCheck" type="checkbox"><span class="eventName">onParamChanged</span></div>
-            <div class="eventRow" data-when="The playhead moved, after the new frame is shown. Skipped while playing if the previous call has not finished; at most once per displayed frame. Use it to drive other things from the time. It cannot change this asset or anything it reads from: Apply and Save refuse a script that tries to, and it is stopped when it runs." data-args="node, frame, playing">
-              <input class="eventCheck" type="checkbox"><span class="eventName">onFrameChanged</span></div>
-            <div class="eventRow" data-when="The instance is about to be deleted (it still exists). Not run when the whole document closes." data-args="node">
-              <input class="eventCheck" type="checkbox"><span class="eventName">onDeleted</span></div>
-            <span class="eventGroup">LIBRARY</span>
-            <div class="eventRow" data-when="The asset is registered in the library (app start, Load, Reload, Save). Not run for an asset that only arrives embedded in a document until that document is trusted." data-args="name, version">
-              <input class="eventCheck" type="checkbox"><span class="eventName">onInstalled</span></div>
-          </div>
+          <div id="eventScroll"><canvas id="eventList" data-newui-type="ListView"></canvas></div>
           <div id="eventDetail">
             <span id="eventTitle">module</span>
             <span id="eventWhen" class="eventText">Once per session, the first time the asset is used (an instance is made, a file with one opens, or another script imports it). Defines helper functions; it is not tied to any node.</span>
@@ -161,9 +138,7 @@ amount: how far; speed: how fast it animates.</textarea>
 
       <div id="pageFiles" class="page">
         <span class="sectionLabel">EXTRA FILES</span>
-        <div id="filesList">
-          <div class="fileRow"><span>icon.png</span><span class="fileSize">2.1 KB</span></div>
-        </div>
+        <div id="filesScroll"><canvas id="filesList" data-newui-type="ListView"></canvas></div>
         <div class="buttons"><button id="fileAdd" class="pill">Add...</button><button id="fileRemove" class="pill">Remove</button></div>
       </div>
 

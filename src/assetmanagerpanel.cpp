@@ -21,8 +21,6 @@ namespace curvy {
         constexpr float kActionsHeight = 62.0f;
         constexpr float kActionHeight = 22.0f;
         constexpr float kMinList = 80.0f;
-        constexpr std::uint32_t kSelected = 0xFF3A2F1Fu;
-        constexpr std::uint32_t kAmber = 0xFFFFB454u;
         constexpr std::uint32_t kMuted = 0xFFA0A0A0u;
 
         const char* const kActionButtons[] = {"addInstanceButton", "editButton", "unlockButton", "reloadButton", "saveToLibraryButton", "uninstallButton"};
@@ -48,13 +46,6 @@ namespace curvy {
             }
         }
 
-        Label* makeLabel(SubView& parent, bool muted) {
-            auto* label = new Label();
-            label->setTextAlignment(TextAlignment::Left);
-            label->setTextColor(BLRgba32(muted ? kMuted : 0xFFF0F0F0u));
-            parent.addChild(label);
-            return label;
-        }
     }
 
     AssetManagerPanel::AssetManagerPanel(std::shared_ptr<AssetManagerModel> model)
@@ -98,9 +89,10 @@ namespace curvy {
         list_->setLayout(nullptr);
         listScroll_ = new ScrollView();
         list_->addChild(listScroll_);
-        rowsRoot_ = new SubView();
-        rowsRoot_->setVisible(true);
-        listScroll_->addChild(rowsRoot_);
+        assets_ = new ListView();
+        assets_->setName("assetRows");   // a GUI test finds the list by it
+        listScroll_->addChild(assets_);
+        wireList();
         actions_->setLayout(nullptr);
         setFontSize(status_, 11.0f);
         status_->setTextColor(BLRgba32(kMuted));
@@ -209,40 +201,39 @@ namespace curvy {
         }
     }
 
-    AssetManagerPanel::Row& AssetManagerPanel::rowAt(std::size_t index) {
-        while (rows_.size() <= index) {
-            const std::size_t at = rows_.size();
-            Row row;
-            row.view = new SubView();
-            row.view->setVisible(true);
-            row.view->setCursor(Cursor(CursorKind::Hand));
-            rowsRoot_->addChild(row.view);
-            row.name = makeLabel(*row.view, false);
-            row.version = makeLabel(*row.view, true);
-            row.version->setTextAlignment(TextAlignment::Right);
-            for (Label*& badge : row.badges) {
-                badge = makeLabel(*row.view, true);
-                badge->setTextAlignment(TextAlignment::Center);
-                setFontSize(badge, 10.0f);
-                badge->style().setBorderWidth(1.0f);
-                badge->style().setBackgroundColor(BLRgba32(0xFF2E2E2Eu));
+    void AssetManagerPanel::wireList() {
+        controller_ = std::make_shared<GroupedListController>();
+        controller_->setHeadingHeight(kTitleRow);
+        controller_->setDefaultItemClassName("AssetRowItem");
+        assets_->setController(controller_);
+        auto rows = std::make_unique<AssetListModel>();
+        listModel_ = rows.get();
+        assets_->setModel(std::move(rows));
+        assets_->setRowHeight(kAssetRow);
+        assets_->onSelectionChanged += [this](ListView& changed) {
+            if (syncingList_) {
+                return SyncReturn(SyncReturn::Handled);
             }
-            const auto choose = [this, at](View&, const Point&, std::uint32_t buttons, std::uint32_t) {
-                if ((buttons & mbmLeftButton) != 0 && at < rows_.size() && !rows_[at].asset.empty()) {
-                    model_.select(rows_[at].asset);
-                    return SyncReturn(SyncReturn::Handled);
+            const std::optional<std::size_t> index = changed.selectedIndex();
+            const AssetListRow* row = index.has_value() ? listModel_->row(*index) : nullptr;
+            if (row != nullptr && row->heading) {
+                // A heading cannot be chosen: the first asset under it is.
+                const std::string selected = model_.selected();
+                std::size_t from = 0;
+                for (std::size_t i = 0; i < listModel_->size(); ++i) {
+                    if (!listModel_->row(i)->heading && listModel_->row(i)->name == selected) {
+                        from = i;
+                    }
                 }
-                return SyncReturn(SyncReturn::Ignored);
-            };
-            row.view->onMouseDown += choose;
-            row.name->onMouseDown += choose;
-            row.version->onMouseDown += choose;
-            for (Label* badge : row.badges) {
-                badge->onMouseDown += choose;
+                row = listModel_->row(controller_->nextSelectable(*index, from));
             }
-            rows_.push_back(row);
-        }
-        return rows_[index];
+            if (row != nullptr && !row->heading && row->name != model_.selected()) {
+                model_.select(row->name);   // changes the model, which refreshes the panel and so the list's selection
+            } else {
+                refreshRows();              // also puts the selection back when Ctrl+click emptied it
+            }
+            return SyncReturn(SyncReturn::Handled);
+        };
     }
 
     void AssetManagerPanel::refresh() {
@@ -275,50 +266,37 @@ namespace curvy {
     }
 
     void AssetManagerPanel::refreshRows() {
-        std::size_t index = 0;
+        std::vector<AssetListRow> rows;
+        std::vector<bool> headings;
+        std::optional<std::size_t> selected;
         for (const AssetManagerModel::Group& group : model_.groups()) {
-            Row& heading = rowAt(index++);
-            heading.asset.clear();
-            heading.view->setName({});
-            heading.badgeTexts.clear();
-            heading.name->setText(upper(group.title));
-            heading.name->setTextColor(BLRgba32(kMuted));
-            setFontSize(heading.name, 10.0f);
-            heading.version->setText({});
-            heading.view->style().setBackgroundColor(BLRgba32(0x00000000u));
-            for (Label* badge : heading.badges) {
-                badge->setVisible(false);
-            }
+            AssetListRow heading;
+            heading.heading = true;
+            heading.name = upper(group.title);
+            rows.push_back(std::move(heading));
+            headings.push_back(true);
             for (const jitnodes::AssetEntry& entry : group.entries) {
-                Row& row = rowAt(index++);
-                row.asset = entry.name;
-                row.view->setName("assetRow_" + entry.name);   // a GUI test finds the row by it
-                row.name->setText(entry.name);
-                row.name->setTextColor(BLRgba32(0xFFF0F0F0u));
-                setFontSize(row.name, 12.0f);
-                row.version->setText("v" + std::to_string(entry.version));
-                row.badgeTexts.clear();
+                AssetListRow row;
+                row.name = entry.name;
+                row.version = entry.version;
                 if (AssetManagerModel::isBrush(entry)) {
-                    row.badgeTexts.push_back("Brush");
+                    row.badges.push_back("Brush");
                 }
                 if (entry.outdated > 0) {
-                    row.badgeTexts.push_back("Outdated " + std::to_string(entry.outdated));
+                    row.badges.push_back("Outdated " + std::to_string(entry.outdated));
                 }
-                for (std::size_t b = 0; b < 2; ++b) {
-                    const bool shown = b < row.badgeTexts.size();
-                    row.badges[b]->setVisible(shown);
-                    if (shown) {
-                        row.badges[b]->setText(row.badgeTexts[b]);
-                        row.badges[b]->setTextColor(BLRgba32(row.badgeTexts[b].rfind("Outdated", 0) == 0 ? kAmber : kMuted));
-                    }
+                if (entry.name == model_.selected()) {
+                    selected = rows.size();
                 }
-                row.view->style().setBackgroundColor(BLRgba32(entry.name == model_.selected() ? kSelected : 0x00000000u));
+                rows.push_back(std::move(row));
+                headings.push_back(false);
             }
         }
-        shownRows_ = index;
-        for (std::size_t i = 0; i < rows_.size(); ++i) {
-            rows_[i].view->setVisible(i < shownRows_);
-        }
+        syncingList_ = true;
+        controller_->setHeadings(std::move(headings));
+        listModel_->setRows(std::move(rows));
+        assets_->setSelectedIndex(selected);
+        syncingList_ = false;
     }
 
     void AssetManagerPanel::refreshDetails() {
@@ -404,40 +382,15 @@ namespace curvy {
                 button->setBounds(Rect(kPad + float(i % 3) * (cell + 6.0f), 6.0f + float(i / 3) * (kActionHeight + 6.0f), cell, kActionHeight));
             }
         }
-        layoutRows(width - 2.0f * kPad);
         listScroll_->setBounds(Rect(0.0f, 0.0f, width - 2.0f * kPad, listHeight));
         root_->updateLayout();
     }
 
-    void AssetManagerPanel::layoutRows(float width) {
-        float y = 0.0f;
-        for (std::size_t i = 0; i < shownRows_; ++i) {
-            Row& row = rows_[i];
-            const bool heading = row.asset.empty();
-            const float rowHeight = heading ? kTitleRow : kAssetRow;
-            row.view->setBounds(Rect(0.0f, y, width, rowHeight));
-            float right = width - 8.0f;
-            if (!heading) {
-                row.version->setBounds(Rect(right - 30.0f, 4.0f, 30.0f, 18.0f));
-                right -= 36.0f;
-                for (std::size_t b = row.badgeTexts.size(); b-- > 0;) {
-                    const float badgeWidth = 12.0f + 6.5f * float(row.badgeTexts[b].size());
-                    row.badges[b]->setBounds(Rect(right - badgeWidth, 5.0f, badgeWidth, 16.0f));
-                    right -= badgeWidth + 4.0f;
-                }
-            }
-            row.name->setBounds(Rect(8.0f, heading ? 6.0f : 4.0f, (std::max)(right - 12.0f, 20.0f), 18.0f));
-            y += rowHeight;
-        }
-        rowsRoot_->setBounds(Rect(0.0f, 0.0f, width, (std::max)(y, 1.0f)));
-        listScroll_->setContentSize(Size(width, (std::max)(y, 1.0f)));
-    }
-
     std::vector<std::string> AssetManagerPanel::shownNames() const {
         std::vector<std::string> names;
-        for (std::size_t i = 0; i < shownRows_; ++i) {
-            if (!rows_[i].asset.empty()) {
-                names.push_back(rows_[i].asset);
+        for (std::size_t i = 0; i < listModel_->size(); ++i) {
+            if (!listModel_->row(i)->heading) {
+                names.push_back(listModel_->row(i)->name);
             }
         }
         return names;
@@ -445,18 +398,18 @@ namespace curvy {
 
     std::vector<std::string> AssetManagerPanel::shownTitles() const {
         std::vector<std::string> titles;
-        for (std::size_t i = 0; i < shownRows_; ++i) {
-            if (rows_[i].asset.empty()) {
-                titles.push_back(rows_[i].name->text());
+        for (std::size_t i = 0; i < listModel_->size(); ++i) {
+            if (listModel_->row(i)->heading) {
+                titles.push_back(listModel_->row(i)->name);
             }
         }
         return titles;
     }
 
     std::vector<std::string> AssetManagerPanel::badgesOf(const std::string& name) const {
-        for (std::size_t i = 0; i < shownRows_; ++i) {
-            if (rows_[i].asset == name) {
-                return rows_[i].badgeTexts;
+        for (std::size_t i = 0; i < listModel_->size(); ++i) {
+            if (!listModel_->row(i)->heading && listModel_->row(i)->name == name) {
+                return listModel_->row(i)->badges;
             }
         }
         return {};
@@ -485,9 +438,9 @@ namespace curvy {
     }
 
     void AssetManagerPanel::clickRow(const std::string& name) {
-        for (std::size_t i = 0; i < shownRows_; ++i) {
-            if (rows_[i].asset == name) {
-                model_.select(name);
+        for (std::size_t i = 0; i < listModel_->size(); ++i) {
+            if (!listModel_->row(i)->heading && listModel_->row(i)->name == name) {
+                assets_->setSelectedIndex(i);   // as a click on the row does
                 return;
             }
         }

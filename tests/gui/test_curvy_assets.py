@@ -27,8 +27,18 @@ class AssetsCase(CurvyCase):
         self.app.wait_until(lambda: self.app.find("assetList").w > 100, "the Assets panel to lay out")
         self.app.wait_idle()
 
+    def click_asset(self, name):
+        """The library list is a ListView: narrow it with the search field so the asset is the only row under its group heading (22 px), then click it."""
+        self.app.click("assetSearch")
+        self.app.key("ctrl+a")
+        self.app.type(name)
+        self.app.wait_idle()
+        box = self.app.find("assetRows")
+        self.app.click_at((box.x + 40, box.y + 22 + 13))
+        self.app.wait_idle()
+
     def select_wobble(self):
-        self.app.click("assetRow_wobbleAsset")
+        self.click_asset("wobbleAsset")
         self.app.wait_until(lambda: self.label("detailsName") == "wobbleAsset  v1", "the details of wobbleAsset")
 
     def dialog_open(self):
@@ -109,7 +119,7 @@ class AssetProperties(AssetsCase):
         self.app.wait_until(lambda: self.app.find("paramName").w > 0, "the Parameters page")
         self.assertEqual("amount", self.app.text_of("paramName"))
         self.assertEqual("10", self.app.text_of("paramMax"))
-        self.app.click("paramRow_1")
+        self.click_row("paramList", 1, 26)
         self.app.wait_until(lambda: self.app.text_of("paramName") == "speed", "the second parameter to be selected")
         self.app.click("paramAdd")
         self.app.wait_until(lambda: self.app.text_of("paramName") == "param1", "the new parameter")
@@ -118,13 +128,47 @@ class AssetProperties(AssetsCase):
         self.app.wait_until(lambda: self.app.text_of("paramName") == "speed", "the new parameter to go")
         self.close_dialog()
 
+    def click_row(self, name, index, row_height):
+        """A ListView's rows are not views, so click where row `index` is."""
+        box = self.app.find(name)
+        self.app.click_at((box.x + 40, box.y + index * row_height + row_height // 2))
+        self.app.wait_idle()
+
+    EVENT_ROWS = ["#", "module", "#", "onCreated", "onVersionUpdated", "onInputChanged", "onParamChanged", "onFrameChanged", "onDeleted", "#",
+                  "onInstalled"]                                  # "#" is a group heading (26 px); events are 24 px
+
+    def click_event(self, name):
+        box = self.app.find("eventList")
+        top = sum(26 if row == "#" else 24 for row in self.EVENT_ROWS[:self.EVENT_ROWS.index(name)])
+        self.app.click_at((box.x + 40, box.y + top + 12))
+        self.app.wait_idle()
+
+    def click_heading(self, index):
+        """The index-th heading's centre (0 = SHARED CODE)."""
+        box = self.app.find("eventList")
+        top = 0
+        seen = -1
+        for row in self.EVENT_ROWS:
+            if row == "#":
+                seen += 1
+                if seen == index:
+                    break
+            top += 26 if row == "#" else 24
+        self.app.click_at((box.x + 40, box.y + top + 13))
+        self.app.wait_idle()
+
     def test_a_script_that_changes_the_asset_from_onframechanged_blocks_apply(self):
         self.select_wobble()
         self.open_dialog("editButton")
         self.app.click("tabPython")
-        self.app.wait_until(lambda: self.app.find("eventRow_onFrameChanged").w > 0, "the Python page")
-        self.app.click("eventRow_onFrameChanged")
+        self.app.wait_until(lambda: self.app.find("eventList").w > 0, "the Python page")
+        self.click_event("onFrameChanged")
         self.app.wait_until(lambda: self.label("eventTitle") == "onFrameChanged", "the event to be selected")
+        self.click_event("onVersionUpdated")                       # a second click must move the selection, not add to it
+        self.app.wait_until(lambda: self.label("eventTitle") == "onVersionUpdated", "the second event to be selected")
+        self.click_heading(2)                                      # LIBRARY: a heading cannot be chosen, the next event below it is
+        self.app.wait_until(lambda: self.label("eventTitle") == "onInstalled", "the event under the heading")
+        self.click_event("onFrameChanged")
         self.assertIn("The playhead moved", self.label("eventWhen"))
         self.assertEqual("node, frame, playing", self.label("eventArgs"))
         self.app.click("assetScriptText")
@@ -149,8 +193,7 @@ class AssetProperties(AssetsCase):
         self.app.click("propsApply")
         self.app.wait_until(lambda: self.footer() == "No changes", "Apply to register the asset")
         self.close_dialog()
-        self.app.wait_until(lambda: self.app.find("assetRow_guiTestAsset").w > 0, "the new asset in the list")
-        self.app.click("assetRow_guiTestAsset")
+        self.click_asset("guiTestAsset")
         self.app.wait_until(lambda: self.label("detailsSource") == "Embedded in this document", "it to be embedded until it is saved")
         self.assertTrue(self.app.prop("saveToLibraryButton", "enabled"))
 
