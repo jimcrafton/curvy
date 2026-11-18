@@ -304,7 +304,11 @@ namespace curvy::assetpropsdialog {
             page_ = index;
             if (View* pages = root_.findView("propsPages")) {
                 if (dynamic_cast<CardLayout*>(pages->layout()) == nullptr) {
-                    pages->setLayout(std::make_unique<CardLayout>());
+                    auto cards = std::make_unique<CardLayout>();
+                    if (const auto* flex = dynamic_cast<const FlexLayout*>(pages->layout())) {
+                        cards->setPadding(flex->padding());   // the mockup's padding around the pages
+                    }
+                    pages->setLayout(std::move(cards));
                 }
                 static_cast<CardLayout*>(pages->layout())->show(index);
                 for (SubView* page : pages->childViews()) {
