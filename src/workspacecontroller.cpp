@@ -412,6 +412,7 @@ namespace curvy {
         }
         if (console != nullptr) {
             assetEvents_ = std::make_unique<AssetEvents>(console);
+            assetEvents_->installMigrationHook();
             assetEvents_->remember(document_);
             installedSeen_.clear();
             for (const jitnodes::AssetEntry& entry : jitnodes::AssetLibrary::instance().list()) {
@@ -1426,6 +1427,7 @@ namespace curvy {
             if (ok) {
                 showDocument();
                 model_->say("Opened " + fileNameOf(file));
+                reportMigrationProblems();
                 fireLoadedEvents();
                 offerObjectRepair();
             } else {
@@ -2237,6 +2239,29 @@ namespace curvy {
         return {};
     }
 
+    void WorkspaceController::reportMigrationProblems() {
+        const std::string text = migrationNotes();
+        if (!text.empty()) {
+            model_->say(text);
+        }
+    }
+
+    std::string WorkspaceController::migrationNotes() {
+        if (!assetEvents_) {
+            return {};
+        }
+        std::string text = assetEvents_->takeMigrationProblems();
+        // The load could not ask, so ask now: an allowed asset runs its script the next time an instance is brought up to date.
+        bool allowedNow = false;
+        for (const std::string& asset : assetEvents_->takeUntrustedAssets()) {
+            allowedNow = assetEvents_->askTrust(asset) || allowedNow;
+        }
+        if (allowedNow) {
+            text += (text.empty() ? "" : "\n") + std::string("Allowed: its migration script runs the next time instances are brought up to date.");
+        }
+        return text;
+    }
+
     void WorkspaceController::wireAssetEvents() {
         const auto idle = [this]() { return assetEvents_ && scriptConsole_ != nullptr && !scriptConsole_->running(); };
         document_.afterEdit = [this, idle](const std::string& description) {
@@ -2353,7 +2378,8 @@ namespace curvy {
         } catch (const std::exception& e) {
             return e.what();
         }
-        return {};
+        const std::string notes = migrationNotes();
+        return notes.empty() ? std::string() : "Updated the instances, but:\n" + notes;
     }
 
     std::string WorkspaceController::unlockSelectedInstance() {

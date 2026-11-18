@@ -7,6 +7,13 @@
 #include <jitnodes/graph/assetLibrary.h>
 #include <jitnodes/graph/serialize.h>
 
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <deque>
+#include <mutex>
+#include <thread>
+
 namespace {
 
     using jitnodes::AssetDefinition;
@@ -43,17 +50,28 @@ namespace {
         }
 
         // An asset with one promoted parameter, `amount`, and the given scripts (event -> Python source), with a console that runs them.
-        void addScripted(const std::string& name, const std::string& scripts) {
+        void useConsole() {
             curvytest::sharedConsole().setMainThreadPoster([](std::function<void()>) {});
             window().setScriptConsole(&curvytest::sharedConsole());
             window().assetEvents()->setTrustPrompt([](const std::string&, const std::vector<std::string>&) { return true; });
+        }
+
+        void addScripted(const std::string& name, const std::string& scripts) {
+            useConsole();
+            applyVersion(name, 1, "amount", scripts);
+        }
+
+        // Registers (in memory) version `version` of an asset with one promoted parameter.
+        void applyVersion(const std::string& name, int version, const std::string& param, const std::string& scripts) {
             AssetLibrary::instance().apply(AssetDefinition::fromText(
-                "{ format: 'jitnodes-asset', version: 1, type: '" + name + "', inputs: 1, promote: { amount: 1 },\n"
+                "{ format: 'jitnodes-asset', version: 1, assetVersion: " + std::to_string(version) + ", type: '" + name + "', inputs: 1, promote: { " + param + ": 1 },\n"
                 "  scripts: { " + scripts + " },\n"
                 "  graph: { display: 2, nodes: [\n"
                 "    { id: 1, type: 'subnetInput', name: 'in', floats: { index: 0 }, inputs: [] },\n"
                 "    { id: 2, type: 'transform', name: 'xf', inputs: [1] } ] } }"));
-            names_.push_back(name);
+            if (std::find(names_.begin(), names_.end(), name) == names_.end()) {
+                names_.push_back(name);
+            }
         }
 
         bool hasNamed(const std::string& name) {
@@ -294,6 +312,104 @@ TEST_F(AssetPanelTest, registeringAnAssetRunsItsOnInstalledOnceWithoutAnInstance
         count += document().network().node(id).name().rfind("installed_", 0) == 0 ? 1 : 0;
     }
     EXPECT_EQ(count, 1u) << "the same version is announced once";
+}
+
+TEST_F(AssetPanelTest, updatingInstancesRunsOnVersionUpdatedWithTheOldAndTheNewInstance) {
+    useConsole();
+    applyVersion("evtMig", 1, "scale", "");
+    const curvy::NodeRef instance = document().addGraphNode("evtMig");
+    document().setGraphFloats(instance, {{"scale", 50.0f}}, "Set scale");
+    applyVersion("evtMig", 2, "amount", "onVersionUpdated: \"fresh.set_float('amount', old.get_float('scale') / 100 + kwargs['to_version'] - kwargs['from_version'])\"");
+    ASSERT_TRUE(window().assetEvents()->askTrust("evtMig"));
+
+    EXPECT_EQ(jitnodes::updateAssetInstances(document().network(), "evtMig"), 1u);
+    EXPECT_NEAR(document().network().node(instance.id).baseFloat("amount"), 1.5f, 1e-5f);
+    EXPECT_EQ(window().assetEvents()->takeMigrationProblems(), "");
+}
+
+TEST_F(AssetPanelTest, aMigrationScriptOfAnAssetThatIsNotAllowedDoesNotRunAndTheAssetIsRemembered) {
+    useConsole();
+    applyVersion("evtMigUntrusted", 1, "scale", "");
+    const curvy::NodeRef instance = document().addGraphNode("evtMigUntrusted");
+    applyVersion("evtMigUntrusted", 2, "amount", "onVersionUpdated: \"fresh.set_float('amount', 9)\"");
+
+    EXPECT_EQ(jitnodes::updateAssetInstances(document().network(), "evtMigUntrusted"), 1u);
+    EXPECT_NEAR(document().network().node(instance.id).baseFloat("amount"), 1.0f, 1e-5f) << "the core's default: the parameter's own default";
+    EXPECT_NE(window().assetEvents()->takeMigrationProblems().find("not allowed yet"), std::string::npos);
+    EXPECT_EQ(window().assetEvents()->takeUntrustedAssets(), std::vector<std::string>{"evtMigUntrusted"});
+}
+
+TEST_F(AssetPanelTest, aMigrationScriptThatFailsLeavesTheCoresResultAndReportsWhy) {
+    useConsole();
+    for (const char* script : {"raise ValueError('nope')", "inputs.append(7)", "fresh.set_float('amount', 9)\\nraise ValueError('late')"}) {
+        const std::string name = "evtMigFail";
+        applyVersion(name, 1, "scale", "");
+        const curvy::NodeRef instance = document().addGraphNode(name);
+        applyVersion(name, 2, "amount", std::string("onVersionUpdated: \"") + script + "\"");
+        window().assetEvents()->askTrust(name);
+        EXPECT_NO_THROW(jitnodes::updateAssetInstances(document().network(), name)) << script;
+        EXPECT_NEAR(document().network().node(instance.id).baseFloat("amount"), 1.0f, 1e-5f) << script << ": nothing of a failed script is kept";
+        EXPECT_FALSE(window().assetEvents()->takeMigrationProblems().empty()) << script;
+        document().removeGraphNode(instance);
+    }
+}
+
+TEST_F(AssetPanelTest, aMigrationScriptThatNeverEndsIsStoppedAfterFiveSeconds) {
+    useConsole();
+    applyVersion("evtMigLoop", 1, "scale", "");
+    const curvy::NodeRef instance = document().addGraphNode("evtMigLoop");
+    applyVersion("evtMigLoop", 2, "amount", "onVersionUpdated: \"while True:\\n    pass\"");
+    ASSERT_TRUE(window().assetEvents()->askTrust("evtMigLoop"));
+    EXPECT_EQ(jitnodes::updateAssetInstances(document().network(), "evtMigLoop"), 1u);
+    EXPECT_NE(window().assetEvents()->takeMigrationProblems().find("longer than 5 seconds"), std::string::npos);
+    EXPECT_NEAR(document().network().node(instance.id).baseFloat("amount"), 1.0f, 1e-5f);
+}
+
+TEST_F(AssetPanelTest, openingADocumentOnAnotherThreadRunsTheMigrationScriptOnTheMainThread) {
+    useConsole();
+    applyVersion("evtMigLoad", 1, "scale", "");
+    const curvy::NodeRef instance = document().addGraphNode("evtMigLoad");
+    document().setGraphFloats(instance, {{"scale", 50.0f}}, "Set scale");
+    const std::string oldText = jitnodes::saveNetwork(document().network());
+    applyVersion("evtMigLoad", 2, "amount", "onVersionUpdated: \"fresh.set_float('amount', old.get_float('scale') / 100)\"");
+    ASSERT_TRUE(window().assetEvents()->askTrust("evtMigLoad"));
+
+    std::mutex mutex;
+    std::deque<std::function<void()>> queue;
+    curvytest::sharedConsole().setMainThreadPoster([&](std::function<void()> task) {
+        std::lock_guard<std::mutex> lock(mutex);
+        queue.push_back(std::move(task));
+    });
+    jitnodes::Network loaded(1);
+    std::atomic<bool> finished{false};
+    std::string loadError;
+    std::thread loader([&]() {
+        try {
+            jitnodes::loadNetwork(loaded, oldText);
+        } catch (const std::exception& e) {
+            loadError = e.what();
+        }
+        finished = true;
+    });
+    while (!finished.load()) {
+        std::function<void()> task;
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            if (!queue.empty()) {
+                task = std::move(queue.front());
+                queue.pop_front();
+            }
+        }
+        if (task) {
+            task();
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+    loader.join();
+    ASSERT_EQ(loadError, "");
+    EXPECT_NEAR(loaded.node(loaded.findNode(document().node(instance).name())).baseFloat("amount"), 0.5f, 1e-5f);
+    EXPECT_EQ(window().assetEvents()->takeMigrationProblems(), "");
 }
 
 TEST_F(AssetPanelTest, anOutdatedInstanceShowsTheBannerAndUpdateRebuildsItAsOneUndoStep) {

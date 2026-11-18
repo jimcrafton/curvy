@@ -3,11 +3,13 @@
 #include "curvy/noderef.h"
 
 #include <jitnodes/graph/assetDefinition.h>
+#include <jitnodes/graph/network.h>
 
 #include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <string>
 #include <vector>
@@ -77,9 +79,21 @@ namespace curvy {
         void remember(SketchDocument& document);
         std::string fireChanges(SketchDocument& document, SelectionModel* selection);
 
+        // onVersionUpdated, the one event that is not fired on a document but by the core while it rebuilds an instance from a newer version of its
+        // asset (Update, or opening a file saved with an older one). installMigrationHook() makes this object the one the core asks. The script runs
+        // only for an asset that is trusted without asking (the load may be on another thread, which cannot show a prompt); when it is not, the
+        // rebuild goes on with the core's default and the asset is remembered. Problems never stop the rebuild.
+        void installMigrationHook();
+        // What went wrong with migrations since the last call, one per line, and the assets whose script was not run for want of trust.
+        std::string takeMigrationProblems();
+        std::vector<std::string> takeUntrustedAssets();
+        // Asks the trust prompt about `asset` (once per session unless allowed); true when its scripts may run now.
+        bool askTrust(const std::string& asset);
+
     private:
         struct Watched;
 
+        void migrate(jitnodes::AssetUpgrade& upgrade);
         std::string fireAsset(SketchDocument& document, SelectionModel* selection, const std::string& asset, const NodeRef& node,
                               const std::string& event, const std::map<std::string, std::string>& values);
         std::string fireForInstances(SketchDocument& document, SelectionModel* selection, std::uint32_t scope,
@@ -94,6 +108,9 @@ namespace curvy {
         std::set<std::string> trusted_;
         std::set<std::string> declined_;
         std::unique_ptr<Watched> watched_;
+        mutable std::mutex mutex_;   // the trust sets and the migration notes: a load runs the hook on its own thread
+        std::vector<std::string> migrationProblems_;
+        std::set<std::string> untrusted_;
     };
 
 }

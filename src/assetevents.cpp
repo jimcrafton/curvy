@@ -69,8 +69,11 @@ namespace curvy {
             return false;
         }
         const jitnodes::AssetDefinition definition = library.definition(asset);
-        if (trusted_.count(scriptsHash(definition)) != 0) {
-            return true;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (trusted_.count(scriptsHash(definition)) != 0) {
+                return true;
+            }
         }
         const std::string source = library.source(asset);
         if (source.empty()) {
@@ -89,8 +92,11 @@ namespace curvy {
             return true;
         }
         const std::string hash = scriptsHash(definition);
-        if (declined_.count(hash) != 0 || !prompt_) {
-            return false;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (declined_.count(hash) != 0 || !prompt_) {
+                return false;
+            }
         }
         std::vector<std::string> names;
         for (const auto& [name, source] : definition.scripts) {
@@ -99,9 +105,11 @@ namespace curvy {
             }
         }
         if (!prompt_(asset, names)) {
+            std::lock_guard<std::mutex> lock(mutex_);
             declined_.insert(hash);
             return false;
         }
+        std::lock_guard<std::mutex> lock(mutex_);
         trusted_.insert(hash);
         if (!trustFile_.empty()) {
             std::error_code ignored;
@@ -260,7 +268,68 @@ namespace curvy {
 
     AssetEvents::AssetEvents(ScriptConsole* console) : console_(console) {}
 
-    AssetEvents::~AssetEvents() = default;
+    namespace {
+        AssetEvents* migrationOwner = nullptr;
+    }
+
+    AssetEvents::~AssetEvents() {
+        if (migrationOwner == this) {
+            jitnodes::NodeRegistry::instance().setAssetMigrationFallback(nullptr);
+            migrationOwner = nullptr;
+        }
+    }
+
+    void AssetEvents::installMigrationHook() {
+        migrationOwner = this;
+        jitnodes::NodeRegistry::instance().setAssetMigrationFallback([this](jitnodes::AssetUpgrade& upgrade) { migrate(upgrade); });
+    }
+
+    // Called by the core while an instance is rebuilt from a newer version of its asset: on the main thread for Update, on the loading thread for
+    // Open. A problem never stops the rebuild (the core's own result stays); it is remembered for the user.
+    void AssetEvents::migrate(jitnodes::AssetUpgrade& upgrade) {
+        const std::string asset = upgrade.fresh.typeName();
+        const jitnodes::AssetLibrary& library = jitnodes::AssetLibrary::instance();
+        if (console_ == nullptr || !library.has(asset) || !hasScript(library.definition(asset), "onVersionUpdated")) {
+            return;
+        }
+        std::string problem;
+        if (!isTrusted(asset)) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            untrusted_.insert(asset);
+            problem = asset + ".onVersionUpdated did not run: the asset's scripts are not allowed yet";
+        } else {
+            const std::string error = console_->runMigration(asset, upgrade);
+            if (!error.empty()) {
+                problem = asset + ".onVersionUpdated: " + error;
+            }
+        }
+        if (!problem.empty()) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            migrationProblems_.push_back(problem);
+        }
+    }
+
+    std::string AssetEvents::takeMigrationProblems() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::string text;
+        for (const std::string& problem : migrationProblems_) {
+            text += (text.empty() ? "" : "\n") + problem;
+        }
+        migrationProblems_.clear();
+        return text;
+    }
+
+    std::vector<std::string> AssetEvents::takeUntrustedAssets() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::vector<std::string> assets(untrusted_.begin(), untrusted_.end());
+        untrusted_.clear();
+        return assets;
+    }
+
+    bool AssetEvents::askTrust(const std::string& asset) {
+        const jitnodes::AssetLibrary& library = jitnodes::AssetLibrary::instance();
+        return library.has(asset) && allowed(asset, library.definition(asset));
+    }
 
     void AssetEvents::remember(SketchDocument& document) {
         watched_ = std::make_unique<Watched>();

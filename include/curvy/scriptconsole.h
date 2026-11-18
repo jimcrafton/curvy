@@ -13,6 +13,10 @@
 #include <string>
 #include <vector>
 
+namespace jitnodes {
+    struct AssetUpgrade;
+}
+
 namespace curvy {
 
     class SketchDocument;
@@ -69,6 +73,14 @@ namespace curvy {
         // the script changes joins the undo step already open in `document` (the caller merges it). Main thread, never in a background run.
         ScriptResult runAssetEvent(SketchDocument& document, SelectionModel* selection, std::uint32_t scope, std::uint32_t node,
                                    const std::string& asset, const std::string& event, const std::map<std::string, std::string>& values);
+
+        // Runs the onVersionUpdated script of `asset` for one instance that is being brought up to a newer version of it (the migration hook of
+        // the core, see NodeRegistry::setAssetMigrationFallback). The script gets `old` and `fresh` as copies of the two nodes in a scratch
+        // network (nothing of the document is reachable), may change `fresh` and reorder `inputs`, and has five seconds. Only on success are
+        // `fresh` and `upgrade.inputs` changed; otherwise the returned text says why and the upgrade is left as the core made it. Any thread:
+        // from another than the main thread (a document load) the run is handed to the main thread through the poster and waited for (ten
+        // seconds at most to be taken up). Never while a script runs.
+        std::string runMigration(const std::string& asset, jitnodes::AssetUpgrade& upgrade);
 
         // The list scripts see as `args` (empty by default): what follows `--` on the command line of a `--run`. Takes effect for the
         // runs that start after the call.

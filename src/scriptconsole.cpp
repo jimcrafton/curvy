@@ -3,6 +3,8 @@
 #include "curvy/scriptmodule.h"
 #include "curvy/sketchdocument.h"
 
+#include <jitnodes/graph/network.h>
+#include <jitnodes/graph/serialize.h>
 #include <pybind11/eval.h>
 #include <pyHandles.h>
 #include <pyRuntime.h>
@@ -14,7 +16,9 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <thread>
 
@@ -236,6 +240,8 @@ namespace curvy {
         jitnodes::python::PythonRuntime runtime;
         py::dict scope;
         py::object eventRunner;
+        py::object migrationRunner;
+        std::thread::id mainThread = std::this_thread::get_id();
         py::object cancelledType;
         py::object sinkObject;
         OutputSink* sink = nullptr;
@@ -395,11 +401,7 @@ import jitnodes
 _modules = {}
 _kinds = {"index": int, "frame": int, "version": int, "value": float, "playing": lambda text: text == "1"}
 
-def run_event(node, asset, event, values, document, curvy):
-    definition = jitnodes.assets.get(asset)
-    source = definition.scripts.get(event)
-    if not source:
-        return
+def module_of(asset, definition):
     key = (asset, definition.version)
     module = _modules.get(key)
     if module is None:
@@ -408,6 +410,29 @@ def run_event(node, asset, event, values, document, curvy):
         if text:
             exec(compile(text, "<%s module>" % asset, "exec"), module.__dict__)
         _modules[key] = module
+    return module
+
+def run_migration(asset, old, fresh, inputs, from_version, to_version):
+    definition = jitnodes.assets.get(asset)
+    source = definition.scripts.get("onVersionUpdated")
+    if not source:
+        return inputs
+    kwargs = {"old": old, "fresh": fresh, "inputs": inputs, "from_version": from_version, "to_version": to_version}
+    names = dict(kwargs)
+    names["kwargs"] = kwargs
+    names["jitnodes"] = jitnodes
+    code = compile(source, "<%s.onVersionUpdated>" % asset, "exec")
+    with jitnodes.assets.restricted(fresh, "onVersionUpdated"):
+        names["module"] = module_of(asset, definition)
+        exec(code, names)
+    return names["inputs"]
+
+def run_event(node, asset, event, values, document, curvy):
+    definition = jitnodes.assets.get(asset)
+    source = definition.scripts.get(event)
+    if not source:
+        return
+    module = module_of(asset, definition)
     kwargs = {}
     for key, text in values.items():
         kind = _kinds.get(key)
@@ -439,6 +464,7 @@ def run_event(node, asset, event, values, document, curvy):
                 py::dict runnerScope;
                 py::exec(kAssetEventRunner, runnerScope);
                 impl_->eventRunner = runnerScope["run_event"];
+                impl_->migrationRunner = runnerScope["run_migration"];
             }
             py::object handle = py::none();
             if (node != jitnodes::invalidNodeId) {
@@ -458,6 +484,132 @@ def run_event(node, asset, event, values, document, curvy):
         }
         impl_->end(result);
         return result;
+    }
+
+    namespace {
+        constexpr std::chrono::seconds kMigrationLimit(5);
+    }
+
+    std::string ScriptConsole::runMigration(const std::string& asset, jitnodes::AssetUpgrade& upgrade) {
+        // Main thread, the GIL held (the interpreter is idle between runs). The script gets two copies in a network of their own, so nothing
+        // of the document is in reach, and only the copy of the new instance may be edited (EventRestriction::Mode::onlyThisNode).
+        const auto onMainThread = [this, &asset, &upgrade]() -> std::string {
+            if (impl_->running.load()) {
+                return "a script is running";
+            }
+            std::string error;
+            try {
+                if (!impl_->migrationRunner) {
+                    py::dict runnerScope;
+                    py::exec(kAssetEventRunner, runnerScope);
+                    impl_->eventRunner = runnerScope["run_event"];
+                    impl_->migrationRunner = runnerScope["run_migration"];
+                }
+                auto scratch = std::make_shared<jitnodes::Network>();
+                const jitnodes::NodeId oldId = scratch->addNode(upgrade.fresh.typeName(), "old");
+                jitnodes::copyNodeParameters(upgrade.old, scratch->node(oldId), true);
+                const jitnodes::NodeId freshId = scratch->addNode(upgrade.fresh.typeName(), "fresh");
+                jitnodes::copyNodeParameters(upgrade.fresh, scratch->node(freshId), false);
+                const jitnodes::python::NetworkRef network = jitnodes::python::NetworkRef::owning(scratch);
+                py::list inputs;
+                for (const jitnodes::NodeId id : upgrade.inputs) {
+                    inputs.append(py::int_(id));
+                }
+
+                const unsigned long scriptThread = PyThread_get_thread_ident();
+                std::atomic<bool> stop{false};
+                std::atomic<bool> late{false};
+                const std::chrono::seconds limit = kMigrationLimit;
+                std::thread watcher([this, scriptThread, &stop, &late, limit]() {
+                    const auto started = std::chrono::steady_clock::now();
+                    while (!stop.load()) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+                        if (stop.load() || std::chrono::steady_clock::now() - started < limit) {
+                            continue;
+                        }
+                        late = true;
+                        py::gil_scoped_acquire gil;
+                        if (!stop.load()) {
+                            PyThreadState_SetAsyncExc(scriptThread, impl_->cancelledType.ptr());
+                        }
+                    }
+                });
+                py::list result;
+                try {
+                    result = impl_->migrationRunner(asset, py::cast(jitnodes::python::PyNode(network, oldId)),
+                                                    py::cast(jitnodes::python::PyNode(network, freshId)), inputs, upgrade.fromVersion, upgrade.toVersion);
+                } catch (const py::error_already_set& e) {
+                    error = late.load() && e.matches(impl_->cancelledType)
+                                ? "it ran longer than " + std::to_string(kMigrationLimit.count()) + " seconds"
+                                : std::string(e.what());
+                }
+                stop = true;
+                {
+                    py::gil_scoped_release release;
+                    watcher.join();
+                }
+                PyThreadState_SetAsyncExc(scriptThread, nullptr);
+                if (!error.empty()) {
+                    return error;
+                }
+                std::vector<jitnodes::NodeId> reordered;
+                for (const py::handle item : result) {
+                    reordered.push_back(item.cast<jitnodes::NodeId>());
+                }
+                if (reordered.size() != upgrade.inputs.size()) {
+                    return "inputs must keep its length";
+                }
+                for (const jitnodes::NodeId id : reordered) {
+                    if (id != jitnodes::invalidNodeId && std::find(upgrade.inputs.begin(), upgrade.inputs.end(), id) == upgrade.inputs.end()) {
+                        return "inputs may only be reordered, but it holds " + std::to_string(id);
+                    }
+                }
+                jitnodes::copyNodeParameters(scratch->node(freshId), upgrade.fresh, false);
+                upgrade.inputs = std::move(reordered);
+            } catch (const std::exception& e) {
+                return e.what();
+            }
+            return {};
+        };
+
+        if (std::this_thread::get_id() == impl_->mainThread) {
+            return onMainThread();
+        }
+        // A document load runs on a worker. The interpreter belongs to the main thread, so the run is handed over and waited for.
+        if (!impl_->poster) {
+            return "there is no main thread to run it on";
+        }
+        struct Handover {
+            std::mutex mutex;
+            std::condition_variable changed;
+            bool started = false;
+            bool done = false;
+            bool abandoned = false;
+            std::string error;
+        };
+        auto handover = std::make_shared<Handover>();
+        impl_->poster([handover, &onMainThread]() {
+            {
+                std::lock_guard<std::mutex> lock(handover->mutex);
+                if (handover->abandoned) {
+                    return;   // the caller is gone: what onMainThread points at no longer exists
+                }
+                handover->started = true;
+                handover->changed.notify_all();
+            }
+            std::string error = onMainThread();
+            std::lock_guard<std::mutex> lock(handover->mutex);
+            handover->error = std::move(error);
+            handover->done = true;
+            handover->changed.notify_all();
+        });
+        std::unique_lock<std::mutex> lock(handover->mutex);
+        if (!handover->changed.wait_for(lock, std::chrono::seconds(10), [&handover] { return handover->started; })) {
+            handover->abandoned = true;
+            return "the main thread was busy for 10 seconds";
+        }
+        handover->changed.wait(lock, [&handover] { return handover->done; });   // the script has a time limit of its own
+        return handover->error;
     }
 
     ScriptResult ScriptConsole::run(const std::string& code, SketchDocument* document, SelectionModel* selection) {

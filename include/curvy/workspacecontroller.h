@@ -209,6 +209,8 @@ namespace curvy {
         std::string updateAssetInstances(const std::string& type, std::size_t& count);
         std::string unlockSelectedInstance();
         void fireLoadedEvents();   // onCreated('loaded') for the instances of a document that was just opened
+        std::string migrationNotes();     // the same as text ("" when there is nothing); asks to allow assets whose script was not trusted
+        void reportMigrationProblems();   // what onVersionUpdated scripts did wrong while a document loaded or instances were updated
         void wireAssetEvents();    // the document hooks behind onDeleted, onFrameChanged, onInputChanged and onParamChanged
         void replaceSubnetWithInstance(const NodeRef& subnet, const std::string& type);
         void wireSwatchActions(SwatchPaletteController& swatches);

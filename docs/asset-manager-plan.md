@@ -285,11 +285,22 @@ The cost test of section 8 is not written yet.
   - `onInstalled(name, version)` (`node` is None): a library listener queues `flushInstalledEvents` on the run loop; it announces every asset whose name or
     version was not seen yet (what was installed before the console existed is not announced). An asset authored in the dialog asks the trust prompt once
     when it has scripts, like any other asset outside the trusted folders.
-- **Still to do:** `onVersionUpdated` (see below); `doc.assets` and its undo routing; the guard cost test.
-- **`onVersionUpdated` is not built.** It is the core's migration hook (`NodeRegistry::setAssetMigration`), called from `updateAssetsIn` and from loading a
-  graph, with `const Node& old` and `Node& fresh` that belong to no network, while the Python handles (`PyNode`) are a network plus an id, and the read-only
-  guard mode refuses every edit in every network, `fresh` included. Needs: a way to hand Python those two nodes (a scratch network holding copies, or a
-  loose-node handle), a guard mode that allows `fresh` only, and an answer to which thread a document load runs the hook on.
+- **`onVersionUpdated(old, fresh, inputs, from_version, to_version)`:** the core's migration hook, called while an instance is rebuilt from a newer version
+  of its asset (Update, or opening a file saved with an older one; a load runs it twice, so the script must be a pure function of its arguments).
+  - Core: `NodeRegistry::setAssetMigrationFallback` (used when the type has no hook of its own; covers assets a file embeds, which never go through the
+    library), `copyNodeParameters(from, to, addMissing)`, and `EventRestriction::Mode::onlyThisNode` (the one node may be edited, nothing else, no node
+    added). Restrictions now apply to the thread that made them.
+  - `AssetEvents::installMigrationHook` installs the fallback; `ScriptConsole::runMigration` builds a scratch network with a copy of `old` (every old
+    parameter, the ones the new type lacks as spares) and of `fresh`, runs `run_migration` in `restricted(fresh, "onVersionUpdated")` (names given to the
+    script: `old`, `fresh`, `inputs`, `from_version`, `to_version`, `module`, `jitnodes`; not `doc`, `network`, `curvy`), and only on success copies `fresh` back
+    and takes the reordered `inputs` (same length, only the original ids or none). The document is out of reach.
+  - Threads: Open loads on a worker, so off the main thread the run is handed to the main thread through the console's poster and waited for (10 seconds
+    to be taken up); it has 5 seconds of its own, stopped as a cancelled script is.
+  - Trust: the script runs only for an asset that is trusted without asking (the load thread cannot show a prompt). Otherwise the core's default stays, the
+    status line says so, and `WorkspaceController::migrationNotes` asks the prompt afterwards so the next update runs it.
+  - Any failure (an exception, the time limit, a bad `inputs`, a running script) keeps the core's default result and is shown on the status line after the
+    load, or as the Update button's message (`takeMigrationProblems`).
+- **Still to do:** `doc.assets` and its undo routing; the guard cost test.
 - **Tests:** `tests/test_assetevents.cpp` and the controller tests in `tests/test_assetpanel.cpp` (the `AssetPanelTest.addScripted` helper makes an asset with
   scripts and a console).
 

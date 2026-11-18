@@ -927,6 +927,35 @@ a.uninstall("pyRefusedAsset")
               "False\n''\nTrue\n");
 }
 
+TEST(ScriptModule, aMigrationRestrictionAllowsOnlyTheNewInstance) {
+    curvy::SketchDocument document;
+    document.newBlank("Migration", 100.0f, 100.0f);
+    const auto result = runOn(document, std::string(assetPrelude) + R"py(
+a.AssetDef.from_text(TEXT.replace("pyTestAsset", "pyMigAsset")).apply()
+net = jn.Network()
+old = net.add_node("pyMigAsset", "old")
+fresh = net.add_node("pyMigAsset", "fresh")
+before = old.amount
+
+def refused(fn):
+    try:
+        fn()
+    except PermissionError:
+        return True
+    return False
+
+with a.restricted(fresh, "onVersionUpdated"):
+    fresh.amount = 4
+    print(refused(lambda: setattr(old, "amount", 1)), refused(lambda: net.add_node("line", "x")), refused(lambda: net.clear()))
+print(fresh.amount, old.amount == before)
+net.remove_node(old)
+net.remove_node(fresh)
+a.uninstall("pyMigAsset")
+)py");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "True True True\n4.0 True\n");
+}
+
 TEST(ScriptModule, whileAnEventRunsTheHandlesRefuseEditsToTheAssetAndWhatItReadsFrom) {
     curvy::SketchDocument document;
     document.newBlank("Guard", 100.0f, 100.0f);
