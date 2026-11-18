@@ -27,8 +27,9 @@ Code a script put into a node is not code you typed, so the first cook asks.
 2. Answer **No**. Expected: the status line says "Python nodes with code that is not allowed stay disabled"; open the Code row: the line under the editor reads
    "Python nodes are not allowed here: the application has not trusted this code"; the Data table shows no rows (or the same error). Selecting another node and back
    does **not** ask again (declined for this session).
-3. To allow it after declining without restarting: change the text in the editor (add a comment line), press Commit. Expected: no question (you typed it), the error
-   clears, and Data shows the points. *(If you expected a way to answer Yes without editing, note it: today it needs an edit or a restart.)*
+3. An **Allow** button sits at the right end of that error line (only for this error; not for a `ValueError` or on a wrangle). Press it. Expected: no question, the
+   error line clears, the button goes away, the canvas and Data recook, and `trustedPythonNodes.txt` gains a line. It allows the node's own code, not what is in the editor
+   if you have unsaved edits. Typing a change and pressing Commit allows the new text too (you typed it).
 4. Restart curvy, delete `trustedPythonNodes.txt` again, run `pythonNodeBasics` again, answer **Yes**. Expected: the canvas and the node recook at once, no error, and
    `trustedPythonNodes.txt` now has one line.
 5. Run `pythonNodeBasics` once more in another new document. Expected: no question (the same text is remembered by its hash). Then edit the code in the editor by one

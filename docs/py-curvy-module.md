@@ -575,7 +575,10 @@ script console is set (without a console there is no Python and no policy, so th
   (`ScriptConsole::checkSyntax`) and `onPythonCodeCommitted` is called with the text before the edit, so the controller trusts what the user typed and
   the cook that follows does not prompt. Commit, Revert and Ctrl+Enter work as for a wrangle. The cook error line is the first line of the
   exception message (`ValueError: boom`; pybind puts the frames after it). Selecting a python node cooks it, as for a wrangle, so its code runs then
-  (and an untrusted text asks). Tests: `PythonCodeTest` in `tests/test_nodepanel.cpp`.
+  (and an untrusted text asks). When the cook was refused (the message starts with `jitnodes::python::pythonNodeNotAllowedMessage`) an **Allow** button
+  (`wrangleAllow`, at the right end of the error line, from `docs/mockups/nodePanelCodeSection.html`) is shown: `NodePanel::allowCode` calls
+  `onPythonCodeAllowed` with the node's own code (the controller trusts it, which also undoes a decline) and shows the node again, so the way back from
+  "No" does not need an edit or a restart. Tests: `PythonCodeTest` in `tests/test_nodepanel.cpp`.
 - A script can call `jitnodes.allow_python_nodes(True)`, which replaces the policy: scripts are code the user ran, so this is not a
   boundary. The window resets the policy when it closes or its console changes.
 - **Time limit and Esc.** A python node runs while the canvas draws, on the main thread, so a runaway script would freeze the application. The window sets
