@@ -22,15 +22,26 @@ namespace curvy {
             const char* name;
             const char* caption;
             double unit;
+            Quantity quantity;
         };
-        const Param kParams[] = {{"tx", "Move X", 1.0}, {"ty", "Move Y", 1.0}, {"rot", "Rotate", 1.0}, {"sx", "Scale X", 0.01},
-                                 {"sy", "Scale Y", 0.01}, {"skew", "Skew", 1.0}, {"px", "Pivot X", 1.0}, {"py", "Pivot Y", 1.0}};
+        const Param kParams[] = {{"tx", "Move X", 1.0, Quantity::Length}, {"ty", "Move Y", 1.0, Quantity::Length}, {"rot", "Rotate", 1.0, Quantity::Angle},
+                                 {"sx", "Scale X", 0.01, Quantity::None}, {"sy", "Scale Y", 0.01, Quantity::None}, {"skew", "Skew", 1.0, Quantity::Angle},
+                                 {"px", "Pivot X", 1.0, Quantity::Length}, {"py", "Pivot Y", 1.0, Quantity::Length}};
 
-        std::string numberText(float value) {
-            char text[32];
-            std::snprintf(text, sizeof(text), "%g", double(value));
-            return text;
+        Quantity quantityOf(const std::string& param) {
+            for (const Param& p : kParams) {
+                if (param == p.name) {
+                    return p.quantity;
+                }
+            }
+            return Quantity::None;
         }
+    }
+
+    std::string TransformPanel::numberText(const std::string& param, double stored) const {
+        char text[48];
+        std::snprintf(text, sizeof(text), "%g", Units::toDisplay(stored, quantityOf(param), document_.units(), double(document_.ppi())));
+        return text;
     }
 
     std::string TransformPanel::narrow(const std::wstring& text) {
@@ -117,14 +128,15 @@ namespace curvy {
                     return SyncReturn(SyncReturn::Ignored);
                 }
                 scrubBefore_ = document_.snapshotGraph();
-                value = double(document_.node(p.node).getFloat(p.rows[at].param));
+                value = Units::toDisplay(double(document_.node(p.node).getFloat(p.rows[at].param)), quantityOf(p.rows[at].param), document_.units(), double(document_.ppi()));
                 return SyncReturn(SyncReturn::Handled);
             };
             row.scrubber->onChange += [this, part, at](NumberScrubber&, double value) {
                 Page& p = pages_[index(part)];
                 if (p.shown && document_.hasNode(p.node)) {
-                    document_.setGraphFloatLive(p.node, p.rows[at].param, float(value));
-                    p.rows[at].field->setText(widen(numberText(float(value))));
+                    const double stored = value / Units::displayScale(quantityOf(p.rows[at].param), document_.units(), double(document_.ppi()));
+                    document_.setGraphFloatLive(p.node, p.rows[at].param, float(stored));
+                    p.rows[at].field->setText(widen(numberText(p.rows[at].param, stored)));
                     if (onEdited) {
                         onEdited();
                     }
@@ -154,7 +166,7 @@ namespace curvy {
             page.node = page.shown ? node : NodeRef();
             for (Row& row : page.rows) {
                 if (page.shown) {
-                    row.field->setText(widen(numberText(document_.node(node).getFloat(row.param))));
+                    row.field->setText(widen(numberText(row.param, double(document_.node(node).getFloat(row.param)))));
                 }
             }
             if (page.shown) {
@@ -215,9 +227,12 @@ namespace curvy {
             return;
         }
         const std::string text = narrow(page.rows[row].field->text());
-        char* end = nullptr;
-        const double number = std::strtod(text.c_str(), &end);
-        if (end == text.c_str()) {
+        if (text == numberText(page.rows[row].param, double(document_.node(page.node).getFloat(page.rows[row].param)))) {
+            refresh();   // unchanged text: parsing it back would round the stored value
+            return;
+        }
+        double number = 0.0;
+        if (!Units::parseQuantity(text, quantityOf(page.rows[row].param), document_.units(), double(document_.ppi()), number)) {
             if (onRefused) {
                 onRefused("'" + text + "' is not a number");
             }

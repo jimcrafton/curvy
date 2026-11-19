@@ -74,6 +74,10 @@ add_library(curvy_core STATIC
     src/radialmenu.cpp
     src/workspacemodel.cpp
     src/newdocumentmodel.cpp
+    src/units.cpp
+    src/rulers.cpp
+    src/rulerview.cpp
+    src/guidedrag.cpp
     src/newdocumentdialog.cpp
     src/pagepreview.cpp
     src/workspacecontroller.cpp

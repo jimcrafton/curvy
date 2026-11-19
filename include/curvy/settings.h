@@ -1,5 +1,7 @@
 #pragma once
 
+#include "curvy/units.h"
+
 #include <cstdint>
 #include <map>
 #include <string>
@@ -7,7 +9,7 @@
 
 namespace curvy {
 
-    enum class SettingsPage { Appearance, Workspace, Pen, Drawing, Files, ScriptEditor };
+    enum class SettingsPage { Appearance, Workspace, Units, Pen, Drawing, Files, ScriptEditor };
 
     // The per-user preferences and the state the app keeps between sessions, in one json5 file (<local app data>/curvy/settings.json5, or
     // the path given with --settings). The window and the dock areas are kept here too, so a session starts as the last one ended. Unknown
@@ -57,6 +59,8 @@ namespace curvy {
         bool rulersVisible = true;
         bool hintsFade = true;
         int recentLength = 10;
+        // The units the next new document starts with (file keys workspace.defaultLength / defaultAngle). A document keeps its own, saved with it.
+        DocumentUnits defaultUnits;
 
         // Pen
         ScrubAxis scrubAxis = ScrubAxis::Vertical;

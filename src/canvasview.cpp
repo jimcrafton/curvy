@@ -3,7 +3,11 @@
 #include "curvy/blendmodes.h"
 #include "curvy/objectnode.h"
 #include "curvy/shapepaths.h"
+#include "curvy/theme.h"
+#include "curvy/units.h"
 
+#include <newui/font.h>
+#include <newui/fontmanager.h>
 #include <newui/rootview.h>
 
 #include <windows.h>
@@ -28,6 +32,14 @@ namespace curvy {
         onMouseDblClick.add(this, &CanvasView::handleMouseDoubleClick);
         onKeyDown.add(this, &CanvasView::handleKeyDown);
         onMouseWheel.add(this, &CanvasView::handleMouseWheel);
+        topRuler_ = new RulerView(*this, true);
+        leftRuler_ = new RulerView(*this, false);
+        addChild(topRuler_);   // the canvas owns them (children are destroyed with it)
+        addChild(leftRuler_);
+        onSizeChanged += [this](View&, const Size&) {
+            updateRulers();
+            return SyncReturn::Ignored;
+        };
     }
 
     void CanvasView::setPasteboardColor(std::uint32_t argb) {
@@ -120,7 +132,7 @@ namespace curvy {
 
     void CanvasView::setDocument(SketchDocument* document) {
         document_ = document;
-        style().markDirty();
+        updateRulers();
     }
 
     void CanvasView::paintPage(BLContext& ctx, const Rect& client) const {
@@ -336,6 +348,125 @@ namespace curvy {
         return onKeyFilter && onKeyFilter(keyMask, vkCode) ? SyncReturn::Handled : SyncReturn::Ignored;
     }
 
+    void CanvasView::setRulersVisible(bool visible) {
+        if (visible != rulersVisible_) {
+            rulersVisible_ = visible;
+            updateRulers();
+        }
+    }
+
+    void CanvasView::setGuidePreview(const std::optional<GuidePreview>& preview) {
+        guidePreview_ = preview;
+        style().markDirty();
+    }
+
+    void CanvasView::setOriginPreview(const std::optional<BLPoint>& at) {
+        originPreview_ = at;
+        style().markDirty();
+    }
+
+    Rulers::Region CanvasView::rulerAt(const Point& viewPoint) const {
+        const Rect client = getClientBounds();
+        return Rulers::regionAt(viewPoint.x - client.left(), viewPoint.y - client.top(), rulersVisible_ && document_ != nullptr);
+    }
+
+    std::optional<std::size_t> CanvasView::guideAt(const Point& viewPoint, float tolerancePx) const {
+        if (document_ == nullptr || !document_->guidesVisible() || rulerAt(viewPoint) != Rulers::Region::None) {
+            return std::nullopt;
+        }
+        const BLPoint at = toDocument(viewPoint);
+        std::optional<std::size_t> best;
+        double bestDistance = double(tolerancePx);
+        const std::vector<Guide>& guides = document_->guides();
+        for (std::size_t i = 0; i < guides.size(); ++i) {
+            const double distance = std::abs((guides[i].vertical ? at.x : at.y) - guides[i].position) * double(zoom_);
+            if (distance <= bestDistance) {
+                bestDistance = distance;
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    double CanvasView::snap(double value, bool vertical, float tolerancePx) const {
+        if (document_ == nullptr || !document_->guidesVisible()) {
+            return value;
+        }
+        double result = value;
+        double bestDistance = double(tolerancePx);
+        for (const Guide& guide : document_->guides()) {
+            const double distance = std::abs(value - guide.position) * double(zoom_);
+            if (guide.vertical == vertical && distance <= bestDistance) {
+                bestDistance = distance;
+                result = guide.position;
+            }
+        }
+        return result;
+    }
+
+    void CanvasView::paintGuides(BLContext& ctx, const Rect& client) const {
+        if (!document_->guidesVisible() && !guidePreview_ && !originPreview_) {
+            return;
+        }
+        const double left = double(client.left()), top = double(client.top());
+        const double right = left + double(client.width()), bottom = top + double(client.height());
+        const auto line = [&](const Guide& guide, bool locked) {
+            const BLPoint at = toView(guide.vertical ? BLPoint(guide.position, 0.0) : BLPoint(0.0, guide.position));
+            ctx.set_stroke_width(1.0);
+            ctx.set_stroke_style(BLRgba32(locked ? 0x9000B7EBu : 0xFF00B7EBu));
+            if (guide.vertical) {
+                ctx.stroke_line(BLPoint(std::floor(at.x) + 0.5, top), BLPoint(std::floor(at.x) + 0.5, bottom));
+            } else {
+                ctx.stroke_line(BLPoint(left, std::floor(at.y) + 0.5), BLPoint(right, std::floor(at.y) + 0.5));
+            }
+        };
+        ctx.save();
+        ctx.clip_to_rect(BLRect(left, top, right - left, bottom - top));
+        if (document_->guidesVisible()) {
+            const std::vector<Guide>& guides = document_->guides();
+            for (std::size_t i = 0; i < guides.size(); ++i) {
+                if (!guidePreview_ || guidePreview_->replaces != i) {
+                    line(guides[i], document_->guidesLocked());
+                }
+            }
+        }
+        if (guidePreview_) {
+            line(guidePreview_->guide, false);
+        }
+        if (originPreview_) {
+            ctx.set_stroke_style(BLRgba32(Theme::argb(Theme::current().accent)));
+            const BLPoint at = toView(*originPreview_);
+            ctx.stroke_line(BLPoint(std::floor(at.x) + 0.5, top), BLPoint(std::floor(at.x) + 0.5, bottom));
+            ctx.stroke_line(BLPoint(left, std::floor(at.y) + 0.5), BLPoint(right, std::floor(at.y) + 0.5));
+        }
+        ctx.restore();
+    }
+
+    void CanvasView::updateRulers() {
+        const bool show = rulersVisible_ && document_ != nullptr;
+        const Size size = bounds().size();
+        constexpr float t = Rulers::kThickness;
+        topRuler_->setBounds(Rect(t, 0.0f, (std::max)(0.0f, size.width - t), t));
+        leftRuler_->setBounds(Rect(0.0f, t, t, (std::max)(0.0f, size.height - t)));
+        topRuler_->setVisible(show);
+        leftRuler_->setVisible(show);
+        style().markDirty();
+    }
+
+    void CanvasView::setPointer(const Point& viewPoint) {
+        topRuler_->setMarker(viewPoint.x);
+        leftRuler_->setMarker(viewPoint.y);
+        CursorKind kind = CursorKind::Arrow;
+        if (document_ != nullptr && !document_->guidesLocked()) {
+            if (const std::optional<std::size_t> hit = guideAt(viewPoint)) {
+                kind = document_->guides()[*hit].vertical ? CursorKind::SizeWE : CursorKind::SizeNS;
+            }
+        }
+        if (cursor().kind() != kind) {
+            cursor().setCursorKind(kind);
+        }
+    }
+
     void CanvasView::paint(BLContext& ctx) {
         const Rect client = getClientBounds();
         ctx.set_fill_style(BLRgba32(pasteboardColor_));
@@ -346,9 +477,14 @@ namespace curvy {
             }
             paintPage(ctx, client);
             renderArtwork(ctx, client);
+            paintGuides(ctx, client);
         }
         if (onPaintTop) {
             onPaintTop(ctx);
+        }
+        if (document_ != nullptr && rulersVisible_) {
+            ctx.set_fill_style(BLRgba32(Theme::argb(Theme::current().slot)));
+            ctx.fill_rect(BLRect(client.left(), client.top(), Rulers::kThickness, Rulers::kThickness));
         }
     }
 

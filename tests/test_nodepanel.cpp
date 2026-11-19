@@ -86,6 +86,50 @@ TEST_F(NodePanelTest, aValueTypedIntoThePanelEditsTheNodeAsOneUndoStep) {
     EXPECT_EQ(window().document().node(circle).getFloat("radius"), 30.0f);
 }
 
+TEST_F(NodePanelTest, aLengthRowShowsAndReadsTheDocumentsUnit) {
+    ASSERT_TRUE(click(100.0, 100.0));
+    const curvy::NodeRef circle = window().graph().selected();
+    window().document().setUnits(curvy::DocumentUnits{curvy::LengthUnit::Inches, curvy::AngleUnit::Degrees});
+    window().nodePanel().show(circle);
+    const std::size_t radius = rowOf("radius");
+    ASSERT_NE(radius, ~std::size_t(0));
+    EXPECT_EQ(window().nodePanel().paramValue(radius), "0.416667") << "30 pt is 5/12 in";
+
+    window().nodePanel().setParam(radius, "2");
+    EXPECT_NEAR(window().document().node(circle).getFloat("radius"), 144.0f, 1e-3f) << "a bare number is in the document's unit";
+    window().nodePanel().setParam(radius, "25.4mm");
+    EXPECT_NEAR(window().document().node(circle).getFloat("radius"), 72.0f, 1e-3f) << "a typed suffix wins";
+    window().document().undoStack().undo();
+    EXPECT_NEAR(window().document().node(circle).getFloat("radius"), 144.0f, 1e-3f);
+
+    window().nodePanel().setParam(radius, "abc");
+    EXPECT_NEAR(window().document().node(circle).getFloat("radius"), 144.0f, 1e-3f) << "text that is not a length is refused";
+}
+
+TEST_F(NodePanelTest, enterOnUnchangedTextLeavesTheStoredValueAndUndoAlone) {
+    ASSERT_TRUE(click(100.0, 100.0));
+    const curvy::NodeRef circle = window().graph().selected();
+    window().document().setUnits(curvy::DocumentUnits{curvy::LengthUnit::Inches, curvy::AngleUnit::Degrees});
+    window().nodePanel().show(circle);
+    const std::size_t radius = rowOf("radius");
+    ASSERT_NE(radius, ~std::size_t(0));
+    const std::string shown = window().nodePanel().paramValue(radius);
+    const std::string lastStep = window().document().undoStack().canUndo() ? window().document().undoStack().undoDescription() : "";
+    window().nodePanel().setParam(radius, shown);
+    EXPECT_EQ(window().document().node(circle).getFloat("radius"), 30.0f) << "0.416667 in must not replace 30 pt";
+    EXPECT_EQ(window().document().undoStack().undoDescription(), lastStep) << "no undo step was recorded";
+}
+
+TEST_F(NodePanelTest, aPlainNumberRowIgnoresTheDocumentsUnit) {
+    ASSERT_TRUE(click(100.0, 100.0));
+    const curvy::NodeRef circle = window().graph().selected();
+    window().document().setUnits(curvy::DocumentUnits{curvy::LengthUnit::Millimeters, curvy::AngleUnit::Radians});
+    window().nodePanel().show(circle);
+    const std::size_t count = rowOf("count");
+    ASSERT_NE(count, ~std::size_t(0));
+    EXPECT_EQ(window().nodePanel().paramValue(count), "96");
+}
+
 TEST_F(NodePanelTest, selectingInTheGraphViewShowsTheSameNode) {
     window().toggleGraph();
     window().graph().select(layer_);

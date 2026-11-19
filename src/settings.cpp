@@ -139,6 +139,9 @@ namespace curvy {
                     docks[i] = defaults.docks[i];
                 }
                 break;
+            case SettingsPage::Units:
+                defaultUnits = defaults.defaultUnits;
+                break;
             case SettingsPage::Pen:
                 scrubAxis = defaults.scrubAxis;
                 scrubSensitivity = defaults.scrubSensitivity;
@@ -210,6 +213,8 @@ namespace curvy {
         flag("rulersVisible", rulersVisible);
         flag("hintsFade", hintsFade);
         number("recentLength", recentLength);
+        text("defaultLength", Units::name(defaultUnits.length));
+        text("defaultAngle", Units::name(defaultUnits.angle));
         b["workspace"] = b.pop();
 
         b.push_object();
@@ -321,6 +326,13 @@ namespace curvy {
             readBool(g, "rulersVisible", rulersVisible);
             readBool(g, "hintsFade", hintsFade);
             readInt(g, "recentLength", recentLength, 0, 50);
+            json5::value unitName;
+            if (find(g, "defaultLength", unitName) && unitName.is_string()) {
+                defaultUnits.length = Units::lengthFromName(unitName.get_c_str()).value_or(defaultUnits.length);
+            }
+            if (find(g, "defaultAngle", unitName) && unitName.is_string()) {
+                defaultUnits.angle = Units::angleFromName(unitName.get_c_str()).value_or(defaultUnits.angle);
+            }
         }
         if (group(root, "pen", g)) {
             choice = int(scrubAxis);

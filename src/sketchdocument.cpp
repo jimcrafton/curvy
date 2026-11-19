@@ -302,6 +302,14 @@ namespace curvy {
         }
     }
 
+    void SketchDocument::setUnits(const DocumentUnits& units) {
+        requireUnlocked();
+        if (units != units_) {
+            units_ = units;
+            changed();
+        }
+    }
+
     void SketchDocument::setPageColor(const newui::Color& color) {
         requireUnlocked();
         if (!(color == pageColor_)) {
@@ -323,6 +331,107 @@ namespace curvy {
         if ((mode == ColorSpace::RGB || mode == ColorSpace::CMYK) && mode != colorMode_) {
             colorMode_ = mode;
             changed();
+        }
+    }
+
+    // ---- Guides ----
+
+    void SketchDocument::requireGuidesUnlocked() const {
+        if (guidesLocked_) {
+            throw std::runtime_error("the guides are locked");
+        }
+    }
+
+    void SketchDocument::editGuides(const std::string& description, const std::function<void()>& edit) {
+        requireUnlocked();
+        const auto before = std::make_shared<const std::vector<Guide>>(guides_);
+        edit();
+        const auto after = std::make_shared<const std::vector<Guide>>(guides_);
+        if (*before == *after) {
+            return;
+        }
+        auto applied = std::make_shared<bool>(true);   // push() runs doIt at once, and the edit is already made
+        undoStack_.push({description,
+            [this, after, applied]() {
+                if (*applied) {
+                    *applied = false;
+                } else {
+                    guides_ = *after;
+                    changed();
+                    onGuidesChanged(*this);
+                }
+            },
+            [this, before]() {
+                guides_ = *before;
+                changed();
+                onGuidesChanged(*this);
+            }});
+        changed();
+        onGuidesChanged(*this);
+    }
+
+    std::size_t SketchDocument::addGuide(bool vertical, double position) {
+        if (!std::isfinite(position)) {
+            throw std::runtime_error("a guide position must be a finite number");
+        }
+        editGuides("Add Guide", [&]() { guides_.push_back(Guide{vertical, position}); });
+        return guides_.size() - 1;
+    }
+
+    void SketchDocument::moveGuide(std::size_t index, double position) {
+        if (index >= guides_.size()) {
+            throw std::runtime_error("there is no guide " + std::to_string(index));
+        }
+        if (!std::isfinite(position)) {
+            throw std::runtime_error("a guide position must be a finite number");
+        }
+        requireGuidesUnlocked();
+        editGuides("Move Guide", [&]() { guides_[index].position = position; });
+    }
+
+    void SketchDocument::removeGuide(std::size_t index) {
+        if (index >= guides_.size()) {
+            throw std::runtime_error("there is no guide " + std::to_string(index));
+        }
+        requireGuidesUnlocked();
+        editGuides("Delete Guide", [&]() { guides_.erase(guides_.begin() + std::ptrdiff_t(index)); });
+    }
+
+    bool SketchDocument::clearGuides() {
+        if (guides_.empty()) {
+            return false;
+        }
+        requireGuidesUnlocked();
+        editGuides("Clear Guides", [&]() { guides_.clear(); });
+        return true;
+    }
+
+    void SketchDocument::setRulerOrigin(const RulerOrigin& origin) {
+        requireUnlocked();
+        if (!std::isfinite(origin.x) || !std::isfinite(origin.y)) {
+            throw std::runtime_error("the ruler origin must be a finite number");
+        }
+        if (origin != rulerOrigin_) {
+            rulerOrigin_ = origin;
+            changed();
+            onGuidesChanged(*this);
+        }
+    }
+
+    void SketchDocument::setGuidesLocked(bool locked) {
+        requireUnlocked();
+        if (locked != guidesLocked_) {
+            guidesLocked_ = locked;
+            onGuidesChanged(*this);
+        }
+    }
+
+    void SketchDocument::setGuidesVisible(bool visible) {
+        requireUnlocked();
+        if (visible != guidesVisible_) {
+            guidesVisible_ = visible;
+            updateAllViews();
+            onGuidesChanged(*this);
         }
     }
 
@@ -777,7 +886,8 @@ namespace curvy {
         palettesChanged();
     }
 
-    void SketchDocument::install(const std::string& name, float width, float height, float ppi, ColorSpace colorMode, const newui::Color& pageColor) {
+    void SketchDocument::install(const std::string& name, float width, float height, float ppi, ColorSpace colorMode, const newui::Color& pageColor,
+                                 const DocumentUnits& units) {
         ++replaceCount_;
         clearGraph();
         objectProblems_.clear();
@@ -787,18 +897,24 @@ namespace curvy {
         pageWidth_ = (std::max)(width, 1.0f);
         pageHeight_ = (std::max)(height, 1.0f);
         ppi_ = (std::max)(ppi, 1.0f);
+        units_ = units;
         colorMode_ = colorMode == ColorSpace::CMYK ? ColorSpace::CMYK : ColorSpace::RGB;
         pageColor_ = pageColor;
         palettes_ = {DefaultPalette::make()};
         activePalette_ = 0;
         recent_.clear();
+        guides_.clear();
+        guidesLocked_ = false;
+        guidesVisible_ = true;
+        rulerOrigin_ = RulerOrigin();
         viewState_ = ViewState();
         updateAllViews();
     }
 
-    void SketchDocument::newBlank(const std::string& name, float width, float height, float ppi, ColorSpace colorMode, const newui::Color& pageColor) {
+    void SketchDocument::newBlank(const std::string& name, float width, float height, float ppi, ColorSpace colorMode, const newui::Color& pageColor,
+                                  const DocumentUnits& units) {
         requireUnlocked();
-        install(name, width, height, ppi, colorMode, pageColor);
+        install(name, width, height, ppi, colorMode, pageColor, units);
     }
 
     // ---- The .curvy file ----
@@ -836,6 +952,11 @@ namespace curvy {
             b["page"] = b.pop();
 
             b.push_object();
+            b["length"] = b.new_string(Units::name(units_.length));
+            b["angle"] = b.new_string(Units::name(units_.angle));
+            b["units"] = b.pop();
+
+            b.push_object();
             b["active"] = json5::value(double(activePalette_));
             b.push_array();
             for (const Palette& palette : palettes_) {
@@ -863,6 +984,27 @@ namespace curvy {
             }
             b["list"] = b.pop();
             b["palettes"] = b.pop();
+
+            if (!guides_.empty() || guidesLocked_ || !guidesVisible_) {
+                b.push_object();
+                b.push_array();
+                for (const Guide& guide : guides_) {
+                    b.push_array();
+                    b += b.new_string(guide.vertical ? "v" : "h");
+                    b += json5::value(guide.position);
+                    b += b.pop();
+                }
+                b["list"] = b.pop();
+                b["locked"] = json5::value(guidesLocked_ ? 1.0 : 0.0);
+                b["visible"] = json5::value(guidesVisible_ ? 1.0 : 0.0);
+                b["guides"] = b.pop();
+            }
+            if (rulerOrigin_ != RulerOrigin()) {
+                b.push_array();
+                b += json5::value(rulerOrigin_.x);
+                b += json5::value(rulerOrigin_.y);
+                b["rulerOrigin"] = b.pop();
+            }
             b["document"] = b.pop();
             if (viewState_.canvas || viewState_.graph) {
                 ViewFile::write(b, viewState_);
@@ -943,6 +1085,53 @@ namespace curvy {
             if (find(page, "background", part)) {
                 background = colorOf(part, "page.background");
             }
+            // The units are optional and lenient: a missing key or an unknown name leaves the default (pixels, degrees).
+            DocumentUnits units;
+            json5::value unitsPart;
+            if (find(info, "units", unitsPart)) {
+                if (const std::optional<LengthUnit> length = Units::lengthFromName(stringOr(unitsPart, "length", "", "units"))) {
+                    units.length = *length;
+                }
+                if (const std::optional<AngleUnit> angle = Units::angleFromName(stringOr(unitsPart, "angle", "", "units"))) {
+                    units.angle = *angle;
+                }
+            }
+            // The guides are optional and lenient like the view: an entry that is not ["v"|"h", number] is dropped.
+            std::vector<Guide> guides;
+            bool guidesLocked = false, guidesVisible = true;
+            json5::value guidesPart;
+            if (find(info, "guides", guidesPart) && guidesPart.is_object()) {
+                json5::value listPart;
+                if (find(guidesPart, "list", listPart)) {
+                    const json5::array_view list(listPart);
+                    for (std::size_t g = 0; list.is_valid() && g < list.size(); ++g) {
+                        const json5::array_view entry(list[g]);
+                        if (!entry.is_valid() || entry.size() != 2 || !entry[0].is_string() || !entry[1].is_number() || !std::isfinite(entry[1].get<double>())) {
+                            continue;
+                        }
+                        const std::string axis = entry[0].get_c_str();
+                        if (axis == "v" || axis == "h") {
+                            guides.push_back(Guide{axis == "v", entry[1].get<double>()});
+                        }
+                    }
+                }
+                json5::value flag;
+                if (find(guidesPart, "locked", flag) && flag.is_number()) {
+                    guidesLocked = flag.get<double>() != 0.0;
+                }
+                if (find(guidesPart, "visible", flag) && flag.is_number()) {
+                    guidesVisible = flag.get<double>() != 0.0;
+                }
+            }
+            RulerOrigin rulerOrigin;
+            json5::value originPart;
+            if (find(info, "rulerOrigin", originPart)) {
+                const json5::array_view pair(originPart);
+                if (pair.is_valid() && pair.size() == 2 && pair[0].is_number() && pair[1].is_number() && std::isfinite(pair[0].get<double>()) &&
+                    std::isfinite(pair[1].get<double>())) {
+                    rulerOrigin = RulerOrigin{pair[0].get<double>(), pair[1].get<double>()};
+                }
+            }
             // The palettes are optional (files from before swatches have none and get the default palette).
             std::vector<Palette> palettes = {DefaultPalette::make()};
             std::size_t active = 0;
@@ -997,9 +1186,13 @@ namespace curvy {
             }
             step(taskProgress_, 0.9f);   // the last point a cancel is honoured: from here the document changes
 
-            install(name, width, height, ppi, mode == "cmyk" ? ColorSpace::CMYK : ColorSpace::RGB, background);
+            install(name, width, height, ppi, mode == "cmyk" ? ColorSpace::CMYK : ColorSpace::RGB, background, units);
             palettes_ = std::move(palettes);
             activePalette_ = active;
+            guides_ = std::move(guides);
+            rulerOrigin_ = rulerOrigin;
+            guidesLocked_ = guidesLocked;
+            guidesVisible_ = guidesVisible;
             viewState_ = ViewFile::read(root);
             jitnodes::loadNetworkValue(network(), graph);
             std::vector<jitnodes::NodeId> path;

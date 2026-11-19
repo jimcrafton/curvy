@@ -146,7 +146,7 @@
                     layoutParams: { type: "FlexLayoutParams", weight: 1 },
                     model: {
                       type: "StringListModel",
-                      items: ["Points", "Pixels", "Millimeters", "Centimeters", "Inches", "Picas"]
+                      items: ["Points", "Pixels", "Millimeters", "Centimeters", "Inches", "Picas", "Meters", "Feet", "Display points"]
                     },
                     selectedIndex: 4
                   }

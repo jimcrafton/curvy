@@ -109,8 +109,13 @@ namespace curvy {
         }
         RadialRing viewRing() {
             return {"View", "Back", "ring.document", {
-                {"Toolbar", "T", "view.toolbar"}, {"Properties", "P", "view.properties"}, {"Rulers", "G", "view.toggleRulers"}, {"Fit page", "0", "view.fitPage"},
+                {"Toolbar", "T", "view.toolbar"}, {"Properties", "P", "view.properties"}, {"Rulers", "G", "ring.rulers"}, {"Fit page", "0", "view.fitPage"},
                 {"Theme", "L", "view.theme"}, {"Graph", "N", "view.graph"}, {"Timeline", "M", "view.timeline"}, {"Settings", "S", "dialog.settings"}}};
+        }
+        RadialRing rulersRing() {
+            return {"Rulers", "Back", "ring.view", {
+                {"Rulers", "R", "view.toggleRulers"}, {"Guides", "G", "view.toggleGuides"}, {"Lock guides", "L", "view.lockGuides"},
+                {"Clear guides", "C", "view.clearGuides"}, {"Reset origin", "O", "view.resetRulerOrigin"}}};
         }
         RadialRing objectRing() {
             return {"Object", "Properties...", "dialog.object", {
@@ -137,7 +142,7 @@ namespace curvy {
         const RingEntry kRings[] = {
             {"ring.new", newRing}, {"ring.create", createRing}, {"ring.document", documentRing}, {"ring.export", exportRing},
             {"ring.import", importRing}, {"ring.view", viewRing}, {"ring.object", objectRing}, {"ring.arrange", arrangeRing},
-            {"ring.select", selectRing}};
+            {"ring.select", selectRing}, {"ring.rulers", rulersRing}};
     }
 
     void WorkspaceController::applyTheme(bool dark) {
@@ -162,6 +167,9 @@ namespace curvy {
         const bool dark = settings.darkTheme();
         const bool themeChanged = dark != Theme::current().isDark;
         settings_ = settings;
+        if (canvas_ != nullptr) {
+            canvas_->setRulersVisible(settings_.rulersVisible);
+        }
         if (scriptConsole_ != nullptr) {
             scriptConsole_->setTimeout(std::chrono::seconds(settings_.scriptTimeout ? settings_.scriptTimeoutSeconds : 0));
             jitnodes::python::setPythonNodeTimeLimit(std::chrono::seconds(settings_.pythonNodeSeconds));
@@ -1552,6 +1560,13 @@ namespace curvy {
             model_->setZoom(double(canvas_->zoom()) * 100.0);
             return SyncReturn::Handled;
         };
+        guideDrag_ = std::make_unique<GuideDrag>(document_, *canvas_);
+        guideDrag_->onCornerClick = [this]() { showRulerMenu(pointer_); };
+        canvas_->setRulersVisible(settings_.rulersVisible);
+        document_.onGuidesChanged += [this](SketchDocument&) {
+            canvas_->style().markDirty();
+            return SyncReturn::Ignored;
+        };
         canvas_->onPressFilter = [this](const Point& pt, std::uint32_t buttons, std::uint32_t keys) { return filterPress(pt, buttons, keys); };
         canvas_->onDoubleClickFilter = [this](const Point& pt, std::uint32_t buttons, std::uint32_t keys) {
             const RootView* root = canvas_->rootView();
@@ -1774,7 +1789,7 @@ namespace curvy {
 
     void WorkspaceController::newDocument(const std::string& name, float width, float height) {
         NewDocumentModel settings;
-        settings.loadSetup(double(width), double(height), 72.0, ColorSpace::RGB, PageBackground::White);
+        settings.loadSetup(double(width), double(height), 72.0, ColorSpace::RGB, PageBackground::White, settings_.defaultUnits.length);
         settings.setName(name);
         startDocument(settings);
     }
@@ -1784,7 +1799,8 @@ namespace curvy {
             return;
         }
         const newui::Color page = settings.background() == PageBackground::Transparent ? newui::Color(1.0f, 1.0f, 1.0f, 0.0f) : newui::Color(1.0f, 1.0f, 1.0f, 1.0f);
-        document_.newBlank(settings.name(), float(settings.widthPoints()), float(settings.heightPoints()), float(settings.ppi()), settings.colorMode(), page);
+        document_.newBlank(settings.name(), float(settings.widthPoints()), float(settings.heightPoints()), float(settings.ppi()), settings.colorMode(), page,
+                            DocumentUnits{settings.unit(), settings_.defaultUnits.angle});
         canvas_->setDocument(&document_);
         graphView_->setDocument(&document_);
         canvas_->zoomToFit(1.0f);
@@ -1820,7 +1836,8 @@ namespace curvy {
             background = PageBackground::CurrentFill;
         }
         NewDocumentModel settings;
-        settings.loadSetup(double(document_.pageWidth()), double(document_.pageHeight()), double(document_.ppi()), document_.colorMode(), background);
+        settings.loadSetup(double(document_.pageWidth()), double(document_.pageHeight()), double(document_.ppi()), document_.colorMode(), background,
+                           document_.units().length);
         settings.setName(document_.name());
         if (!NewDocumentDialog::runSetup(frame_, settings, true)) {
             return false;
@@ -1831,6 +1848,7 @@ namespace curvy {
         document_.setPageSize(float(settings.widthPoints()), float(settings.heightPoints()));
         canvas_->zoomToFit(1.0f);
         document_.setPpi(float(settings.ppi()));
+        document_.setUnits(DocumentUnits{settings.unit(), document_.units().angle});
         document_.setColorMode(settings.colorMode());
         switch (settings.background()) {
             case PageBackground::Transparent:
@@ -1872,7 +1890,7 @@ namespace curvy {
 
     bool WorkspaceController::commandWired(const std::string& command) {
         static const std::set<std::string> wired = {
-            "file.open", "file.save", "dialog.new", "dialog.setup", "dialog.settings", "view.fitPage", "view.toolbar", "view.properties",
+            "file.open", "file.save", "dialog.new", "dialog.setup", "dialog.settings", "view.fitPage", "view.toolbar", "view.properties", "view.toggleRulers", "view.toggleGuides", "view.lockGuides", "view.clearGuides", "view.resetRulerOrigin",
             "view.graph", "view.theme", "select.by", "select.similar", "tool.select", "options.select",
             "graph.display", "graph.bypass", "graph.freeze", "graph.rename", "graph.group", "graph.ungroup", "graph.enter", "graph.exit", "graph.data"};
         if (wired.count(command) != 0) {
@@ -1929,6 +1947,13 @@ namespace curvy {
                 canvas_->zoomToFit();
                 model_->say("Fit page");
             }
+        } else if (command == "view.toggleRulers") {
+            settings_.rulersVisible = !settings_.rulersVisible;
+            canvas_->setRulersVisible(settings_.rulersVisible);
+            saveSettings();
+            model_->say(settings_.rulersVisible ? "Rulers shown" : "Rulers hidden");
+        } else if (command == "view.toggleGuides" || command == "view.lockGuides" || command == "view.clearGuides" || command == "view.resetRulerOrigin") {
+            runGuideCommand(command);
         } else if (command == "select.by") {
             showSelectPanel();
         } else if (command == "tool.select") {
@@ -2012,6 +2037,10 @@ namespace curvy {
             }
             return true;
         }
+        if ((buttons & mbmRightButton) != 0 && model_->documentOpen() && canvas_->rulerAt(pt) != Rulers::Region::None) {
+            showRulerMenu(pt);   // a right click on a ruler is its unit menu, not the ring
+            return true;
+        }
         if ((buttons & mbmRightButton) != 0) {
             const bool barrel = pen.barrel || pen.inRange;   // Windows reports the barrel button as a right click; a mouse is not in range
             if (barrel && settings_.barrelButton == Settings::PenButton::Pan) {
@@ -2040,6 +2069,9 @@ namespace curvy {
         }
         if ((buttons & mbmLeftButton) == 0) {
             return false;
+        }
+        if (!graphOverlay_->isVisible() && !menu_->isOpen() && guideDrag_->begin(pt)) {
+            return true;
         }
         return tools_.current()->inputDown(toolEvent(pt, buttons, keys, false));
     }
@@ -2078,7 +2110,62 @@ namespace curvy {
         return optionsCard_->show(*tool, at);
     }
 
+    void WorkspaceController::runGuideCommand(const std::string& command) {
+        if (!model_->documentOpen()) {
+            return;
+        }
+        try {
+            if (command == "view.toggleGuides") {
+                document_.setGuidesVisible(!document_.guidesVisible());
+                model_->say(document_.guidesVisible() ? "Guides shown" : "Guides hidden");
+            } else if (command == "view.lockGuides") {
+                document_.setGuidesLocked(!document_.guidesLocked());
+                model_->say(document_.guidesLocked() ? "Guides locked" : "Guides unlocked");
+            } else if (command == "view.clearGuides") {
+                model_->say(document_.clearGuides() ? "Guides cleared" : "No guides to clear");
+            } else {
+                document_.setRulerOrigin(RulerOrigin());
+                model_->say("Ruler origin reset to the page corner");
+            }
+        } catch (const std::runtime_error& error) {
+            model_->say(error.what());
+        }
+    }
+
+    std::vector<PanelMenuEntry> WorkspaceController::rulerMenuEntries() {
+        std::vector<PanelMenuEntry> entries;
+        const DocumentUnits units = document_.units();
+        for (int i = 0; i < Units::kLengthCount; ++i) {
+            const LengthUnit unit = LengthUnit(i);
+            entries.push_back({Units::name(unit), unit == units.length, false, [this, unit]() {
+                document_.setUnits(DocumentUnits{unit, document_.units().angle});
+                documentPanel_->refresh();
+            }});
+        }
+        entries.push_back({"", false, true, nullptr});
+        for (const AngleUnit angle : {AngleUnit::Degrees, AngleUnit::Radians}) {
+            entries.push_back({Units::name(angle), angle == units.angle, false, [this, angle]() {
+                document_.setUnits(DocumentUnits{document_.units().length, angle});
+                documentPanel_->refresh();
+            }});
+        }
+        entries.push_back({"", false, true, nullptr});
+        entries.push_back({"Show guides", document_.guidesVisible(), false, [this]() { runGuideCommand("view.toggleGuides"); }});
+        entries.push_back({"Lock guides", document_.guidesLocked(), false, [this]() { runGuideCommand("view.lockGuides"); }});
+        entries.push_back({"Clear guides", false, false, [this]() { runGuideCommand("view.clearGuides"); }});
+        entries.push_back({"", false, true, nullptr});
+        entries.push_back({"Reset ruler origin", false, false, [this]() { runGuideCommand("view.resetRulerOrigin"); }});
+        return entries;
+    }
+
+    void WorkspaceController::showRulerMenu(const Point& at) {
+        if (model_->documentOpen() && presentMenu) {
+            presentMenu(rulerMenuEntries(), canvas_->localToScreen(at));
+        }
+    }
+
     SyncReturn WorkspaceController::handleMouseMove(View&, const Point& pt, std::uint32_t buttons, std::uint32_t keys) {
+        canvas_->setPointer(pt);
         if (panning_) {
             if ((buttons & (mbmRightButton | mbmLeftButton)) != 0) {
                 canvas_->panBy(pt.x - pointer_.x, pt.y - pointer_.y);
@@ -2095,7 +2182,13 @@ namespace curvy {
                 zooming_ = false;
             }
         }
-        if (tools_.current() != nullptr && !panning_ && !zooming_) {
+        if (guideDrag_->active()) {
+            if ((buttons & mbmLeftButton) != 0) {
+                guideDrag_->move(pt);
+            } else {
+                guideDrag_->cancel();
+            }
+        } else if (tools_.current() != nullptr && !panning_ && !zooming_) {
             tools_.current()->inputMove(toolEvent(pt, buttons, keys, false));
         }
         pointer_ = pt;
@@ -2109,6 +2202,9 @@ namespace curvy {
     SyncReturn WorkspaceController::handleMouseUp(View&, const Point& pt, std::uint32_t buttons, std::uint32_t keys) {
         panning_ = false;
         zooming_ = false;
+        if (guideDrag_->end(pt)) {
+            return SyncReturn::Handled;
+        }
         if (tools_.current() != nullptr) {
             tools_.current()->inputUp(toolEvent(pt, buttons, keys, (buttons & mbmRightButton) != 0));
         }

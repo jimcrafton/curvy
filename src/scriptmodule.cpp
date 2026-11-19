@@ -259,6 +259,20 @@ namespace curvy {
             throw std::invalid_argument("color_mode is 'rgb' or 'cmyk'");
         }
 
+        LengthUnit lengthUnitFrom(const std::string& name) {
+            if (const std::optional<LengthUnit> unit = Units::lengthFromName(name)) {
+                return *unit;
+            }
+            throw std::invalid_argument("unit is 'px', 'pt', 'mm', 'cm', 'in', 'pc', 'm', 'ft' or 'dip'");
+        }
+
+        AngleUnit angleUnitFrom(const std::string& name) {
+            if (const std::optional<AngleUnit> unit = Units::angleFromName(name)) {
+                return *unit;
+            }
+            throw std::invalid_argument("angle_unit is 'deg' or 'rad'");
+        }
+
         void bindSwatches(py::module_& module) {
             py::class_<Swatch>(module, "Swatch", "A colour (red, green, blue, alpha in 0..1) with an optional name. Changing one changes a copy only; use the document's swatch calls to edit a palette.")
                 .def(py::init([](float r, float g, float b, float a, const std::string& name) {
@@ -280,6 +294,13 @@ namespace curvy {
                 .def("__repr__", [](const Swatch& s) {
                     return "Swatch(" + std::to_string(s.r) + ", " + std::to_string(s.g) + ", " + std::to_string(s.b) + ", " + std::to_string(s.a) + ", '" + s.name + "')";
                 });
+
+            py::class_<Guide>(module, "Guide", "A ruler guide (a copy: edit through the document). `vertical` is True for a line at x = position, False for y = position; position is in points from the page's top left.")
+                .def(py::init([](bool vertical, double position) { return Guide{vertical, position}; }), py::arg("vertical"), py::arg("position"))
+                .def_readonly("vertical", &Guide::vertical)
+                .def_readonly("position", &Guide::position)
+                .def("__eq__", [](const Guide& a, const Guide& b) { return a == b; })
+                .def("__repr__", [](const Guide& g) { return std::string("Guide(") + (g.vertical ? "vertical" : "horizontal") + ", " + std::to_string(g.position) + ")"; });
 
             py::class_<Palette>(module, "Palette", "A named list of swatches (a copy: edit through the document).")
                 .def_readonly("name", &Palette::name)
@@ -783,6 +804,16 @@ namespace curvy {
                 .def_property_readonly("page_height", [](const ScriptDocument& d) { return d.get().pageHeight(); })
                 .def_property("ppi", [](const ScriptDocument& d) { return d.get().ppi(); },
                               [](const ScriptDocument& d, float ppi) { d.get().setPpi(ppi); })
+                .def_property("unit", [](const ScriptDocument& d) { return std::string(Units::name(d.get().units().length)); },
+                              [](const ScriptDocument& d, const std::string& unit) {
+                                  d.get().setUnits(DocumentUnits{lengthUnitFrom(unit), d.get().units().angle});
+                              },
+                              "The unit the document is worked in ('px', 'mm', 'in', ...), saved with the file. Geometry and every script number stay in points; "
+                              "this only changes how the app shows numbers. Not undoable.")
+                .def_property("angle_unit", [](const ScriptDocument& d) { return std::string(Units::name(d.get().units().angle)); },
+                              [](const ScriptDocument& d, const std::string& unit) {
+                                  d.get().setUnits(DocumentUnits{d.get().units().length, angleUnitFrom(unit)});
+                              }, "'deg' or 'rad'; shown angles only, stored angles stay in degrees.")
                 .def_property("page_color", [](const ScriptDocument& d) { return rgbaOf(d.get().pageColor()); },
                               [](const ScriptDocument& d, const Rgba& color) { d.get().setPageColor(colorOf(color)); },
                               "(r, g, b, a) in 0..1; alpha 0 is a transparent page.")
@@ -1059,6 +1090,22 @@ namespace curvy {
                     return geometry ? py::cast(geometry) : py::none();
                 }, "What the document draws: the cooked layers as a read-only jitnodes Geometry, or None.")
 
+                .def_property_readonly("guides", [](const ScriptDocument& d) { return d.get().guides(); }, "Copies of the ruler guides, in the order they were added.")
+                .def("add_guide", [](const ScriptDocument& d, bool vertical, double position) { return d.get().addGuide(vertical, position); },
+                     py::arg("vertical"), py::arg("position"), "Adds a guide (position in points from the page's top left) and returns its index. One undo step.")
+                .def("move_guide", [](const ScriptDocument& d, std::size_t index, double position) { d.get().moveGuide(index, position); },
+                     "Raises when the guides are locked.")
+                .def("remove_guide", [](const ScriptDocument& d, std::size_t index) { d.get().removeGuide(index); }, "Raises when the guides are locked.")
+                .def("clear_guides", [](const ScriptDocument& d) { return d.get().clearGuides(); }, "Removes every guide; False when there were none. Raises when locked.")
+                .def_property("guides_locked", [](const ScriptDocument& d) { return d.get().guidesLocked(); },
+                              [](const ScriptDocument& d, bool locked) { d.get().setGuidesLocked(locked); }, "A locked set cannot be moved or removed. Not undoable.")
+                .def_property("guides_visible", [](const ScriptDocument& d) { return d.get().guidesVisible(); },
+                              [](const ScriptDocument& d, bool visible) { d.get().setGuidesVisible(visible); }, "Not undoable.")
+
+                .def_property("ruler_origin", [](const ScriptDocument& d) { return std::make_pair(d.get().rulerOrigin().x, d.get().rulerOrigin().y); },
+                              [](const ScriptDocument& d, const std::pair<double, double>& origin) { d.get().setRulerOrigin(RulerOrigin{origin.first, origin.second}); },
+                              "Where the rulers read zero, an (x, y) pair in points from the page's top left (0, 0 by default). Not undoable; raises for a non-finite number.")
+
                 .def_property_readonly("palettes", [](const ScriptDocument& d) { return d.get().palettes(); }, "Copies of the palettes.")
                 .def_property("active_palette", [](const ScriptDocument& d) { return d.get().activePalette(); },
                               [](const ScriptDocument& d, std::size_t index) {
@@ -1306,6 +1353,11 @@ namespace curvy {
             return py::make_tuple(problem->line, problem->column, problem->message);
         }, py::arg("code"),
            "Compiles wrangle code without running it: None when it parses, else (line, column, message), 1-based. What the Node panel's Code editor shows.");
+        module.def("to_points", [](double value, const std::string& unit, double ppi) { return Units::toPoints(value, lengthUnitFrom(unit), ppi); },
+                   py::arg("value"), py::arg("unit"), py::arg("ppi") = 72.0,
+                   "A length in 'px', 'pt', 'mm', 'cm', 'in', 'pc', 'm', 'ft' or 'dip' as points (1/72 in), the unit geometry is stored in. 'px' needs the ppi.");
+        module.def("from_points", [](double points, const std::string& unit, double ppi) { return Units::fromPoints(points, lengthUnitFrom(unit), ppi); },
+                   py::arg("points"), py::arg("unit"), py::arg("ppi") = 72.0, "The inverse of to_points.");
         module.def("blend_modes", []() { return BlendModes::names(); }, "The blend modes an object offers, as names (Normal first).");
         module.def("wrangle_functions", []() {
             std::vector<std::tuple<std::string, int>> functions;

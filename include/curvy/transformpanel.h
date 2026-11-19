@@ -5,6 +5,7 @@
 #include "curvy/panel.h"
 #include "curvy/selectionmodel.h"
 #include "curvy/sketchdocument.h"
+#include "curvy/units.h"
 
 #include <newui/controls.h>
 
@@ -73,6 +74,7 @@ namespace curvy {
         };
 
         static std::size_t index(Part part) { return part == Part::Object ? 0 : 1; }
+        std::string numberText(const std::string& param, double stored) const;
         static std::string narrow(const std::wstring& text);
         static std::wstring widen(const std::string& text);
         void buildPage(Part part, const char* title);

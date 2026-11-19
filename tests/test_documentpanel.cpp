@@ -23,7 +23,7 @@ TEST_F(DocumentPanelTest, DocumentTabShowsTheDocument) {
     window().document().newBlank("Poster", 400.0f, 300.0f);
     panel().refresh();
     EXPECT_EQ("Poster", panel().nameText());
-    EXPECT_EQ("400 x 300 pt", panel().pageText());
+    EXPECT_EQ("400 x 300 px", panel().pageText());
 }
 
 TEST_F(DocumentPanelTest, thePanelAsksForTheHeightOfTheTabThatShows) {
@@ -62,4 +62,28 @@ TEST_F(DocumentPanelTest, SwatchesTabEditsTheSharedPalettes) {
     }
     EXPECT_EQ(before + 1, window().document().palettes().size());
     EXPECT_EQ(window().document().palettes().size() + 1, window().swatchesTab().paletteRowCount());   // Recent is the last row
+}
+
+TEST_F(DocumentPanelTest, thePageIsShownInTheDocumentsUnitAndTheUnitCanBeChangedHere) {
+    window().document().newBlank("Poster", 720.0f, 360.0f);
+    panel().refresh();
+    auto* length = dynamic_cast<newui::DropDownList*>(panel().findView("documentLengthUnit"));
+    auto* angle = dynamic_cast<newui::DropDownList*>(panel().findView("documentAngleUnit"));
+    ASSERT_NE(nullptr, length);
+    ASSERT_NE(nullptr, angle);
+    EXPECT_EQ(std::size_t(curvy::LengthUnit::Pixels), *length->selectedIndex());
+
+    length->setSelectedIndex(std::size_t(curvy::LengthUnit::Inches));
+    EXPECT_EQ(curvy::LengthUnit::Inches, window().document().units().length);
+    EXPECT_EQ("10 x 5 in", panel().pageText());
+    EXPECT_FLOAT_EQ(720.0f, window().document().pageWidth()) << "only the display changes, the page stays in points";
+
+    angle->setSelectedIndex(std::size_t(curvy::AngleUnit::Radians));
+    EXPECT_EQ(curvy::AngleUnit::Radians, window().document().units().angle);
+    EXPECT_EQ(curvy::LengthUnit::Inches, window().document().units().length);
+
+    window().document().setUnits(curvy::DocumentUnits{curvy::LengthUnit::Millimeters, curvy::AngleUnit::Degrees});
+    panel().refresh();
+    EXPECT_EQ(std::size_t(curvy::LengthUnit::Millimeters), *length->selectedIndex());
+    EXPECT_EQ("254 x 127 mm", panel().pageText());
 }

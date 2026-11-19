@@ -1,6 +1,7 @@
 #include "curvy/documentpanel.h"
 
 #include "curvy/theme.h"
+#include "curvy/units.h"
 
 #include <algorithm>
 #include <cmath>
@@ -43,6 +44,35 @@ namespace curvy {
         name_ = row("Name");
         page_ = row("Page");
         mode_ = row("Colour mode");
+        Label* unitsTitle = makeLabel(*documentPage, true);
+        unitsTitle->setText("Units");
+        rows_.push_back(unitsTitle);
+        const auto makeCombo = [&](const char* name, std::vector<std::string> items) {
+            auto* combo = new DropDownList();
+            combo->setName(name);
+            auto model = std::make_unique<StringListModel>();
+            for (const std::string& item : items) {
+                model->addItem(item);
+            }
+            combo->setModel(std::move(model));
+            documentPage->addChild(combo);
+            return combo;
+        };
+        std::vector<std::string> lengthNames;
+        for (int i = 0; i < Units::kLengthCount; ++i) {
+            lengthNames.push_back(Units::name(LengthUnit(i)));
+        }
+        lengthUnit_ = makeCombo("documentLengthUnit", lengthNames);
+        angleUnit_ = makeCombo("documentAngleUnit", {Units::name(AngleUnit::Degrees), Units::name(AngleUnit::Radians)});
+        const auto commit = [this](DropDownList&) {
+            if (!refreshing_ && lengthUnit_->selectedIndex() && angleUnit_->selectedIndex()) {
+                document_.setUnits(DocumentUnits{LengthUnit(*lengthUnit_->selectedIndex()), AngleUnit(*angleUnit_->selectedIndex())});
+                refresh();
+            }
+            return SyncReturn::Handled;
+        };
+        lengthUnit_->onSelectionChanged += commit;
+        angleUnit_->onSelectionChanged += commit;
 
         auto* swatchTab = new TabPage();
         swatchTab->setTitle("Swatches");
@@ -66,7 +96,7 @@ namespace curvy {
     }
 
     void DocumentPanel::fitHeight() {
-        constexpr float kDocumentTab = 150.0f;   // the name, the page and the colour mode
+        constexpr float kDocumentTab = 218.0f;   // the name, the page, the colour mode and the units
         constexpr float kMostSwatches = 560.0f;   // beyond this the page scrolls
         float content = kDocumentTab;
         if (tabs_->selectedIndex() == 1 && swatchesContentHeight) {
@@ -83,9 +113,14 @@ namespace curvy {
 
     void DocumentPanel::refresh() {
         name_->setText(document_.name());
-        char text[64];
-        std::snprintf(text, sizeof(text), "%g x %g pt", document_.pageWidth(), document_.pageHeight());
-        page_->setText(text);
+        const DocumentUnits& units = document_.units();
+        const double ppi = double(document_.ppi());
+        page_->setText(Units::number(Units::fromPoints(double(document_.pageWidth()), units.length, ppi)) + " x " +
+                       Units::number(Units::fromPoints(double(document_.pageHeight()), units.length, ppi)) + " " + Units::name(units.length));
+        refreshing_ = true;
+        lengthUnit_->setSelectedIndex(std::size_t(units.length));
+        angleUnit_->setSelectedIndex(std::size_t(units.angle));
+        refreshing_ = false;
         mode_->setText(document_.colorMode() == ColorSpace::CMYK ? "CMYK" : document_.colorMode() == ColorSpace::Gray ? "Gray" : "RGB");
         layoutParts();
     }
@@ -109,10 +144,15 @@ namespace curvy {
         }
         fitHeight();
         float y = kPad;
-        for (std::size_t i = 0; i < rows_.size(); ++i) {
+        for (std::size_t i = 0; i < rows_.size() - 1; ++i) {
             rows_[i]->setBounds(Rect(kPad, y, width, kLine));
             y += (i % 2 == 0) ? kLine - 4.0f : kLine + 6.0f;
         }
+        rows_.back()->setBounds(Rect(kPad, y, width, kLine));   // the Units caption, then its two lists side by side
+        y += kLine + 2.0f;   // more than a caption has above a text value: a list has a border and would crowd the caption
+        const float lengthWidth = std::floor(width * 0.58f);
+        lengthUnit_->setBounds(Rect(kPad, y, lengthWidth, kLine + 4.0f));
+        angleUnit_->setBounds(Rect(kPad + lengthWidth + 6.0f, y, (std::max)(20.0f, width - lengthWidth - 6.0f), kLine + 4.0f));
         style().markDirty();
     }
 

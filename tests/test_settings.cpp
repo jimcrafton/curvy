@@ -218,3 +218,12 @@ TEST(SettingsFile, PanelStatesRoundTripInOrder) {
     EXPECT_FLOAT_EQ(-20.0f, back.panels[1].floatY);
     EXPECT_FLOAT_EQ(180.0f, back.panels[1].bodyHeight);
 }
+
+TEST(Settings, theUnitsPageResetsOnlyTheDefaultUnits) {
+    curvy::Settings changed;
+    changed.defaultUnits = curvy::DocumentUnits{curvy::LengthUnit::Millimeters, curvy::AngleUnit::Radians};
+    changed.rulersVisible = false;
+    changed.resetPage(curvy::SettingsPage::Units);
+    EXPECT_EQ(curvy::DocumentUnits(), changed.defaultUnits);
+    EXPECT_FALSE(changed.rulersVisible) << "the rulers toggle belongs to the Workspace page";
+}

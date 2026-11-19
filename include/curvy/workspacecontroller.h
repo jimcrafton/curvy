@@ -9,6 +9,7 @@
 #include "curvy/paneldock.h"
 #include "curvy/panelsmenu.h"
 #include "curvy/graphcrumbs.h"
+#include "curvy/guidedrag.h"
 #include "curvy/nodepanel.h"
 #include "curvy/graphview.h"
 #include "curvy/marquee.h"
@@ -155,6 +156,9 @@ namespace curvy {
         // The lines of the Scripts button's menu as they are now: the user's scripts folder (next to the settings file), the samples, and
         // "Open scripts folder". A picked script runs like Run in the editor, shown in the console panel.
         std::vector<PanelMenuEntry> scriptsMenuEntries();
+        // The ruler menu (a click in the rulers' corner or a right click on a ruler): the length and angle units with the document's ticked, the guides
+        // commands and the ruler origin reset. Shown through presentMenu.
+        std::vector<PanelMenuEntry> rulerMenuEntries();
         std::filesystem::path userScriptsFolder() const;
         // How a panel menu is shown (screen point); the native popup unless a test replaces it, because that one blocks until the user picks.
         std::function<void(const std::vector<PanelMenuEntry>&, const newui::Point&)> presentMenu;
@@ -249,6 +253,8 @@ namespace curvy {
         void toggleDock(DockSide side);
         void showPanelsMenu(const newui::Point& screen);
         void showScriptsMenu(const newui::Point& screen);
+        void showRulerMenu(const newui::Point& at);
+        void runGuideCommand(const std::string& command);
         void runMenuScript(const ScriptFile& file);
         void showPanelMenu(Panel& panel, const newui::Point& screen);
         void buildGraphOverlay();
@@ -355,6 +361,7 @@ namespace curvy {
         ToolRegistry tools_;
         SelectTool* selectTool_ = nullptr;   // owned by tools_
         std::unique_ptr<ToolOptionsCard> optionsCard_;
+        std::unique_ptr<GuideDrag> guideDrag_;   // above the tools: a press in a ruler or on a guide is its drag
     };
 
 }

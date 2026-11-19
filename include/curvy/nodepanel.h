@@ -7,6 +7,7 @@
 #include "curvy/panel.h"
 #include "curvy/sketchdocument.h"
 #include "curvy/swatchpalettecontroller.h"
+#include "curvy/units.h"
 
 #include <newui/controls.h>
 #include <newui/view.h>
@@ -144,6 +145,7 @@ namespace curvy {
             std::string name;
             bool color = false;
             double unit = 1.0;
+            Quantity quantity = Quantity::None;   // from the "quantity:" tag: the row shows and reads the document's unit; the node keeps points / degrees
             std::optional<double> minimum, maximum;
             std::vector<std::string> choices;   // from the "choices:A,B,C" tag: the value is the index, shown as a dropdown of names
             std::string r, g, b, a;
@@ -194,6 +196,7 @@ namespace curvy {
         void layoutRows();
         void fillRow(std::size_t row);
         static double clampTo(const Entry& entry, double value);
+        std::string displayText(const Entry& entry, double stored) const;
         static std::string limitText(const Entry& entry);
         void syncPicker();
         void makePicker();

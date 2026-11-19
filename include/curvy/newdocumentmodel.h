@@ -1,13 +1,12 @@
 #pragma once
 
 #include "curvy/colorspace.h"
+#include "curvy/units.h"
 
 #include <string>
 #include <vector>
 
 namespace curvy {
-
-    enum class LengthUnit { Points, Pixels, Millimeters, Centimeters, Inches, Picas };  // the order of the dialog's unit list
 
     enum class PageBackground { White, Transparent, CurrentFill };  // the order of the dialog's background list
 
@@ -39,11 +38,12 @@ namespace curvy {
         static std::vector<std::size_t> presetsIn(const std::string& category);
         // "Letter   8.5 x 11 in   CMYK, 300 ppi" - the list's row text.
         static std::string rowText(const DocumentPreset& preset);
-        static const char* unitName(LengthUnit unit);  // "in", "px", ... for labels
-        static double pointsPer(LengthUnit unit, double ppi);
+        static const char* unitName(LengthUnit unit) { return Units::name(unit); }  // "in", "px", ... for labels
+        static double pointsPer(LengthUnit unit, double ppi) { return Units::pointsPer(unit, ppi); }
 
-        // Starts from an existing document's page (Document Setup): shown in points, name and proportions untouched.
-        void loadSetup(double widthPoints, double heightPoints, double ppi, ColorSpace colorMode, PageBackground background);
+        // Starts from an existing document's page (Document Setup): shown in the document's own unit, name and proportions untouched.
+        void loadSetup(double widthPoints, double heightPoints, double ppi, ColorSpace colorMode, PageBackground background,
+                       LengthUnit unit = LengthUnit::Points);
 
         // Takes all of a preset's settings (name resets to "Untitled-1", the link ratio is recaptured).
         void loadPreset(const DocumentPreset& preset);

@@ -3,7 +3,9 @@
 #include "curvy/backgroundtask.h"
 #include "curvy/colorspace.h"
 #include "curvy/graphdocument.h"
+#include "curvy/guides.h"
 #include "curvy/swatchpalettes.h"
+#include "curvy/units.h"
 #include "curvy/viewstate.h"
 
 #include <newui/color.h>
@@ -33,6 +35,12 @@ namespace curvy {
         void setPageSize(float width, float height);
         void setPpi(float ppi);
 
+        // The units the document is worked in (rulers, dimension labels, parameter rows, typed bare numbers), saved with the file. Geometry stays
+        // in points and degrees whatever they are, so changing them changes only how numbers are shown. Like the page size it is the document's
+        // setup: not undoable, but it marks the document modified and repaints.
+        const DocumentUnits& units() const { return units_; }
+        void setUnits(const DocumentUnits& units);
+
         // The page's fill: opaque white by default. A color with alpha 0 is a transparent page, drawn as a checkerboard.
         const newui::Color& pageColor() const { return pageColor_; }
         void setPageColor(const newui::Color& color);
@@ -44,6 +52,30 @@ namespace curvy {
 
         const std::string& name() const { return name_; }
         void setName(const std::string& name);
+
+        // ---- Guides ----
+        // Ruler guides, kept beside the graph (saved as document.guides, never a node). Each edit below is one undo step and throws
+        // std::runtime_error when refused (a bad index or a position that is not a finite number). Positions are points from the page's top left.
+        // Locking and hiding are view choices: not undoable, and they do not mark the document modified, but they are saved with the guides.
+        // Locked guides cannot be moved, removed or cleared (adding one is still allowed, as in Illustrator); the refusal is here, so scripts
+        // and tools obey the same lock.
+        const std::vector<Guide>& guides() const { return guides_; }
+        std::size_t addGuide(bool vertical, double position);
+        void moveGuide(std::size_t index, double position);
+        void removeGuide(std::size_t index);
+        // One undo step; false (and no step) when there were none.
+        bool clearGuides();
+        bool guidesLocked() const { return guidesLocked_; }
+        void setGuidesLocked(bool locked);
+        bool guidesVisible() const { return guidesVisible_; }
+        void setGuidesVisible(bool visible);
+        // Where the rulers read zero. Like the units it is setup, not content: not undoable, but it marks the document modified, repaints and is
+        // saved (document.rulerOrigin). Not a finite number is refused with std::runtime_error.
+        const RulerOrigin& rulerOrigin() const { return rulerOrigin_; }
+        void setRulerOrigin(const RulerOrigin& origin);
+        // Called after the guides, their lock or visibility, or the ruler origin changed by an edit, undo, redo or the setters (on the caller's thread). Not called
+        // by New or a load: whoever shows the guides reads them again then.
+        newui::Delegate<SketchDocument> onGuidesChanged;
 
         // ---- Swatches and palettes ----
         // A document keeps at least one palette (a new one starts with DefaultPalette), one of them active. Every edit below is one undo step and throws
@@ -103,7 +135,7 @@ namespace curvy {
 
         // Replaces everything with an empty, unmodified document: no graph, no undo history, a blank page of this size.
         void newBlank(const std::string& name, float width, float height, float ppi = 72.0f, ColorSpace colorMode = ColorSpace::RGB,
-                      const newui::Color& pageColor = newui::Color(1.0f, 1.0f, 1.0f, 1.0f));
+                      const newui::Color& pageColor = newui::Color(1.0f, 1.0f, 1.0f, 1.0f), const DocumentUnits& units = DocumentUnits());
 
         // ---- Layers and groups ----
         // Both are Object subnets (see docs/v2-objects-plan.md). Layers hang off the root merge, groups off another object's merge; the order of
@@ -250,11 +282,15 @@ namespace curvy {
         };
 
         void requireUnlocked() const;
-        void install(const std::string& name, float width, float height, float ppi, ColorSpace colorMode, const newui::Color& pageColor);
+        void install(const std::string& name, float width, float height, float ppi, ColorSpace colorMode, const newui::Color& pageColor,
+                     const DocumentUnits& units = DocumentUnits());
         void changed();
         // Runs `edit` (which changes palettes_ and must not throw after it has changed anything) and records the before and after as one undo step.
         // `withGraph`: the edit also changes nodes (linked swatches), and undo and redo restore the graph with the palettes.
         void editPalettes(const std::string& description, const std::function<void()>& edit, bool withGraph = false);
+        // Same for guides_: runs `edit` and records the before and after as one undo step (nothing when the list did not change).
+        void editGuides(const std::string& description, const std::function<void()>& edit);
+        void requireGuidesUnlocked() const;
         // Every node of every network, subnets included.
         void forEachNode(const std::function<void(jitnodes::Network&, jitnodes::NodeId)>& visit);
         // Every colour row of the graph: the node, its colour and the swatch link it is tied to (0 for none).
@@ -284,11 +320,16 @@ namespace curvy {
         float pageWidth_ = 612.0f;
         float pageHeight_ = 792.0f;
         float ppi_ = 72.0f;
+        DocumentUnits units_;
         ColorSpace colorMode_ = ColorSpace::RGB;
         newui::Color pageColor_{1.0f, 1.0f, 1.0f, 1.0f};
         std::vector<Palette> palettes_ = {DefaultPalette::make()};
         std::size_t activePalette_ = 0;
         std::vector<Swatch> recent_;
+        std::vector<Guide> guides_;
+        RulerOrigin rulerOrigin_;
+        bool guidesLocked_ = false;
+        bool guidesVisible_ = true;
         ViewState viewState_;
     };
 

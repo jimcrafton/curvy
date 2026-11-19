@@ -13,7 +13,7 @@
 namespace curvy {
 
     // The Document panel of the right dock (docs/mockups/dockPanels.html): a Panel (the chrome) whose body is a TabControl with a Document tab (name,
-    // page, colour mode) and a Swatches tab, which is empty until the owner puts a SwatchesTab into swatchPage() (and keeps it no longer than the
+    // page in the document's unit, colour mode, and the units, which can be changed here) and a Swatches tab, which is empty until the owner puts a SwatchesTab into swatchPage() (and keeps it no longer than the
     // document). Library and Fonts tabs come later. It is only the view.
     // @reflect ignore=true
     class DocumentPanel : public Panel {
@@ -51,6 +51,9 @@ namespace curvy {
         newui::Label* name_ = nullptr;
         newui::Label* page_ = nullptr;
         newui::Label* mode_ = nullptr;
+        newui::DropDownList* lengthUnit_ = nullptr;   // the document's units, edited here
+        newui::DropDownList* angleUnit_ = nullptr;
+        bool refreshing_ = false;
     };
 
 }

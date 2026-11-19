@@ -480,6 +480,9 @@ namespace curvy {
                 if (!(entry.unit > 0.0)) {
                     entry.unit = 1.0;
                 }
+                if (const auto quantity = shown->paramTagValue(n, "quantity")) {
+                    entry.quantity = Units::quantityFromName(*quantity);
+                }
                 if (const auto low = shown->paramTagValue(n, "min")) {
                     entry.minimum = std::strtod(low->c_str(), nullptr);
                 }
@@ -711,12 +714,13 @@ namespace curvy {
                 return SyncReturn(SyncReturn::Ignored);
             }
             scrubBefore_ = document_.snapshotGraph();
-            value = double(document_.node(node_).getFloat(entries_[index].name));
+            value = Units::toDisplay(double(document_.node(node_).getFloat(entries_[index].name)), entries_[index].quantity, document_.units(), double(document_.ppi()));
             return SyncReturn(SyncReturn::Handled);
         };
         row.scrubber->onChange += [this, index](NumberScrubber&, double value) {
             if (index < entries_.size() && node_.valid() && document_.hasNode(node_)) {
-                document_.setGraphFloatLive(node_, entries_[index].name, float(clampTo(entries_[index], value)));
+                const double stored = value / Units::displayScale(entries_[index].quantity, document_.units(), double(document_.ppi()));
+                document_.setGraphFloatLive(node_, entries_[index].name, float(clampTo(entries_[index], stored)));
                 fillRow(index);
                 if (onEdited) {
                     onEdited();
@@ -789,9 +793,7 @@ namespace curvy {
         }
         sliderName_ = entry.name;
         document_.setGraphFloatLive(node_, entry.name, value);
-        char text[32];
-        std::snprintf(text, sizeof(text), "%g", double(value));
-        rows_[row].field->setText(widen(text));
+        rows_[row].field->setText(widen(displayText(entry, double(value))));
         if (onEdited) {
             onEdited();
         }
@@ -840,10 +842,14 @@ namespace curvy {
             const auto byte = [](float v) { return std::uint32_t(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f); };
             row.swatch->style().setBackgroundColor(BLRgba32(0xFF000000u | (byte(r) << 16) | (byte(g) << 8) | byte(b)));
         } else {
-            char text[32];
-            std::snprintf(text, sizeof(text), "%g", double(shown.getFloat(entry.name)));
-            row.field->setText(widen(text));
+            row.field->setText(widen(displayText(entry, double(shown.getFloat(entry.name)))));
         }
+    }
+
+    std::string NodePanel::displayText(const Entry& entry, double stored) const {
+        char text[48];
+        std::snprintf(text, sizeof(text), "%g", Units::toDisplay(stored, entry.quantity, document_.units(), double(document_.ppi())));
+        return text;
     }
 
     void NodePanel::layoutRows() {
@@ -1100,9 +1106,12 @@ namespace curvy {
             dropLinkTags(entry.name);   // a colour typed by hand is no longer the swatch's
             document_.commitGraphEdit(before, "Change " + entry.name);
         } else {
-            char* end = nullptr;
-            const double number = std::strtod(text.c_str(), &end);
-            if (end == text.c_str()) {
+            if (text == displayText(entries_[row], double(document_.node(node_).getFloat(entries_[row].name)))) {
+                show(node_);   // the text is what the row already shows; parsing it back would round the stored value
+                return;
+            }
+            double number = 0.0;
+            if (!Units::parseQuantity(text, entries_[row].quantity, document_.units(), double(document_.ppi()), number)) {
                 if (onRefused) {
                     onRefused("'" + text + "' is not a number");
                 }

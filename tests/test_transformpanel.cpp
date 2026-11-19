@@ -61,6 +61,22 @@ TEST_F(TransformPanelTest, aSelectedShapeShowsItsObjectTransformAndOffersALocalO
     EXPECT_TRUE(panel().addButtonShown());
 }
 
+TEST_F(TransformPanelTest, lengthsAndAnglesFollowTheDocumentsUnits) {
+    ASSERT_TRUE(click(100.0, 100.0));
+    window().document().setUnits(curvy::DocumentUnits{curvy::LengthUnit::Millimeters, curvy::AngleUnit::Radians});
+    panel().refresh();
+    const float before = firstX();
+    panel().setValue(Part::Object, "tx", "25.4");
+    EXPECT_NEAR(firstX(), before + 72.0f, 1e-2f) << "25.4 mm is one inch";
+    EXPECT_EQ(panel().value(Part::Object, "tx"), "25.4");
+    panel().setValue(Part::Object, "rot", "1");
+    const curvy::NodeRef object = window().graph().selectionModel().objectXform();
+    EXPECT_NEAR(window().document().node(object).getFloat("rot"), 57.29578f, 1e-3f) << "stored in degrees";
+    EXPECT_EQ(panel().value(Part::Object, "rot"), "1");
+    panel().setValue(Part::Object, "sx", "2");
+    EXPECT_EQ(window().document().node(object).getFloat("sx"), 2.0f) << "a scale has no unit";
+}
+
 TEST_F(TransformPanelTest, theTabsNameWhichTransformTheyEdit) {
     ASSERT_TRUE(click(100.0, 100.0));
     EXPECT_EQ(panel().note(Part::Object), "Object transform: objectXform") << "the transform of the whole layer, not of the shape";

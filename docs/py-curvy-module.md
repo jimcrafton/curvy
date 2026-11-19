@@ -84,7 +84,7 @@ itself in `HistoryChange`: it ends the transaction (what the script did so far b
 transaction. So `add B, add C, undo, add D` undoes the B+C step and leaves D as the script's step. Any new wrapper method that clears or
 rewinds the history needs the same `HistoryChange` line.
 
-Setters that the C++ side documents as not undoable stay that way (`set_page_size`, `ppi`, `new_blank`); they are not part of the step.
+Setters that the C++ side documents as not undoable stay that way (`set_page_size`, `ppi`, `unit`, `angle_unit`, `new_blank`); they are not part of the step.
 
 ### Sub-transactions: `with doc.transaction(name):`
 
@@ -612,3 +612,20 @@ script console is set (without a console there is no Python and no policy, so th
 read and set the layer's or group's `opacity` and `blend` parameters as one undo step each. They are ordinary float parameters of the
 `curvyObject` node (`doc.set_param(layer, "blend", 1)` works too; `blend` is the index into `BlendModes::names()` in `blendmodes.h`).
 Test: `ScriptModule.anObjectsOpacityAndBlendAreParametersOfItsNode`.
+
+### Units (2026-11-18)
+
+`doc.unit` ('px', 'pt', 'mm', 'cm', 'in', 'pc', 'm', 'ft', 'dip') and `doc.angle_unit` ('deg', 'rad') are the units the document is worked in
+(`SketchDocument::units()`, saved as `document.units`). They change only how the app shows numbers: every number a script reads or writes
+stays in points and degrees. `curvy.to_points(value, unit, ppi=72)` and `curvy.from_points(points, unit, ppi=72)` convert (`'px'` uses the
+ppi). Plan: `docs/units-dimensions-guides-plan.md`.
+
+### Guides (2026-11-18)
+
+`doc.guides` is a list of `curvy.Guide` copies (`vertical`, `position` in points from the page's top left, read-only; `curvy.Guide(vertical, position)`
+builds one). `doc.add_guide(vertical, position)` (returns the index), `doc.move_guide(i, position)`, `doc.remove_guide(i)` and `doc.clear_guides()`
+(False when empty) are one undo step each and raise on a bad index or a non-finite position. `doc.guides_locked = True` makes move, remove and
+clear raise (adding stays allowed); `doc.guides_visible` hides them. Lock and visibility are view choices: not undoable, not a modification.
+`doc.ruler_origin` is an `(x, y)` pair, the point the rulers read zero at (points from the page's top left, default `(0, 0)`; set it from a tuple; raises
+for a non-finite number; not undoable, saved as `document.rulerOrigin`). The C++ side is `SketchDocument::guides()` and friends (`include/curvy/guides.h`); the file keeps them in `document.guides`
+(`{ list: [["v", 120.5], ["h", 40]], locked, visible }`, lenient reader: bad entries are dropped). Tests: `ScriptModule.guides`, `tests/test_guides.cpp`.

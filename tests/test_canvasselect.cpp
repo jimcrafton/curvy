@@ -622,11 +622,11 @@ TEST_F(RingChoiceTest, theCreationRingsSelectSlotHasAnOptionBoxAndPicksTheSelect
 
 TEST(CommandWiredTest, onlyWhatRunCommandDoesIsWired) {
     for (const char* command : {"file.open", "file.save", "new.a4", "ring.create", "ring.select", "tool.select", "options.select", "select.by",
-                                "dialog.settings", "graph.bypass", "view.theme"}) {
+                                "dialog.settings", "graph.bypass", "view.theme", "view.toggleRulers"}) {
         EXPECT_TRUE(curvy::WorkspaceController::commandWired(command)) << command;
     }
     for (const char* command : {"tool.rect", "tool.star", "options.polygon", "options.star", "object.group", "arrange.bringToFront",
-                                "file.exportPdf", "doc.newArtboard", "view.toggleRulers", "dialog.shape", "dialog.object", ""}) {
+                                "file.exportPdf", "doc.newArtboard", "dialog.shape", "dialog.object", ""}) {
         EXPECT_FALSE(curvy::WorkspaceController::commandWired(command)) << command;
     }
 }

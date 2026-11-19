@@ -55,6 +55,40 @@ TEST(ScriptModule, pageSettings) {
     EXPECT_FALSE(runOn(document, "doc.color_mode = 'lab'").ok);
 }
 
+TEST(ScriptModule, documentUnits) {
+    curvy::SketchDocument document;
+    document.newBlank("Units", 612.0f, 792.0f);
+    auto result = runOn(document, "print(doc.unit, doc.angle_unit)\ndoc.unit = 'mm'\ndoc.angle_unit = 'rad'\n"
+                                  "print(curvy.to_points(1, 'in'), curvy.from_points(72, 'in'), curvy.to_points(10, 'px', 144))");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "px deg\n72.0 1.0 5.0\n");
+    EXPECT_EQ(document.units().length, curvy::LengthUnit::Millimeters);
+    EXPECT_EQ(document.units().angle, curvy::AngleUnit::Radians);
+    EXPECT_FALSE(runOn(document, "doc.unit = 'furlong'").ok);
+    EXPECT_FALSE(runOn(document, "doc.angle_unit = 'grad'").ok);
+}
+
+TEST(ScriptModule, guides) {
+    curvy::SketchDocument document;
+    document.newBlank("Guides", 100.0f, 100.0f);
+    auto result = runOn(document,
+                        "i = doc.add_guide(True, 12.5)\n"
+                        "doc.add_guide(False, 30)\n"
+                        "doc.move_guide(i, 20)\n"
+                        "print(len(doc.guides), doc.guides[0].vertical, doc.guides[0].position, doc.guides[1])");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "2 True 20.0 Guide(horizontal, 30.000000)\n");
+    ASSERT_EQ(document.guides().size(), 2u);
+
+    result = runOn(document, "doc.guides_locked = True\ndoc.move_guide(0, 1)");
+    EXPECT_FALSE(result.ok) << "a locked guide cannot be moved";
+    EXPECT_EQ(document.guides()[0].position, 20.0);
+    result = runOn(document, "doc.guides_locked = False\nprint(doc.clear_guides(), doc.clear_guides(), doc.guides_visible)");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "True False True\n");
+    EXPECT_FALSE(runOn(document, "doc.remove_guide(3)").ok);
+}
+
 TEST(ScriptModule, layersAndGroups) {
     curvy::SketchDocument document;
     document.newBlank("Objects", 100.0f, 100.0f);
@@ -1140,4 +1174,14 @@ a.uninstall("pyGuardAsset")
               "3.0\n"
               "not twice: True\n"
               "5.0 False\n");
+}
+
+TEST(ScriptModule, rulerOrigin) {
+    curvy::SketchDocument document;
+    document.newBlank("Origin", 100.0f, 100.0f);
+    auto result = runOn(document, "print(doc.ruler_origin)\ndoc.ruler_origin = (10, 20.5)\nprint(doc.ruler_origin)");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "(0.0, 0.0)\n(10.0, 20.5)\n");
+    EXPECT_EQ(document.rulerOrigin(), (curvy::RulerOrigin{10.0, 20.5}));
+    EXPECT_FALSE(runOn(document, "doc.ruler_origin = (float('nan'), 0)").ok);
 }

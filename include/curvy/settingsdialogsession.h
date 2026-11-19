@@ -45,6 +45,7 @@ namespace curvy::settingsdialog {
     inline const PageInfo kPages[] = {
         {"navAppearance", "pageAppearance", SettingsPage::Appearance},
         {"navWorkspace", "pageWorkspace", SettingsPage::Workspace},
+        {"navUnits", "pageUnits", SettingsPage::Units},
         {"navPen", "pagePen", SettingsPage::Pen},
         {"navDrawing", "pageDrawing", SettingsPage::Drawing},
         {"navFiles", "pageFiles", SettingsPage::Files},
@@ -124,6 +125,14 @@ namespace curvy::settingsdialog {
                 [this] { return int(working_.barrelButton); }, [this](int v) { working_.barrelButton = Settings::PenButton(v); });
             dropDown("eraserEnd", {"Erase", "Undo", "Nothing"},
                 [this] { return int(working_.eraserEnd); }, [this](int v) { working_.eraserEnd = Settings::EraserAction(v); });
+            std::vector<std::string> lengthNames;
+            for (int i = 0; i < Units::kLengthCount; ++i) {
+                lengthNames.push_back(Units::name(LengthUnit(i)));
+            }
+            dropDown("defaultLength", lengthNames,
+                [this] { return int(working_.defaultUnits.length); }, [this](int v) { working_.defaultUnits.length = LengthUnit(v); });
+            dropDown("defaultAngle", {"deg", "rad"},
+                [this] { return int(working_.defaultUnits.angle); }, [this](int v) { working_.defaultUnits.angle = AngleUnit(v); });
             dropDown("toolDefaultsScope", {"Remember per user", "Store in the document"},
                 [this] { return working_.toolDefaultsInDocument ? 1 : 0; }, [this](int v) { working_.toolDefaultsInDocument = v == 1; });
 

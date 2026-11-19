@@ -61,50 +61,29 @@ namespace curvy {
         return buffer;
     }
 
-    const char* NewDocumentModel::unitName(LengthUnit unit) {
-        switch (unit) {
-            case LengthUnit::Points: return "pt";
-            case LengthUnit::Pixels: return "px";
-            case LengthUnit::Millimeters: return "mm";
-            case LengthUnit::Centimeters: return "cm";
-            case LengthUnit::Picas: return "pc";
-            default: return "in";
-        }
-    }
-
     std::string NewDocumentModel::rowText(const DocumentPreset& preset) {
         return preset.name + "   " + format(preset.width) + " x " + format(preset.height) + " " + unitName(preset.unit) + "   " +
             (preset.colorMode == ColorSpace::CMYK ? "CMYK" : "RGB") + ", " + format(preset.ppi) + " ppi";
     }
 
-    double NewDocumentModel::pointsPer(LengthUnit unit, double ppi) {
-        switch (unit) {
-            case LengthUnit::Points: return 1.0;
-            case LengthUnit::Pixels: return 72.0 / (ppi > 0.0 ? ppi : 72.0);
-            case LengthUnit::Millimeters: return 72.0 / 25.4;
-            case LengthUnit::Centimeters: return 72.0 / 2.54;
-            case LengthUnit::Picas: return 12.0;
-            default: return 72.0;
-        }
-    }
-
     double NewDocumentModel::toPoints(double value, LengthUnit unit) const {
-        return value * pointsPer(unit, ppi_);
+        return Units::toPoints(value, unit, ppi_);
     }
 
     double NewDocumentModel::fromPoints(double points, LengthUnit unit) const {
-        return points / pointsPer(unit, ppi_);
+        return Units::fromPoints(points, unit, ppi_);
     }
 
     void NewDocumentModel::captureRatio() {
         ratio_ = height_ > 0.0 ? width_ / height_ : 1.0;
     }
 
-    void NewDocumentModel::loadSetup(double widthPoints, double heightPoints, double ppi, ColorSpace colorMode, PageBackground background) {
-        unit_ = LengthUnit::Points;
-        width_ = widthPoints;
-        height_ = heightPoints;
+    void NewDocumentModel::loadSetup(double widthPoints, double heightPoints, double ppi, ColorSpace colorMode, PageBackground background,
+                                     LengthUnit unit) {
+        unit_ = unit;
         ppi_ = ppi > 0.0 ? ppi : 72.0;
+        width_ = fromPoints(widthPoints, unit);
+        height_ = fromPoints(heightPoints, unit);
         setColorMode(colorMode);
         background_ = background;
         linked_ = false;

@@ -37,7 +37,7 @@ namespace curvy {
         } else {
             declareFloat("width", 1.0f);
             tagParam("width", "min:0");
-            declareFloat("cap", 0.0f);
+            tagParam("width", "quantity:length");            declareFloat("cap", 0.0f);
             declareFloat("join", 0.0f);
             declareFloat("miter", 4.0f);
         }
