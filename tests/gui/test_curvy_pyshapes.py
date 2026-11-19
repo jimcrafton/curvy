@@ -113,6 +113,17 @@ class PyShapes(CurvyCase):
         self.run_line("print(len(selection))")
         self.assertTrue(self.transcript().rstrip().endswith("0"), self.transcript())
 
+    def test_shapes_are_found_by_point_rectangle_and_property_and_selected(self):
+        self.shapes_scene()
+        self.run_line("print(doc.shape_at(20, 20).name(), doc.shape_at(300, 300), len(doc.shapes_in_rect(0, 0, 80, 80)), len(doc.shapes_where(fill='#FF0000')))")
+        self.assertTrue(self.transcript().rstrip().endswith("path None 1 1"), self.transcript())
+
+        self.run_line("doc.select_where(fill='#FF0000'); print(len(selection), selection.primary.name())")
+        self.assertTrue(self.transcript().rstrip().endswith("1 path"), self.transcript())
+
+        self.run_line("doc.select_where('subtract', fill='#FF0000'); print(len(selection))")
+        self.assertTrue(self.transcript().rstrip().endswith("0"), self.transcript())
+
 
 if __name__ == "__main__":
     newui_guitest.main()

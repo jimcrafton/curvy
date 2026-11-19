@@ -8,7 +8,7 @@ Where things live (`%LOCALAPPDATA%\curvy\`):
 
 | File | What |
 |---|---|
-| `settings.json5` | the settings; the node time limit is `scriptEditor: { pythonNodeSeconds: 10 }` (0 = no limit), not in the Settings dialog |
+| `settings.json5` | the settings; the node time limit is `scriptEditor: { pythonNodeSeconds: 10 }` (0 = no limit), also in Settings > Script editor > "Stop Python nodes after" |
 | `trustedPythonNodes.txt` | one 16-character hash per line: the code texts you allowed. Delete it (curvy closed) to be asked again |
 | `scripts\` | your own scripts, listed above the samples |
 
@@ -63,7 +63,7 @@ Code a script put into a node is not code you typed, so the first cook asks.
 3. Put back `raise ValueError("again")`; Commit; select another node; select `broken` again. Expected: the error is still shown (the failing cook is retried and fails the same way).
 
 ## 5. Time limit and Esc
-The limit is 10 seconds by default. To make the checks quicker, close curvy and set `scriptEditor: { pythonNodeSeconds: 3 }` in `settings.json5`.
+The limit is 10 seconds by default. To make the checks quicker, set "Stop Python nodes after" to 3 in Settings > Script editor (or `scriptEditor: { pythonNodeSeconds: 3 }` in `settings.json5`).
 1. Run `pythonNodeRunaway`, answer Yes. The script selects the node, so the loop starts: the window freezes. Expected: after about the limit it comes back, and the
    line under the editor reads "Python node stopped: it ran longer than 3 seconds (change the code, a parameter or an input to run it again)" (the first time without the
    bracket). Task Manager shows curvy.exe at a core of CPU while frozen and idle after.
@@ -71,8 +71,8 @@ The limit is 10 seconds by default. To make the checks quicker, close curvy and 
 3. Change the code to `pass` and Commit. Expected: it runs (empty result, no error). Put the loop back and Commit: it freezes up to the limit again.
 4. Esc: Commit the loop again, and press and hold Esc as soon as the window freezes (keep curvy the focused window). Expected: it comes back within a fraction of a
    second with "Python node stopped" (no "longer than"). Esc pressed while the window is not focused does nothing.
-5. With `pythonNodeSeconds: 0` (no limit) the loop is only stopped by Esc. Try it once, with a finger on Esc.
-6. Raise the limit in the settings file (curvy closed), start, and re-select the stopped node in a fresh run of the script: it runs for the new limit.
+5. With the limit set to 0 (no limit) the loop is only stopped by Esc. Try it once, with a finger on Esc.
+6. Raise the limit in Settings (the dialog applies it live), and re-select the stopped node in a fresh run of the script: it runs for the new limit.
 
 ## 6. Saving, opening and the trust of a document
 1. Run `pythonNodeBasics`, answer Yes, and save as `pynode.curvy`. Close curvy, delete `trustedPythonNodes.txt`, start curvy, open `pynode.curvy`.

@@ -31,13 +31,32 @@ namespace {
 
 TEST_F(PenTest, AMouseRightClickOpensTheRingsWhateverTheBarrelSettingIs) {
     settings_.barrelButton = Settings::PenButton::Nothing;
+    settings_.selectTwoButton = false;
     EXPECT_TRUE(window().pressed(mouse_, at_, newui::mbmRightButton, 0));
+    EXPECT_TRUE(window().menu().isOpen()) << "without the two-button marquee the ring opens on the press";
+}
+
+TEST_F(PenTest, WithTheTwoButtonMarqueeARightClickOnEmptyCanvasOpensTheRingOnRelease) {
+    curvy::CanvasView& canvas = window().canvas();
+    EXPECT_TRUE(window().pressed(mouse_, at_, newui::mbmRightButton, 0));
+    EXPECT_FALSE(window().menu().isOpen()) << "the press might become a marquee drag";
+    canvas.onMouseUp(canvas, at_, newui::mbmRightButton, 0);
     EXPECT_TRUE(window().menu().isOpen());
 }
 
 TEST_F(PenTest, TheBarrelButtonOpensTheRingsWhenSetTo) {
     settings_.barrelButton = Settings::PenButton::Rings;
+    settings_.selectTwoButton = false;
     EXPECT_TRUE(window().pressed(barrel_, at_, newui::mbmRightButton, 0));
+    EXPECT_TRUE(window().menu().isOpen());
+}
+
+TEST_F(PenTest, TheBarrelButtonOpensTheRingsOnReleaseWithTheTwoButtonMarquee) {
+    settings_.barrelButton = Settings::PenButton::Rings;
+    curvy::CanvasView& canvas = window().canvas();
+    EXPECT_TRUE(window().pressed(barrel_, at_, newui::mbmRightButton, 0));
+    EXPECT_FALSE(window().menu().isOpen());
+    canvas.onMouseUp(canvas, at_, newui::mbmRightButton, 0);
     EXPECT_TRUE(window().menu().isOpen());
 }
 

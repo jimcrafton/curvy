@@ -75,6 +75,35 @@ namespace curvy {
         return set(node);   // a key that names nothing (a click on empty canvas) clears
     }
 
+    bool SelectionModel::selectShapeKeys(const std::vector<std::string>& keys, Combine how) {
+        if (!documentAlive()) {
+            return false;
+        }
+        std::vector<NodeRef> nodes;
+        for (const std::string& key : keys) {
+            const NodeRef node = document_->nodeForShapeKey(key);
+            if (node.valid() && std::find(nodes.begin(), nodes.end(), node) == nodes.end()) {
+                nodes.push_back(node);
+            }
+        }
+        switch (how) {
+            case Combine::Replace:
+                return nodes.empty() ? clear() : replace(nodes);
+            case Combine::Add:
+                return addAll(nodes);
+            case Combine::Subtract: {
+                std::vector<NodeRef> kept;
+                for (const NodeRef& item : items_) {
+                    if (std::find(nodes.begin(), nodes.end(), item) == nodes.end()) {
+                        kept.push_back(item);
+                    }
+                }
+                return kept.size() == items_.size() ? false : (kept.empty() ? clear() : replace(kept));
+            }
+        }
+        return false;
+    }
+
     bool SelectionModel::stepUp() {
         if (!documentAlive() || !primary_.valid()) {
             return false;

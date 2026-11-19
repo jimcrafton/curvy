@@ -525,6 +525,36 @@ TEST(ScriptModule, theEditorSelectionIsReadAndChangedByScripts) {
     EXPECT_EQ(result.output, "True G\nFalse\n");
 }
 
+TEST(ScriptModule, shapesAreFoundByPointRectangleAndProperty) {
+    curvy::SketchDocument document;
+    document.newBlank("Find", 100.0f, 100.0f);
+    curvy::SelectionModel selection(&document);
+    auto run = [&](const std::string& code) { return curvytest::sharedConsole().run(code, &document, &selection); };
+
+    auto result = run("layer = doc.add_layer('L')\n"
+                      "a = layer.add_rect(10, 10, 20, 20, fill=(1, 0, 0, 1))\n"
+                      "b = layer.add_rect(60, 10, 20, 20, fill=(0, 0, 1, 1))\n"
+                      "c = layer.add_rect(60, 60, 20, 20, fill=(1, 0, 0, 1))\n"
+                      "print(doc.shape_at(20, 20) is not None, doc.shape_at(50, 50), doc.shape_at(70, 20) is not None)\n"
+                      "print(len(doc.shapes_in_rect(0, 0, 100, 40)), len(doc.shapes_in_rect(0, 0, 100, 100)))\n"
+                      "print(len(doc.shapes_in_rect(0, 0, 25, 25)), len(doc.shapes_in_rect(0, 0, 25, 25, inside=False)))\n"
+                      "print(len(doc.shapes_where(fill='#ff0000')), len(doc.shapes_where(fill='#0000FF')), len(doc.shapes_where(stroke=None)))\n"
+                      "print(len(doc.shapes_where(layer='L')), len(doc.shapes_where(layer='X')), len(doc.shapes_where(fill='#FF0000', layer='L')))");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "True None True\n2 3\n0 1\n2 1 3\n3 0 2\n");
+
+    result = run("print(len(doc.select_where(fill='#FF0000')), len(selection))\n"
+                 "doc.select_where('subtract', fill='#FF0000')\n"
+                 "print(len(selection))\n"
+                 "doc.select_where('add', fill='#0000FF')\n"
+                 "print(len(selection))");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "2 2\n0\n1\n");
+
+    result = run("doc.shapes_where(colour='red')");
+    EXPECT_FALSE(result.ok);
+}
+
 namespace {
 
     // A path for a script to use: forward slashes, so it can sit in a Python string without escaping.

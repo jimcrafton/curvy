@@ -12,6 +12,7 @@
 namespace curvy {
 
     GraphDocument::GraphDocument() {
+        network_->setStampAnonymousShapes(true);
         registerObjectNodes();
         registerAppearanceNodes();
         registerRenderNode();

@@ -144,7 +144,7 @@ TEST_F(SettingsDialogTest, theScriptEditorPageFitsItsAreaWithRoomForThePreview) 
     newui::View* page = find<newui::View>("pageScriptEditor");
     newui::View* preview = find<newui::View>("editorPreview");
     ASSERT_NE(nullptr, preview);
-    EXPECT_GT(preview->bounds().height(), 60.0f) << "the preview is not squeezed out by the rows above it";
+    EXPECT_GE(preview->bounds().height(), 90.0f) << "the preview is not squeezed out by the rows above it";
     EXPECT_LE(preview->bounds().bottom(), page->bounds().height() + 0.5f) << "and it does not run past the page";
     for (const auto& style : curvy::pythonSyntaxStyles()) {
         newui::View* well = find<newui::View>((std::string("syntaxWell_") + style.name).c_str());
@@ -218,6 +218,22 @@ TEST_F(SettingsDialogTest, theScriptTimeoutIsOptInAndItsSecondsAreRangeChecked) 
     seconds->setText(L"0");
     seconds->onReturnPressed(*seconds);
     EXPECT_EQ(30, working_.scriptTimeoutSeconds) << "a limit of zero is refused";
+}
+
+TEST_F(SettingsDialogTest, thePythonNodeLimitShowsItsDefaultAndAcceptsZeroForNoLimit) {
+    showScriptEditorPage(dialog_);
+    auto* seconds = find<newui::TextField>("pythonNodeSeconds");
+    ASSERT_NE(nullptr, seconds);
+    EXPECT_EQ("10", narrow(seconds->text()));
+    seconds->setText(L"3");
+    seconds->onReturnPressed(*seconds);
+    EXPECT_EQ(3, working_.pythonNodeSeconds);
+    seconds->setText(L"0");
+    seconds->onReturnPressed(*seconds);
+    EXPECT_EQ(0, working_.pythonNodeSeconds) << "0 lifts the limit";
+    seconds->setText(L"-5");
+    seconds->onReturnPressed(*seconds);
+    EXPECT_EQ(0, working_.pythonNodeSeconds) << "a negative limit is refused";
 }
 
 TEST_F(SettingsDialogTest, aTypedColourOverridesTheThemeAndTheDefaultClearsIt) {

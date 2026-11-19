@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 #include <newui/delegate.h>
 #include <newui/geometry.h>
 #include <newui/subview.h>
@@ -33,8 +35,8 @@ namespace curvy {
         static constexpr double hubRadius = 46.0;
         static constexpr double ringRadius = 118.0;
         static constexpr double reach = 200.0;     // beyond this the pointer is outside the ring
-        static constexpr double slotWidth = 108.0;
-        static constexpr double slotHeight = 38.0;
+        static constexpr double slotWidth = 132.0;
+        static constexpr double slotHeight = 34.0;
         static constexpr int hub = -1;
         static constexpr int outside = -2;
 
@@ -43,8 +45,11 @@ namespace curvy {
         static newui::Point slotCenter(int index, int count, double phase = 0.0);
         // The slot nearest to the direction of (dx, dy) from the ring's centre, the hub, or outside.
         static int slotAt(double dx, double dy, int count, double phase = 0.0);
-        // Where a slot's option box sits relative to the ring's centre: just past the slot's outer end, along the line from the hub.
+        // Where a slot's option box sits relative to the ring's centre: inside the slot's pill, at its outer end (the left end for a slot on
+        // the left side of the ring, the right end otherwise), as in docs/mockups/tooloptions.html.
         static newui::Point optionBoxCenter(int index, int count, double phase = 0.0);
+        // True when the slot's outer end is its left end.
+        static bool slotOnLeft(int index, int count, double phase = 0.0);
         static constexpr double optionBoxReach = 13.0;   // the box's tap target, a pen-sized circle
     };
 
@@ -67,6 +72,13 @@ namespace curvy {
         bool handleEscape();
 
         newui::Delegate<RadialMenu, const std::string&> onCommand;
+        // Asked for every command of the ring when it is drawn and chosen. A command it refuses is shown dimmed and does nothing (the ring
+        // stays open). Empty: every command is enabled.
+        std::function<bool(const std::string& command)> isEnabled;
+        bool commandEnabled(const std::string& command) const;
+        // Where the option box of the slot last chosen through its options command sat (the menu's own pixels, the ring's centre included):
+        // the point a card opened by that command should sit beside, so the pointer has no distance to travel.
+        const newui::Point& optionAnchor() const { return optionAnchor_; }
 
         void paint(BLContext& ctx) override;
 
@@ -80,6 +92,7 @@ namespace curvy {
 
         RadialRing ring_;
         newui::Point center_;
+        newui::Point optionAnchor_;
         bool open_ = false;
         bool openedByPress_ = false;
         int hot_ = RadialLayout::outside;

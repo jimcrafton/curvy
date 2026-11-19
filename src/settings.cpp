@@ -31,6 +31,8 @@ namespace curvy {
         constexpr const char* axisNames[] = {"vertical", "horizontal"};
         constexpr const char* buttonNames[] = {"rings", "pan", "nothing"};
         constexpr const char* eraserNames[] = {"erase", "undo", "nothing"};
+        constexpr const char* regionNames[] = {"rectangle", "ellipse", "freehand", "polygon"};
+        constexpr const char* containmentNames[] = {"inside", "touches"};
         constexpr float defaultDockSize[Settings::dockCount] = {64.0f, 220.0f, 268.0f, 120.0f};
 
         bool find(const json5::value& object, const char* key, json5::value& out) {
@@ -143,6 +145,9 @@ namespace curvy {
                 spaceTapMs = defaults.spaceTapMs;
                 barrelButton = defaults.barrelButton;
                 eraserEnd = defaults.eraserEnd;
+                selectRegion = defaults.selectRegion;
+                selectTwoButton = defaults.selectTwoButton;
+                selectContainment = defaults.selectContainment;
                 break;
             case SettingsPage::Drawing:
                 snapGrid = defaults.snapGrid;
@@ -213,6 +218,9 @@ namespace curvy {
         number("spaceTapMs", spaceTapMs);
         text("barrelButton", buttonNames[int(barrelButton)]);
         text("eraserEnd", eraserNames[int(eraserEnd)]);
+        text("selectRegion", regionNames[int(selectRegion)]);
+        flag("selectTwoButton", selectTwoButton);
+        text("selectContainment", containmentNames[int(selectContainment)]);
         b["pen"] = b.pop();
 
         b.push_object();
@@ -326,6 +334,13 @@ namespace curvy {
             choice = int(eraserEnd);
             readChoice(g, "eraserEnd", choice, eraserNames);
             eraserEnd = EraserAction(choice);
+            choice = int(selectRegion);
+            readChoice(g, "selectRegion", choice, regionNames);
+            selectRegion = SelectRegion(choice);
+            readBool(g, "selectTwoButton", selectTwoButton);
+            choice = int(selectContainment);
+            readChoice(g, "selectContainment", choice, containmentNames);
+            selectContainment = SelectContainment(choice);
         }
         if (group(root, "drawing", g)) {
             readBool(g, "snapGrid", snapGrid);

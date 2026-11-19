@@ -231,6 +231,41 @@ class Docks(CurvyCase):
             saved = f.read()
         self.assertRegex(saved, r"left:\s*\{\s*size:\s*220,\s*collapsed:\s*false")
 
+    def test_the_script_editor_page_keeps_the_python_node_limit_and_its_layout(self):
+        self.open_settings()
+        self.app.click("navScriptEditor")
+        self.app.wait_idle()
+        limit = self.app.find("pythonNodeSeconds")
+        size = self.app.find("editorFontSize")
+        tab = self.app.find("editorTabWidth")
+        preview = self.app.find("editorPreview")
+        page = self.app.find("pageScriptEditor")
+        self.assertEqual("10", self.app.text_of("pythonNodeSeconds"), "the default limit")
+        self.assertEqual(size.y, tab.y, "Size and Tab width share a row")
+        self.assertGreater(tab.x, size.x + size.w)
+        self.assertGreater(limit.y, tab.y, "the limit row is below the editor rows")
+        self.assertGreaterEqual(preview.h, 90, "the preview shows several lines of sample code")
+        self.assertLessEqual(preview.y + preview.h, page.y + page.h, "the preview stays inside the page")
+
+        self.app.click("pythonNodeSeconds")
+        self.app.key("ctrl+a")
+        self.app.type("3")
+        self.app.key("enter")
+        self.app.wait_idle()
+        self.assertEqual("3", self.app.text_of("pythonNodeSeconds"))
+        self.app.click("pythonNodeSeconds")
+        self.app.key("ctrl+a")
+        self.app.type("-5")
+        self.app.key("enter")
+        self.app.wait_idle()
+        self.assertEqual("3", self.app.text_of("pythonNodeSeconds"), "a negative limit goes back to the kept value")
+
+        self.app.click("settingsOk")
+        self.app.wait_until(lambda: not self.dialog_open(), "the dialog to close")
+        with open(self.settings_file) as f:
+            saved = f.read()
+        self.assertRegex(saved, r"pythonNodeSeconds:\s*3\b")
+
 
 if __name__ == "__main__":
     newui_guitest.main()

@@ -31,6 +31,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
@@ -88,12 +89,15 @@ namespace curvy {
         RadialRing createRing() {
             return {"Create", "Shape options...", "dialog.shape", {
                 {"Rectangle", "R", "tool.rect"}, {"Ellipse", "E", "tool.ellipse"}, {"Polygon", "P", "tool.polygon", "options.polygon"}, {"Star", "S", "tool.star", "options.star"},
-                {"Line", "L", "tool.line"}, {"Freehand", "B", "tool.pencil", "options.pencil"}, {"Text", "T", "tool.text"}, {"Select", "V", "tool.select"}}};
+                {"Line", "L", "tool.line"}, {"Freehand", "B", "tool.pencil", "options.pencil"}, {"Text", "T", "tool.text"}, {"Select", "V", "tool.select", "options.select"}}};
         }
         RadialRing documentRing() {
             return {"Document", "Setup...", "dialog.setup", {
                 {"New artboard", "A", "doc.newArtboard"}, {"New document", "N", "ring.new"}, {"Open", "O", "file.open"}, {"Save", "S", "file.save"},
-                {"Export", "E", "ring.export"}, {"Import", "I", "ring.import"}, {"View", "V", "ring.view"}}};
+                {"Export", "E", "ring.export"}, {"Import", "I", "ring.import"}, {"View", "V", "ring.view"}, {"Select", "L", "ring.select"}}};
+        }
+        RadialRing selectRing() {
+            return {"Select", "Back", "ring.document", {{"By...", "B", "select.by"}, {"Similar", "S", "select.similar"}}};
         }
         RadialRing exportRing() {
             return {"Export", "Back", "ring.document", {
@@ -132,7 +136,8 @@ namespace curvy {
         };
         const RingEntry kRings[] = {
             {"ring.new", newRing}, {"ring.create", createRing}, {"ring.document", documentRing}, {"ring.export", exportRing},
-            {"ring.import", importRing}, {"ring.view", viewRing}, {"ring.object", objectRing}, {"ring.arrange", arrangeRing}};
+            {"ring.import", importRing}, {"ring.view", viewRing}, {"ring.object", objectRing}, {"ring.arrange", arrangeRing},
+            {"ring.select", selectRing}};
     }
 
     void WorkspaceController::applyTheme(bool dark) {
@@ -540,10 +545,12 @@ namespace curvy {
 
         buildGraphOverlay();
         menu_ = new RadialMenu();
+        menu_->isEnabled = [](const std::string& command) { return commandWired(command); };
         canvas_->addChild(menu_);
         docks_ = std::make_unique<DockController>(frame_, settings_, [this]() { saveSettings(); });
         buildRightDock();
         bindViews();
+        makeTools();
         start();
     }
 
@@ -570,6 +577,12 @@ namespace curvy {
         transformInfo.title = "Transform";
         transformInfo.side = DockSide::Right;
         panelLayout_.add(transformInfo);
+        PanelInfo selectInfo;
+        selectInfo.id = "select";
+        selectInfo.title = "Select by";
+        selectInfo.side = DockSide::Right;
+        selectInfo.collapsed = true;   // used now and then: the title shows until it is opened (the ring's "By..." opens it)
+        panelLayout_.add(selectInfo);
         PanelInfo assetsInfo;
         assetsInfo.id = "assets";
         assetsInfo.title = "Assets";
@@ -650,6 +663,10 @@ namespace curvy {
             graphView_->style().markDirty();
             canvas_->style().markDirty();
         };
+        selectPanel_ = new SelectPanel(document_, graphView_->selectionModel());
+        rightDock_->addPanel(selectPanel_);
+        selectPanel_->onMessage = [this](const std::string& message) { model_->say(message); };
+        selectPanel_->onDestroyed = [this]() { selectPanel_ = nullptr; };
         createAssetPanel();
         if (scriptConsole_ != nullptr) {
             pyConsolePanel_ = new PyConsolePanel(*scriptConsole_, &document_);
@@ -696,6 +713,9 @@ namespace curvy {
                 }
                 if (transformPanel_ != nullptr) {
                     transformPanel_->refresh();
+                }
+                if (selectPanel_ != nullptr) {
+                    selectPanel_->refresh();
                 }
             };
             scriptEditorPanel_ = new ScriptEditorPanel();
@@ -748,6 +768,9 @@ namespace curvy {
             }
             if (transformPanel_ != nullptr) {
                 transformPanel_->refresh();
+            }
+            if (selectPanel_ != nullptr) {
+                selectPanel_->refresh();
             }
             return SyncReturn::Ignored;
         };
@@ -1204,6 +1227,7 @@ namespace curvy {
         }
         nodePanel_->show(graphView_->selected());
         transformPanel_->refresh();
+        selectPanel_->refresh();
         graphView_->style().markDirty();
         canvas_->style().markDirty();
         return true;
@@ -1273,6 +1297,10 @@ namespace curvy {
         }
         if (transformPanel_ != nullptr) {
             transformPanel_->onDestroyed = nullptr;
+        }
+        if (selectPanel_ != nullptr) {
+            selectPanel_->onDestroyed = nullptr;
+            selectPanel_->onMessage = nullptr;
         }
         if (assetPanel_ != nullptr) {   // its callbacks name this window
             assetPanel_->onDestroyed = nullptr;
@@ -1718,7 +1746,25 @@ namespace curvy {
             showRing(nodeRing(document_.node(selected).name()), ringPoint(), byPress);
             return;
         }
-        showRing(model_->documentOpen() ? documentRing() : newRing(), ringPoint(), byPress);
+        if (!model_->documentOpen()) {
+            showRing(newRing(), ringPoint(), byPress);
+            return;
+        }
+        // Over a shape: the object ring (the shape is selected first, unless it already is, so Group and Arrange act on the whole selection).
+        // Over the page: the creation ring. Over the grey workspace around it: the document ring.
+        const Point at = ringPoint();
+        const std::optional<ShapeHit> hit = canvas_->shapeAt(at);
+        if (hit.has_value() && !hit->key.empty()) {
+            SelectionModel& selection = graphView_->selectionModel();
+            if (!selection.isShapeKeySelected(hit->key)) {
+                selection.selectShapeKey(hit->key, false);
+            }
+            showRing(objectRing(), at, byPress);
+            return;
+        }
+        const BLPoint world = canvas_->toDocument(at);
+        const bool onPage = world.x >= 0.0 && world.y >= 0.0 && world.x <= double(document_.pageWidth()) && world.y <= double(document_.pageHeight());
+        showRing(onPage ? createRing() : documentRing(), at, byPress);
     }
 
     void WorkspaceController::newDocument(const std::string& name, float width, float height) {
@@ -1819,6 +1865,27 @@ namespace curvy {
         return SyncReturn::Handled;
     }
 
+    bool WorkspaceController::commandWired(const std::string& command) {
+        static const std::set<std::string> wired = {
+            "file.open", "file.save", "dialog.new", "dialog.setup", "dialog.settings", "view.fitPage", "view.toolbar", "view.properties",
+            "view.graph", "view.theme", "select.by", "select.similar", "tool.select", "options.select",
+            "graph.display", "graph.bypass", "graph.freeze", "graph.rename", "graph.group", "graph.ungroup", "graph.enter", "graph.exit", "graph.data"};
+        if (wired.count(command) != 0) {
+            return true;
+        }
+        for (const PageSize& page : kPages) {
+            if (command == page.command) {
+                return true;
+            }
+        }
+        for (const RingEntry& ring : kRings) {
+            if (command == ring.command) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     void WorkspaceController::runCommand(const std::string& command) {
         if (busy_ && command != "view.theme" && command.rfind("ring.", 0) != 0) {
             model_->say(taskLabel_ + " - wait for it to finish, or press Esc to cancel");
@@ -1857,6 +1924,19 @@ namespace curvy {
                 canvas_->zoomToFit();
                 model_->say("Fit page");
             }
+        } else if (command == "select.by") {
+            showSelectPanel();
+        } else if (command == "tool.select") {
+            tools_.setCurrent("select");
+            model_->say("Select");
+        } else if (command.compare(0, 5, "tool.") == 0) {
+            model_->say("The " + command.substr(5) + " tool is not built yet");
+        } else if (command == "options.select") {
+            showToolOptions("select", menu_->optionAnchor());
+        } else if (command == "select.similar") {
+            if (selectPanel_ != nullptr && !selectPanel_->selectSimilar()) {
+                model_->say(selectPanel_->status());
+            }
         } else if (command == "dialog.settings") {
             settingsDialog();
         } else if (command == "view.toolbar") {
@@ -1873,6 +1953,16 @@ namespace curvy {
         }
     }
 
+    void WorkspaceController::showSelectPanel() {
+        if (selectPanel_ == nullptr) {
+            return;
+        }
+        ensureDockShown(DockSide::Right);
+        selectPanel_->setCollapsed(false);
+        selectPanel_->refresh();
+        model_->say("Select by: choose a property, then a value");
+    }
+
     // ---- Pen and mouse ----
 
     bool WorkspaceController::filterPress(const Point& pt, std::uint32_t buttons, std::uint32_t keys) {
@@ -1885,6 +1975,9 @@ namespace curvy {
         pointerKnown_ = true;
         panning_ = false;
         zooming_ = false;
+        if (optionsCard_ != nullptr && optionsCard_->isOpen() && !optionsCard_->contains(pt)) {
+            optionsCard_->close();
+        }
         if (pen.eraser && (buttons & mbmLeftButton) != 0) {
             switch (settings_.eraserEnd) {
                 case Settings::EraserAction::Erase:
@@ -1908,7 +2001,9 @@ namespace curvy {
             if (barrel && settings_.barrelButton == Settings::PenButton::Pan) {
                 panning_ = true;
             } else if (!barrel || settings_.barrelButton == Settings::PenButton::Rings) {
-                openRing(true);
+                if (!tools_.current()->inputDown(toolEvent(pt, buttons, keys, true))) {
+                    openRing(true);
+                }
             }
             return true;
         }
@@ -1927,23 +2022,44 @@ namespace curvy {
             }
             return true;
         }
-        return (buttons & mbmLeftButton) != 0 && selectAt(pt, (keys & (kmShift | kmCtrl)) != 0);
+        if ((buttons & mbmLeftButton) == 0) {
+            return false;
+        }
+        return tools_.current()->inputDown(toolEvent(pt, buttons, keys, false));
     }
 
-    bool WorkspaceController::selectAt(const Point& pt, bool additive) {
-        SelectionModel& selection = graphView_->selectionModel();
-        const std::optional<ShapeHit> hit = canvas_->shapeAt(pt);
-        if (!hit.has_value() || hit->key.empty()) {   // an anonymous shape has no node to name
-            return !additive && selection.clear();
+    ToolEvent WorkspaceController::toolEvent(const Point& pt, std::uint32_t buttons, std::uint32_t keys, bool secondary) const {
+        ToolEvent event;
+        event.view = pt;
+        event.document = canvas_->toDocument(pt);
+        event.buttons = buttons;
+        event.keys = keys;
+        event.secondary = secondary;
+        const RootView* root = canvas_->rootView();
+        event.pen = root != nullptr && root->penState().inRange;
+        return event;
+    }
+
+    void WorkspaceController::makeTools() {
+        ToolContext context{document_, graphView_->selectionModel(), *canvas_, settings_};
+        context.say = [this](const std::string& text) { model_->say(text); };
+        context.saveSettings = [this]() { saveSettings(); };
+        context.openRing = [this]() { openRing(false); };
+        context.showSelection = [this]() { ensureDockShown(DockSide::Right); };
+        context.documentOpen = [this]() { return model_->documentOpen(); };
+        context.graphShown = [this]() { return graphOverlay_->isVisible(); };
+        context.menuOpen = [this]() { return menu_->isOpen(); };
+        selectTool_ = static_cast<SelectTool*>(&tools_.add(std::make_unique<SelectTool>(context)));
+        optionsCard_ = std::make_unique<ToolOptionsCard>(*canvas_);
+        optionsCard_->onDismissed = [this]() { focusCanvas(); };
+    }
+
+    bool WorkspaceController::showToolOptions(const std::string& toolId, const Point& at) {
+        Tool* tool = tools_.find(toolId);
+        if (tool == nullptr || optionsCard_ == nullptr) {
+            return false;
         }
-        // A click on what is already selected (or inside the selected group or layer) goes up one level; at the top it starts over at the shape.
-        const bool steppingUp = !additive && selection.items().size() == 1 && selection.isShapeKeySelected(hit->key);
-        const bool changed = steppingUp ? (selection.stepUp() || selection.selectShapeKey(hit->key, false)) : selection.selectShapeKey(hit->key, additive);
-        if (changed && selection.primary().valid()) {
-            ensureDockShown(DockSide::Right);
-            model_->say(document_.node(selection.primary()).name());
-        }
-        return true;
+        return optionsCard_->show(*tool, at);
     }
 
     SyncReturn WorkspaceController::handleMouseMove(View&, const Point& pt, std::uint32_t buttons, std::uint32_t keys) {
@@ -1963,6 +2079,9 @@ namespace curvy {
                 zooming_ = false;
             }
         }
+        if (tools_.current() != nullptr && !panning_ && !zooming_) {
+            tools_.current()->inputMove(toolEvent(pt, buttons, keys, false));
+        }
         pointer_ = pt;
         pointerKnown_ = true;
         if (menu_->isOpen()) {
@@ -1974,6 +2093,9 @@ namespace curvy {
     SyncReturn WorkspaceController::handleMouseUp(View&, const Point& pt, std::uint32_t buttons, std::uint32_t keys) {
         panning_ = false;
         zooming_ = false;
+        if (tools_.current() != nullptr) {
+            tools_.current()->inputUp(toolEvent(pt, buttons, keys, (buttons & mbmRightButton) != 0));
+        }
         if (menu_->isOpen()) {
             menu_->onMouseUp(*menu_, pt, buttons, keys);
         }
@@ -2050,6 +2172,7 @@ namespace curvy {
         // The panel is not a view of the document: it shows the selected node again (a node an undo removed shows as an empty panel).
         nodePanel_->show(graphView_->selected());
         transformPanel_->refresh();
+        selectPanel_->refresh();
         graphView_->style().markDirty();
         canvas_->style().markDirty();
         model_->say(eventErrors.empty() ? (forward ? "Redo " : "Undo ") + what : eventErrors);
@@ -2057,6 +2180,10 @@ namespace curvy {
     }
 
     bool WorkspaceController::filterKey(std::uint32_t mask, std::uint32_t vk) {
+        if ((mask & kmCtrl) != 0 && (mask & kmAlt) == 0 && (mask & kmShift) == 0 && vk == vkLetterA && !menu_->isOpen() && model_->documentOpen()) {
+            selectTool_->selectAll();   // the canvas has the focus when this filter runs, so a text field keeps its own Ctrl+A
+            return true;
+        }
         if ((mask & kmAlt) != 0 || ((mask & kmCtrl) != 0 && vk != vkSpaceBar)) {   // Ctrl+Space is the zoom drag
             return false;
         }
@@ -2080,7 +2207,20 @@ namespace curvy {
             }
             return true;
         }
+        if (vk == vkEscape && optionsCard_ != nullptr && optionsCard_->isOpen()) {
+            optionsCard_->close();
+            return true;
+        }
+        ToolKeyEvent keyEvent;
+        keyEvent.vk = vk;
+        keyEvent.mask = mask;
+        if (tools_.current()->keyDown(keyEvent)) {
+            return true;
+        }
         if (recentColorKey(vk, shift)) {
+            return true;
+        }
+        if (vk == vkTab && !graphOverlay_->isVisible() && selectTool_->cycle(shift ? -1 : 1)) {
             return true;
         }
         if (vk == vkTab && !shift) {
@@ -2103,6 +2243,9 @@ namespace curvy {
     }
 
     SyncReturn WorkspaceController::handleKeyUp(View&, std::uint32_t, int, int, std::uint32_t vk) {
+        ToolKeyEvent keyEvent;
+        keyEvent.vk = vk;
+        tools_.current()->keyUp(keyEvent);
         if (vk == vkSpaceBar && spaceDown_) {
             spaceDown_ = false;
             model_->setSpaceDown(false);
@@ -2119,15 +2262,17 @@ namespace curvy {
         if (model_->documentOpen()) {
             const SelectionModel& selection = graphView_->selectionModel();
             const jitnodes::GeometryHandle artwork = selection.empty() ? nullptr : document_.artwork();
-            if (artwork == nullptr) {
-                return;
-            }
-            const BLPoint origin = canvas_->toView(BLPoint(0.0, 0.0));
-            ctx.set_stroke_width(2.0);
-            for (const jitnodes::ShapeRange& shape : artwork->shapes()) {
-                if (!shape.key.empty() && selection.isShapeKeySelected(std::string(shape.key))) {
-                    ctx.stroke_path(shapePath(*artwork, shape, origin.x, origin.y, double(canvas_->zoom())), rgb(Theme::current().accent));
+            if (artwork != nullptr) {
+                const BLPoint origin = canvas_->toView(BLPoint(0.0, 0.0));
+                ctx.set_stroke_width(2.0);
+                for (const jitnodes::ShapeRange& shape : artwork->shapes()) {
+                    if (!shape.key.empty() && selection.isShapeKeySelected(std::string(shape.key))) {
+                        ctx.stroke_path(shapePath(*artwork, shape, origin.x, origin.y, double(canvas_->zoom())), rgb(Theme::current().accent));
+                    }
                 }
+            }
+            if (tools_.current() != nullptr) {
+                tools_.current()->paintOverlay(ctx);
             }
             return;
         }

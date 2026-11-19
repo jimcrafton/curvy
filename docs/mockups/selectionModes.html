@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curvy selection modes</title>
+<style>
+  :root {
+    --bg: #1e1f22; --panel: #26272b; --workspace: #2b2d31; --text: #e6e7ea; --muted: #9a9ea8;
+    --accent: #4c8dff; --amber: #ffb454; --slot: #313338; --slotLine: #4a4d55;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 12px/1.45 "Segoe UI", system-ui, sans-serif; }
+  header { width: 980px; margin: 14px auto 8px; }
+  header h1 { font-size: 16px; margin: 0 0 4px; }
+  header p { margin: 0; color: var(--muted); }
+  header b { color: var(--text); }
+  #wrap { position: relative; width: 980px; height: 600px; margin: 0 auto; display: flex; gap: 8px; }
+  #stage { position: relative; width: 700px; height: 600px; background: var(--workspace); border: 1px solid var(--slotLine); border-radius: 6px; overflow: hidden; user-select: none; touch-action: none; }
+  #stage svg { position: absolute; left: 0; top: 0; }
+  #over { pointer-events: none; }
+  #page { position: absolute; left: 30px; top: 20px; width: 640px; height: 520px; background: #fff; box-shadow: 3px 4px 0 #0006; }
+  #side { width: 272px; display: flex; flex-direction: column; gap: 8px; }
+  .card { background: var(--panel); border: 1px solid var(--slotLine); border-radius: 8px; padding: 8px 10px 10px; }
+  .card h3 { margin: 0 0 6px; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+  .row > span { width: 78px; color: var(--muted); flex: none; }
+  .seg { display: flex; flex: 1; border: 1px solid var(--slotLine); border-radius: 6px; overflow: hidden; }
+  .seg button { flex: 1; background: var(--slot); color: var(--text); border: 0; border-right: 1px solid var(--slotLine); padding: 4px 2px; font: inherit; cursor: pointer; }
+  .seg button:last-child { border-right: 0; }
+  .seg button.on { background: var(--accent); color: #fff; }
+  .seg button:disabled { opacity: .4; cursor: default; }
+  label.chk { display: flex; align-items: center; gap: 6px; margin-top: 6px; cursor: pointer; }
+  .note { color: var(--muted); font-size: 11px; margin-top: 6px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; min-height: 28px; }
+  .chip { display: flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 12px; background: var(--slot); border: 1px solid var(--slotLine); cursor: pointer; }
+  .chip:hover { border-color: var(--amber); }
+  .chip.on { border-color: var(--accent); background: #2a3f66; }
+  .chip i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid #0008; }
+  .chip small { color: var(--muted); }
+  #hint { position: absolute; left: 0; right: 0; bottom: 0; height: 28px; display: flex; align-items: center; gap: 10px; padding: 0 10px; overflow: hidden; font-size: 11px; background: #17181bf0; border-top: 1px solid var(--slotLine); white-space: nowrap; }
+  #hint .tool { color: var(--amber); font-weight: 600; }
+  #hint .main { color: var(--text); }
+  #hint .grow { flex: 1; }
+  .mod { color: var(--muted); }
+  .key { display: inline-block; min-width: 18px; padding: 0 5px; margin-right: 4px; text-align: center; border: 1px solid var(--slotLine); border-radius: 4px; background: var(--slot); color: var(--text); font-size: 10px; }
+  .key.lit { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #badge { position: absolute; display: none; padding: 2px 8px; border-radius: 8px; background: #17181bf0; border: 1px solid #5a5d66; color: var(--amber); z-index: 5; }
+  #notes { width: 980px; margin: 14px auto 28px; color: var(--muted); }
+  #notes h2 { color: var(--text); font-size: 13px; margin: 14px 0 4px; }
+  #notes li { margin-bottom: 4px; }
+  #notes b { color: var(--text); }
+  #notes code { color: var(--amber); }
+  #notes table { border-collapse: collapse; margin-top: 4px; }
+  #notes td, #notes th { border: 1px solid var(--slotLine); padding: 3px 8px; text-align: left; vertical-align: top; }
+  #notes th { color: var(--text); background: var(--panel); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Selection modes</h1>
+  <p>Drag on empty canvas with the <b>primary</b> button to select what the shape <b>fully contains</b>, with the <b>secondary</b> button (right mouse, pen barrel) for everything it <b>touches</b>. Pick the region shape in the card: <b>Rectangle</b>, <b>Ellipse</b>, <b>Freehand</b> (drag a loop) or <b>Polygon</b> (click corners, click the first one, double-click or <b>Enter</b> to close, <b>Esc</b> cancels). <b>Shift</b> adds, <b>Alt</b> subtracts. The lower card selects by a property instead of by area. Also: <b>Ctrl+A</b> all, <b>Esc</b> clears, <b>Tab</b> / <b>Shift+Tab</b> cycles.</p>
+</header>
+
+<div id="wrap">
+  <div id="stage">
+    <div id="page"></div>
+    <svg id="svg" width="700" height="600" viewBox="0 0 700 600"></svg>
+    <svg id="over" width="700" height="600" viewBox="0 0 700 600"></svg>
+    <div id="badge"></div>
+    <div id="hint"></div>
+  </div>
+  <div id="side">
+    <div class="card" id="optCard">
+      <h3>Select tool options</h3>
+      <div class="row"><span>Region</span><div class="seg" id="segShape"></div></div>
+      <label class="chk"><input id="cTwo" type="checkbox" checked> Secondary button picks what it touches</label>
+      <div class="row" id="rowMode"><span>Containment</span><div class="seg" id="segMode"></div></div>
+      <div class="note" id="optNote"></div>
+    </div>
+    <div class="card" id="byCard">
+      <h3>Select by</h3>
+      <div class="seg" id="segBy"></div>
+      <div class="chips" id="chips"></div>
+      <div class="row"><span>Within</span><div class="seg" id="segWithin"></div></div>
+      <div class="note">Click a value to select every shape that has it. <b>Shift</b> adds, <b>Alt</b> subtracts. With one shape selected, its own values are outlined: "Select similar".</div>
+    </div>
+  </div>
+</div>
+
+<div id="notes">
+  <h2>How it works (proposal)</h2>
+  <ul>
+    <li><b>Two buttons, no modifier.</b> The primary button is "fully inside", the secondary button is "touches", so a pen can do both (barrel button = secondary). This replaces the direction rule of the older Selection and transform mock (left to right contained, right to left touching), which needed a precise drag direction. If the secondary button is wanted for something else (the ring), untick <b>Secondary button picks what it touches</b>: both buttons then use the one <b>Containment</b> setting, kept in the Select tool's options card (the small option box curvy v1 had for ring items).</li>
+    <li><b>Region shapes.</b> Rectangle and Ellipse are a drag from corner to corner; Freehand closes itself when the button is released; Polygon is click by click and its first click fixes the button, so the whole polygon is "inside" or "touches". The region is tested against the real outline (sampled), not the bounding box; an open line counts as touched when the region comes within half its stroke width. The status badge says <code>N shapes, inside</code> or <code>touching</code>.</li>
+    <li><b>Where a marquee can start.</b> Only on empty canvas. A press on a shape is a click (select / step up) or, later, a move, never a marquee. A press with no drag is still the click that clears. Space still pans.</li>
+    <li><b>Select by.</b> The card builds a value list from what the document holds and selects every shape that has the value. It works on the engine data that exists today, so it needs no new storage:
+      <table>
+        <tr><th>Property</th><th>Where it comes from</th></tr>
+        <tr><td><b>Tag</b></td><td><code>Node::tags()</code> of the node that made the shape, and of the layer or group around it (so tagging a group selects all of its shapes). Added with the Node panel's tags field or <code>node.add_tag</code>.</td></tr>
+        <tr><td><b>Fill / Stroke colour</b></td><td>the primitive attributes <code>fill.r g b a</code> and <code>stroke.r g b a</code> the Fill and Stroke look nodes stamp on the geometry. Compared with a small tolerance.</td></tr>
+        <tr><td><b>Stroke width</b></td><td><code>stroke.width</code>, rounded to 0.5.</td></tr>
+        <tr><td><b>Type</b></td><td>the producing node's type (<code>circle</code>, <code>path</code>, <code>python</code>, ...).</td></tr>
+        <tr><td><b>Layer</b></td><td>the enclosing layer object.</td></tr>
+      </table>
+      Within: the whole document, the level you are in, or the current selection (narrow a selection down).</li>
+    <li><b>One query behind everything.</b> <code>shapesWhere(artwork, predicate)</code> returns keys; the marquee, the card and the Python calls (<code>doc.shapes_in_rect</code>, <code>doc.select_where(tag=..., fill=..., stroke_width=...)</code>) all go through the same result and the same <code>SelectionModel</code> add / subtract / replace.</li>
+    <li><b>Not mocked:</b> select by custom attribute from a script (a Python predicate), "same fill and stroke" combined, invert, saved selections.</li>
+  </ul>
+</div>
+
+<script>
+"use strict";
+const svgEl = document.getElementById('svg'), overEl = document.getElementById('over'), stage = document.getElementById('stage');
+const badge = document.getElementById('badge'), hintEl = document.getElementById('hint');
+const OX = 30, OY = 20;                                                   // the page's corner in stage space
+
+function ellipsePts(cx, cy, rx, ry, n = 40) { const a = []; for (let i = 0; i < n; i++) { const t = i / n * Math.PI * 2; a.push([cx + rx * Math.cos(t), cy + ry * Math.sin(t)]); } return a; }
+function starPts(cx, cy, o, i, n = 5) { const a = []; for (let k = 0; k < n * 2; k++) { const r = k % 2 ? i : o, t = -Math.PI / 2 + k * Math.PI / n; a.push([cx + r * Math.cos(t), cy + r * Math.sin(t)]); } return a; }
+const rectPts = (x, y, w, h) => [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+const SHAPES = [
+  { id: 's1', type: 'circle', layer: 'Sky', tags: ['sun', 'warm'], fill: '#e5484d', stroke: null, sw: 0, pts: ellipsePts(150, 140, 40, 40), closed: true },
+  { id: 's2', type: 'circle', layer: 'Sky', tags: ['cool'], fill: '#3b82f6', stroke: null, sw: 0, pts: ellipsePts(300, 150, 40, 40), closed: true },
+  { id: 's3', type: 'path', layer: 'Ground', tags: ['ground', 'hero'], fill: '#22c55e', stroke: '#14532d', sw: 3, pts: rectPts(90, 260, 150, 80), closed: true },
+  { id: 's4', type: 'ellipse', layer: 'Ground', tags: ['cool', 'hero'], fill: '#3b82f6', stroke: '#1e3a8a', sw: 2, pts: ellipsePts(420, 300, 60, 30), closed: true },
+  { id: 's5', type: 'star', layer: 'Sky', tags: ['warm', 'hero'], fill: '#f5c542', stroke: null, sw: 0, pts: starPts(560, 130, 45, 20), closed: true },
+  { id: 's6', type: 'polygon', layer: 'Ground', tags: ['warm'], fill: '#e5484d', stroke: '#7f1d1d', sw: 4, pts: ellipsePts(540, 300, 45, 45, 6), closed: true },
+  { id: 's7', type: 'line', layer: 'Ground', tags: ['guide'], fill: null, stroke: '#2b2d31', sw: 4, pts: [[60, 450], [400, 450]], closed: false },
+  { id: 's8', type: 'path', layer: 'Ground', tags: ['ground'], fill: '#22c55e', stroke: null, sw: 0, pts: rectPts(430, 400, 120, 70), closed: true },
+  { id: 's9', type: 'circle', layer: 'Ground', tags: ['warm'], fill: '#f5c542', stroke: null, sw: 0, pts: ellipsePts(260, 380, 25, 25), closed: true },
+  { id: 's10', type: 'python', layer: 'Sky', tags: [], fill: '#a855f7', stroke: null, sw: 0, pts: [[90, 70], [130, 20], [170, 70]].map(p => [p[0] + 330, p[1] + 330]), closed: true },
+];
+SHAPES.forEach(s => { s.pts = s.pts.map(p => [p[0] + 0, p[1] + 0]); });
+
+let sel = [], drag = null, poly = null, held = { shift: false, alt: false };
+let shapeMode = 'rect', twoButton = true, contain = 'inside', by = 'tag', within = 'doc';
+
+// ---------- geometry ----------
+function pip(p, poly) { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[i], b = poly[j]; if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]) c = !c; } return c; }
+function densify(pts, closed, step = 5) { const out = [], n = closed ? pts.length : pts.length - 1; for (let i = 0; i < n; i++) { const a = pts[i], b = pts[(i + 1) % pts.length], k = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / step)); for (let t = 0; t < k; t++) out.push([a[0] + (b[0] - a[0]) * t / k, a[1] + (b[1] - a[1]) * t / k]); } if (!closed) out.push(pts[pts.length - 1]); return out; }
+function distSeg(p, a, b) { const dx = b[0] - a[0], dy = b[1] - a[1], l = dx * dx + dy * dy, t = l ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l)) : 0; return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy); }
+function nearLine(p, pts, r) { for (let i = 0; i + 1 < pts.length; i++) if (distSeg(p, pts[i], pts[i + 1]) <= r) return true; return false; }
+function regionPoly() {
+  const d = drag; if (!d) return null;
+  if (d.kind === 'rect') { const a = d.p0, b = d.cur; return [[a[0], a[1]], [b[0], a[1]], [b[0], b[1]], [a[0], b[1]]]; }
+  if (d.kind === 'ellipse') { const a = d.p0, b = d.cur; return ellipsePts((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, Math.abs(b[0] - a[0]) / 2, Math.abs(b[1] - a[1]) / 2, 48); }
+  return d.pts;
+}
+function hits(region, mode) {
+  if (!region || region.length < 3) return [];
+  const edge = densify(region, true);
+  return SHAPES.filter(s => {
+    const o = densify(s.pts.map(p => [p[0] + OX, p[1] + OY]), s.closed);
+    if (mode === 'inside') return o.every(p => pip(p, region));
+    if (o.some(p => pip(p, region))) return true;
+    const sp = s.pts.map(p => [p[0] + OX, p[1] + OY]);
+    return edge.some(p => s.closed ? pip(p, sp) : nearLine(p, sp, Math.max(2, s.sw / 2 + 1)));
+  }).map(s => s.id);
+}
+function applyHits(ids, base, how) {
+  if (how === 'sub') return base.filter(id => !ids.includes(id));
+  if (how === 'add') return base.concat(ids.filter(id => !base.includes(id)));
+  return ids;
+}
+const how = () => held.alt ? 'sub' : (held.shift ? 'add' : 'set');
+
+// ---------- properties for select-by ----------
+function valueOf(s, key) {
+  if (key === 'tag') return s.tags.length ? s.tags : ['(none)'];
+  if (key === 'fill') return [s.fill || '(none)'];
+  if (key === 'stroke') return [s.stroke || '(none)'];
+  if (key === 'width') return [s.sw ? s.sw + ' px' : '(none)'];
+  if (key === 'type') return [s.type];
+  return [s.layer];
+}
+function pool() { return within === 'sel' ? SHAPES.filter(s => sel.includes(s.id)) : SHAPES; }
+function chipsFor() {
+  const m = new Map();
+  pool().forEach(s => valueOf(s, by).forEach(v => m.set(v, (m.get(v) || 0) + 1)));
+  return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+function chipOn(v) { const one = sel.length === 1 ? SHAPES.find(s => s.id === sel[0]) : null; return !!one && valueOf(one, by).includes(v); }
+function chooseValue(v) {
+  const ids = pool().filter(s => valueOf(s, by).includes(v)).map(s => s.id);
+  sel = applyHits(ids, sel, how()); refresh();
+}
+
+// ---------- drawing ----------
+const poly2d = pts => pts.map(p => p.join(',')).join(' ');
+function renderWorld() {
+  svgEl.innerHTML = SHAPES.map(s => {
+    const pts = poly2d(s.pts.map(p => [p[0] + OX, p[1] + OY]));
+    const attrs = 'fill="' + (s.fill || 'none') + '" stroke="' + (s.stroke || 'none') + '" stroke-width="' + s.sw + '" stroke-linejoin="round"';
+    return (s.closed ? '<polygon points="' + pts + '" ' : '<polyline points="' + pts + '" ') + attrs + ' data-id="' + s.id + '"/>';
+  }).join('');
+}
+function drawOverlay() {
+  let s = '';
+  sel.forEach(id => { const sh = SHAPES.find(x => x.id === id); if (sh) s += '<' + (sh.closed ? 'polygon' : 'polyline') + ' points="' + poly2d(sh.pts.map(p => [p[0] + OX, p[1] + OY])) + '" fill="none" stroke="#4c8dff" stroke-width="' + (sh.sw + 3) + '" stroke-linejoin="round" opacity=".85"/>'; });
+  const r = regionPoly(), live = drag && (drag.moved || drag.kind === 'poly');
+  if (r && live) {
+    const touching = drag.mode === 'touch', col = touching ? '#ffb454' : '#4c8dff', dash = touching ? '5 3' : '';
+    const pts = poly2d(r);
+    if (drag.kind === 'poly') {
+      s += '<polyline points="' + poly2d(r.concat([drag.cur])) + '" fill="' + col + '22" stroke="' + col + '" stroke-width="1.2" stroke-dasharray="' + dash + '"/>';
+      r.forEach((p, i) => { s += '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="' + (i === 0 ? 6 : 3.5) + '" fill="' + (i === 0 ? '#fff' : col) + '" stroke="' + col + '"/>'; });
+    } else {
+      s += '<polygon points="' + pts + '" fill="' + col + '22" stroke="' + col + '" stroke-width="1.2" stroke-dasharray="' + dash + '"/>';
+    }
+    hits(drag.kind === 'poly' ? r.concat([drag.cur]) : r, drag.mode).forEach(id => { const sh = SHAPES.find(x => x.id === id); s += '<' + (sh.closed ? 'polygon' : 'polyline') + ' points="' + poly2d(sh.pts.map(p => [p[0] + OX, p[1] + OY])) + '" fill="none" stroke="' + col + '" stroke-width="' + (sh.sw + 3) + '" stroke-dasharray="4 3" stroke-linejoin="round"/>'; });
+  }
+  overEl.innerHTML = s;
+}
+function mk(label, list) { return '<span class="mod"><span class="key' + (list ? ' lit' : '') + '">' + label[0] + '</span>' + label[1] + '</span>'; }
+function updateHint() {
+  const two = twoButton, inside = two ? 'LMB' : 'drag', touch = two ? 'RMB' : '';
+  let main = sel.length ? sel.length + ' selected' : 'Click to select, drag for a ' + shapeMode;
+  if (drag && drag.moved) main = drag.mode === 'touch' ? 'Touching' : 'Fully inside';
+  if (drag && drag.kind === 'poly') main = 'Polygon: ' + drag.pts.length + ' corners';
+  const mods = [mk(['Shift', 'add'], held.shift), mk(['Alt', 'subtract'], held.alt)];
+  if (two) mods.unshift(mk([inside, 'inside'], false), mk([touch, 'touches'], false));
+  else mods.unshift(mk(['drag', contain === 'inside' ? 'inside' : 'touches'], false));
+  mods.push(mk(['Ctrl A', 'all'], false), mk(['Esc', 'clear'], false));
+  hintEl.innerHTML = '<span class="tool">Select V</span><span class="main">' + main + '</span><span class="grow"></span>' + mods.join('');
+}
+function renderChips() {
+  document.getElementById('chips').innerHTML = chipsFor().map(([v, n]) => {
+    const sw = (by === 'fill' || by === 'stroke') && v[0] === '#' ? '<i style="background:' + v + '"></i>' : '';
+    return '<div class="chip' + (chipOn(v) ? ' on' : '') + '" data-v="' + v + '">' + sw + v + ' <small>' + n + '</small></div>';
+  }).join('') || '<span class="note">Nothing to choose from</span>';
+}
+function seg(id, items, cur, onPick) {
+  const el = document.getElementById(id);
+  el.innerHTML = items.map(([k, t]) => '<button data-k="' + k + '" class="' + (k === cur ? 'on' : '') + '">' + t + '</button>').join('');
+  el.onclick = e => { const b = e.target.closest('button'); if (b && !b.disabled) { onPick(b.dataset.k); refresh(); } };
+}
+function renderCards() {
+  seg('segShape', [['rect', 'Rect'], ['ellipse', 'Ellipse'], ['free', 'Free'], ['poly', 'Polygon']], shapeMode, k => { shapeMode = k; poly = null; drag = null; });
+  seg('segMode', [['inside', 'Inside'], ['touch', 'Touches']], contain, k => { contain = k; });
+  document.querySelectorAll('#segMode button').forEach(b => { b.disabled = twoButton; });
+  document.getElementById('rowMode').style.opacity = twoButton ? .45 : 1;
+  document.getElementById('optNote').textContent = twoButton ? 'Primary button: fully inside. Secondary button (right mouse, pen barrel): touches.' : 'Both buttons use the Containment setting; the secondary button is free for the ring.';
+  seg('segBy', [['tag', 'Tag'], ['fill', 'Fill'], ['stroke', 'Stroke'], ['width', 'Width'], ['type', 'Type'], ['layer', 'Layer']], by, k => { by = k; });
+  seg('segWithin', [['doc', 'Document'], ['sel', 'Selection']], within, k => { within = k; });
+  renderChips();
+}
+function refresh() { renderWorld(); drawOverlay(); renderCards(); updateHint(); }
+
+// ---------- pointer ----------
+const localPos = e => { const r = stage.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+function hitShape(p) {
+  for (let i = SHAPES.length - 1; i >= 0; i--) { const s = SHAPES[i], q = s.pts.map(a => [a[0] + OX, a[1] + OY]); if (s.closed ? (pip(p, q) || (s.sw && nearLine(p, q.concat([q[0]]), s.sw / 2 + 2))) : nearLine(p, q, Math.max(4, s.sw / 2 + 2))) return s.id; }
+  return null;
+}
+function modeFor(e) { return twoButton ? (e.button === 2 ? 'touch' : 'inside') : contain; }
+function finish(d, e) {
+  const ids = hits(d.kind === 'poly' ? d.pts : regionPoly(), d.mode);
+  sel = applyHits(ids, d.base, d.how);
+  if (!ids.length && d.how === 'set') sel = [];
+  badge.style.display = 'none'; drag = null; poly = null; refresh();
+}
+stage.addEventListener('contextmenu', e => e.preventDefault());
+stage.addEventListener('pointerdown', e => {
+  if (e.target.closest('#hint')) return;
+  const p = localPos(e); held.shift = e.shiftKey; held.alt = e.altKey;
+  if (drag && drag.kind === 'poly') {                                           // polygon in progress: this press adds a corner or closes
+    const d = drag, first = d.pts[0];
+    if (d.pts.length >= 3 && Math.hypot(p[0] - first[0], p[1] - first[1]) < 9) { finish(d, e); return; }
+    d.pts.push(p); d.cur = p; drawOverlay(); updateHint(); return;
+  }
+  const id = hitShape(p);
+  if (id) {                                                                     // a press on a shape is a click, never a marquee
+    sel = e.altKey ? sel.filter(x => x !== id) : (e.shiftKey ? (sel.includes(id) ? sel.filter(x => x !== id) : sel.concat(id)) : [id]);
+    refresh(); return;
+  }
+  try { stage.setPointerCapture(e.pointerId); } catch (x) { /* synthetic */ }
+  const base = e.shiftKey || e.altKey ? sel.slice() : [];
+  if (shapeMode === 'poly') { drag = { kind: 'poly', pts: [p], cur: p, mode: modeFor(e), base, how: how(), moved: true }; refresh(); return; }
+  drag = { kind: shapeMode, p0: p, cur: p, pts: [p], moved: false, mode: modeFor(e), base, how: how() };
+  if (!base.length) sel = [];
+  refresh();
+});
+stage.addEventListener('pointermove', e => {
+  held.shift = e.shiftKey; held.alt = e.altKey;
+  if (!drag) { updateHint(); return; }
+  const p = localPos(e); drag.cur = p;
+  if (drag.kind === 'poly') { drawOverlay(); return; }
+  if (Math.hypot(p[0] - drag.p0[0], p[1] - drag.p0[1]) > 3) drag.moved = true;
+  if (drag.kind === 'free' && drag.moved) drag.pts.push(p);
+  if (drag.moved) {
+    const ids = hits(regionPoly(), drag.mode);
+    sel = applyHits(ids, drag.base, drag.how);
+    badge.textContent = ids.length + (ids.length === 1 ? ' shape, ' : ' shapes, ') + (drag.mode === 'touch' ? 'touching' : 'inside');
+    badge.style.display = 'block'; badge.style.left = Math.min(p[0] + 16, 580) + 'px'; badge.style.top = Math.min(p[1] + 16, 560) + 'px';
+  }
+  drawOverlay(); updateHint(); renderChips();
+});
+function endPointer(e) {
+  if (!drag || drag.kind === 'poly') return;
+  const d = drag; badge.style.display = 'none';
+  if (!d.moved && d.how === 'set') sel = [];
+  drag = null; refresh();
+}
+stage.addEventListener('pointerup', endPointer);
+stage.addEventListener('pointercancel', endPointer);
+stage.addEventListener('dblclick', e => { if (drag && drag.kind === 'poly' && drag.pts.length >= 3) finish(drag, e); });
+document.addEventListener('keydown', e => {
+  held.shift = e.shiftKey; held.alt = e.altKey;
+  if (e.key === 'Escape') { if (drag) { drag = null; poly = null; badge.style.display = 'none'; } else sel = []; refresh(); return; }
+  if (e.key === 'Enter' && drag && drag.kind === 'poly' && drag.pts.length >= 3) { finish(drag, e); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') { e.preventDefault(); sel = SHAPES.map(s => s.id); refresh(); return; }
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const i = sel.length ? SHAPES.findIndex(s => s.id === sel[sel.length - 1]) : -1, n = SHAPES.length;
+    sel = [SHAPES[(i + (e.shiftKey ? -1 : 1) + n) % n].id]; refresh(); return;
+  }
+  updateHint();
+});
+document.addEventListener('keyup', e => { held.shift = e.shiftKey; held.alt = e.altKey; updateHint(); });
+document.getElementById('cTwo').addEventListener('change', e => { twoButton = e.target.checked; refresh(); });
+document.getElementById('chips').addEventListener('click', e => { const c = e.target.closest('.chip'); if (c) { held.shift = e.shiftKey; held.alt = e.altKey; chooseValue(c.dataset.v); } });
+refresh();
+</script>
+</body>
+</html>

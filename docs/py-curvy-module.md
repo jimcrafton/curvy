@@ -228,6 +228,23 @@ or `jitnodes` `Node` (`wrapAny`). Members: `items`, `primary`, `len`, iteration,
 `clear`, `step_up`, and the role queries `object`, `layer`, `fill`, `stroke`, `shape` (the nodes around the primary, or `None`).
 Changing the selection is not an undo step.
 
+### Finding shapes
+
+These `Document` methods read `doc.artwork()` (the cooked geometry the canvas draws) and answer with the node that made each shape, the same
+node a canvas click selects (`GraphDocument::nodeForShapeKey`, so every shape needs a key; see the key stamping in the selection plan).
+They share the C++ queries of the canvas: `shapeAt`, `shapesInRegion` (`shapepaths.h`) and `describeShapes` / `shapesWithValue`
+(`shapeproperties.h`, what the Select panel uses). Units are document units.
+
+- `doc.shape_at(x, y, tolerance=2.0)`: the topmost shape's node under the point (inside its fill or within `tolerance` of its stroke), or `None`.
+- `doc.shapes_in_rect(x, y, width, height, inside=True)`: nodes of the shapes wholly inside the rectangle, or touching it with `inside=False`.
+- `doc.shapes_where(tag=, fill=, stroke=, width=, type=, layer=)`: nodes of the shapes matching every given criterion. `fill`/`stroke` are
+  `'#RRGGBB'` (any case) or `None` for "not drawn"; `width` is a number rounded to half a unit; `tag` is any user tag of the node or the
+  layers and groups around it (tags with a `:` are internal and never match); an unknown criterion raises.
+- `doc.select_where(combine='replace', **criteria)`: selects the shapes `shapes_where` finds (`'replace'`, `'add'` or `'subtract'`) and
+  returns their nodes; raises when the run has no editor selection.
+
+A node that made several shapes is listed once. The tests are `shapesAreFoundByPointRectangleAndProperty` in `tests/test_scriptmodule.cpp`.
+
 ## Values and conversions
 
 - Colours are `(r, g, b, a)` tuples in 0..1 (`Rgba` in the source). `Swatch` is the C++ struct bound directly; palettes come back as copies, so
@@ -582,8 +599,8 @@ script console is set (without a console there is no Python and no policy, so th
 - A script can call `jitnodes.allow_python_nodes(True)`, which replaces the policy: scripts are code the user ran, so this is not a
   boundary. The window resets the policy when it closes or its console changes.
 - **Time limit and Esc.** A python node runs while the canvas draws, on the main thread, so a runaway script would freeze the application. The window sets
-  `jitnodes::python::setPythonNodeTimeLimit` from `Settings::pythonNodeSeconds` (default 10, 0 = no limit; only in the settings file as
-  `scriptEditor.pythonNodeSeconds`, there is no dialog row, and it is separate from the script time limit, which is off by default) and
+  `jitnodes::python::setPythonNodeTimeLimit` from `Settings::pythonNodeSeconds` (default 10, 0 = no limit; Settings > Script editor > "Stop Python nodes after",
+  file key `scriptEditor.pythonNodeSeconds`; it is separate from the script time limit above, which is off by default) and
   `setPythonNodeInterruptCheck` to "Esc is down while this application has the focus" (the check the script console uses). A node that was stopped
   stays stopped until its code, a parameter or an input changes (docs in `3rdparty/jitnodes/docs/python.md`). Tests: `PythonNodeTest` (limit,
   `except Exception`, stopped node, cancel, host check) and the default in `tests/test_settings.cpp`.

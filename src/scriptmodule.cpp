@@ -3,6 +3,8 @@
 #include "curvy/blendmodes.h"
 #include "curvy/objectnode.h"
 #include "curvy/selectionmodel.h"
+#include "curvy/shapepaths.h"
+#include "curvy/shapeproperties.h"
 #include "curvy/sketchdocument.h"
 #include "curvy/wranglecheck.h"
 
@@ -15,7 +17,9 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
@@ -297,6 +301,75 @@ namespace curvy {
                 return py::none();
             }
             return wrapAny(guard, ref);
+        }
+
+        py::list nodesOfShapeKeys(const ScriptDocument& d, const std::vector<std::string>& keys) {
+            py::list list;
+            std::vector<NodeRef> seen;
+            for (const std::string& key : keys) {
+                const NodeRef ref = d.get().nodeForShapeKey(key);
+                if (ref.valid() && std::find(seen.begin(), seen.end(), ref) == seen.end()) {
+                    seen.push_back(ref);
+                    list.append(wrapAny(d.guard(), ref));
+                }
+            }
+            return list;
+        }
+
+        std::string criterionText(const py::handle& value, bool colour) {
+            if (value.is_none()) {
+                return kNoValue;
+            }
+            std::string text = py::str(value);
+            if (colour) {
+                std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return char(std::toupper(c)); });
+            }
+            return text;
+        }
+
+        std::vector<std::string> keysWhere(const ScriptDocument& d, const py::kwargs& criteria) {
+            const jitnodes::GeometryHandle geometry = d.get().artwork();
+            if (geometry == nullptr) {
+                return {};
+            }
+            std::vector<ShapeValues> shapes = describeShapes(d.get(), *geometry);
+            for (const auto& item : criteria) {
+                const std::string name = py::str(item.first);
+                ShapeProperty property = ShapeProperty::Tag;
+                std::string wanted;
+                if (name == "tag") {
+                    wanted = criterionText(item.second, false);
+                } else if (name == "fill" || name == "stroke") {
+                    property = name == "fill" ? ShapeProperty::Fill : ShapeProperty::Stroke;
+                    wanted = criterionText(item.second, true);
+                } else if (name == "width") {
+                    property = ShapeProperty::Width;
+                    if (item.second.is_none()) {
+                        wanted = kNoValue;
+                    } else {
+                        char text[32];
+                        std::snprintf(text, sizeof(text), "%g px", std::round(py::cast<double>(item.second) * 2.0) / 2.0);
+                        wanted = text;
+                    }
+                } else if (name == "type") {
+                    property = ShapeProperty::Type;
+                    wanted = criterionText(item.second, false);
+                } else if (name == "layer") {
+                    property = ShapeProperty::Layer;
+                    wanted = criterionText(item.second, false);
+                } else {
+                    throw std::runtime_error("unknown criterion '" + name + "' (tag, fill, stroke, width, type, layer)");
+                }
+                const std::vector<std::string> keep = shapesWithValue(shapes, property, wanted);
+                shapes.erase(std::remove_if(shapes.begin(), shapes.end(), [&](const ShapeValues& s) {
+                                 return std::find(keep.begin(), keep.end(), s.key) == keep.end();
+                             }), shapes.end());
+            }
+            std::vector<std::string> keys;
+            for (const ShapeValues& shape : shapes) {
+                keys.push_back(shape.key);
+            }
+            return keys;
         }
 
         // What is selected in the editor: shared with the canvas, graph view and panels, so a script's change shows there and a user's
@@ -934,6 +1007,46 @@ namespace curvy {
                      }, py::arg("node"), py::arg("closed") = true)
                 .def("is_curve", [](const ScriptDocument& d, const py::object& node) { return d.get().pathCubic(pathNodeFor(d.get(), node)); }, py::arg("node"),
                      "True when the path's points are Bezier control points.")
+
+                .def("shape_at", [](const ScriptDocument& d, float x, float y, float tolerance) -> py::object {
+                         SketchDocument& doc = d.get();
+                         const jitnodes::GeometryHandle geometry = doc.artwork();
+                         if (geometry == nullptr) {
+                             return py::none();
+                         }
+                         const std::optional<ShapeHit> hit = curvy::shapeAt(*geometry, x, y, tolerance);
+                         return hit.has_value() ? wrapOptional(d.guard(), doc.nodeForShapeKey(hit->key)) : py::none();
+                     }, py::arg("x"), py::arg("y"), py::arg("tolerance") = 2.0f,
+                     "The node that made the topmost shape under (x, y) in document units (inside its fill, or within `tolerance` of its stroke), or None.")
+                .def("shapes_in_rect", [](const ScriptDocument& d, float x, float y, float width, float height, bool inside) {
+                         const jitnodes::GeometryHandle geometry = d.get().artwork();
+                         if (geometry == nullptr) {
+                             return py::list();
+                         }
+                         const std::vector<BLPoint> region = rectRegion(x, y, double(x) + width, double(y) + height);
+                         return nodesOfShapeKeys(d, shapesInRegion(*geometry, region, inside ? RegionMode::Inside : RegionMode::Touches));
+                     }, py::arg("x"), py::arg("y"), py::arg("width"), py::arg("height"), py::arg("inside") = true,
+                     "The nodes that made the shapes in a rectangle: wholly inside it, or (inside=False) touching it. Drawing order, each node once.")
+                .def("shapes_where", [](const ScriptDocument& d, const py::kwargs& criteria) { return nodesOfShapeKeys(d, keysWhere(d, criteria)); },
+                     "The nodes that made the shapes that match every given criterion: tag='name' (any tag of the shape), fill='#RRGGBB' or None "
+                     "(not filled), stroke=..., width=2.0 (stroke width, to half a unit) or None, type='circle' (node type), layer='name'.")
+                .def("select_where", [](const ScriptDocument& d, const std::string& combine, const py::kwargs& criteria) {
+                         if (d.selection() == nullptr) {
+                             throw std::runtime_error("this run has no editor selection");
+                         }
+                         SelectionModel::Combine how = SelectionModel::Combine::Replace;
+                         if (combine == "add") {
+                             how = SelectionModel::Combine::Add;
+                         } else if (combine == "subtract") {
+                             how = SelectionModel::Combine::Subtract;
+                         } else if (combine != "replace") {
+                             throw std::runtime_error("combine must be 'replace', 'add' or 'subtract'");
+                         }
+                         const std::vector<std::string> keys = keysWhere(d, criteria);
+                         d.selection()->selectShapeKeys(keys, how);
+                         return nodesOfShapeKeys(d, keys);
+                     }, py::arg("combine") = "replace",
+                     "Selects the shapes shapes_where(**criteria) finds (combine: 'replace', 'add' or 'subtract'); returns their nodes. Not an undo step.")
 
                 .def("artwork", [](const ScriptDocument& d) -> py::object {
                     jitnodes::GeometryHandle geometry = d.get().artwork();

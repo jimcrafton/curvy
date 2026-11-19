@@ -76,6 +76,11 @@ Only nodes that produce *document shapes*: the jitnodes generators `circle`, `re
 and the object prefix, which the owning subnet supplies). Particles, patterns, trails and other bulk geometry stay anonymous: stamping a
 key on 100 000 primitives would cost far more than it is worth, and nobody binds to one particle.
 
+**Curvy turns stamping on for everything** (2026-11-18, `Network::setStampAnonymousShapes`, set by `GraphDocument`): right after a node
+cooks, each anonymous primitive of its output gets `<node key>#p<index>`, so every shape that reaches the canvas can be clicked, boxed
+and bound, including the output of the Python node and wrangle. The key is deterministic, so a selection survives a recook; a key the
+producer set is kept. The cost is one copy of the geometry for a node whose output has anonymous primitives.
+
 ## Contract for operations
 
 | Operation | What happens to shapes |
@@ -111,6 +116,21 @@ A rig is a node that takes geometry and a list of *bindings*, each a key or a ke
 - Hit test per shape. A click yields a key; the key's node uid resolves to the node in the graph, replacing the `src.path` idea. The
   document keeps a `uid -> NodeRef` index, rebuilt when the graph changes (`onGraphChanged`).
 - `SelectionModel` gets `selectShapeKey(key)` and the reverse, so canvas and graph view stay in step.
+- **Select by** (2026-11-18). `describeShapes` / `valuesOf` / `countValues` / `shapesWithValue` (`shapeproperties.h`) read, per keyed
+  shape, its tags (its node's and those of the layers and groups around it), fill and stroke colour (`fill.r g b a`, `stroke.r g b a`),
+  stroke width, node type and layer name. The Select by panel lists the values with counts; a click selects every shape that has the
+  value. See `docs/canvas-selection-plan.md` S3b.
+- **Marquee** (2026-11-18). `shapesInRegion(geometry, polygon, RegionMode)` in `shapepaths` returns the keys a region takes: *Inside* =
+  every point of the shape's outline is in the region, *Touches* = any outline point is, or the region's edge crosses the shape's fill
+  or stroke. A rectangle, ellipse, freehand loop and polygon are all a polygon (`rectRegion`, `ellipseRegion`). `Marquee`
+  (`include/curvy/marquee.h`) tracks the gesture in canvas pixels; `SelectTool` (`selecttool.h`, see `docs/tools.md`) turns it into a
+  region, outlines what it would take while it is drawn and combines the result with
+  `SelectionModel::selectShapeKeys(keys, Replace | Add | Subtract)` on release. Primary button = Inside, secondary = Touches (`Settings::selectTwoButton`; off: both use `selectContainment`). A press
+  on a shape is a click, never a marquee; a secondary press with no drag opens the ring on release (with the setting off it opens
+  on the press as before). Shift/Ctrl add, Alt subtracts, Escape cancels, `M` cycles Rectangle, Ellipse, Freehand, Polygon
+  (`Settings::selectRegion`); a polygon takes one press per corner and closes with Enter or a press on its first corner. The three
+  settings are the Select tool's options: the option box on the Create ring's Select slot opens the options card (`docs/tools.md`); they are also in the settings
+  file (`pen` group).
 - Not touched now: curvy's PDF/SVG/AI/EPS import and export, and jitnodes' `svgExport.cpp` (it could write real compound `<path>` data
   from `shapes()` later; the user's import/export branch is separate).
 

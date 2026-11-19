@@ -251,6 +251,8 @@ namespace curvy::settingsdialog {
             toggle("scriptTimeout", [this] { return working_.scriptTimeout; }, [this](bool v) { working_.scriptTimeout = v; });
             number("scriptTimeoutSeconds", 1, 86400, [this](double v) { working_.scriptTimeoutSeconds = int(v); },
                    [this] { return double(working_.scriptTimeoutSeconds); });
+            number("pythonNodeSeconds", 0, 86400, [this](double v) { working_.pythonNodeSeconds = int(v); },
+                   [this] { return double(working_.pythonNodeSeconds); });
 
             for (const SyntaxStyleInfo& info : editorColorRows()) {
                 const std::string style = info.name;

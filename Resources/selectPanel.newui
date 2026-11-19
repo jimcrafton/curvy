@@ -1,0 +1,248 @@
+{
+  meta: {
+    author: "",
+    date: "2026-11-18",
+    copyright: "",
+    version: "0.1.0.900"
+  },
+  type: "SubView",
+  bounds: {
+    type: "Rect",
+    pos: { type: "Point", x: 0, y: 0 },
+    size: { type: "Size", width: 268, height: 528 }
+  },
+  visible: true,
+  name: "selectPanel",
+  layout: {
+    type: "FlexLayout",
+    orientation: "Vertical",
+    spacing: 6,
+    padding: 10
+  },
+  style: {
+    type: "ViewStyle",
+    backgroundFill: { type: "Fill", kind: "Color", color: "#1e1e1e" }
+  },
+  childViews: [
+    {
+      type: "Label",
+      text: "SELECT BY",
+      textAlignment: "Left",
+      bounds: {
+        type: "Rect",
+        pos: { type: "Point", x: 10, y: 10 },
+        size: { type: "Size", width: 248, height: 14 }
+      },
+      name: "selectTitle",
+      style: {
+        type: "LabelStyle",
+        text: "SELECT BY",
+        wordWrap: true,
+        font: { type: "Font", name: "Segoe UI", size: 10, bold: false, italic: false, strikeThrough: false, underlined: false },
+        textColor: "#a0a0a0",
+        textAlignment: "Left"
+      }
+    },
+    {
+      type: "SubView",
+      bounds: {
+        type: "Rect",
+        pos: { type: "Point", x: 10, y: 30 },
+        size: { type: "Size", width: 248, height: 120 }
+      },
+      visible: true,
+      name: "selectTabsRow",
+      childViews: [
+        {
+          type: "SegmentedControl",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 0 },
+            size: { type: "Size", width: 248, height: 120 }
+          },
+          name: "selectTabs"
+        }
+      ]
+    },
+    {
+      type: "SubView",
+      bounds: {
+        type: "Rect",
+        pos: { type: "Point", x: 10, y: 156 },
+        size: { type: "Size", width: 248, height: 168 }
+      },
+      visible: true,
+      name: "selectValuesBox",
+      layout: {
+        type: "FlexLayout",
+        orientation: "Vertical",
+        spacing: 2,
+        padding: 3
+      },
+      style: {
+        type: "ViewStyle",
+        backgroundFill: { type: "Fill", kind: "Color", color: "#121212" },
+        borderWidth: 1,
+        borderFill: "#4a4a4a"
+      },
+      desiredSize: { type: "Size", width: 248, height: 168 },
+      desiredSizeOverride: true,
+      childViews: [
+        {
+          type: "ListView",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 3, y: 3 },
+            size: { type: "Size", width: 242, height: 162 }
+          },
+          name: "selectValues",
+          layoutParams: { type: "FlexLayoutParams", weight: 1 }
+        }
+      ]
+    },
+    {
+      type: "SubView",
+      bounds: {
+        type: "Rect",
+        pos: { type: "Point", x: 10, y: 330 },
+        size: { type: "Size", width: 248, height: 120 }
+      },
+      visible: true,
+      name: "selectWithinRow",
+      layout: {
+        type: "FlexLayout",
+        orientation: "Horizontal",
+        crossAxisAlignment: "Center",
+        spacing: 6
+      },
+      childViews: [
+        {
+          type: "Label",
+          text: "Within",
+          textAlignment: "Left",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 51 },
+            size: { type: "Size", width: 52, height: 17 }
+          },
+          name: "withinLabel",
+          style: {
+            type: "LabelStyle",
+            text: "Within",
+            wordWrap: true,
+            font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false },
+            textColor: "#a0a0a0",
+            textAlignment: "Left"
+          },
+          desiredSize: { type: "Size", width: 52, height: 17 },
+          desiredSizeOverride: true
+        },
+        {
+          type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 58, y: 0 },
+            size: { type: "Size", width: 190, height: 120 }
+          },
+          visible: true,
+          name: "selectWithinBox",
+          layoutParams: { type: "FlexLayoutParams", weight: 1 },
+          childViews: [
+            {
+              type: "SegmentedControl",
+              bounds: {
+                type: "Rect",
+                pos: { type: "Point", x: 0, y: 0 },
+                size: { type: "Size", width: 190, height: 120 }
+              },
+              name: "selectWithin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      type: "SubView",
+      bounds: {
+        type: "Rect",
+        pos: { type: "Point", x: 10, y: 456 },
+        size: { type: "Size", width: 248, height: 24 }
+      },
+      visible: true,
+      name: "selectButtons",
+      layout: { type: "FlexLayout", orientation: "Horizontal", spacing: 5 },
+      childViews: [
+        {
+          type: "Button",
+          text: "Add",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 0, y: 0 },
+            size: { type: "Size", width: 76, height: 24 }
+          },
+          name: "selectAddButton",
+          layoutParams: { type: "FlexLayoutParams", weight: 1 },
+          style: {
+            type: "ThemedButtonStyle",
+            font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+          },
+          desiredSize: { type: "Size", width: 76, height: 24 },
+          desiredSizeOverride: true
+        },
+        {
+          type: "Button",
+          text: "Subtract",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 81, y: 0 },
+            size: { type: "Size", width: 84, height: 24 }
+          },
+          name: "selectSubtractButton",
+          layoutParams: { type: "FlexLayoutParams", weight: 1 },
+          style: {
+            type: "ThemedButtonStyle",
+            font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+          },
+          desiredSize: { type: "Size", width: 84, height: 24 },
+          desiredSizeOverride: true
+        },
+        {
+          type: "Button",
+          text: "Similar",
+          bounds: {
+            type: "Rect",
+            pos: { type: "Point", x: 170, y: 0 },
+            size: { type: "Size", width: 78, height: 24 }
+          },
+          name: "selectSimilarButton",
+          layoutParams: { type: "FlexLayoutParams", weight: 1 },
+          style: {
+            type: "ThemedButtonStyle",
+            font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+          },
+          desiredSize: { type: "Size", width: 78, height: 24 },
+          desiredSizeOverride: true
+        }
+      ]
+    },
+    {
+      type: "Label",
+      text: "1 shape selected. Click a value to select every shape that has it.",
+      textAlignment: "Left",
+      bounds: {
+        type: "Rect",
+        pos: { type: "Point", x: 10, y: 486 },
+        size: { type: "Size", width: 248, height: 32 }
+      },
+      name: "selectStatus",
+      style: {
+        type: "LabelStyle",
+        text: "1 shape selected. Click a value to select every shape that has it.",
+        wordWrap: true,
+        font: { type: "Font", name: "Segoe UI", size: 11, bold: false, italic: false, strikeThrough: false, underlined: false },
+        textColor: "#a0a0a0",
+        textAlignment: "Left"
+      }
+    }
+  ]
+}

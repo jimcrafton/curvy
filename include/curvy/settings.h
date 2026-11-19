@@ -18,6 +18,8 @@ namespace curvy {
         enum class ScrubAxis { Vertical, Horizontal };
         enum class PenButton { Rings, Pan, Nothing };
         enum class EraserAction { Erase, Undo, Nothing };
+        enum class SelectRegion { Rectangle, Ellipse, Freehand, Polygon };
+        enum class SelectContainment { Inside, Touches };
 
         // The window as the user left it, in screen pixels (the normal rectangle when maximized); known() is false until a session has
         // saved it. `monitor` is the screen it was on (its device name, such as \\.\DISPLAY2); empty when not known.
@@ -62,6 +64,12 @@ namespace curvy {
         int spaceTapMs = 300;
         PenButton barrelButton = PenButton::Rings;
         EraserAction eraserEnd = EraserAction::Erase;
+        // The Select tool's marquee. With selectTwoButton the primary button takes what the region fully contains and the secondary button
+        // (right mouse, pen barrel when it opens rings) takes what it touches; without it both buttons use selectContainment and the
+        // secondary button keeps opening the ring on press.
+        SelectRegion selectRegion = SelectRegion::Rectangle;
+        bool selectTwoButton = true;
+        SelectContainment selectContainment = SelectContainment::Inside;
 
         // Drawing
         bool snapGrid = false;
@@ -88,7 +96,7 @@ namespace curvy {
         bool scriptTimeout = false;
         int scriptTimeoutSeconds = 60;
         // How long a `python` node may run before it is stopped (0: no limit). Unlike a script, a node runs while the canvas draws, so it has a
-        // limit by default. Only in the settings file (scriptEditor.pythonNodeSeconds), no dialog row.
+        // limit by default. Settings > Script editor > "Stop Python nodes after" (file key scriptEditor.pythonNodeSeconds).
         int pythonNodeSeconds = 10;
         // Only the colours the user changed, by syntax style name ("keyword", "string", ...; see pythonSyntaxStyles()), as 0xRRGGBB. Every
         // other style keeps the theme's colour.

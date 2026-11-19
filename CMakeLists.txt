@@ -106,6 +106,12 @@ add_library(curvy_core STATIC
     src/wranglehighlight.cpp
     src/utf8.cpp
     src/editorfonts.cpp
+    src/marquee.cpp
+    src/tool.cpp
+    src/selecttool.cpp
+    src/tooloptionscard.cpp
+    src/shapeproperties.cpp
+    src/selectpanel.cpp
 )
 
 target_include_directories(curvy_core PUBLIC include)

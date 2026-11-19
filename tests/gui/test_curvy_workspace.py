@@ -34,8 +34,15 @@ class Rings(CurvyCase):
         self.assertEqual("New A4", self.hint_keys())
         self.assertFalse(self.ring_open())
 
-    def test_with_a_document_open_space_opens_the_document_ring(self):
+    def test_with_a_document_open_space_over_the_page_opens_the_creation_ring(self):
+        self.new_a4()                                              # the pointer is left at the middle of the canvas: on the page
+        self.tap_space()
+        self.assertEqual("Ring: Create", self.hint_keys())
+
+    def test_space_over_the_workspace_around_the_page_opens_the_document_ring(self):
         self.new_a4()
+        canvas = self.app.find("canvas")
+        self.app.click_at((canvas.x + 40, canvas.y + canvas.h - 40))   # the pasteboard corner
         self.tap_space()
         self.assertEqual("Ring: Document", self.hint_keys())
 

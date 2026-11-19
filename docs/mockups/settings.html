@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <title>curvy settings</title>
-<!-- Settings / Preferences dialog (docs/ui-design.md, "Settings / Preferences dialog"). Modal, 720x520: category list on the left that scrolls the right
+<!-- Settings / Preferences dialog (docs/ui-design.md, "Settings / Preferences dialog"). Modal, 720x616 (tall enough that the Script editor page leaves its code preview about 120px): category list on the left that scrolls the right
      side to its section, one scrolling column of sections on the right (no tabs, so a search box can later filter rows), Reset / Cancel / OK in the footer.
      OK is the default button and Esc cancels (needs newui's default/cancel button support, newui/todo.txt). Settings that belong to the document rather than the
      user carry the "Document" tag. Theme tokens (include/curvy/theme.h): bgSurface for the dialog, bgApp for fields, textMuted for captions/help, border for lines,
      accent for the default button.
      Convert: python .claude/skills/html-mockup-to-newui/scripts/html2newui.py docs/mockups/settings.html -o Resources/settings.newui --name settings -->
 <style>
-  body { width: 720px; height: 520px; margin: 0; display: flex; flex-direction: column; font-family: "Segoe UI", sans-serif; font-size: 12px; color: #F0F0F0; }
+  body { width: 720px; height: 616px; margin: 0; display: flex; flex-direction: column; font-family: "Segoe UI", sans-serif; font-size: 12px; color: #F0F0F0; }
   #settingsBox { flex-grow: 1; display: flex; flex-direction: column; background: #1E1E1E; }
   #settingsMain { display: flex; flex-direction: row; flex-grow: 1; }
   #settingsNav { display: flex; flex-direction: column; gap: 2px; width: 150px; padding: 10px 8px; background: #181818; border-right: 1px solid #4A4A4A; }
@@ -28,6 +28,7 @@
   .well { width: 22px; height: 22px; border: 1px solid #4A4A4A; }
   .slider { width: 160px; height: 24px; }
   .unit { color: #A0A0A0; width: 40px; }
+  .tabLabel { width: 64px; }
   .colorColumns { display: flex; flex-direction: row; gap: 16px; }
   .colorColumn { display: flex; flex-direction: column; gap: 4px; flex-grow: 1; }
   .colorRow { display: flex; flex-direction: row; align-items: center; gap: 8px; height: 24px; }
@@ -97,9 +98,9 @@
         <div id="pageScriptEditor" class="section">
           <span class="sectionTitle">Script editor</span>
           <div class="row"><span class="label">Font</span><select id="editorFont" class="wide"><option>Automatic</option></select></div>
-          <div class="row"><span class="label">Size</span><input id="editorFontSize" class="field" type="text" value="14"><span class="unit">pt</span></div>
-          <div class="row"><span class="label">Tab width</span><input id="editorTabWidth" class="field" type="text" value="4"><span class="unit">spaces</span></div>
+          <div class="row"><span class="label">Size</span><input id="editorFontSize" class="field" type="text" value="14"><span class="unit">pt</span><span class="tabLabel">Tab width</span><input id="editorTabWidth" class="field" type="text" value="4"><span class="unit">spaces</span></div>
           <div class="row"><span class="label">Stop scripts after</span><input id="scriptTimeout" type="checkbox"><input id="scriptTimeoutSeconds" class="field" type="text" value="60"><span class="unit">seconds</span></div>
+          <div class="row"><span class="label">Stop Python nodes after</span><input id="pythonNodeSeconds" class="field" type="text" value="10"><span class="unit" style="width:150px">seconds (0 = no limit)</span></div>
           <span class="sectionTitle">Syntax colours</span>
           <div class="colorColumns">
             <div class="colorColumn">

@@ -11,6 +11,10 @@
 #include "curvy/graphcrumbs.h"
 #include "curvy/nodepanel.h"
 #include "curvy/graphview.h"
+#include "curvy/marquee.h"
+#include "curvy/selecttool.h"
+#include "curvy/tool.h"
+#include "curvy/tooloptionscard.h"
 #include "curvy/newdocumentdialog.h"
 #include "curvy/pointtable.h"
 #include "curvy/radialmenu.h"
@@ -19,6 +23,7 @@
 #include "curvy/assetmanagermodel.h"
 #include "curvy/assetmanagerpanel.h"
 #include "curvy/assetpropertiessession.h"
+#include "curvy/selectpanel.h"
 #include "curvy/settings.h"
 #include "curvy/sketchdocument.h"
 #include "curvy/swatchestab.h"
@@ -118,6 +123,7 @@ namespace curvy {
         // @reflect ignore=true
         NodePanel& nodePanel() { return *nodePanel_; }
         TransformPanel& transformPanel() { return *transformPanel_; }
+        SelectPanel& selectPanel() { return *selectPanel_; }
         AssetManagerPanel& assetPanel() { return *assetPanel_; }
         AssetManagerModel& assetModel() { return *assetModel_; }
         AssetEvents* assetEvents() { return assetEvents_.get(); }   // null until there is a script console
@@ -164,10 +170,20 @@ namespace curvy {
         void openRing(bool byPress);
         void ensureDockShown(DockSide side);
         bool recentColorKey(std::uint32_t vk, bool shift);
-        // A left press on the canvas: selects the shape under it (the node that made it) in the selection the graph view shares, or clears
-        // the selection on empty canvas; `additive` (Shift or Ctrl) adds to it instead. True when the press did something.
-        bool selectAt(const newui::Point& pt, bool additive);
+        // The Select tool's click and marquee (see SelectTool); these hand over to it so callers and tests keep one entry point.
+        bool selectAt(const newui::Point& pt, bool additive) { return selectTool_->selectAt(pt, additive); }
+        const Marquee& marquee() const { return selectTool_->marquee(); }
+        void cycleSelectRegion() { selectTool_->cycleRegion(); }
+        const std::vector<std::string>& marqueeHits() const { return selectTool_->marqueeHits(); }
+        // The tools, and the card their options open in (built from Tool::options()).
+        ToolRegistry& tools() { return tools_; }
+        ToolOptionsCard& optionsCard() { return *optionsCard_; }
+        // Opens the options card of a tool at a point of the canvas; false for an unknown tool or one with no options.
+        bool showToolOptions(const std::string& toolId, const newui::Point& at);
         void runCommand(const std::string& command);
+        // True when runCommand does something for this command; the rings show every other slot dimmed and ignore it. When a command gets
+        // built, add it here (the list is the one place that says what works).
+        static bool commandWired(const std::string& command);
 
         // One step back or forward in the document's history (Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z); the graph panel is shown again so it follows.
         // False when there was nothing to do.
@@ -267,6 +283,7 @@ namespace curvy {
         std::unique_ptr<PointTable> pointTable_;
         NodePanel* nodePanel_ = nullptr;   // in the right dock, which owns it
         TransformPanel* transformPanel_ = nullptr;   // likewise
+        SelectPanel* selectPanel_ = nullptr;         // likewise
         std::shared_ptr<AssetManagerModel> assetModel_;   // shared with the panel, which can outlive this
         AssetManagerPanel* assetPanel_ = nullptr;   // likewise
         ScriptConsole* scriptConsole_ = nullptr;   // the application's, outlives the window
@@ -328,6 +345,14 @@ namespace curvy {
         float zoomStart_ = 1.0f;
         bool spaceDown_ = false, spaceUsed_ = false;
         std::chrono::steady_clock::time_point spaceStart_;
+
+        // Shows the right dock and the Select by panel (the ring's "By..." slot).
+        void showSelectPanel();
+        void makeTools();
+        ToolEvent toolEvent(const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys, bool secondary) const;
+        ToolRegistry tools_;
+        SelectTool* selectTool_ = nullptr;   // owned by tools_
+        std::unique_ptr<ToolOptionsCard> optionsCard_;
     };
 
 }

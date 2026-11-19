@@ -121,6 +121,48 @@ TEST_F(PythonNodeTest, aGeneratorWithoutInputsCanResizeAndAddAttributes) {
     EXPECT_FLOAT_EQ(result->detail("n"), 9.0f);
 }
 
+TEST_F(PythonNodeTest, primitivesWithoutAKeyStayAnonymousUnlessTheNetworkStampsThem) {
+    Network network;
+    const NodeId node = addPython(network, "geo.resize_points(4)\ngeo.add_primitive(0, 2)\ngeo.add_primitive(2, 2)\n", jitnodes::invalidNodeId);
+    const GeometryHandle plain = network.cook(node);
+    ASSERT_EQ(plain->primitiveCount(), 2u);
+    EXPECT_FALSE(plain->hasShapeKeys()) << "stamping is opt-in: geometry that never gets keys allocates nothing";
+}
+
+TEST_F(PythonNodeTest, aStampingNetworkGivesEveryUnkeyedPrimitiveItsOwnStableKey) {
+    Network network;
+    network.setStampAnonymousShapes(true);
+    const NodeId node = addPython(network, "geo.resize_points(4)\ngeo.add_primitive(0, 2)\ngeo.add_primitive(2, 2)\n", jitnodes::invalidNodeId);
+    const GeometryHandle first = network.cook(node);
+    ASSERT_EQ(first->primitiveCount(), 2u);
+    const std::string key0 = first->shapeKey(0), key1 = first->shapeKey(1);
+    EXPECT_FALSE(key0.empty());
+    EXPECT_FALSE(key1.empty());
+    EXPECT_NE(key0, key1) << "each primitive is a shape of its own";
+    EXPECT_EQ(first->shapes().size(), 2u);
+    EXPECT_NO_THROW(first->checkShapes());
+
+    network.node(node).setString("code", "geo.resize_points(4)\ngeo.add_primitive(0, 2)\ngeo.add_primitive(2, 2)\n# recook\n");
+    const GeometryHandle again = network.cook(node);
+    EXPECT_EQ(again->shapeKey(0), key0) << "a recook keeps the keys, so a selection survives it";
+    EXPECT_EQ(again->shapeKey(1), key1);
+}
+
+TEST_F(PythonNodeTest, aKeyTheScriptGaveIsKeptAndOnlyTheOthersAreStamped) {
+    Network network;
+    network.setStampAnonymousShapes(true);
+    const NodeId node = addPython(network, "geo.resize_points(4)\ngeo.add_primitive(0, 2, key='mine')\ngeo.add_primitive(2, 2)\n", jitnodes::invalidNodeId);
+    const GeometryHandle result = network.cook(node);
+    EXPECT_EQ(result->shapeKey(0), "mine");
+    EXPECT_FALSE(result->shapeKey(1).empty());
+    EXPECT_NE(result->shapeKey(1), "mine");
+}
+
+TEST_F(PythonNodeTest, theDocumentNetworkStamps) {
+    curvy::SketchDocument document;
+    EXPECT_TRUE(document.network().stampAnonymousShapes());
+}
+
 TEST_F(PythonNodeTest, resizingWhileAViewIsAliveIsRefusedAndAfterDelItWorks) {
     Network network;
     const NodeId bad = addPython(network, "x = geo.point_attrib('x')\ngeo.resize_points(10)\n", addLine(network, 3));

@@ -45,6 +45,10 @@ namespace curvy {
         // Selects the node that made the shapes with this key (what a click on the canvas hands over; see CanvasView::shapeAt). A key that
         // names no node clears the selection, unless `additive`, which then changes nothing; additive joins the selection like add().
         bool selectShapeKey(const std::string& key, bool additive = false);
+        // A marquee or a select-by result: the nodes that made these shapes, combined with the selection. Replace with no shapes clears;
+        // Add joins (the last new one becomes the primary); Subtract removes them. One onChanged at most.
+        enum class Combine { Replace, Add, Subtract };
+        bool selectShapeKeys(const std::vector<std::string>& keys, Combine how);
         // Replaces the selection with the nearest group or layer around the primary; false (nothing changes) at the top level.
         bool stepUp();
         // True when the node that made the shape, or a subnet around it (a layer or group), is selected: what the canvas highlights.

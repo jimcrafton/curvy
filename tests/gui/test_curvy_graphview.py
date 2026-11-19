@@ -42,7 +42,9 @@ class GraphViewCase(Samples):
         """With the graph up the canvas is covered and the ring that Space opens is the node ring, which swallows S."""
         self.app.click("graphToggle")                    # hiding the graph gives the canvas the keyboard
         self.app.wait_idle()
-        self.tap_space()                                 # no press on the canvas first: on empty canvas it would clear the selection the save keeps
+        canvas = self.app.find("canvas")
+        self.app._move_to((canvas.x + 40, canvas.y + canvas.h - 40))   # only a move: a press on empty canvas would clear the selection the save keeps; on the pasteboard Space opens the Document ring
+        self.tap_space()
         self.app.key("s")
         self.app.wait_idle()
         self.app.click("graphToggle")

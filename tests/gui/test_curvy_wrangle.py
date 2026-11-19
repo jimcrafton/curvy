@@ -17,7 +17,7 @@ class WrangleCode(CurvyCase):
     def setUp(self):
         # Listed in this order so the console is on top, where the window shows it; the node panel follows with the room that is left.
         self.make_settings_file("{ panels: { pyconsole: { userBodyHeight: 120 }, node: {}, pyeditor: { collapsed: true }, document: { collapsed: true }, "
-                                "transform: { collapsed: true }, assets: { collapsed: true } } }")
+                                "transform: { collapsed: true }, select: { hidden: true }, assets: { collapsed: true } } }")
         super().setUp()
         self.console_collapsed = False
 

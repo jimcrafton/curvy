@@ -23,6 +23,7 @@ namespace curvy {
         setName("CanvasView");
         setVisible(true);
         setAcceptsFocus(true);
+        setWantsTabKey(true);   // newui keeps Tab for focus navigation otherwise; the canvas uses it for the graph and for stepping through shapes
         onMouseDown.add(this, &CanvasView::handleMouseDown);
         onKeyDown.add(this, &CanvasView::handleKeyDown);
         onMouseWheel.add(this, &CanvasView::handleMouseWheel);

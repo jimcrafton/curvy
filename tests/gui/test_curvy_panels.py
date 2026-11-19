@@ -35,7 +35,7 @@ class SwatchesTab(DockCase):
     def setUp(self):
         # Listed in this order so the Document panel is on top; its body is tall enough for the tiles and the details box.
         self.make_settings_file("{ panels: { document: { userBodyHeight: 440 }, node: { collapsed: true }, transform: { collapsed: true }, "
-                                "pyeditor: { collapsed: true }, pyconsole: { collapsed: true }, assets: { collapsed: true } } }")
+                                "pyeditor: { collapsed: true }, pyconsole: { collapsed: true }, select: { hidden: true }, assets: { collapsed: true } } }")
         super().setUp()
 
     def show_tab(self):
@@ -98,7 +98,7 @@ class SwatchesTab(DockCase):
 class TransformPanel(DockCase):
     def setUp(self):
         self.make_settings_file("{ panels: { pyconsole: {}, pyeditor: { collapsed: true }, document: { collapsed: true }, node: { collapsed: true }, "
-                                "assets: { collapsed: true } } }")
+                                "select: { hidden: true }, assets: { collapsed: true } } }")
         super().setUp()
 
     def scene(self):

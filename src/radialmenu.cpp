@@ -23,14 +23,15 @@ namespace curvy {
         return Point(float(ringRadius * std::cos(angle)), float(ringRadius * std::sin(angle)));
     }
 
+    bool RadialLayout::slotOnLeft(int index, int count, double phase) {
+        const Point at = slotCenter(index, count, phase);
+        return double(at.x) < -0.2 * ringRadius;
+    }
+
     Point RadialLayout::optionBoxCenter(int index, int count, double phase) {
         const Point at = slotCenter(index, count, phase);
-        const double length = std::hypot(double(at.x), double(at.y));
-        const double ux = length > 0.0 ? double(at.x) / length : 0.0, uy = length > 0.0 ? double(at.y) / length : -1.0;
-        const double toSide = std::fabs(ux) > 1e-6 ? slotWidth * 0.5 / std::fabs(ux) : 1e9;
-        const double toEnd = std::fabs(uy) > 1e-6 ? slotHeight * 0.5 / std::fabs(uy) : 1e9;
-        const double out = std::min(toSide, toEnd) + 14.0;
-        return Point(float(double(at.x) + ux * out), float(double(at.y) + uy * out));
+        const double inset = slotWidth * 0.5 - 17.0;
+        return Point(float(double(at.x) + (slotOnLeft(index, count, phase) ? -inset : inset)), at.y);
     }
 
     int RadialLayout::slotAt(double dx, double dy, int count, double phase) {
@@ -101,11 +102,22 @@ namespace curvy {
         } else if (hit >= 0 && hit < int(ring_.slots.size())) {
             const RadialSlot& slot = ring_.slots[std::size_t(hit)];
             command = options && !slot.optionsCommand.empty() ? slot.optionsCommand : slot.command;
+            if (options && !slot.optionsCommand.empty()) {
+                const Point box = RadialLayout::optionBoxCenter(hit, int(ring_.slots.size()), ring_.phase());
+                optionAnchor_ = Point(center_.x + box.x, center_.y + box.y);
+            }
+        }
+        if (!command.empty() && !commandEnabled(command)) {
+            return;   // a command that is not built yet does nothing, and the ring stays open
         }
         close();
         if (!command.empty()) {
             onCommand(*this, command);
         }
+    }
+
+    bool RadialMenu::commandEnabled(const std::string& command) const {
+        return !isEnabled || isEnabled(command);
     }
 
     bool RadialMenu::handleKey(const std::string& key, bool options) {
@@ -194,42 +206,54 @@ namespace curvy {
             const Point at = RadialLayout::slotCenter(i, count, ring_.phase());
             const double w = RadialLayout::slotWidth, h = RadialLayout::slotHeight;
             const double x = cx + double(at.x) - w * 0.5, y = cy + double(at.y) - h * 0.5;
-            const bool hot = i == hot_;
-            ctx.set_fill_style(hot ? rgb(theme.accent) : rgb(theme.slot));
+            const bool enabled = commandEnabled(slot.command);
+            const bool hot = i == hot_ && enabled;   // a slot that does nothing never lights up
+            const auto faded = [enabled](std::uint32_t color) { return enabled ? rgb(color) : BLRgba32(Theme::argb(color, 0x70)); };
+            ctx.set_fill_style(hot ? rgb(theme.accent) : faded(theme.slot));
             ctx.fill_round_rect(BLRoundRect(x, y, w, h, h * 0.5));
-            ctx.set_stroke_style(hot ? rgb(theme.accent) : rgb(theme.border));
+            ctx.set_stroke_style(hot ? rgb(theme.accent) : faded(theme.border));
             ctx.set_stroke_width(1.0);
             ctx.stroke_round_rect(BLRoundRect(x + 0.5, y + 0.5, w - 1.0, h - 1.0, h * 0.5));
             if (blFont != nullptr && blFont->is_valid()) {
-                const float labelWidth = font.measureText(slot.label).width;
-                const float keyWidth = slot.key.empty() || blSmall == nullptr ? 0.0f : tiny.measureText(slot.key).width + 6.0f;
-                const double tx = x + (w - double(labelWidth + keyWidth)) * 0.5;
-                ctx.set_fill_style(rgb(hot ? theme.onAccent : theme.textPrimary));
-                ctx.fill_utf8_text(BLPoint(tx, y + h * 0.5 + 4.0), *blFont, slot.label.c_str(), slot.label.size());
-                if (keyWidth > 0.0f) {
-                    ctx.set_fill_style(hot ? rgb(theme.onAccent) : rgb(theme.textMuted));
-                    ctx.fill_utf8_text(BLPoint(tx + double(labelWidth) + 6.0, y + h * 0.5 + 4.0), *blSmall, slot.key.c_str(), slot.key.size());
+                // A small key chip, then the label; the content sits in the part of the pill the option box (at the outer end) leaves free.
+                constexpr double chip = 17.0, gap = 6.0, boxZone = 26.0;
+                const bool hasBox = !slot.optionsCommand.empty();
+                const bool left = RadialLayout::slotOnLeft(i, count, ring_.phase());
+                const double labelWidth = double(font.measureText(slot.label).width);
+                const double contentWidth = (slot.key.empty() ? 0.0 : chip + gap) + labelWidth;
+                const double zoneLeft = x + h * 0.35 + (hasBox && left ? boxZone : 0.0);
+                const double zoneRight = x + w - h * 0.35 - (hasBox && !left ? boxZone : 0.0);
+                double tx = zoneLeft + (zoneRight - zoneLeft - contentWidth) * 0.5;
+                if (!slot.key.empty() && blSmall != nullptr) {
+                    ctx.set_fill_style(hot ? BLRgba32(0x40FFFFFFu) : faded(theme.bgSurface));
+                    ctx.fill_round_rect(BLRoundRect(tx, y + h * 0.5 - chip * 0.5, chip, chip, 4.0));
+                    ctx.set_fill_style(hot ? rgb(theme.onAccent) : faded(theme.textMuted));
+                    const double keyWidth = double(tiny.measureText(slot.key).width);
+                    ctx.fill_utf8_text(BLPoint(tx + (chip - keyWidth) * 0.5, y + h * 0.5 + 3.5), *blSmall, slot.key.c_str(), slot.key.size());
+                    tx += chip + gap;
                 }
+                ctx.set_fill_style(hot ? rgb(theme.onAccent) : faded(enabled ? theme.textPrimary : theme.textMuted));
+                ctx.fill_utf8_text(BLPoint(tx, y + h * 0.5 + 4.0), *blFont, slot.label.c_str(), slot.label.size());
+            }
+            if (!slot.optionsCommand.empty()) {
+                // The option box (a tiny dialog glyph, heavier top edge) at the slot's outer end; it is a tap target. Dimmed when what it opens
+                // is not built.
+                const bool boxEnabled = commandEnabled(slot.optionsCommand);
+                const auto boxColor = [boxEnabled](std::uint32_t color) { return boxEnabled ? rgb(color) : BLRgba32(Theme::argb(color, 0x70)); };
+                const Point box = RadialLayout::optionBoxCenter(i, count, ring_.phase());
+                const double bx = cx + double(box.x) - 8.0, by = cy + double(box.y) - 6.75;
+                ctx.set_fill_style(hot ? BLRgba32(0x30000000u) : boxColor(theme.bgSurface));
+                ctx.fill_round_rect(BLRoundRect(bx, by, 16.0, 13.5, 2.7));
+                ctx.set_stroke_style(boxColor(boxEnabled ? theme.highlight : theme.textMuted));
+                ctx.set_stroke_width(1.35);
+                ctx.stroke_round_rect(BLRoundRect(bx + 0.7, by + 0.7, 14.6, 12.1, 2.7));
+                ctx.set_fill_style(boxColor(boxEnabled ? theme.highlight : theme.textMuted));
+                ctx.fill_rect(BLRect(bx, by, 16.0, 3.6));
             }
         }
 
-        // The option box (a tiny dialog glyph, heavier top edge) at the outer end of a slot that has options; it is a tap target.
-        for (int i = 0; i < count; ++i) {
-            if (ring_.slots[std::size_t(i)].optionsCommand.empty()) {
-                continue;
-            }
-            const Point box = RadialLayout::optionBoxCenter(i, count, ring_.phase());
-            const double bx = cx + double(box.x) - 8.0, by = cy + double(box.y) - 6.75;
-            ctx.set_fill_style(rgb(theme.bgSurface));
-            ctx.fill_round_rect(BLRoundRect(bx, by, 16.0, 13.5, 2.7));
-            ctx.set_stroke_style(rgb(theme.highlight));
-            ctx.set_stroke_width(1.35);
-            ctx.stroke_round_rect(BLRoundRect(bx + 0.7, by + 0.7, 14.6, 12.1, 2.7));
-            ctx.set_fill_style(rgb(theme.highlight));
-            ctx.fill_rect(BLRect(bx, by, 16.0, 3.6));
-        }
-
-        ctx.set_fill_style(hot_ == RadialLayout::hub ? rgb(theme.slot) : rgb(theme.bgSurface));
+        const bool hubEnabled = ring_.hubCommand.empty() || commandEnabled(ring_.hubCommand);
+        ctx.set_fill_style(hot_ == RadialLayout::hub && hubEnabled ? rgb(theme.slot) : rgb(theme.bgSurface));
         ctx.fill_circle(BLCircle(cx, cy, RadialLayout::hubRadius));
         ctx.set_stroke_style(rgb(theme.highlight));
         ctx.set_stroke_width(2.0);
@@ -238,11 +262,11 @@ namespace curvy {
             const float titleWidth = font.measureText(ring_.title).width;
             ctx.set_fill_style(rgb(theme.textPrimary));
             ctx.fill_utf8_text(BLPoint(cx - double(titleWidth) * 0.5, cy - 6.0), *blFont, ring_.title.c_str(), ring_.title.size());
-            ctx.set_fill_style(rgb(theme.highlight));
+            ctx.set_fill_style(hubEnabled ? rgb(theme.highlight) : BLRgba32(Theme::argb(theme.textMuted, 0x70)));
             ctx.fill_utf8_text(BLPoint(cx - 6.0, cy + 8.0), *blFont, "...", 3);
             if (blSmall != nullptr && blSmall->is_valid() && !ring_.caption.empty()) {
                 const float captionWidth = tiny.measureText(ring_.caption).width;
-                ctx.set_fill_style(rgb(theme.textMuted));
+                ctx.set_fill_style(hubEnabled ? rgb(theme.textMuted) : BLRgba32(Theme::argb(theme.textMuted, 0x70)));
                 ctx.fill_utf8_text(BLPoint(cx - double(captionWidth) * 0.5, cy + 22.0), *blSmall, ring_.caption.c_str(), ring_.caption.size());
             }
         }

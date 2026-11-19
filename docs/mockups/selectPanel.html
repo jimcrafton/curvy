@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>curvy select by panel (static layout for conversion)</title>
+<!-- The "Select by" panel of the right dock, laid out for html-mockup-to-newui (no script: selectionModes.html is the interactive prototype of the
+     same design). Sample rows stand in for what the code fills: one row per distinct value of the chosen property in the document (or in the
+     selection), with its swatch (colour properties only) and how many shapes have it. The row of the selected shape's own value is the "on" row.
+     Width is the right dock's. Convert with: html2newui.py selectPanel.html --fragment --name selectPanel -->
+<link rel="stylesheet" href="preview.css">
+<style>
+  body { margin: 0; padding: 10px; width: 268px; background: #1E1E1E; font-family: "Segoe UI", sans-serif; font-size: 12px; color: #F0F0F0; display: flex; flex-direction: column; gap: 6px; }
+  .row { display: flex; flex-direction: row; align-items: center; gap: 6px; }
+  .title { color: #A0A0A0; font-size: 10px; }
+  .tabs { display: flex; flex-direction: row; gap: 3px; }
+  .tabs button { flex-grow: 1; height: 22px; }
+  .tabs button.on { background: #FFB454; border: 1px solid #FFB454; color: #1B1B1B; }
+  .list { display: flex; flex-direction: column; gap: 2px; height: 168px; padding: 3px; background: #121212; border: 1px solid #4A4A4A; }
+  .item { display: flex; flex-direction: row; align-items: center; gap: 8px; height: 24px; padding: 0 6px; }
+  .item.on { background: #2A3F66; border: 1px solid #4C8DFF; }
+  .item .chip { width: 14px; height: 14px; border: 1px solid #000000; }
+  .item .grow { flex-grow: 1; }
+  .count { color: #A0A0A0; }
+  .label { width: 52px; color: #A0A0A0; }
+  .buttons { display: flex; flex-direction: row; gap: 5px; }
+  .buttons button { flex-grow: 1; height: 24px; }
+  .note { color: #A0A0A0; font-size: 11px; }
+</style>
+</head>
+<body>
+  <span id="selectTitle" class="title">SELECT BY</span>
+  <div id="selectTabsRow"><canvas id="selectTabs" data-newui-type="SegmentedControl"></canvas></div>
+
+  <div id="selectValuesBox" class="list"><canvas id="selectValues" data-newui-type="ListView" style="flex-grow:1"></canvas></div>
+
+  <div id="selectWithinRow" class="row"><span id="withinLabel" class="label">Within</span>
+    <div id="selectWithinBox" style="flex-grow:1"><canvas id="selectWithin" data-newui-type="SegmentedControl"></canvas></div>
+  </div>
+
+  <div id="selectButtons" class="buttons">
+    <button id="selectAddButton">Add</button>
+    <button id="selectSubtractButton">Subtract</button>
+    <button id="selectSimilarButton">Similar</button>
+  </div>
+
+  <span id="selectStatus" class="note">1 shape selected. Click a value to select every shape that has it.</span>
+</body>
+</html>
