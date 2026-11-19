@@ -49,6 +49,25 @@ namespace curvy {
         // Add joins (the last new one becomes the primary); Subtract removes them. One onChanged at most.
         enum class Combine { Replace, Add, Subtract };
         bool selectShapeKeys(const std::vector<std::string>& keys, Combine how);
+        // The same combine rules for nodes the caller already chose (the canvas picks them with pickShapeKey).
+        bool selectNodes(const std::vector<NodeRef>& nodes, Combine how);
+
+        // Isolation, as in Illustrator: a click on the canvas picks a whole group; a double-click enters that group, so its members become
+        // the pickable things and the rest of the artwork is dimmed and not pickable, until exitGroup(). Layers are never entered.
+        // kNoNode: the top level.
+        const NodeRef& isolation() const { return isolation_; }
+        // What a click on a shape with this key selects at the current level: the outermost group inside the isolated group (or inside the
+        // layer at the top level), or the shape's own node when no group is left. kNoNode for a shape outside the isolated group.
+        NodeRef pickShapeKey(const std::string& key) const;
+        // Enters the group a click on this shape would pick and selects what is under the pointer one level down. False (nothing
+        // changes) when the click would pick a shape rather than a group.
+        bool enterGroupAt(const std::string& key);
+        // Enters a group directly (scripts); the selection is left as it is. False for a layer, a non-group or the group already entered.
+        bool enterGroup(const NodeRef& group);
+        // Goes up one level and selects the group that was left. False at the top level.
+        bool exitGroup();
+        // True for a shape outside the isolated group.
+        bool isShapeKeyDimmed(const std::string& key) const;
         // Replaces the selection with the nearest group or layer around the primary; false (nothing changes) at the top level.
         bool stepUp();
         // True when the node that made the shape, or a subnet around it (a layer or group), is selected: what the canvas highlights.
@@ -93,6 +112,7 @@ namespace curvy {
         newui::Connection connection_;
         std::vector<NodeRef> items_;
         NodeRef primary_;
+        NodeRef isolation_;
     };
 
 }

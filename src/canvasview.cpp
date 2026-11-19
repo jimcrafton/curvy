@@ -25,6 +25,7 @@ namespace curvy {
         setAcceptsFocus(true);
         setWantsTabKey(true);   // newui keeps Tab for focus navigation otherwise; the canvas uses it for the graph and for stepping through shapes
         onMouseDown.add(this, &CanvasView::handleMouseDown);
+        onMouseDblClick.add(this, &CanvasView::handleMouseDoubleClick);
         onKeyDown.add(this, &CanvasView::handleKeyDown);
         onMouseWheel.add(this, &CanvasView::handleMouseWheel);
     }
@@ -150,10 +151,11 @@ namespace curvy {
     }
 
     void CanvasView::renderArtwork(BLContext& ctx, const Rect& client) {
-        renderArtworkAtScale(ctx, *document_, double(client.left()) + double(panX_), double(client.top()) + double(panY_), double(zoom_));
+        renderArtworkAtScale(ctx, *document_, double(client.left()) + double(panX_), double(client.top()) + double(panY_), double(zoom_), shapeDimmed);
     }
 
-    void CanvasView::renderArtworkAtScale(BLContext& ctx, SketchDocument& document, double originX, double originY, double scale) {
+    void CanvasView::renderArtworkAtScale(BLContext& ctx, SketchDocument& document, double originX, double originY, double scale,
+                                          const std::function<bool(const std::string&)>& dimmed) {
         const jitnodes::GeometryHandle artwork = document.artwork();
         if (artwork == nullptr || artwork->primitiveCount() == 0 || !artwork->hasPointAttrib("x")) {
             return;
@@ -228,11 +230,23 @@ namespace curvy {
             }
         }
 
+        std::vector<char> faded;
+        if (dimmed) {
+            faded.reserve(shapes.size());
+            for (const jitnodes::ShapeRange& shape : shapes) {
+                faded.push_back(dimmed(std::string(shape.key)) ? 1 : 0);
+            }
+        }
+        constexpr double fadedAlpha = 0.3;
+
         const auto paintShape = [&](BLContext& target, std::size_t s) {
             const std::size_t i = shapes[s].first;
             const BLPath& path = paths[s];
             if (path.is_empty()) {
                 return;
+            }
+            if (!faded.empty() && faded[s] != 0) {
+                target.set_global_alpha(fadedAlpha);
             }
             if (fillA != nullptr && fillA[i] > 0.0f) {
                 target.set_fill_rule(evenOdd != nullptr && evenOdd[i] != 0.0f ? BL_FILL_RULE_EVEN_ODD : BL_FILL_RULE_NON_ZERO);
@@ -242,6 +256,7 @@ namespace curvy {
                 target.set_stroke_width(double(strokeW[i]) * scale);
                 target.stroke_path(path, packed(strokeR[i], strokeG[i], strokeB[i], strokeA[i]));
             }
+            target.set_global_alpha(1.0);
         };
 
         // Paints shapes [first, last) at `depth` into `target`, whose pixel (0, 0) is (offsetX, offsetY) of the page-space the paths are in.
@@ -311,6 +326,10 @@ namespace curvy {
             root->setFocusedSubView(this);
         }
         return onPressFilter && onPressFilter(pt, buttons, keys) ? SyncReturn::Handled : SyncReturn::Ignored;
+    }
+
+    SyncReturn CanvasView::handleMouseDoubleClick(View&, const Point& pt, std::uint32_t buttons, std::uint32_t keys) {
+        return onDoubleClickFilter && onDoubleClickFilter(pt, buttons, keys) ? SyncReturn::Handled : SyncReturn::Ignored;
     }
 
     SyncReturn CanvasView::handleKeyDown(View&, std::uint32_t keyMask, int, int, std::uint32_t vkCode) {

@@ -1553,8 +1553,13 @@ namespace curvy {
             return SyncReturn::Handled;
         };
         canvas_->onPressFilter = [this](const Point& pt, std::uint32_t buttons, std::uint32_t keys) { return filterPress(pt, buttons, keys); };
+        canvas_->onDoubleClickFilter = [this](const Point& pt, std::uint32_t buttons, std::uint32_t keys) {
+            const RootView* root = canvas_->rootView();
+            return doubleClicked(root != nullptr ? root->penState() : PenState(), pt, buttons, keys);
+        };
         canvas_->onKeyFilter = [this](std::uint32_t mask, std::uint32_t vk) { return filterKey(mask, vk); };
         canvas_->onPaintTop = [this](BLContext& ctx) { paintTop(ctx); };
+        canvas_->shapeDimmed = [this](const std::string& key) { return graphView_->selectionModel().isShapeKeyDimmed(key); };
         graphView_->selectionModel().onChanged += [this](SelectionModel&) {
             canvas_->style().markDirty();   // the outline of the selected shapes
             return SyncReturn::Ignored;
@@ -1754,10 +1759,10 @@ namespace curvy {
         // Over the page: the creation ring. Over the grey workspace around it: the document ring.
         const Point at = ringPoint();
         const std::optional<ShapeHit> hit = canvas_->shapeAt(at);
-        if (hit.has_value() && !hit->key.empty()) {
+        if (hit.has_value() && !hit->key.empty() && !graphView_->selectionModel().isShapeKeyDimmed(hit->key)) {
             SelectionModel& selection = graphView_->selectionModel();
             if (!selection.isShapeKeySelected(hit->key)) {
-                selection.selectShapeKey(hit->key, false);
+                selection.set(selection.pickShapeKey(hit->key));
             }
             showRing(objectRing(), at, byPress);
             return;
@@ -1968,6 +1973,17 @@ namespace curvy {
     bool WorkspaceController::filterPress(const Point& pt, std::uint32_t buttons, std::uint32_t keys) {
         const RootView* root = canvas_->rootView();
         return pressed(root != nullptr ? root->penState() : PenState(), pt, buttons, keys);
+    }
+
+    bool WorkspaceController::doubleClicked(const PenState& pen, const Point& pt, std::uint32_t buttons, std::uint32_t keys) {
+        const bool plainLeft = (buttons & mbmLeftButton) != 0 && (buttons & mbmRightButton) == 0 && !spaceDown_ && !pen.eraser && model_->documentOpen() &&
+                               !graphOverlay_->isVisible() && !menu_->isOpen();
+        if (plainLeft && tools_.current()->inputDoubleClick(toolEvent(pt, buttons, keys, false))) {
+            pointer_ = pt;
+            pointerKnown_ = true;
+            return true;
+        }
+        return pressed(pen, pt, buttons, keys);
     }
 
     bool WorkspaceController::pressed(const PenState& pen, const Point& pt, std::uint32_t buttons, std::uint32_t keys) {

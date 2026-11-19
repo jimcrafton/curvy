@@ -523,6 +523,15 @@ TEST(ScriptModule, theEditorSelectionIsReadAndChangedByScripts) {
                  "print(selection.step_up())");
     EXPECT_TRUE(result.ok) << result.error;
     EXPECT_EQ(result.output, "True G\nFalse\n");
+
+    result = run("print(selection.isolation)\n"
+                 "print(selection.enter_group(doc.layers[0]))\n"
+                 "print(selection.enter_group(g), selection.isolation.name)\n"
+                 "print(selection.enter_group(g))\n"
+                 "print(selection.exit_group(), selection.isolation, selection.primary.name)\n"
+                 "print(selection.exit_group())");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "None\nFalse\nTrue G\nFalse\nTrue None G\nFalse\n");
 }
 
 TEST(ScriptModule, shapesAreFoundByPointRectangleAndProperty) {

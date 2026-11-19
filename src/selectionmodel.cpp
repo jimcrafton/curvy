@@ -28,6 +28,7 @@ namespace curvy {
 
     void SelectionModel::setDocument(GraphDocument* document) {
         disconnect();
+        isolation_ = NodeRef();
         document_ = document;
         documentLife_ = document != nullptr ? document->lifetime() : std::weak_ptr<void>();
         if (document_ != nullptr) {
@@ -81,7 +82,14 @@ namespace curvy {
         }
         std::vector<NodeRef> nodes;
         for (const std::string& key : keys) {
-            const NodeRef node = document_->nodeForShapeKey(key);
+            nodes.push_back(document_->nodeForShapeKey(key));
+        }
+        return selectNodes(nodes, how);
+    }
+
+    bool SelectionModel::selectNodes(const std::vector<NodeRef>& all, Combine how) {
+        std::vector<NodeRef> nodes;
+        for (const NodeRef& node : all) {
             if (node.valid() && std::find(nodes.begin(), nodes.end(), node) == nodes.end()) {
                 nodes.push_back(node);
             }
@@ -110,6 +118,71 @@ namespace curvy {
         }
         const NodeRef up = enclosing(primary_);
         return up.valid() && set(up);
+    }
+
+    NodeRef SelectionModel::pickShapeKey(const std::string& key) const {
+        const std::vector<std::uint32_t> uids = documentAlive() ? GraphDocument::uidsOfShapeKey(key) : std::vector<std::uint32_t>();
+        if (uids.empty()) {
+            return kNoNode;
+        }
+        std::size_t from = 0;
+        if (known(isolation_)) {
+            const auto inside = std::find(uids.begin(), uids.end() - 1, document_->node(isolation_).uid());
+            if (inside == uids.end() - 1) {
+                return kNoNode;
+            }
+            from = std::size_t(inside - uids.begin()) + 1;
+        }
+        for (std::size_t i = from; i + 1 < uids.size(); ++i) {   // the last uid is the generator itself
+            const NodeRef ref = document_->nodeOfUid(uids[i]);
+            if (known(ref) && dynamic_cast<const ObjectNode*>(&document_->node(ref)) != nullptr && !document_->node(ref).hasTag(layerTag)) {
+                return ref;
+            }
+        }
+        return document_->nodeForShapeKey(key);
+    }
+
+    bool SelectionModel::enterGroupAt(const std::string& key) {
+        const NodeRef group = pickShapeKey(key);
+        if (!known(group) || dynamic_cast<const ObjectNode*>(&document_->node(group)) == nullptr) {
+            return false;
+        }
+        isolation_ = group;
+        if (!set(pickShapeKey(key))) {
+            changed();   // the dimming around the group still has to repaint
+        }
+        return true;
+    }
+
+    bool SelectionModel::enterGroup(const NodeRef& group) {
+        if (!known(group) || group == isolation_ || dynamic_cast<const ObjectNode*>(&document_->node(group)) == nullptr ||
+            document_->node(group).hasTag(layerTag)) {
+            return false;
+        }
+        isolation_ = group;
+        changed();
+        return true;
+    }
+
+    bool SelectionModel::exitGroup() {
+        if (!isolation_.valid()) {
+            return false;
+        }
+        const NodeRef left = isolation_;
+        const NodeRef up = known(left) ? enclosing(left) : kNoNode;
+        isolation_ = known(up) && !document_->node(up).hasTag(layerTag) ? up : NodeRef();
+        if (!set(left)) {
+            changed();
+        }
+        return true;
+    }
+
+    bool SelectionModel::isShapeKeyDimmed(const std::string& key) const {
+        if (!known(isolation_)) {
+            return false;
+        }
+        const std::vector<std::uint32_t> uids = GraphDocument::uidsOfShapeKey(key);
+        return std::find(uids.begin(), uids.end(), document_->node(isolation_).uid()) == uids.end();
     }
 
     bool SelectionModel::isShapeKeySelected(const std::string& key) const {
@@ -205,10 +278,17 @@ namespace curvy {
     }
 
     bool SelectionModel::prune() {
+        const bool isolationLost = isolation_.valid() && !known(isolation_);
+        if (isolationLost) {
+            isolation_ = NodeRef();
+        }
         const std::size_t before = items_.size();
         items_.erase(std::remove_if(items_.begin(), items_.end(), [this](const NodeRef& node) { return !known(node); }), items_.end());
         if (items_.size() == before) {
-            return false;
+            if (isolationLost) {
+                changed();
+            }
+            return isolationLost;
         }
         if (!contains(primary_)) {
             primary_ = items_.empty() ? NodeRef() : items_.back();

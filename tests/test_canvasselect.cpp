@@ -25,6 +25,8 @@ namespace {
             return newui::Point(float(p.x), float(p.y));
         }
         bool press(double x, double y, std::uint32_t keys = 0) { return window().pressed(pen_, at(x, y), newui::mbmLeftButton, keys); }
+        // Windows sends the double-click in place of the second press.
+        bool doubleClick(double x, double y, std::uint32_t keys = 0) { return window().doubleClicked(pen_, at(x, y), newui::mbmLeftButton, keys); }
         std::string primaryType() { return window().document().node(selection().primary()).typeName(); }
 
         newui::PenState pen_;
@@ -63,24 +65,116 @@ TEST_F(CanvasSelectTest, shiftAddsAndEmptyCanvasClears) {
     EXPECT_FALSE(press(600.0, 700.0)) << "nothing to clear: the press is not used";
 }
 
-TEST_F(CanvasSelectTest, clickingTheSelectedShapeAgainGoesUpToItsLayerThenStartsOver) {
+TEST_F(CanvasSelectTest, clickingTheSelectedShapeAgainKeepsItSelected) {
     press(100.0, 100.0);
-    ASSERT_EQ(primaryType(), "circle");
+    const curvy::NodeRef first = selection().primary();
     EXPECT_TRUE(press(100.0, 100.0));
-    ASSERT_EQ(selection().items().size(), 1u);
-    EXPECT_EQ(selection().primary().id, window().document().childrenOf()[0].id) << "the layer";
-    EXPECT_TRUE(selection().isShapeKeySelected(std::string(window().document().artwork()->shapes().back().key))) << "the layer holds both shapes";
-
-    EXPECT_TRUE(press(300.0, 100.0));
-    EXPECT_EQ(primaryType(), "circle") << "at the top it starts over, at the shape that was clicked";
-    EXPECT_EQ(selection().fill(), second_);
+    EXPECT_EQ(selection().primary(), first) << "a layer is never the pick, and a shape in no group has nothing above it to step to";
+    EXPECT_FALSE(selection().isolation().valid());
 }
 
 TEST_F(CanvasSelectTest, stepUpDoesNothingWhenNothingEncloses) {
     EXPECT_FALSE(selection().stepUp());
     press(100.0, 100.0);
-    press(100.0, 100.0);
+    EXPECT_TRUE(selection().stepUp()) << "the script call still reaches the layer";
     EXPECT_FALSE(selection().stepUp()) << "a layer is the top";
+}
+
+namespace {
+
+    // A group of two circles next to the fixture's two loose ones: (450,400) and (520,400), radius 30.
+    class IsolationTest : public CanvasSelectTest {
+    protected:
+        void SetUp() override {
+            CanvasSelectTest::SetUp();
+            group_ = window().document().addGroup(layer_, "G");
+            window().document().addCircle(group_, 450.0f, 400.0f, 30.0f, newui::Color(1.0f, 1.0f, 0.0f, 1.0f));
+            window().document().addCircle(group_, 520.0f, 400.0f, 30.0f, newui::Color(0.0f, 1.0f, 1.0f, 1.0f));
+        }
+
+        bool escape() { return canvas().onKeyFilter(0, newui::vkEscape); }
+        bool dimmed(double x, double y) {
+            const auto hit = canvas().shapeAt(at(x, y));
+            return hit.has_value() && selection().isShapeKeyDimmed(hit->key);
+        }
+
+        curvy::NodeRef group_;
+    };
+
+}
+
+TEST_F(IsolationTest, aClickOnAGroupedShapeSelectsTheWholeGroup) {
+    EXPECT_TRUE(press(450.0, 400.0));
+    EXPECT_EQ(selection().primary(), group_);
+    EXPECT_TRUE(selection().isShapeKeySelected(std::string(window().document().artwork()->shapes().back().key))) << "the group's other circle shows selected too";
+    EXPECT_FALSE(selection().isolation().valid());
+}
+
+TEST_F(IsolationTest, aDoubleClickEntersTheGroupAndSelectsTheShapeUnderThePointer) {
+    press(450.0, 400.0);
+    EXPECT_TRUE(doubleClick(450.0, 400.0));
+    EXPECT_EQ(selection().isolation(), group_);
+    ASSERT_EQ(selection().items().size(), 1u);
+    EXPECT_EQ(primaryType(), "circle");
+    EXPECT_FALSE(dimmed(450.0, 400.0));
+    EXPECT_FALSE(dimmed(520.0, 400.0));
+    EXPECT_TRUE(dimmed(100.0, 100.0)) << "the artwork outside the group is dimmed";
+
+    selection().clear();
+    EXPECT_TRUE(press(520.0, 400.0));
+    EXPECT_EQ(primaryType(), "circle") << "inside the group a click picks one member";
+    EXPECT_EQ(selection().isolation(), group_);
+}
+
+TEST_F(IsolationTest, insideAGroupTheOutsideCannotBePicked) {
+    press(450.0, 400.0);
+    doubleClick(450.0, 400.0);
+    ASSERT_EQ(selection().isolation(), group_);
+    EXPECT_TRUE(press(100.0, 100.0)) << "the press only clears: the dimmed circle is not a hit";
+    EXPECT_TRUE(selection().empty());
+    EXPECT_EQ(selection().isolation(), group_);
+}
+
+TEST_F(IsolationTest, escapeLeavesTheGroupAndSelectsIt) {
+    press(450.0, 400.0);
+    doubleClick(450.0, 400.0);
+    ASSERT_EQ(selection().isolation(), group_);
+    EXPECT_TRUE(escape());
+    EXPECT_FALSE(selection().isolation().valid());
+    EXPECT_EQ(selection().primary(), group_);
+    EXPECT_FALSE(dimmed(100.0, 100.0));
+    EXPECT_TRUE(escape());
+    EXPECT_TRUE(selection().empty()) << "the next Escape clears the selection as before";
+}
+
+TEST_F(IsolationTest, aDoubleClickOnEmptyCanvasLeavesTheGroup) {
+    press(450.0, 400.0);
+    doubleClick(450.0, 400.0);
+    ASSERT_EQ(selection().isolation(), group_);
+    press(600.0, 700.0);
+    EXPECT_TRUE(doubleClick(600.0, 700.0));
+    EXPECT_FALSE(selection().isolation().valid());
+}
+
+TEST_F(IsolationTest, aDoubleClickOnALooseShapeJustSelectsIt) {
+    press(100.0, 100.0);
+    EXPECT_TRUE(doubleClick(100.0, 100.0)) << "nothing to enter: it is an ordinary press";
+    EXPECT_FALSE(selection().isolation().valid());
+    EXPECT_EQ(primaryType(), "circle");
+}
+
+TEST_F(IsolationTest, aDoubleClickWithAModifierDoesNotEnter) {
+    press(450.0, 400.0, newui::kmShift);
+    doubleClick(450.0, 400.0, newui::kmShift);
+    EXPECT_FALSE(selection().isolation().valid());
+}
+
+TEST_F(IsolationTest, theIsolationEndsWhenItsGroupIsDeleted) {
+    press(450.0, 400.0);
+    doubleClick(450.0, 400.0);
+    ASSERT_EQ(selection().isolation(), group_);
+    window().document().removeGraphNode(group_);
+    EXPECT_FALSE(selection().isolation().valid());
 }
 
 TEST_F(CanvasSelectTest, theSelectionIsSharedWithTheGraphView) {

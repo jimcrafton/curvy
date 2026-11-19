@@ -422,6 +422,12 @@ namespace curvy {
                 .def("clear", [](const ScriptSelection& s) { return s.model().clear(); })
                 .def("step_up", [](const ScriptSelection& s) { return s.model().stepUp(); },
                      "Selects the group or layer around the primary; False at the top level.")
+                .def_property_readonly("isolation", [](const ScriptSelection& s) { return wrapOptional(s.guard(), s.model().isolation()); },
+                                       "The group being edited (the canvas dims the rest), or None at the top level.")
+                .def("enter_group", [](const ScriptSelection& s, const py::object& group) { return s.model().enterGroup(refOf(s.guard()->get(), group)); },
+                     "Edits inside this group, as a double-click on the canvas does; False for a layer or a non-group.")
+                .def("exit_group", [](const ScriptSelection& s) { return s.model().exitGroup(); },
+                     "Goes up one level and selects the group that was left; False at the top level.")
                 .def_property_readonly("object", role(Role::Object), "The layer or group the primary belongs to, or None.")
                 .def_property_readonly("layer", role(Role::Layer))
                 .def_property_readonly("fill", role(Role::Fill))

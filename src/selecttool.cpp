@@ -29,7 +29,46 @@ namespace curvy {
         if (!context_.documentOpen() || context_.graphShown() || context_.menuOpen()) {
             return false;
         }
-        return marquee_.polygonOpen() || !context_.canvas.shapeAt(pt).has_value();
+        return marquee_.polygonOpen() || !hitAt(pt).has_value();
+    }
+
+    std::optional<ShapeHit> SelectTool::hitAt(const Point& pt) const {
+        std::optional<ShapeHit> hit = context_.canvas.shapeAt(pt);
+        if (hit.has_value() && context_.selection.isShapeKeyDimmed(hit->key)) {
+            return std::nullopt;
+        }
+        return hit;
+    }
+
+    std::vector<NodeRef> SelectTool::picked(const std::vector<std::string>& keys) const {
+        std::vector<NodeRef> nodes;
+        nodes.reserve(keys.size());
+        for (const std::string& key : keys) {
+            nodes.push_back(context_.selection.pickShapeKey(key));
+        }
+        return nodes;
+    }
+
+    bool SelectTool::inputDoubleClick(const ToolEvent& event) {
+        if (context_.menuOpen() || (event.keys & (kmShift | kmCtrl | kmAlt)) != 0 || marquee_.polygonOpen()) {
+            return false;
+        }
+        SelectionModel& selection = context_.selection;
+        const Point& pt = event.view;
+        const std::optional<ShapeHit> hit = hitAt(pt);
+        if (hit.has_value() && !hit->key.empty()) {
+            if (!selection.enterGroupAt(hit->key)) {
+                return false;
+            }
+            context_.say("Editing " + context_.document.node(selection.isolation()).name() + ", Esc leaves it");
+            context_.showSelection();
+            return true;
+        }
+        if (!selection.exitGroup()) {
+            return false;
+        }
+        context_.say("Left the group");
+        return true;
     }
 
     bool SelectTool::inputDown(const ToolEvent& event) {
@@ -93,6 +132,10 @@ namespace curvy {
                 return true;
             }
         }
+        if (event.vk == vkEscape && !shift && !context_.graphShown() && context_.selection.exitGroup()) {
+            context_.say("Left the group");
+            return true;
+        }
         if (event.vk == vkEscape && !shift && !context_.graphShown() && !context_.selection.empty()) {
             context_.selection.clear();
             context_.say("Selection cleared");
@@ -143,6 +186,9 @@ namespace curvy {
             region.push_back(context_.canvas.toDocument(p));
         }
         marqueeHits_ = shapesInRegion(*artwork, region, marquee_.mode());
+        marqueeHits_.erase(std::remove_if(marqueeHits_.begin(), marqueeHits_.end(),
+                                          [this](const std::string& key) { return context_.selection.isShapeKeyDimmed(key); }),
+                           marqueeHits_.end());
     }
 
     void SelectTool::finishMarquee() {
@@ -151,7 +197,7 @@ namespace curvy {
         }
         updateMarqueeHits();
         const std::size_t count = marqueeHits_.size();
-        context_.selection.selectShapeKeys(marqueeHits_, marquee_.how());
+        context_.selection.selectNodes(picked(marqueeHits_), marquee_.how());
         cancel();
         context_.say(std::to_string(count) + (count == 1 ? " shape" : " shapes"));
     }
@@ -166,13 +212,17 @@ namespace curvy {
 
     bool SelectTool::selectAt(const Point& pt, bool additive) {
         SelectionModel& selection = context_.selection;
-        const std::optional<ShapeHit> hit = context_.canvas.shapeAt(pt);
+        const std::optional<ShapeHit> hit = hitAt(pt);
         if (!hit.has_value() || hit->key.empty()) {   // an anonymous shape has no node to name
             return !additive && selection.clear();
         }
-        // A click on what is already selected (or inside the selected group or layer) goes up one level; at the top it starts over at the shape.
-        const bool steppingUp = !additive && selection.items().size() == 1 && selection.isShapeKeySelected(hit->key);
-        const bool changed = steppingUp ? (selection.stepUp() || selection.selectShapeKey(hit->key, false)) : selection.selectShapeKey(hit->key, additive);
+        const NodeRef pick = selection.pickShapeKey(hit->key);
+        bool changed = false;
+        if (additive) {
+            changed = pick.valid() && (selection.contains(pick) ? selection.setPrimary(pick) : selection.add(pick));
+        } else {
+            changed = selection.set(pick);
+        }
         if (changed && selection.primary().valid()) {
             context_.showSelection();
             context_.say(context_.document.node(selection.primary()).name());
@@ -190,7 +240,8 @@ namespace curvy {
                 }
             }
         }
-        context_.selection.selectShapeKeys(keys, SelectionModel::Combine::Replace);
+        keys.erase(std::remove_if(keys.begin(), keys.end(), [this](const std::string& key) { return context_.selection.isShapeKeyDimmed(key); }), keys.end());
+        context_.selection.selectNodes(picked(keys), SelectionModel::Combine::Replace);
         context_.say(std::to_string(keys.size()) + (keys.size() == 1 ? " shape" : " shapes"));
     }
 
@@ -204,7 +255,7 @@ namespace curvy {
         std::size_t first = 0, last = 0;
         bool found = false;
         for (const jitnodes::ShapeRange& shape : artwork->shapes()) {
-            if (shape.key.empty()) {
+            if (shape.key.empty() || selection.isShapeKeyDimmed(std::string(shape.key))) {
                 continue;
             }
             keys.push_back(std::string(shape.key));
@@ -221,7 +272,7 @@ namespace curvy {
         }
         const std::size_t count = keys.size();
         const std::size_t next = step > 0 ? (last + 1) % count : (first + count - 1) % count;
-        selection.selectShapeKey(keys[next], false);
+        selection.set(selection.pickShapeKey(keys[next]));
         context_.say("Shape " + std::to_string(next + 1) + " of " + std::to_string(count));
         return true;
     }

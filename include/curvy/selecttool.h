@@ -1,15 +1,19 @@
 #pragma once
 
 #include "curvy/marquee.h"
+#include "curvy/noderef.h"
+#include "curvy/shapepaths.h"
 #include "curvy/tool.h"
 
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace curvy {
 
-    // The default tool: a click selects the shape under the pointer (the node that made it; a click on what is selected goes up one level),
-    // and a drag on empty canvas is a marquee. Settings::selectRegion, selectTwoButton and selectContainment are its options. Primary button
+    // The default tool: a click selects what is under the pointer at the current level (a whole group, or a shape that is in no group; see
+    // SelectionModel::pickShapeKey), a double-click on a group enters it (Illustrator's isolation: the rest is dimmed and not pickable),
+    // Escape or a double-click on empty canvas leaves it, and a drag on empty canvas is a marquee. Settings::selectRegion, selectTwoButton and selectContainment are its options. Primary button
     // = takes what the region fully contains, secondary = what it touches (selectTwoButton; off: both use selectContainment). Shift/Ctrl add,
     // Alt subtracts. The polygon takes one press per corner and closes with Enter or a press on its first corner; Escape cancels a region.
     // Also here, because they are selection commands of this tool: Ctrl+A / Tab cycling (selectAll, cycle), M cycles the region, Escape clears.
@@ -24,6 +28,8 @@ namespace curvy {
         void cancel() override;
         bool busy() const override { return marquee_.active(); }
         bool inputDown(const ToolEvent& event) override;
+        // On a group enters it; on empty canvas inside a group leaves it; anything else is not used (an ordinary press follows).
+        bool inputDoubleClick(const ToolEvent& event) override;
         void inputMove(const ToolEvent& event) override;
         void inputUp(const ToolEvent& event) override;
         bool keyDown(const ToolKeyEvent& event) override;
@@ -45,6 +51,9 @@ namespace curvy {
         bool cycle(int step);
 
     private:
+        // The shape under a canvas point, leaving out what is dimmed (outside the group being edited).
+        std::optional<ShapeHit> hitAt(const newui::Point& pt) const;
+        std::vector<NodeRef> picked(const std::vector<std::string>& keys) const;
         bool marqueeMayStart(const newui::Point& pt) const;
         void beginMarquee(const newui::Point& pt, bool secondary, std::uint32_t keys);
         void updateMarqueeHits();

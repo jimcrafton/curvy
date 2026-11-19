@@ -27,12 +27,33 @@ outline and then `current()->paintOverlay`. A secondary press that the tool does
 
 ## `SelectTool` (`selecttool.h`, `selecttool.cpp`)
 
-The only tool so far, and the default. It owns the `Marquee` gesture and the marquee's hit list, and has click-select (`selectAt`: step up
-on a click on what is selected), Esc (cancel a region, or clear the selection), `M` (cycle the region), `selectAll` (Ctrl+A) and `cycle`
+The only tool so far, and the default. It owns the `Marquee` gesture and the marquee's hit list, and has click-select (`selectAt`), Esc
+(cancel a region, leave a group, or clear the selection), `M` (cycle the region), `selectAll` (Ctrl+A) and `cycle`
 (Tab / Shift+Tab; the controller calls it and keeps Tab's graph toggle when it returns false). Options: Region, "Secondary button picks
 what it touches", Containment (greyed while the two-button rule is on). They read and write `Settings::selectRegion`,
 `selectTwoButton`, `selectContainment` and save the settings file. `WorkspaceController` keeps `selectAt`, `marquee`, `marqueeHits` and
 `cycleSelectRegion` as one-line forwards so callers and tests have one entry point.
+
+### Groups: click picks, double-click enters (Illustrator's isolation)
+
+Changed 2026-11-18. A click selects what is under the pointer **at the current level**, `SelectionModel::pickShapeKey(key)`: the shape key
+holds the uids of the subnets around the shape, outermost first, so the pick is the first group (a non-layer `ObjectNode`) after the
+isolated group, or after the layers at the top level; a shape in no group is picked as its own node. Layers are never picked or entered.
+Clicking the selected thing again changes nothing (the old click-again-goes-up rule is gone; `SelectionModel::stepUp` stays for scripts).
+
+- **Double-click a group** (no modifier): `enterGroupAt` makes it the *isolation* (`isolation()`), and selects what is under the pointer
+  one level down. The double-click is the system's own: Windows sends `WM_LBUTTONDBLCLK` in place of the second press (a pen tap too), newui
+  raises `onMouseDblClick` on the canvas, `CanvasView::onDoubleClickFilter` calls `WorkspaceController::doubleClicked`, which offers it to
+  `Tool::inputDoubleClick`; a tool that does not use it gets an ordinary press, so the system's double-click speed and distance settings
+  apply and no timing code is ours. Tests call `doubleClicked` after a `pressed`.
+- **Inside a group** the artwork outside it is drawn at 30% (`CanvasView::shapeDimmed`, a hook the controller points at
+  `isShapeKeyDimmed`) and cannot be picked: a click on it only clears the selection; marquee hits, Ctrl+A and Tab skip it; the Object ring
+  does not open over it.
+- **Leave** with Esc (goes up one level and selects the group just left; the next Esc clears the selection) or a double-click on empty
+  canvas. A deleted isolated group ends the isolation (`prune`).
+- Marquee, Ctrl+A and Tab use the same pick (`SelectionModel::selectNodes` takes the picked nodes), so a marquee at the top level selects
+  whole groups. The select panel and `shapes_where` / `select_where` still select the nodes that made the shapes (not the pick).
+- Python: `selection.isolation`, `selection.enter_group(group)`, `selection.exit_group()`.
 
 ## The options card (`tooloptionscard.h`, `tooloptionscard.cpp`)
 

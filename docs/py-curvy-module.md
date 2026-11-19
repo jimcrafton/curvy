@@ -225,7 +225,7 @@ picked and a script's pick shows in the canvas, graph view and panels. `ScriptCo
 `graphView_->selectionModel()` in `WorkspaceController`. `ScriptSelection` holds the `DocumentGuard` and re-checks
 `model.document() == &guard.get()` on every call, because the model outlives a closed document. Items come back as `Object` (layer/group)
 or `jitnodes` `Node` (`wrapAny`). Members: `items`, `primary`, `len`, iteration, `in`, `set`, `add`, `remove`, `toggle`, `replace`,
-`clear`, `step_up`, and the role queries `object`, `layer`, `fill`, `stroke`, `shape` (the nodes around the primary, or `None`).
+`clear`, `step_up`, `isolation`, `enter_group(group)`, `exit_group()` (the group being edited on the canvas, see `docs/tools.md`), and the role queries `object`, `layer`, `fill`, `stroke`, `shape` (the nodes around the primary, or `None`).
 Changing the selection is not an undo step.
 
 ### Finding shapes

@@ -171,16 +171,18 @@ class CanvasSelect(CanvasSelectBase):
         self.app.click_at((canvas.x + 40, canvas.y + canvas.h - 40))
         self.assertEqual(0, self.selection()[0], "the pasteboard has none either")
 
-    def test_clicking_the_selected_shape_again_steps_up_and_then_starts_over(self):
+    def test_clicking_the_selected_shape_again_keeps_it_selected(self):
         self.scene()
         self.click_shape(150, 150)
         self.expect(1, "e1", "the shape")
-        seen = []
-        for _ in range(4):
-            self.click_shape(150, 150)
-            seen.append(self.selection())
-        self.assertNotEqual("e1", seen[0][2], "the second click leaves the shape's own node: %s" % seen)
-        self.assertEqual("e1", seen[-1][2], "the steps come round to the shape again: %s" % seen)
+        self.click_shape(150, 150)
+        self.expect(1, "e1", "a second slow click does not go up to the layer")
+
+    def test_a_click_on_a_grouped_shape_selects_the_whole_group(self):
+        self.scene()
+        self.click_shape(450, 350)
+        got = self.selection()
+        self.assertEqual((1, "G"), (got[0], got[1]), "the group, not the circle in it: %s" % (got,))
 
     def test_an_open_stroked_line_is_hit_on_the_line_and_not_in_the_gap_beside_it(self):
         self.scene()
@@ -200,16 +202,23 @@ class CanvasSelect(CanvasSelectBase):
         self.click_shape(300, 150)
         self.expect(1, "e2", "the page moved: the second circle is where the pan put it")
 
-    @unittest.expectedFailure                                      # only the graph view enters on a double click; the canvas has no handler yet
-    def test_a_double_click_on_a_grouped_shape_enters_the_group(self):
+    def test_a_double_click_on_a_grouped_shape_enters_the_group_and_escape_leaves_it(self):
         self.scene()
         self.click_shape(450, 350)
-        first = self.selection()
-        self.assertEqual(1, first[0], "the grouped shape is selectable: %s" % (first,))
         self.app.double_click(self.screen(450, 350))
         after = self.selection()
         self.assertEqual(1, after[0], "after entering the group the shape is selected: %s" % (after,))
         self.assertEqual("inner", after[2], after)
+        self.click_shape(150, 150)
+        self.assertEqual(0, self.selection()[0], "inside the group the dimmed circle outside it cannot be picked")
+        self.click_shape(450, 350)
+        self.expect(1, "inner", "a click inside the group picks the shape")
+        self.keep_selection_and_focus_canvas()
+        self.app.key("escape")
+        got = self.selection()
+        self.assertEqual((1, "G"), (got[0], got[1]), "Escape leaves the group and selects it: %s" % (got,))
+        self.click_shape(150, 150)
+        self.expect(1, "e1", "back at the top level the circle is pickable again")
 
     def test_a_primary_button_drag_selects_what_the_rectangle_contains(self):
         self.scene()

@@ -89,6 +89,9 @@ namespace curvy {
 
         // True when the press was used; false lets the controller carry on (the secondary button then opens the ring).
         virtual bool inputDown(const ToolEvent&) { return false; }
+        // The system's double-click (Windows sends it instead of the second press, for mouse and pen alike). False: the controller treats it
+        // as an ordinary press.
+        virtual bool inputDoubleClick(const ToolEvent&) { return false; }
         virtual void inputMove(const ToolEvent&) {}
         virtual void inputUp(const ToolEvent&) {}
         // True when the key was used.

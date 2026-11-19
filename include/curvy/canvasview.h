@@ -57,7 +57,9 @@ namespace curvy {
 
         // Draws the document's cooked artwork with the page's top-left at (originX, originY) and `scale` pixels per point, clipped to the page.
         // @reflect ignore=true
-        static void renderArtworkAtScale(BLContext& ctx, SketchDocument& document, double originX, double originY, double scale);
+        // `dimmed` (optional) names the shapes drawn faded, by key: what lies outside the group that is being edited.
+        static void renderArtworkAtScale(BLContext& ctx, SketchDocument& document, double originX, double originY, double scale,
+                                         const std::function<bool(const std::string&)>& dimmed = {});
 
         static constexpr float kMinZoom = 0.05f;
         static constexpr float kMaxZoom = 64.0f;
@@ -70,9 +72,11 @@ namespace curvy {
 
         // Return true when the press / key was used.
         std::function<bool(const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys)> onPressFilter;
+        std::function<bool(const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys)> onDoubleClickFilter;
         std::function<bool(std::uint32_t keyMask, std::uint32_t vkCode)> onKeyFilter;
         // Painted over everything the canvas draws.
         std::function<void(BLContext& ctx)> onPaintTop;
+        std::function<bool(const std::string& key)> shapeDimmed;
 
         void paint(BLContext& ctx) override;
 
@@ -81,6 +85,7 @@ namespace curvy {
         // Draws the document's cooked artwork: each primitive as a path, filled and stroked from its fill.* / stroke.* attributes, clipped to the page.
         void renderArtwork(BLContext& ctx, const newui::Rect& client);
         newui::SyncReturn handleMouseDown(newui::View& sender, const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys);
+        newui::SyncReturn handleMouseDoubleClick(newui::View& sender, const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys);
         newui::SyncReturn handleKeyDown(newui::View& sender, std::uint32_t keyMask, int keyChar, int repeatCount, std::uint32_t vkCode);
 
         void centre(const newui::Rect& client);

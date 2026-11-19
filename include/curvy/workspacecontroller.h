@@ -166,6 +166,8 @@ namespace curvy {
         // Settings::barrelButton says (open the rings, pan while it is held, or nothing), its eraser end what Settings::eraserEnd says; a
         // mouse's right button always opens the rings. True when the press was used.
         bool pressed(const newui::PenState& pen, const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys);
+        // The system's double-click on the canvas (it arrives instead of the second press): the current tool may use it, else it is a press.
+        bool doubleClicked(const newui::PenState& pen, const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys);
 
         void openRing(bool byPress);
         void ensureDockShown(DockSide side);

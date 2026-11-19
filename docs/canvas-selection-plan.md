@@ -48,6 +48,9 @@ New `tests/gui/test_curvy_canvasselect.py`, class on `CurvyCase`, console-driven
 - Screenshot the outline once and compare against the unselected canvas (accent pixels appear), so the paint path is covered.
 - Fix whatever the live run finds before moving on.
 
+DONE 2026-11-18 (user asked to follow Illustrator): the double-click item is built as group isolation, and clicks now pick whole groups;
+the test is no longer an expected failure. See "Groups" in `docs/tools.md`.
+
 ### S2. Make every shape selectable (key stamping)
 BUILT 2026-11-18 (curvyTests 706). Stamping is done once, in the engine: `Network::setStampAnonymousShapes(true)` (off by default so plain
 jitnodes keeps "no keys, no allocation"; `GraphDocument` turns it on). In `Network::runTask`, right after a node cooks, a result with
