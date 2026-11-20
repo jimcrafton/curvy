@@ -1,6 +1,6 @@
 #include "curvy/canvasview.h"
 #include "curvy/selectionmodel.h"
-#include "curvy/shapepaths.h"
+#include "curvy/shapegeometry.h"
 #include "curvy/sketchdocument.h"
 
 #include <gtest/gtest.h>
@@ -40,10 +40,10 @@ TEST(ShapeHitTest, aCompoundShapeKeepsItsHoleAndOnlyTheRingIsHit) {
     addSquare(g, "ring", 0, 0, 4);   // the counter
     paint(g, 0, 1.0f, 0.0f, 0.0f, 1.0f);
     paint(g, 1, 1.0f, 0.0f, 0.0f, 1.0f);
-    EXPECT_TRUE(curvy::shapeAt(g, 7.0f, 0.0f, 1.0f).has_value());
-    EXPECT_FALSE(curvy::shapeAt(g, 0.0f, 0.0f, 1.0f).has_value());   // in the hole
-    EXPECT_FALSE(curvy::shapeAt(g, 20.0f, 0.0f, 1.0f).has_value());
-    const auto hit = curvy::shapeAt(g, 7.0f, 0.0f, 1.0f);
+    EXPECT_TRUE(curvy::ShapeGeometry(g).hitAt(7.0f, 0.0f, 1.0f).has_value());
+    EXPECT_FALSE(curvy::ShapeGeometry(g).hitAt(0.0f, 0.0f, 1.0f).has_value());   // in the hole
+    EXPECT_FALSE(curvy::ShapeGeometry(g).hitAt(20.0f, 0.0f, 1.0f).has_value());
+    const auto hit = curvy::ShapeGeometry(g).hitAt(7.0f, 0.0f, 1.0f);
     ASSERT_TRUE(hit.has_value());
     EXPECT_EQ(hit->key, "ring");
     EXPECT_EQ(hit->first, 0u);
@@ -55,24 +55,24 @@ TEST(ShapeHitTest, theShapeDrawnLastWins) {
     addSquare(g, "above", 5, 5, 10);
     paint(g, 0, 1.0f, 0.0f, 0.0f);
     paint(g, 1, 1.0f, 0.0f, 0.0f);
-    EXPECT_EQ(curvy::shapeAt(g, 6.0f, 6.0f, 1.0f)->key, "above");
-    EXPECT_EQ(curvy::shapeAt(g, -8.0f, -8.0f, 1.0f)->key, "below");
+    EXPECT_EQ(curvy::ShapeGeometry(g).hitAt(6.0f, 6.0f, 1.0f)->key, "above");
+    EXPECT_EQ(curvy::ShapeGeometry(g).hitAt(-8.0f, -8.0f, 1.0f)->key, "below");
 }
 
 TEST(ShapeHitTest, aStrokeOnlyShapeIsHitNearItsLineAndNotInside) {
     Geometry g;
     addSquare(g, "outline", 0, 0, 10);
     paint(g, 0, 0.0f, 1.0f, 0.5f);
-    EXPECT_FALSE(curvy::shapeAt(g, 0.0f, 0.0f, 1.0f).has_value());
-    EXPECT_TRUE(curvy::shapeAt(g, 10.0f, 0.0f, 1.0f).has_value());
-    EXPECT_TRUE(curvy::shapeAt(g, 10.8f, 0.0f, 1.0f).has_value());   // thin stroke, but the tolerance widens it
-    EXPECT_FALSE(curvy::shapeAt(g, 13.0f, 0.0f, 1.0f).has_value());
+    EXPECT_FALSE(curvy::ShapeGeometry(g).hitAt(0.0f, 0.0f, 1.0f).has_value());
+    EXPECT_TRUE(curvy::ShapeGeometry(g).hitAt(10.0f, 0.0f, 1.0f).has_value());
+    EXPECT_TRUE(curvy::ShapeGeometry(g).hitAt(10.8f, 0.0f, 1.0f).has_value());   // thin stroke, but the tolerance widens it
+    EXPECT_FALSE(curvy::ShapeGeometry(g).hitAt(13.0f, 0.0f, 1.0f).has_value());
 }
 
 TEST(ShapeHitTest, aShapeWithNoLookIsNotHit) {
     Geometry g;
     addSquare(g, "bare", 0, 0, 10);
-    EXPECT_FALSE(curvy::shapeAt(g, 0.0f, 0.0f, 1.0f).has_value());
+    EXPECT_FALSE(curvy::ShapeGeometry(g).hitAt(0.0f, 0.0f, 1.0f).has_value());
 }
 
 TEST(ShapeKeyTest, aKeyParsesToTheUidsOfItsPath) {

@@ -51,10 +51,11 @@ namespace {
 
 }
 
-TEST_F(SelectPanelTest, describeShapesReadsTheLookTheTagsAndTheLayer) {
+TEST_F(SelectPanelTest, aShapeTableReadsTheLookTheTagsAndTheLayer) {
     const jitnodes::GeometryHandle artwork = window().document().artwork();
     ASSERT_NE(artwork, nullptr);
-    const std::vector<curvy::ShapeValues> shapes = curvy::describeShapes(window().document(), *artwork);
+    const curvy::ShapeTable table(window().document(), *artwork);
+    const std::vector<curvy::ShapeValues>& shapes = table.rows();
     ASSERT_EQ(shapes.size(), 2u);
     std::vector<std::string> fills = {shapes[0].fill, shapes[1].fill};
     std::sort(fills.begin(), fills.end());
@@ -72,14 +73,15 @@ TEST_F(SelectPanelTest, describeShapesReadsTheLookTheTagsAndTheLayer) {
 
 TEST_F(SelectPanelTest, valuesAreCountedAndFoundByValue) {
     const jitnodes::GeometryHandle artwork = window().document().artwork();
-    const std::vector<curvy::ShapeValues> shapes = curvy::describeShapes(window().document(), *artwork);
-    const std::vector<curvy::ValueCount> tags = curvy::countValues(shapes, curvy::ShapeProperty::Tag);
+    const curvy::ShapeTable shapes(window().document(), *artwork);
+    const std::vector<curvy::ValueCount> tags = shapes.counts(curvy::ShapeProperty::Tag);
     ASSERT_EQ(tags.size(), 2u);
     EXPECT_EQ(tags[0].text, "backdrop") << "the most common first";
     EXPECT_EQ(tags[0].count, 2u);
-    EXPECT_EQ(curvy::shapesWithValue(shapes, curvy::ShapeProperty::Tag, "hero").size(), 1u);
-    EXPECT_EQ(curvy::shapesWithValue(shapes, curvy::ShapeProperty::Fill, "#FF0000").size(), 1u);
-    EXPECT_TRUE(curvy::shapesWithValue(shapes, curvy::ShapeProperty::Fill, "#123456").empty());
+    EXPECT_EQ(shapes.keysWith(curvy::ShapeProperty::Tag, "hero").size(), 1u);
+    EXPECT_EQ(shapes.keysWith(curvy::ShapeProperty::Fill, "#FF0000").size(), 1u);
+    EXPECT_TRUE(shapes.keysWith(curvy::ShapeProperty::Fill, "#123456").empty());
+    EXPECT_EQ(shapes.having(curvy::ShapeProperty::Tag, "hero").rows().size(), 1u) << "narrowing gives a table of its own";
 }
 
 TEST_F(SelectPanelTest, thePanelListsTheValuesOfTheChosenProperty) {

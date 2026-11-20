@@ -296,8 +296,12 @@ namespace curvy {
         shapes_.clear();
         const jitnodes::GeometryHandle artwork = document_.artwork();
         if (artwork != nullptr) {
-            shapes_ = describeShapes(document_, *artwork);
+            shapes_ = ShapeTable(document_, *artwork);
         }
+    }
+
+    ShapeTable SelectPanel::pooled() const {
+        return shapes_.filtered([this](const ShapeValues& shape) { return within_ == Within::Document || selection_.isShapeKeySelected(shape.key); });
     }
 
     std::vector<std::string> SelectPanel::ownValues() const {
@@ -306,10 +310,10 @@ namespace curvy {
         }
         std::vector<std::string> out;
         std::size_t shapes = 0;
-        for (const ShapeValues& shape : shapes_) {
+        for (const ShapeValues& shape : shapes_.rows()) {
             if (selection_.isShapeKeySelected(shape.key)) {
                 ++shapes;
-                for (const std::string& value : valuesOf(shape, property_)) {
+                for (const std::string& value : ShapeTable::valuesOf(shape, property_)) {
                     if (std::find(out.begin(), out.end(), value) == out.end()) {
                         out.push_back(value);
                     }
@@ -321,15 +325,10 @@ namespace curvy {
 
     void SelectPanel::refresh() {
         rebuildShapes();
-        std::vector<ShapeValues> pool;
-        for (const ShapeValues& shape : shapes_) {
-            if (within_ == Within::Document || selection_.isShapeKeySelected(shape.key)) {
-                pool.push_back(shape);
-            }
-        }
+        const ShapeTable pool = pooled();
         const std::vector<std::string> own = ownValues();
         std::vector<SelectValueRow> rows;
-        for (const ValueCount& value : countValues(pool, property_)) {
+        for (const ValueCount& value : pool.counts(property_)) {
             SelectValueRow row;
             row.text = value.text;
             row.count = value.count;
@@ -363,13 +362,7 @@ namespace curvy {
 
     bool SelectPanel::choose(const std::string& value, SelectionModel::Combine how) {
         rebuildShapes();
-        std::vector<ShapeValues> pool;
-        for (const ShapeValues& shape : shapes_) {
-            if (within_ == Within::Document || selection_.isShapeKeySelected(shape.key)) {
-                pool.push_back(shape);
-            }
-        }
-        const std::vector<std::string> keys = shapesWithValue(pool, property_, value);
+        const std::vector<std::string> keys = pooled().keysWith(property_, value);
         if (keys.empty()) {
             return false;
         }
@@ -395,7 +388,7 @@ namespace curvy {
         }
         std::vector<std::string> keys;
         for (const std::string& value : own) {
-            for (const std::string& key : shapesWithValue(shapes_, property_, value)) {
+            for (const std::string& key : shapes_.keysWith(property_, value)) {
                 if (std::find(keys.begin(), keys.end(), key) == keys.end()) {
                     keys.push_back(key);
                 }

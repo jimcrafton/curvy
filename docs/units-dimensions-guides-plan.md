@@ -195,6 +195,18 @@ bool removeGuide(std::size_t);   bool clearGuides();   bool guidesLocked() const
   `CanvasView::snap(value, vertical)` (guides only, 6 px) are the hit test and the one snapping entry point; no tool calls `snap` yet (the Select tool
   does not drag shapes). The pointer marker is on the rulers (`CanvasView::setPointer`; only the ruler marks itself dirty). Presses, moves and releases on a ruler are forwarded to the canvas, so the guide drag is unchanged. A dirty ruler still repaints the canvas under its strip, clipped, and that includes building every shape's path: measure on a big document. **G2 leftovers finished (2026-11-18):** the canvas shows a resize cursor over an unlocked guide; a click in the rulers' corner or a right click on a ruler opens the ruler menu (`WorkspaceController::rulerMenuEntries`: length and angle units with the document's ticked, show/lock/clear guides, reset origin); the ruler origin is `SketchDocument::rulerOrigin` (saved as `document.rulerOrigin`, Python `doc.ruler_origin`, setup not an undo step), `Rulers::ticks` counts from it, and dragging out of the corner sets it with a crosshair preview (`GuideDrag`); the View ring's Rulers slot opens a Rulers ring (Rulers, Guides, Lock guides, Clear guides, Reset origin). Guide positions are still page coordinates. Settings has its own Units page (default length and angle). Not done: tools calling `snap`.
 
+- **D1-D5 done (2026-11-18):** `DimensionModel` (`dimensions.h`) and `DimensionOverlay` (`dimensionoverlay.h`, owned by `SelectTool`). Differences from the plan:
+  the kinds are Width, Height, Radius (one circle) and CurveLength (one other shape, not editable); there is no ArcAngle (no arc node exists yet) and no
+  Diameter. The model has no `target` field: every edit is a document-axis scale of the selection's box (width and height about the box's top-left,
+  radius about the centre), written into the transform node of each selected object, or into a shape's local transform (made when missing, by
+  `SketchDocument::ensureLocalTransformLive`, which makes no undo step of its own), after composing it with the transforms of the objects around it
+  and decomposing the result back into `tx ty rot sx sy skew` (any 2D matrix fits that form), so it is exact through rotated and scaled groups. A
+  circle is edited by the same transform, not its `radius` parameter, so it works for every shape. `begin / preview / commit / cancel` is the live
+  session (preview always restarts from the originals; cancel is `restoreGraph`), `apply` is the three in a row. The overlay recomputes the labels
+  on every paint and hit test (no cache to go stale; paintTop already walks the selected shapes). Scrub step is the power of ten at or below one point in
+  the document unit (1 px, 0.1 mm, 0.01 in); the typed field takes anything `Units::parseQuantity` does. Escape cancels a scrub or the field.
+  `Settings::showDimensions` (Settings > Workspace > Dimensions). Python: `selection.dimensions()`, `doc.set_dimension(kind, value)`. Not done: the
+  proportional-resize lock, Shift = about the centre, edge length (direct select), a GUI test (ask first).
 
 ## Order of work (each one finishes with tests, tracker rows, docs, Python wrapper)
 

@@ -2,7 +2,7 @@
 
 #include "curvy/panel.h"
 #include "curvy/selectionmodel.h"
-#include "curvy/shapeproperties.h"
+#include "curvy/shapetable.h"
 #include "curvy/sketchdocument.h"
 
 #include <newui/controllers.h>
@@ -95,6 +95,8 @@ namespace curvy {
         void showStatus(const std::string& text);
         void applyKeys(const std::vector<std::string>& keys, SelectionModel::Combine how);
         std::vector<std::string> ownValues() const;
+        // The rows the list counts: every shape, or only the selected ones when Within is Selection.
+        ShapeTable pooled() const;
 
         SketchDocument& document_;
         SelectionModel& selection_;
@@ -113,7 +115,7 @@ namespace curvy {
 
         ShapeProperty property_ = ShapeProperty::Fill;
         Within within_ = Within::Document;
-        std::vector<ShapeValues> shapes_;   // every shape of the artwork (what Within narrows)
+        ShapeTable shapes_;   // every shape of the artwork (what Within narrows)
         std::string chosen_;
         std::string statusText_;
         bool updating_ = false;

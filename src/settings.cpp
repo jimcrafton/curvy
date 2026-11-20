@@ -133,6 +133,7 @@ namespace curvy {
                 break;
             case SettingsPage::Workspace:
                 rulersVisible = defaults.rulersVisible;
+                showDimensions = defaults.showDimensions;
                 hintsFade = defaults.hintsFade;
                 recentLength = defaults.recentLength;
                 for (int i = 0; i < dockCount; ++i) {
@@ -211,6 +212,7 @@ namespace curvy {
 
         b.push_object();
         flag("rulersVisible", rulersVisible);
+        flag("showDimensions", showDimensions);
         flag("hintsFade", hintsFade);
         number("recentLength", recentLength);
         text("defaultLength", Units::name(defaultUnits.length));
@@ -324,6 +326,7 @@ namespace curvy {
         }
         if (group(root, "workspace", g)) {
             readBool(g, "rulersVisible", rulersVisible);
+            readBool(g, "showDimensions", showDimensions);
             readBool(g, "hintsFade", hintsFade);
             readInt(g, "recentLength", recentLength, 0, 50);
             json5::value unitName;

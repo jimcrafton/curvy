@@ -89,6 +89,35 @@ TEST(ScriptModule, guides) {
     EXPECT_FALSE(runOn(document, "doc.remove_guide(3)").ok);
 }
 
+TEST(ScriptModule, selectionDimensionsAreReadAndSetInOneUndoStep) {
+    curvy::SketchDocument document;
+    document.newBlank("Dimensions", 612.0f, 792.0f);
+    const curvy::NodeRef layer = document.addLayer();
+    document.addCircle(layer, 100.0f, 100.0f, 30.0f, newui::Color(1.0f, 0.0f, 0.0f, 1.0f));
+    curvy::SelectionModel selection(&document);
+    auto run = [&](const std::string& code) { return curvytest::sharedConsole().run(code, &document, &selection); };
+
+    auto result = run("print(len(selection.dimensions()))");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "0\n");
+    EXPECT_FALSE(run("doc.set_dimension('width', 10)").ok) << "nothing selected";
+
+    result = run("doc.select_where(type='circle')\n"
+                 "d = {x.kind: x.value for x in selection.dimensions()}\n"
+                 "print(round(d['width']), round(d['radius']), selection.dimensions()[0].editable)");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "60 30 True\n");
+
+    const std::size_t before = document.undoStack().depth();
+    result = run("doc.set_dimension('width', 90)\nprint(round(selection.dimensions()[0].value))");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "90\n");
+    EXPECT_EQ(document.undoStack().depth(), before + 1);
+
+    EXPECT_FALSE(run("doc.set_dimension('width', 0)").ok);
+    EXPECT_FALSE(run("doc.set_dimension('depth', 5)").ok);
+}
+
 TEST(ScriptModule, layersAndGroups) {
     curvy::SketchDocument document;
     document.newBlank("Objects", 100.0f, 100.0f);

@@ -185,6 +185,15 @@ namespace curvy {
         NodeRef localTransformOf(const NodeRef& node);
         // Makes the transform node when the shape has none (one undo step; nothing happens when it has one) and returns it.
         NodeRef addLocalTransform(const NodeRef& node);
+        // The same, but makes no undo step: for an edit that records one step itself from a snapshot taken before (a live drag).
+        NodeRef ensureLocalTransformLive(const NodeRef& node);
+        // A transform that does nothing yet has its pivot at the origin of the space it works in, which is a poor place to rotate or scale from. This moves
+        // the pivot of the layer's or group's transform (or of the shape's local one, when it has one) to the centre of what it holds, and does nothing
+        // (false) when the transform already changes something or has a pivot of its own. No undo step: it changes no result, and the caller's step covers it.
+        bool centrePivotIfIdentity(const NodeRef& objectOrShape);
+        // Where that centre is: in the space the transform's pivot is in (the layer's or group's contents, or the shape's own), or nothing when
+        // it holds no shape. Reads only.
+        std::optional<std::pair<float, float>> defaultPivot(const NodeRef& objectOrShape);
         // The parameters (as objectTransform); the identity values when the shape has no transform node yet. Does not create one.
         std::map<std::string, float> shapeTransform(const NodeRef& node);
         // Sets the named parameters, making the transform node first when needed, all as one undo step; an unknown name throws and changes nothing.

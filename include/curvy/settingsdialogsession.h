@@ -140,7 +140,8 @@ namespace curvy::settingsdialog {
             toggle("toolbarVisible", [this] { return !working_.docks[leftDock].collapsed; }, [this](bool v) { working_.docks[leftDock].collapsed = !v; });
             toggle("propertiesVisible", [this] { return !working_.docks[rightDock].collapsed; }, [this](bool v) { working_.docks[rightDock].collapsed = !v; });
             toggle("rulersVisible", [this] { return working_.rulersVisible; }, [this](bool v) { working_.rulersVisible = v; });
-            toggle("hintsFade", [this] { return working_.hintsFade; }, [this](bool v) { working_.hintsFade = v; });
+            toggle("showDimensions", [this] { return working_.showDimensions; }, [this](bool v) { working_.showDimensions = v; });
+            toggle("hintsFade",[this] { return working_.hintsFade; }, [this](bool v) { working_.hintsFade = v; });
             toggle("snapGrid", [this] { return working_.snapGrid; }, [this](bool v) { working_.snapGrid = v; });
             toggle("snapGuides", [this] { return working_.snapGuides; }, [this](bool v) { working_.snapGuides = v; });
             toggle("autosave", [this] { return working_.autosave; }, [this](bool v) { working_.autosave = v; });

@@ -3,7 +3,7 @@
 #include "curvy/canvasview.h"
 #include "curvy/selectionmodel.h"
 #include "curvy/settings.h"
-#include "curvy/shapepaths.h"
+#include "curvy/shapegeometry.h"
 #include "curvy/sketchdocument.h"
 #include "curvy/theme.h"
 
@@ -20,6 +20,7 @@ namespace curvy {
     }
 
     void SelectTool::cancel() {
+        dimensions_.cancel();
         marquee_.cancel();
         marqueeHits_.clear();
         context_.canvas.style().markDirty();
@@ -55,6 +56,9 @@ namespace curvy {
         }
         SelectionModel& selection = context_.selection;
         const Point& pt = event.view;
+        if (dimensions_.beginEdit(pt)) {
+            return true;
+        }
         const std::optional<ShapeHit> hit = hitAt(pt);
         if (hit.has_value() && !hit->key.empty()) {
             if (!selection.enterGroupAt(hit->key)) {
@@ -84,6 +88,9 @@ namespace curvy {
             beginMarquee(pt, false, event.keys);
             return true;
         }
+        if (dimensions_.press(pt)) {
+            return true;
+        }
         const bool mayStart = marqueeMayStart(pt);
         const bool subtract = (event.keys & kmAlt) != 0;
         const bool used = selectAt(pt, (event.keys & (kmShift | kmCtrl)) != 0 || (subtract && mayStart));
@@ -94,6 +101,10 @@ namespace curvy {
     }
 
     void SelectTool::inputMove(const ToolEvent& event) {
+        if (dimensions_.scrubbing()) {
+            dimensions_.move(event.view, event.keys);
+            return;
+        }
         if (!marquee_.active()) {
             return;
         }
@@ -105,6 +116,10 @@ namespace curvy {
     }
 
     void SelectTool::inputUp(const ToolEvent&) {
+        if (dimensions_.scrubbing()) {
+            dimensions_.release();
+            return;
+        }
         if (!marquee_.active() || marquee_.polygonOpen()) {
             return;
         }
@@ -121,6 +136,11 @@ namespace curvy {
 
     bool SelectTool::keyDown(const ToolKeyEvent& event) {
         const bool shift = (event.mask & kmShift) != 0;
+        if (dimensions_.scrubbing() && event.vk == vkEscape) {
+            dimensions_.cancel();
+            context_.say("Resize cancelled");
+            return true;
+        }
         if (marquee_.active()) {
             if (event.vk == vkEscape) {
                 cancel();
@@ -185,7 +205,7 @@ namespace curvy {
         for (const Point& p : outline) {
             region.push_back(context_.canvas.toDocument(p));
         }
-        marqueeHits_ = shapesInRegion(*artwork, region, marquee_.mode());
+        marqueeHits_ = ShapeGeometry(*artwork).keysInRegion(region, marquee_.mode());
         marqueeHits_.erase(std::remove_if(marqueeHits_.begin(), marqueeHits_.end(),
                                           [this](const std::string& key) { return context_.selection.isShapeKeyDimmed(key); }),
                            marqueeHits_.end());
@@ -278,6 +298,7 @@ namespace curvy {
     }
 
     void SelectTool::paintOverlay(BLContext& ctx) const {
+        dimensions_.paint(ctx);
         if (!marquee_.active() || !(marquee_.moved() || marquee_.polygonOpen())) {
             return;
         }
@@ -289,9 +310,10 @@ namespace curvy {
         ctx.set_stroke_width(2.0);
         // Inside is the accent colour; touching is drawn in the highlight tone so the two read apart without a dash.
         const std::uint32_t tone = marquee_.mode() == RegionMode::Touches ? Theme::current().highlight : Theme::current().accent;
+        const ShapeGeometry shapeGeometry(*artwork);
         for (const jitnodes::ShapeRange& shape : artwork->shapes()) {
             if (std::find(marqueeHits_.begin(), marqueeHits_.end(), std::string(shape.key)) != marqueeHits_.end()) {
-                ctx.stroke_path(shapePath(*artwork, shape, origin.x, origin.y, double(context_.canvas.zoom())), rgb(tone));
+                ctx.stroke_path(shapeGeometry.path(shape, origin.x, origin.y, double(context_.canvas.zoom())), rgb(tone));
             }
         }
         const std::vector<Point> outline = marquee_.outline();

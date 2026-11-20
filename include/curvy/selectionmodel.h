@@ -74,6 +74,8 @@ namespace curvy {
         bool isShapeKeySelected(const std::string& key) const;
         // Drops the nodes the document no longer has (done by itself on onGraphChanged).
         bool prune();
+        // The nearest object (layer or group) that contains `node`, not the node itself; kNoNode at the top level.
+        NodeRef enclosing(const NodeRef& node) const;
 
         // The parts of an object, found by walking the chain around a node: upstream along input 0 and downstream through the first consumer,
         // stopping at a merge. A graph that was built by hand may lack a part or have two; find() then gives the one nearest the merge (the one
@@ -99,8 +101,6 @@ namespace curvy {
         void changed();
         // The object a node belongs to: itself when it is an object, else the nearest enclosing one.
         NodeRef objectOf(const NodeRef& node) const;
-        // The nearest object that contains `node` (not the node itself).
-        NodeRef enclosing(const NodeRef& node) const;
         // The nodes around `from` in flow order, from the source to the node before the merge.
         std::vector<NodeRef> chainOf(const NodeRef& from) const;
 

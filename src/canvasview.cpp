@@ -2,7 +2,7 @@
 
 #include "curvy/blendmodes.h"
 #include "curvy/objectnode.h"
-#include "curvy/shapepaths.h"
+#include "curvy/shapegeometry.h"
 #include "curvy/theme.h"
 #include "curvy/units.h"
 
@@ -82,7 +82,7 @@ namespace curvy {
         if (at.x < 0.0 || at.y < 0.0 || at.x > double(document_->pageWidth()) || at.y > double(document_->pageHeight())) {
             return std::nullopt;   // the artwork is clipped to the page, so what lies beyond it is not drawn and cannot be clicked
         }
-        return curvy::shapeAt(*artwork, float(at.x), float(at.y), tolerancePx / zoom_);
+        return ShapeGeometry(*artwork).hitAt(float(at.x), float(at.y), tolerancePx / zoom_);
     }
 
     void CanvasView::zoomAt(const Point& anchor, float newZoom) {
@@ -163,11 +163,17 @@ namespace curvy {
     }
 
     void CanvasView::renderArtwork(BLContext& ctx, const Rect& client) {
-        renderArtworkAtScale(ctx, *document_, double(client.left()) + double(panX_), double(client.top()) + double(panY_), double(zoom_), shapeDimmed);
+        BLBox region;
+        if (hasVisibleRegion()) {
+            const Rect& seen = visibleRegion();
+            region = BLBox(double(seen.left()), double(seen.top()), double(seen.right()), double(seen.bottom()));
+        }
+        renderArtworkAtScale(ctx, *document_, double(client.left()) + double(panX_), double(client.top()) + double(panY_), double(zoom_), shapeDimmed,
+                             hasVisibleRegion() ? &region : nullptr);
     }
 
     void CanvasView::renderArtworkAtScale(BLContext& ctx, SketchDocument& document, double originX, double originY, double scale,
-                                          const std::function<bool(const std::string&)>& dimmed) {
+                                          const std::function<bool(const std::string&)>& dimmed, const BLBox* visible) {
         const jitnodes::GeometryHandle artwork = document.artwork();
         if (artwork == nullptr || artwork->primitiveCount() == 0 || !artwork->hasPointAttrib("x")) {
             return;
@@ -199,8 +205,9 @@ namespace curvy {
         const std::vector<jitnodes::ShapeRange> shapes = geo.shapes();
         std::vector<BLPath> paths;
         paths.reserve(shapes.size());
+        const ShapeGeometry shapeGeometry(geo);
         for (const jitnodes::ShapeRange& shape : shapes) {
-            paths.push_back(shapePath(geo, shape, originX, originY, scale));
+            paths.push_back(shapeGeometry.path(shape, originX, originY, scale));
         }
 
         // The objects with an opacity below 1 or a blend other than Normal that each shape lies in, outermost first. The shape's key holds the
@@ -256,6 +263,15 @@ namespace curvy {
             const BLPath& path = paths[s];
             if (path.is_empty()) {
                 return;
+            }
+            if (visible != nullptr) {
+                BLBox bounds;
+                if (path.get_bounding_box(&bounds) == BL_SUCCESS) {
+                    const double grow = strokeW != nullptr && strokeA != nullptr && strokeA[i] > 0.0f ? double(strokeW[i]) * scale : 0.0;
+                    if (bounds.x1 + grow < visible->x0 || bounds.x0 - grow > visible->x1 || bounds.y1 + grow < visible->y0 || bounds.y0 - grow > visible->y1) {
+                        return;
+                    }
+                }
             }
             if (!faded.empty() && faded[s] != 0) {
                 target.set_global_alpha(fadedAlpha);

@@ -1,10 +1,11 @@
 #include "curvy/scriptmodule.h"
 
 #include "curvy/blendmodes.h"
+#include "curvy/dimensions.h"
 #include "curvy/objectnode.h"
 #include "curvy/selectionmodel.h"
-#include "curvy/shapepaths.h"
-#include "curvy/shapeproperties.h"
+#include "curvy/shapegeometry.h"
+#include "curvy/shapetable.h"
 #include "curvy/sketchdocument.h"
 #include "curvy/wranglecheck.h"
 
@@ -353,7 +354,7 @@ namespace curvy {
             if (geometry == nullptr) {
                 return {};
             }
-            std::vector<ShapeValues> shapes = describeShapes(d.get(), *geometry);
+            ShapeTable shapes(d.get(), *geometry);
             for (const auto& item : criteria) {
                 const std::string name = py::str(item.first);
                 ShapeProperty property = ShapeProperty::Tag;
@@ -381,16 +382,9 @@ namespace curvy {
                 } else {
                     throw std::runtime_error("unknown criterion '" + name + "' (tag, fill, stroke, width, type, layer)");
                 }
-                const std::vector<std::string> keep = shapesWithValue(shapes, property, wanted);
-                shapes.erase(std::remove_if(shapes.begin(), shapes.end(), [&](const ShapeValues& s) {
-                                 return std::find(keep.begin(), keep.end(), s.key) == keep.end();
-                             }), shapes.end());
+                shapes = shapes.having(property, wanted);
             }
-            std::vector<std::string> keys;
-            for (const ShapeValues& shape : shapes) {
-                keys.push_back(shape.key);
-            }
-            return keys;
+            return shapes.keys();
         }
 
         // What is selected in the editor: shared with the canvas, graph view and panels, so a script's change shows there and a user's
@@ -426,7 +420,16 @@ namespace curvy {
             const auto role = [](Role which) {
                 return [which](const ScriptSelection& s) { return wrapOptional(s.guard(), s.model().find(which)); };
             };
+            py::class_<DimensionItem>(module, "Dimension", "One measurement of the selection, as the canvas labels it. Values are in points.")
+                .def_property_readonly("kind", [](const DimensionItem& i) { return std::string(DimensionModel::name(i.kind)); },
+                                       "'width', 'height', 'radius' (one circle) or 'length' (one other shape).")
+                .def_property_readonly("value", [](const DimensionItem& i) { return i.value; })
+                .def_property_readonly("anchor", [](const DimensionItem& i) { return std::make_pair(i.anchor.x, i.anchor.y); }, "Where the label sits, in points.")
+                .def_property_readonly("editable", [](const DimensionItem& i) { return i.editable; })
+                .def("__repr__", [](const DimensionItem& i) { return "Dimension(" + std::string(DimensionModel::name(i.kind)) + ", " + std::to_string(i.value) + ")"; });
             py::class_<ScriptSelection>(module, "Selection", "What is selected in the editor (layers, groups and graph nodes). Changing it is not an undo step.")
+                .def("dimensions", [](const ScriptSelection& s) { return DimensionModel(s.guard()->get(), s.model()).compute(); },
+                     "The measurements of the selection: width and height of its box, a circle's radius, a curve's length (the numbers the canvas labels).")
                 .def_property_readonly("items", &selectionItems, "The selected objects and nodes, in selection order.")
                 .def_property_readonly("primary", [](const ScriptSelection& s) { return wrapOptional(s.guard(), s.model().primary()); },
                                        "The one the panels show, or None.")
@@ -1051,7 +1054,7 @@ namespace curvy {
                          if (geometry == nullptr) {
                              return py::none();
                          }
-                         const std::optional<ShapeHit> hit = curvy::shapeAt(*geometry, x, y, tolerance);
+                         const std::optional<ShapeHit> hit = ShapeGeometry(*geometry).hitAt(x, y, tolerance);
                          return hit.has_value() ? wrapOptional(d.guard(), doc.nodeForShapeKey(hit->key)) : py::none();
                      }, py::arg("x"), py::arg("y"), py::arg("tolerance") = 2.0f,
                      "The node that made the topmost shape under (x, y) in document units (inside its fill, or within `tolerance` of its stroke), or None.")
@@ -1060,8 +1063,8 @@ namespace curvy {
                          if (geometry == nullptr) {
                              return py::list();
                          }
-                         const std::vector<BLPoint> region = rectRegion(x, y, double(x) + width, double(y) + height);
-                         return nodesOfShapeKeys(d, shapesInRegion(*geometry, region, inside ? RegionMode::Inside : RegionMode::Touches));
+                         const std::vector<BLPoint> region = ShapeGeometry::rectRegion(x, y, double(x) + width, double(y) + height);
+                         return nodesOfShapeKeys(d, ShapeGeometry(*geometry).keysInRegion(region, inside ? RegionMode::Inside : RegionMode::Touches));
                      }, py::arg("x"), py::arg("y"), py::arg("width"), py::arg("height"), py::arg("inside") = true,
                      "The nodes that made the shapes in a rectangle: wholly inside it, or (inside=False) touching it. Drawing order, each node once.")
                 .def("shapes_where", [](const ScriptDocument& d, const py::kwargs& criteria) { return nodesOfShapeKeys(d, keysWhere(d, criteria)); },
@@ -1085,6 +1088,22 @@ namespace curvy {
                      }, py::arg("combine") = "replace",
                      "Selects the shapes shapes_where(**criteria) finds (combine: 'replace', 'add' or 'subtract'); returns their nodes. Not an undo step.")
 
+                .def("set_dimension", [](const ScriptDocument& d, const std::string& kind, double value, bool aboutPivot) {
+                         if (d.selection() == nullptr) {
+                             throw std::runtime_error("this run has no editor selection");
+                         }
+                         const std::optional<DimensionItem::Kind> which = DimensionModel::kindFromName(kind);
+                         if (!which.has_value()) {
+                             throw std::runtime_error("kind must be 'width', 'height', 'radius' or 'length'");
+                         }
+                         DimensionModel model(d.get(), *d.selection());
+                         if (!model.apply(*which, value, aboutPivot)) {
+                             throw std::runtime_error(model.message().empty() ? "nothing changed" : model.message());
+                         }
+                     }, py::arg("kind"), py::arg("value"), py::arg("about_pivot") = false,
+                     "Resizes the selection so its 'width' or 'height' (scaled about the box's top left) or a lone circle's 'radius' (about its centre) is `value` "
+                     "points. With about_pivot=True the pivot of the transform being edited stays where it is instead. One undo step; raises when the selection "
+                     "cannot be measured that way or the value is not above zero.")
                 .def("artwork", [](const ScriptDocument& d) -> py::object {
                     jitnodes::GeometryHandle geometry = d.get().artwork();
                     return geometry ? py::cast(geometry) : py::none();

@@ -3,7 +3,7 @@
 #include "curvy/guides.h"
 #include "curvy/rulers.h"
 #include "curvy/rulerview.h"
-#include "curvy/shapepaths.h"
+#include "curvy/shapegeometry.h"
 #include "curvy/sketchdocument.h"
 
 #include <newui/subview.h>
@@ -61,8 +61,9 @@ namespace curvy {
         // Draws the document's cooked artwork with the page's top-left at (originX, originY) and `scale` pixels per point, clipped to the page.
         // @reflect ignore=true
         // `dimmed` (optional) names the shapes drawn faded, by key: what lies outside the group that is being edited.
+        // `visible` (optional, in the same pixel space as the page origin) skips the shapes that lie wholly outside it: the part of the view being repainted.
         static void renderArtworkAtScale(BLContext& ctx, SketchDocument& document, double originX, double originY, double scale,
-                                         const std::function<bool(const std::string&)>& dimmed = {});
+                                         const std::function<bool(const std::string&)>& dimmed = {}, const BLBox* visible = nullptr);
 
         // The rulers along the top and left edge (in the document's unit, zero at the page's top left) and the document's guides, painted over
         // the artwork. Visible rulers cover a strip of Rulers::kThickness pixels of the view.

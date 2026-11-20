@@ -232,8 +232,8 @@ Changing the selection is not an undo step.
 
 These `Document` methods read `doc.artwork()` (the cooked geometry the canvas draws) and answer with the node that made each shape, the same
 node a canvas click selects (`GraphDocument::nodeForShapeKey`, so every shape needs a key; see the key stamping in the selection plan).
-They share the C++ queries of the canvas: `shapeAt`, `shapesInRegion` (`shapepaths.h`) and `describeShapes` / `shapesWithValue`
-(`shapeproperties.h`, what the Select panel uses). Units are document units.
+They share the C++ queries of the canvas: `ShapeGeometry::hitAt` and `keysInRegion` (`shapegeometry.h`) and `ShapeTable` (`shapetable.h`:
+`having`, `keysWith`, `counts`; what the Select panel uses). Units are document units.
 
 - `doc.shape_at(x, y, tolerance=2.0)`: the topmost shape's node under the point (inside its fill or within `tolerance` of its stroke), or `None`.
 - `doc.shapes_in_rect(x, y, width, height, inside=True)`: nodes of the shapes wholly inside the rectangle, or touching it with `inside=False`.
@@ -619,6 +619,21 @@ Test: `ScriptModule.anObjectsOpacityAndBlendAreParametersOfItsNode`.
 (`SketchDocument::units()`, saved as `document.units`). They change only how the app shows numbers: every number a script reads or writes
 stays in points and degrees. `curvy.to_points(value, unit, ppi=72)` and `curvy.from_points(points, unit, ppi=72)` convert (`'px'` uses the
 ppi). Plan: `docs/units-dimensions-guides-plan.md`.
+
+### Dimensions (2026-11-18)
+
+`selection.dimensions()` is a list of read-only `curvy.Dimension` objects, the numbers the canvas labels around the selection (`kind`: `'width'`,
+`'height'`, `'radius'` for one circle, `'length'` for one other shape; `value` in points; `anchor`, an `(x, y)` pair in points; `editable`).
+`doc.set_dimension(kind, value, about_pivot=False)` resizes the selection so that measurement is `value` points, as one undo step: a width scales along the
+document's x axis about the left edge of the selection's box, a height along y about the top edge, a radius uniformly about the centre; with
+`about_pivot=True` (Alt in the canvas) the pivot of the transform being edited stays where it is instead. A transform that does nothing yet gets
+its pivot at the centre of what it holds the first time it is used (a new shape transform, or `set_transform` on a layer or group that gives no
+`px`/`py`); a transform that already changes something keeps its pivot. It edits
+the transform of each selected object (a shape gets a local transform when it has none), composed with the objects around it, so it is exact
+through rotated or scaled groups; a group and a member of it that are both selected are scaled once. It raises when nothing is selected, the kind
+is unknown or not editable now (`'length'`), or the value is not above zero. C++: `DimensionModel` (`include/curvy/dimensions.h`; `begin` /
+`preview` / `commit` / `cancel` are the live session the canvas scrub uses, `apply` is the three in a row). Tests:
+`ScriptModule.selectionDimensionsAreReadAndSetInOneUndoStep`, `tests/test_dimensions.cpp`.
 
 ### Guides (2026-11-18)
 

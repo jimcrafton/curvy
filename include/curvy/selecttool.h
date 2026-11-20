@@ -1,8 +1,9 @@
 #pragma once
 
+#include "curvy/dimensionoverlay.h"
 #include "curvy/marquee.h"
 #include "curvy/noderef.h"
-#include "curvy/shapepaths.h"
+#include "curvy/shapegeometry.h"
 #include "curvy/tool.h"
 
 #include <optional>
@@ -20,13 +21,13 @@ namespace curvy {
     // @reflect ignore=true
     class SelectTool : public Tool {
     public:
-        explicit SelectTool(ToolContext context) : context_(std::move(context)) {}
+        explicit SelectTool(ToolContext context) : context_(std::move(context)), dimensions_(context_) {}
 
         std::string id() const override { return "select"; }
         std::string title() const override { return "Select"; }
 
         void cancel() override;
-        bool busy() const override { return marquee_.active(); }
+        bool busy() const override { return marquee_.active() || dimensions_.scrubbing() || dimensions_.editing(); }
         bool inputDown(const ToolEvent& event) override;
         // On a group enters it; on empty canvas inside a group leaves it; anything else is not used (an ordinary press follows).
         bool inputDoubleClick(const ToolEvent& event) override;
@@ -38,6 +39,8 @@ namespace curvy {
         std::string optionsNote() const override { return "Applies to the next selection"; }
 
         const Marquee& marquee() const { return marquee_; }
+        // The size labels around the selection (Settings::showDimensions): a press on one scrubs it, a double-click types a value.
+        DimensionOverlay& dimensions() { return dimensions_; }
         // The keys of the shapes the marquee would take now (what the canvas outlines while the region is being drawn).
         const std::vector<std::string>& marqueeHits() const { return marqueeHits_; }
         // Selects the shape (the node that made it) under a canvas point, or clears the selection on empty canvas; `additive` adds instead.
@@ -60,6 +63,8 @@ namespace curvy {
         void finishMarquee();
 
         ToolContext context_;
+        // Mutable because painting measures the selection, which is what the labels show.
+        mutable DimensionOverlay dimensions_;
         Marquee marquee_;
         std::vector<std::string> marqueeHits_;
     };

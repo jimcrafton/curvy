@@ -1,4 +1,4 @@
-#include "curvy/shapeproperties.h"
+#include "curvy/shapetable.h"
 
 #include "curvy/objectnode.h"
 
@@ -50,7 +50,7 @@ namespace curvy {
 
     }
 
-    const char* shapePropertyName(ShapeProperty property) {
+    const char* ShapeTable::propertyName(ShapeProperty property) {
         switch (property) {
             case ShapeProperty::Tag: return "tag";
             case ShapeProperty::Fill: return "fill";
@@ -62,10 +62,9 @@ namespace curvy {
         return "";
     }
 
-    std::vector<ShapeValues> describeShapes(GraphDocument& document, const jitnodes::Geometry& geometry) {
-        std::vector<ShapeValues> out;
+    ShapeTable::ShapeTable(GraphDocument& document, const jitnodes::Geometry& geometry) {
         if (geometry.primitiveCount() == 0) {
-            return out;
+            return;
         }
         const float* strokeA = column(geometry, "stroke.a");
         const float* strokeW = column(geometry, "stroke.width");
@@ -109,12 +108,11 @@ namespace curvy {
                     }
                 }
             }
-            out.push_back(std::move(values));
+            rows_.push_back(std::move(values));
         }
-        return out;
     }
 
-    std::vector<std::string> valuesOf(const ShapeValues& shape, ShapeProperty property) {
+    std::vector<std::string> ShapeTable::valuesOf(const ShapeValues& shape, ShapeProperty property) {
         switch (property) {
             case ShapeProperty::Tag: return shape.tags.empty() ? std::vector<std::string>{kNoValue} : shape.tags;
             case ShapeProperty::Fill: return {shape.fill};
@@ -126,30 +124,49 @@ namespace curvy {
         return {};
     }
 
-    std::vector<ValueCount> countValues(const std::vector<ShapeValues>& shapes, ShapeProperty property) {
-        std::map<std::string, std::size_t> counts;
-        for (const ShapeValues& shape : shapes) {
-            for (const std::string& value : valuesOf(shape, property)) {
-                ++counts[value];
+    ShapeTable ShapeTable::filtered(const std::function<bool(const ShapeValues&)>& keep) const {
+        ShapeTable out;
+        for (const ShapeValues& row : rows_) {
+            if (keep(row)) {
+                out.rows_.push_back(row);
+            }
+        }
+        return out;
+    }
+
+    ShapeTable ShapeTable::having(ShapeProperty property, const std::string& value) const {
+        return filtered([&](const ShapeValues& row) {
+            const std::vector<std::string> values = valuesOf(row, property);
+            return std::find(values.begin(), values.end(), value) != values.end();
+        });
+    }
+
+    std::vector<ValueCount> ShapeTable::counts(ShapeProperty property) const {
+        std::map<std::string, std::size_t> found;
+        for (const ShapeValues& row : rows_) {
+            for (const std::string& value : valuesOf(row, property)) {
+                ++found[value];
             }
         }
         std::vector<ValueCount> out;
-        for (const auto& [text, count] : counts) {
+        for (const auto& [text, count] : found) {
             out.push_back({text, count});
         }
         std::stable_sort(out.begin(), out.end(), [](const ValueCount& a, const ValueCount& b) { return a.count > b.count; });
         return out;
     }
 
-    std::vector<std::string> shapesWithValue(const std::vector<ShapeValues>& shapes, ShapeProperty property, const std::string& value) {
-        std::vector<std::string> keys;
-        for (const ShapeValues& shape : shapes) {
-            const std::vector<std::string> values = valuesOf(shape, property);
-            if (std::find(values.begin(), values.end(), value) != values.end()) {
-                keys.push_back(shape.key);
-            }
+    std::vector<std::string> ShapeTable::keysWith(ShapeProperty property, const std::string& value) const {
+        return having(property, value).keys();
+    }
+
+    std::vector<std::string> ShapeTable::keys() const {
+        std::vector<std::string> out;
+        out.reserve(rows_.size());
+        for (const ShapeValues& row : rows_) {
+            out.push_back(row.key);
         }
-        return keys;
+        return out;
     }
 
 }

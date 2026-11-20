@@ -2,7 +2,7 @@
 
 #include "curvy/selectionmodel.h"
 #include "curvy/settings.h"
-#include "curvy/shapepaths.h"
+#include "curvy/shapegeometry.h"
 
 #include <newui/geometry.h>
 

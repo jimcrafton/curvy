@@ -6,7 +6,7 @@
 #include "curvy/settingsdialog.h"
 #include "curvy/paletteimagedialog.h"
 #include "curvy/paletteimagemodel.h"
-#include "curvy/shapepaths.h"
+#include "curvy/shapegeometry.h"
 #include "curvy/swatchimport.h"
 #include "curvy/theme.h"
 
@@ -2377,9 +2377,10 @@ namespace curvy {
             if (artwork != nullptr) {
                 const BLPoint origin = canvas_->toView(BLPoint(0.0, 0.0));
                 ctx.set_stroke_width(2.0);
+                const ShapeGeometry shapeGeometry(*artwork);
                 for (const jitnodes::ShapeRange& shape : artwork->shapes()) {
                     if (!shape.key.empty() && selection.isShapeKeySelected(std::string(shape.key))) {
-                        ctx.stroke_path(shapePath(*artwork, shape, origin.x, origin.y, double(canvas_->zoom())), rgb(Theme::current().accent));
+                        ctx.stroke_path(shapeGeometry.path(shape, origin.x, origin.y, double(canvas_->zoom())), rgb(Theme::current().accent));
                     }
                 }
             }

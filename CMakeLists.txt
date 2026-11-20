@@ -64,7 +64,7 @@ add_library(curvy_core STATIC
     src/nodepanel.cpp
     src/transformpanel.cpp
     src/selectionmodel.cpp
-    src/shapepaths.cpp
+    src/shapegeometry.cpp
     src/graphoverviews.cpp
     src/numberscrubber.cpp
     src/graphview.cpp
@@ -113,8 +113,10 @@ add_library(curvy_core STATIC
     src/marquee.cpp
     src/tool.cpp
     src/selecttool.cpp
+    src/dimensions.cpp
+    src/dimensionoverlay.cpp
     src/tooloptionscard.cpp
-    src/shapeproperties.cpp
+    src/shapetable.cpp
     src/selectpanel.cpp
 )
 

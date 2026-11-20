@@ -57,6 +57,8 @@ namespace curvy {
 
         // Workspace
         bool rulersVisible = true;
+        // Size labels and a bracket around the selection on the canvas (Select tool; see DimensionOverlay).
+        bool showDimensions = true;
         bool hintsFade = true;
         int recentLength = 10;
         // The units the next new document starts with (file keys workspace.defaultLength / defaultAngle). A document keeps its own, saved with it.

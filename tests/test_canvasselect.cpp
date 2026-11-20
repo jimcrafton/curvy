@@ -257,8 +257,8 @@ TEST_F(MarqueeTest, aRectangleThatOnlyCutsACircleTakesItOnlyWithTheSecondaryButt
 TEST_F(MarqueeTest, aRegionInsideABigShapeTouchesItButDoesNotContainIt) {
     const jitnodes::GeometryHandle artwork = window().document().artwork();
     ASSERT_NE(artwork, nullptr);
-    EXPECT_TRUE(curvy::shapesInRegion(*artwork, curvy::rectRegion(95.0, 95.0, 105.0, 105.0), curvy::RegionMode::Inside).empty());
-    EXPECT_EQ(curvy::shapesInRegion(*artwork, curvy::rectRegion(95.0, 95.0, 105.0, 105.0), curvy::RegionMode::Touches).size(), 1u);
+    EXPECT_TRUE(curvy::ShapeGeometry(*artwork).keysInRegion(curvy::ShapeGeometry::rectRegion(95.0, 95.0, 105.0, 105.0), curvy::RegionMode::Inside).empty());
+    EXPECT_EQ(curvy::ShapeGeometry(*artwork).keysInRegion(curvy::ShapeGeometry::rectRegion(95.0, 95.0, 105.0, 105.0), curvy::RegionMode::Touches).size(), 1u);
 }
 
 TEST_F(MarqueeTest, withoutTheTwoButtonRuleBothButtonsFollowTheContainmentSetting) {
@@ -355,12 +355,12 @@ TEST_F(MarqueeTest, theMKeyCyclesTheRegionShape) {
 TEST_F(MarqueeTest, theRegionQueryReadsTheArtworkDirectly) {
     const jitnodes::GeometryHandle artwork = window().document().artwork();
     ASSERT_NE(artwork, nullptr);
-    EXPECT_EQ(curvy::shapesInRegion(*artwork, curvy::rectRegion(0.0, 0.0, 400.0, 200.0), curvy::RegionMode::Inside).size(), 2u);
-    EXPECT_EQ(curvy::shapesInRegion(*artwork, curvy::rectRegion(0.0, 0.0, 100.0, 200.0), curvy::RegionMode::Inside).size(), 0u);
-    EXPECT_EQ(curvy::shapesInRegion(*artwork, curvy::rectRegion(0.0, 0.0, 100.0, 200.0), curvy::RegionMode::Touches).size(), 1u);
-    EXPECT_EQ(curvy::shapesInRegion(*artwork, curvy::ellipseRegion(0.0, 0.0, 200.0, 200.0), curvy::RegionMode::Inside).size(), 1u);
-    EXPECT_EQ(curvy::shapesInRegion(*artwork, curvy::rectRegion(500.0, 500.0, 600.0, 600.0), curvy::RegionMode::Touches).size(), 0u);
-    EXPECT_TRUE(curvy::shapesInRegion(*artwork, {}, curvy::RegionMode::Touches).empty());
+    EXPECT_EQ(curvy::ShapeGeometry(*artwork).keysInRegion(curvy::ShapeGeometry::rectRegion(0.0, 0.0, 400.0, 200.0), curvy::RegionMode::Inside).size(), 2u);
+    EXPECT_EQ(curvy::ShapeGeometry(*artwork).keysInRegion(curvy::ShapeGeometry::rectRegion(0.0, 0.0, 100.0, 200.0), curvy::RegionMode::Inside).size(), 0u);
+    EXPECT_EQ(curvy::ShapeGeometry(*artwork).keysInRegion(curvy::ShapeGeometry::rectRegion(0.0, 0.0, 100.0, 200.0), curvy::RegionMode::Touches).size(), 1u);
+    EXPECT_EQ(curvy::ShapeGeometry(*artwork).keysInRegion(curvy::ShapeGeometry::ellipseRegion(0.0, 0.0, 200.0, 200.0), curvy::RegionMode::Inside).size(), 1u);
+    EXPECT_EQ(curvy::ShapeGeometry(*artwork).keysInRegion(curvy::ShapeGeometry::rectRegion(500.0, 500.0, 600.0, 600.0), curvy::RegionMode::Touches).size(), 0u);
+    EXPECT_TRUE(curvy::ShapeGeometry(*artwork).keysInRegion({}, curvy::RegionMode::Touches).empty());
 }
 
 TEST_F(MarqueeTest, controlAselectsEveryShape) {

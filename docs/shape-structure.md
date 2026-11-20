@@ -116,13 +116,13 @@ A rig is a node that takes geometry and a list of *bindings*, each a key or a ke
 - Hit test per shape. A click yields a key; the key's node uid resolves to the node in the graph, replacing the `src.path` idea. The
   document keeps a `uid -> NodeRef` index, rebuilt when the graph changes (`onGraphChanged`).
 - `SelectionModel` gets `selectShapeKey(key)` and the reverse, so canvas and graph view stay in step.
-- **Select by** (2026-11-18). `describeShapes` / `valuesOf` / `countValues` / `shapesWithValue` (`shapeproperties.h`) read, per keyed
+- **Select by** (2026-11-18; now the class `ShapeTable`, `shapetable.h`: constructor = describe, `valuesOf`, `counts`, `having`, `keysWith`). It reads, per keyed
   shape, its tags (its node's and those of the layers and groups around it), fill and stroke colour (`fill.r g b a`, `stroke.r g b a`),
   stroke width, node type and layer name. The Select by panel lists the values with counts; a click selects every shape that has the
   value. See `docs/canvas-selection-plan.md` S3b.
-- **Marquee** (2026-11-18). `shapesInRegion(geometry, polygon, RegionMode)` in `shapepaths` returns the keys a region takes: *Inside* =
+- **Marquee** (2026-11-18; now `ShapeGeometry::keysInRegion(polygon, RegionMode)`, `shapegeometry.h`, which also has `path` and `hitAt`) returns the keys a region takes: *Inside* =
   every point of the shape's outline is in the region, *Touches* = any outline point is, or the region's edge crosses the shape's fill
-  or stroke. A rectangle, ellipse, freehand loop and polygon are all a polygon (`rectRegion`, `ellipseRegion`). `Marquee`
+  or stroke. A rectangle, ellipse, freehand loop and polygon are all a polygon (`ShapeGeometry::rectRegion`, `ellipseRegion`). `Marquee`
   (`include/curvy/marquee.h`) tracks the gesture in canvas pixels; `SelectTool` (`selecttool.h`, see `docs/tools.md`) turns it into a
   region, outlines what it would take while it is drawn and combines the result with
   `SelectionModel::selectShapeKeys(keys, Replace | Add | Subtract)` on release. Primary button = Inside, secondary = Touches (`Settings::selectTwoButton`; off: both use `selectContainment`). A press

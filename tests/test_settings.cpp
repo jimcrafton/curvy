@@ -15,6 +15,7 @@ namespace {
         changed.canvasFollowsTheme = false;
         changed.propertyTextSize = 14;
         changed.rulersVisible = false;
+        changed.showDimensions = false;
         changed.hintsFade = false;
         changed.recentLength = 25;
         changed.scrubAxis = Settings::ScrubAxis::Horizontal;
@@ -71,6 +72,7 @@ TEST(SettingsFile, EverySettingRoundTrips) {
     EXPECT_FALSE(back.canvasFollowsTheme);
     EXPECT_EQ(14, back.propertyTextSize);
     EXPECT_FALSE(back.rulersVisible);
+    EXPECT_FALSE(back.showDimensions);
     EXPECT_FALSE(back.hintsFade);
     EXPECT_EQ(25, back.recentLength);
     EXPECT_EQ(Settings::ScrubAxis::Horizontal, back.scrubAxis);

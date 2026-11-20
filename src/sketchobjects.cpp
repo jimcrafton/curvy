@@ -1,8 +1,10 @@
 #include "curvy/sketchdocument.h"
 
 #include "curvy/appearancenode.h"
+#include "curvy/dimensions.h"
 #include "curvy/objectnode.h"
 #include "curvy/selectionmodel.h"
+#include "curvy/shapegeometry.h"
 
 #include <jitnodes/graph/network.h>
 #include <jitnodes/graph/serialize.h>
@@ -10,7 +12,9 @@
 #include <algorithm>
 #include <initializer_list>
 #include <iterator>
+#include <optional>
 #include <stdexcept>
+#include <utility>
 
 namespace curvy {
 
@@ -261,8 +265,99 @@ namespace curvy {
             return NodeRef(after.scope, made);
         }
 
+        bool isIdentityTransform(const jitnodes::Node& xform) {
+            return xform.getFloat("tx") == 0.0f && xform.getFloat("ty") == 0.0f && xform.getFloat("rot") == 0.0f && xform.getFloat("skew") == 0.0f &&
+                   xform.getFloat("sx") == 1.0f && xform.getFloat("sy") == 1.0f && xform.getFloat("px") == 0.0f && xform.getFloat("py") == 0.0f;
+        }
+
+        // The centre of what a transform holds, in the space its pivot is in: the shapes of the object (or the one shape), as the document draws
+        // them, taken back through the objects around the owner. An object's own transform works on what its children made, so the objects
+        // above it are all that lies between that space and the document; a shape's local transform has its own object and those above it.
+        std::optional<std::pair<float, float>> pivotCentre(SketchDocument& document, const NodeRef& owner, bool isObject) {
+            const jitnodes::GeometryHandle artwork = document.artwork();
+            if (artwork == nullptr) {
+                return std::nullopt;
+            }
+            bool any = false;
+            BLBox box;
+            DimensionModel::Affine above;
+            bool aboveKnown = false;
+            const ShapeGeometry shapeGeometry(*artwork);
+            for (const jitnodes::ShapeRange& shape : artwork->shapes()) {
+                if (shape.key.empty()) {
+                    continue;
+                }
+                const std::string key(shape.key);
+                const std::vector<std::uint32_t> uids = SketchDocument::uidsOfShapeKey(key);
+                std::size_t level = uids.size();
+                if (isObject) {
+                    for (std::size_t k = 0; k + 1 < uids.size(); ++k) {
+                        if (document.nodeOfUid(uids[k]) == owner) {
+                            level = k;
+                            break;
+                        }
+                    }
+                    if (level == uids.size()) {
+                        continue;
+                    }
+                } else {
+                    NodeRef generator;
+                    try {
+                        generator = shapeGeneratorOf(document, document.nodeForShapeKey(key));
+                    } catch (const std::exception&) {
+                        continue;
+                    }
+                    if (!(generator == owner) || uids.empty()) {
+                        continue;
+                    }
+                    level = uids.size() - 1;
+                }
+                if (!aboveKnown) {
+                    for (std::size_t k = 0; k < level; ++k) {
+                        const NodeRef ref = document.nodeOfUid(uids[k]);
+                        ObjectNode* object = ref.valid() && document.hasNode(ref) ? dynamic_cast<ObjectNode*>(&document.node(ref)) : nullptr;
+                        if (object != nullptr && object->xformId() != jitnodes::invalidNodeId) {
+                            const NodeRef xform(document.scopeOfSubnet(ref), object->xformId());
+                            above = DimensionModel::multiply(above, DimensionModel::fromNode(document.node(xform)));
+                        }
+                    }
+                    aboveKnown = true;
+                }
+                const BLPath path = shapeGeometry.path(shape, 0.0, 0.0, 1.0);
+                BLBox one;
+                if (path.is_empty() || path.get_bounding_box(&one) != BL_SUCCESS) {
+                    continue;
+                }
+                if (!any) {
+                    box = one;
+                    any = true;
+                } else {
+                    box.x0 = (std::min)(box.x0, one.x0);
+                    box.y0 = (std::min)(box.y0, one.y0);
+                    box.x1 = (std::max)(box.x1, one.x1);
+                    box.y1 = (std::max)(box.y1, one.y1);
+                }
+            }
+            if (!any) {
+                return std::nullopt;
+            }
+            double x = (box.x0 + box.x1) * 0.5, y = (box.y0 + box.y1) * 0.5;
+            DimensionModel::Affine inverse;
+            if (DimensionModel::invert(above, inverse)) {
+                const double lx = inverse.a * x + inverse.c * y + inverse.e;
+                y = inverse.b * x + inverse.d * y + inverse.f;
+                x = lx;
+            }
+            return std::make_pair(float(x), float(y));
+        }
+
         NodeRef insertLocalTransform(SketchDocument& document, const NodeRef& shape) {
-            return insertNodeAfter(document, shape, "transform", "localXform");
+            const NodeRef made = insertNodeAfter(document, shape, "transform", "localXform");
+            if (const auto centre = pivotCentre(document, shape, false)) {
+                document.node(made).setFloat("px", centre->first);
+                document.node(made).setFloat("py", centre->second);
+            }
+            return made;
         }
 
         NodeRef findLook(SketchDocument& document, const NodeRef& shape, SketchDocument::LookKind kind) {
@@ -303,7 +398,36 @@ namespace curvy {
 
     void SketchDocument::setObjectTransform(const NodeRef& object, const std::map<std::string, float>& values) {
         checkTransformNames(values);
-        setGraphFloats(objectXformRef(*this, object), values, "Transform Object");
+        const NodeRef xform = objectXformRef(*this, object);
+        std::map<std::string, float> changes = values;
+        if (isIdentityTransform(node(xform)) && changes.count("px") == 0 && changes.count("py") == 0) {
+            if (const auto centre = pivotCentre(*this, object, true)) {
+                changes["px"] = centre->first;
+                changes["py"] = centre->second;
+            }
+        }
+        setGraphFloats(xform, changes, "Transform Object");
+    }
+
+    std::optional<std::pair<float, float>> SketchDocument::defaultPivot(const NodeRef& from) {
+        const bool isObject = hasNode(from) && dynamic_cast<ObjectNode*>(&node(from)) != nullptr;
+        return pivotCentre(*this, isObject ? from : shapeGeneratorOf(*this, from), isObject);
+    }
+
+    bool SketchDocument::centrePivotIfIdentity(const NodeRef& from) {
+        const bool isObject = hasNode(from) && dynamic_cast<ObjectNode*>(&node(from)) != nullptr;
+        const NodeRef owner = isObject ? from : shapeGeneratorOf(*this, from);
+        const NodeRef xform = isObject ? objectXformRef(*this, from) : findLocalTransform(*this, owner);
+        if (!xform.valid() || !isIdentityTransform(node(xform))) {
+            return false;
+        }
+        const auto centre = pivotCentre(*this, owner, isObject);
+        if (!centre) {
+            return false;
+        }
+        node(xform).setFloat("px", centre->first);
+        node(xform).setFloat("py", centre->second);
+        return true;
     }
 
     NodeRef SketchDocument::localTransformOf(const NodeRef& from) {
@@ -319,6 +443,14 @@ namespace curvy {
         const NodeRef made = insertLocalTransform(*this, shape);
         commitGraphEdit(before, "Add Local Transform");
         return made;
+    }
+
+    NodeRef SketchDocument::ensureLocalTransformLive(const NodeRef& from) {
+        const NodeRef shape = shapeGeneratorOf(*this, from);
+        if (const NodeRef existing = findLocalTransform(*this, shape); existing.valid()) {
+            return existing;
+        }
+        return insertLocalTransform(*this, shape);
     }
 
     std::map<std::string, float> SketchDocument::shapeTransform(const NodeRef& from) {
