@@ -18,7 +18,9 @@ class CurvyCase(AppTestCase):
     # The default window is too short for every panel of the right dock to show at once (the lower ones fall below the window), so a suite
     # that works in the script panels puts them on top and starts the other panels collapsed.
     # The Select by panel is hidden here too: one more title row is enough to push the console's input off the bottom of the short window.
-    SCRIPT_PANELS_SETTINGS = "{ panels: { pyeditor: {}, pyconsole: {}, document: { collapsed: true }, node: { collapsed: true }, transform: { collapsed: true }, select: { hidden: true }, assets: { collapsed: true } } }"
+    # The default window (1360 x 860) ends above the lower panel buttons; a taller one keeps them on the window, so a click lands on the app.
+    TALL_WINDOW = "window: { x: 40, y: 40, width: 1360, height: 1200 }, "
+    SCRIPT_PANELS_SETTINGS = "{ " + TALL_WINDOW + "panels: { pyeditor: {}, pyconsole: {}, document: { collapsed: true }, node: { collapsed: true }, transform: { collapsed: true }, select: { hidden: true }, assets: { collapsed: true } } }"
 
     def make_settings_file(self, text=""):
         self._settings_dir = tempfile.TemporaryDirectory()

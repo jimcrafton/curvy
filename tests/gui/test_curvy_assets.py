@@ -16,7 +16,7 @@ import newui_guitest
 class AssetsCase(CurvyCase):
     def setUp(self):
         # The Assets panel on top and open; the others collapsed so it has room.
-        self.make_settings_file("{ panels: { assets: { collapsed: false, userBodyHeight: 460 }, document: { collapsed: true }, "
+        self.make_settings_file("{ " + CurvyCase.TALL_WINDOW + "panels: { assets: { collapsed: false, userBodyHeight: 460 }, document: { collapsed: true }, "
                                 "node: { collapsed: true }, transform: { collapsed: true }, pyeditor: { collapsed: true }, "
                                 "pyconsole: { collapsed: true } } }")
         super().setUp()

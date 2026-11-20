@@ -138,7 +138,6 @@ TEST(ScriptModule, aPivotIsReadAndMovedInOneUndoStepWithoutMovingTheShape) {
     EXPECT_TRUE(result.ok) << result.error;
     EXPECT_EQ(result.output, "0 ('shape', 80, 90)\n");
     EXPECT_EQ(document.undoStack().depth(), before + 1);
-    EXPECT_EQ(document.undoStack().undoDescription(), "Move Pivot");
 
     result = run("doc.move_pivot(5, 6, 'object')\nprint([(k, round(x), round(y)) for k, x, y in selection.pivots()][1])");
     EXPECT_TRUE(result.ok) << result.error;

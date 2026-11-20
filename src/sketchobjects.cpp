@@ -411,7 +411,11 @@ namespace curvy {
 
     std::optional<std::pair<float, float>> SketchDocument::defaultPivot(const NodeRef& from) {
         const bool isObject = hasNode(from) && dynamic_cast<ObjectNode*>(&node(from)) != nullptr;
-        return pivotCentre(*this, isObject ? from : shapeGeneratorOf(*this, from), isObject);
+        try {
+            return pivotCentre(*this, isObject ? from : shapeGeneratorOf(*this, from), isObject);
+        } catch (const std::runtime_error&) {
+            return std::nullopt;   // a selected node that is part of no shape (a fill whose input was unwired): the canvas paints this, so it must not throw
+        }
     }
 
     bool SketchDocument::centrePivotIfIdentity(const NodeRef& from) {

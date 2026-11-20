@@ -631,7 +631,12 @@ its pivot at the centre of what it holds the first time it is used (a new shape 
 `px`/`py`); a transform that already changes something keeps its pivot. It edits
 the transform of each selected object (a shape gets a local transform when it has none), composed with the objects around it, so it is exact
 through rotated or scaled groups; a group and a member of it that are both selected are scaled once. It raises when nothing is selected, the kind
-is unknown or not editable now (`'length'`), or the value is not above zero. C++: `DimensionModel` (`include/curvy/dimensions.h`; `begin` /
+is unknown or not editable now (`'length'`), or the value is not above zero.
+`selection.pivots()` lists the pivots the canvas marks as `(level, x, y)` tuples in points (`'shape'`: the shape's own transform; `'object'`: its
+layer or group). `doc.move_pivot(x, y, level='shape')` moves the first pivot of that level to `(x, y)` without moving anything on screen (the
+transform's translation is adjusted to match), as one undo step; it raises when nothing is selected, the level is unknown, the selection has no
+pivot of that level, or a coordinate is not finite. C++: `DimensionModel::movePivot` (`beginPivotMove` / `previewPivotMove` / `commit` are the
+live drag). C++: `DimensionModel` (`include/curvy/dimensions.h`; `begin` /
 `preview` / `commit` / `cancel` are the live session the canvas scrub uses, `apply` is the three in a row). Tests:
 `ScriptModule.selectionDimensionsAreReadAndSetInOneUndoStep`, `tests/test_dimensions.cpp`.
 

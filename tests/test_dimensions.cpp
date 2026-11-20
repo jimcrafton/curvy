@@ -412,3 +412,11 @@ TEST_F(DimensionOverlayTest, cancellingTheEditorKeepsTheSize) {
     EXPECT_FALSE(overlay().editing());
     EXPECT_NEAR(width(), 120.0, 1e-3);
 }
+
+TEST(Dimensions, aSelectedNodeCutOffFromItsShapeHasNoPivotAndPaintingItDoesNotThrow) {
+    Shapes s;
+    jitnodes::Network& network = s.document.networkOf(s.first.scope);
+    network.disconnect(s.first.id, 0);   // the fill no longer hangs on its circle: what unwiring it on the graph does
+    s.selection.selectNodes({s.first}, curvy::SelectionModel::Combine::Replace);
+    EXPECT_NO_THROW(s.model.pivots());
+}
