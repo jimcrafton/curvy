@@ -430,6 +430,14 @@ namespace curvy {
             py::class_<ScriptSelection>(module, "Selection", "What is selected in the editor (layers, groups and graph nodes). Changing it is not an undo step.")
                 .def("dimensions", [](const ScriptSelection& s) { return DimensionModel(s.guard()->get(), s.model()).compute(); },
                      "The measurements of the selection: width and height of its box, a circle's radius, a curve's length (the numbers the canvas labels).")
+                .def("pivots", [](const ScriptSelection& s) {
+                         py::list result;
+                         for (const DimensionModel::PivotMark& mark : DimensionModel(s.guard()->get(), s.model()).pivots()) {
+                             result.append(py::make_tuple(DimensionModel::levelName(mark.level), mark.at.x, mark.at.y));
+                         }
+                         return result;
+                     }, "The pivots of the selection the canvas marks, as (level, x, y) tuples in points: level is 'shape' (the shape's own transform) or 'object' "
+                        "(its layer or group).")
                 .def_property_readonly("items", &selectionItems, "The selected objects and nodes, in selection order.")
                 .def_property_readonly("primary", [](const ScriptSelection& s) { return wrapOptional(s.guard(), s.model().primary()); },
                                        "The one the panels show, or None.")
@@ -1104,6 +1112,21 @@ namespace curvy {
                      "Resizes the selection so its 'width' or 'height' (scaled about the box's top left) or a lone circle's 'radius' (about its centre) is `value` "
                      "points. With about_pivot=True the pivot of the transform being edited stays where it is instead. One undo step; raises when the selection "
                      "cannot be measured that way or the value is not above zero.")
+                .def("move_pivot", [](const ScriptDocument& d, double x, double y, const std::string& level) {
+                         if (d.selection() == nullptr) {
+                             throw std::runtime_error("this run has no editor selection");
+                         }
+                         const std::optional<DimensionModel::PivotMark::Level> which = DimensionModel::levelFromName(level);
+                         if (!which.has_value()) {
+                             throw std::runtime_error("level must be 'shape' or 'object'");
+                         }
+                         DimensionModel model(d.get(), *d.selection());
+                         if (!model.movePivot(*which, BLPoint(x, y))) {
+                             throw std::runtime_error(model.message().empty() ? "nothing changed" : model.message());
+                         }
+                     }, py::arg("x"), py::arg("y"), py::arg("level") = "shape",
+                     "Moves the selection's pivot (level 'shape': the selected shape's own; 'object': its layer's or group's) to (x, y) in points without moving "
+                     "anything on screen; later rotations and scales turn about it. One undo step; raises when nothing is selected or it has no pivot of that level.")
                 .def("artwork", [](const ScriptDocument& d) -> py::object {
                     jitnodes::GeometryHandle geometry = d.get().artwork();
                     return geometry ? py::cast(geometry) : py::none();

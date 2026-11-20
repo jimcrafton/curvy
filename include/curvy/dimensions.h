@@ -67,6 +67,11 @@ namespace curvy {
         // same begin / preview / commit session as a size edit, so a drag is one undo step. False when the move is refused.
         bool beginPivotMove(const PivotMark& mark);
         bool previewPivotMove(const BLPoint& at);
+        // begin, preview and commit in one call, for a script: moves the first pivot of `level` among the selection's marks. False (see message())
+        // when the selection has none of that level or the move is refused.
+        bool movePivot(PivotMark::Level level, const BLPoint& at);
+        static const char* levelName(PivotMark::Level level);
+        static std::optional<PivotMark::Level> levelFromName(const std::string& text);
         const std::string& message() const { return message_; }
 
         // A 2D matrix x' = a x + c y + e, y' = b x + d y + f, and the few operations the transform editing here needs; SketchDocument uses them

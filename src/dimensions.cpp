@@ -389,6 +389,41 @@ namespace curvy {
         return true;
     }
 
+    const char* DimensionModel::levelName(PivotMark::Level level) {
+        return level == PivotMark::Level::Shape ? "shape" : "object";
+    }
+
+    std::optional<DimensionModel::PivotMark::Level> DimensionModel::levelFromName(const std::string& text) {
+        if (text == "shape") {
+            return PivotMark::Level::Shape;
+        }
+        if (text == "object") {
+            return PivotMark::Level::Object;
+        }
+        return std::nullopt;
+    }
+
+    bool DimensionModel::movePivot(PivotMark::Level level, const BLPoint& at) {
+        message_.clear();
+        if (!std::isfinite(at.x) || !std::isfinite(at.y)) {
+            return refuse("the pivot position must be a finite number");
+        }
+        for (const PivotMark& mark : pivots()) {
+            if (mark.level != level) {
+                continue;
+            }
+            if (!beginPivotMove(mark)) {
+                return false;
+            }
+            if (!previewPivotMove(at)) {
+                cancel();
+                return false;
+            }
+            return commit();
+        }
+        return refuse("the selection has no pivot of that level");
+    }
+
     bool DimensionModel::previewPivotMove(const BLPoint& at) {
         if (!editing_ || !pivotMove_ || targets_.empty()) {
             return false;

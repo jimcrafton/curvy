@@ -118,6 +118,36 @@ TEST(ScriptModule, selectionDimensionsAreReadAndSetInOneUndoStep) {
     EXPECT_FALSE(run("doc.set_dimension('depth', 5)").ok);
 }
 
+TEST(ScriptModule, aPivotIsReadAndMovedInOneUndoStepWithoutMovingTheShape) {
+    curvy::SketchDocument document;
+    document.newBlank("Pivots", 612.0f, 792.0f);
+    const curvy::NodeRef layer = document.addLayer();
+    document.addCircle(layer, 100.0f, 100.0f, 30.0f, newui::Color(1.0f, 0.0f, 0.0f, 1.0f));
+    curvy::SelectionModel selection(&document);
+    auto run = [&](const std::string& code) { return curvytest::sharedConsole().run(code, &document, &selection); };
+
+    EXPECT_FALSE(run("doc.move_pivot(10, 10)").ok) << "nothing selected";
+    auto result = run("doc.select_where(type='circle')\nprint([(k, round(x), round(y)) for k, x, y in selection.pivots()])");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "[('shape', 100, 100), ('object', 100, 100)]\n");
+
+    const std::size_t before = document.undoStack().depth();
+    result = run("w = selection.dimensions()[0].value\n"
+                 "doc.move_pivot(80, 90)\n"
+                 "print(round(w - selection.dimensions()[0].value), [(k, round(x), round(y)) for k, x, y in selection.pivots()][0])");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "0 ('shape', 80, 90)\n");
+    EXPECT_EQ(document.undoStack().depth(), before + 1);
+    EXPECT_EQ(document.undoStack().undoDescription(), "Move Pivot");
+
+    result = run("doc.move_pivot(5, 6, 'object')\nprint([(k, round(x), round(y)) for k, x, y in selection.pivots()][1])");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "('object', 5, 6)\n");
+
+    EXPECT_FALSE(run("doc.move_pivot(1, 1, 'world')").ok);
+    EXPECT_FALSE(run("doc.move_pivot(float('nan'), 1)").ok);
+}
+
 TEST(ScriptModule, layersAndGroups) {
     curvy::SketchDocument document;
     document.newBlank("Objects", 100.0f, 100.0f);
