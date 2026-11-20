@@ -5,6 +5,7 @@
 #include "curvy/graphdocument.h"
 #include "curvy/guides.h"
 #include "curvy/swatchpalettes.h"
+#include "curvy/tracelayer.h"
 #include "curvy/units.h"
 #include "curvy/viewstate.h"
 
@@ -76,6 +77,27 @@ namespace curvy {
         // Called after the guides, their lock or visibility, or the ruler origin changed by an edit, undo, redo or the setters (on the caller's thread). Not called
         // by New or a load: whoever shows the guides reads them again then.
         newui::Delegate<SketchDocument> onGuidesChanged;
+
+        // ---- Trace layer ----
+        // Guide shapes drawn over the artwork (saved as document.trace, never a node and never rendered by the graph). Each edit below is one
+        // undo step and throws std::runtime_error when refused (a bad index, a shape that is not finite or has no size, or a locked layer).
+        // Hiding and locking are view choices like the guides': not undoable, saved with the layer.
+        const TraceLayer& trace() const { return trace_; }
+        std::size_t addTraceItem(const TraceItem& item);
+        void setTraceItem(std::size_t index, const TraceItem& item);
+        void removeTraceItem(std::size_t index);
+        // Several shapes in one undo step (a bad index or a distance that is not finite is refused before anything changes; duplicates in
+        // `indices` count once). Moving by (0, 0) or an empty list is not a step.
+        void moveTraceItems(const std::vector<std::size_t>& indices, double dx, double dy);
+        void removeTraceItems(const std::vector<std::size_t>& indices);
+        // One undo step; false (and no step) when there were none.
+        bool clearTrace();
+        void setTraceVisible(bool visible);
+        void setTraceLocked(bool locked);
+        // How see-through the layer paints (0.05..1, default 0.6); a view choice like visible. Not a finite number is refused.
+        void setTraceOpacity(double opacity);
+        // Called after the trace layer changed by an edit, undo, redo or the setters. Not called by New or a load.
+        newui::Delegate<SketchDocument> onTraceChanged;
 
         // ---- Swatches and palettes ----
         // A document keeps at least one palette (a new one starts with DefaultPalette), one of them active. Every edit below is one undo step and throws
@@ -300,6 +322,8 @@ namespace curvy {
         // Same for guides_: runs `edit` and records the before and after as one undo step (nothing when the list did not change).
         void editGuides(const std::string& description, const std::function<void()>& edit);
         void requireGuidesUnlocked() const;
+        // Same for trace_ (the shapes only; visible and locked are not part of a step).
+        void editTrace(const std::string& description, const std::function<void()>& edit);
         // Every node of every network, subnets included.
         void forEachNode(const std::function<void(jitnodes::Network&, jitnodes::NodeId)>& visit);
         // Every colour row of the graph: the node, its colour and the swatch link it is tied to (0 for none).
@@ -339,6 +363,7 @@ namespace curvy {
         RulerOrigin rulerOrigin_;
         bool guidesLocked_ = false;
         bool guidesVisible_ = true;
+        TraceLayer trace_;
         ViewState viewState_;
     };
 

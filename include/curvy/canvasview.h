@@ -110,6 +110,8 @@ namespace curvy {
         // Painted over everything the canvas draws.
         std::function<void(BLContext& ctx)> onPaintTop;
         std::function<bool(const std::string& key)> shapeDimmed;
+        // True while the trace sheet should show although the trace layer has no shapes yet (a trace tool is the current tool).
+        std::function<bool()> traceSheetActive;
 
         void paint(BLContext& ctx) override;
 

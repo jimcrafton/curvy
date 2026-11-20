@@ -89,6 +89,53 @@ TEST(ScriptModule, guides) {
     EXPECT_FALSE(runOn(document, "doc.remove_guide(3)").ok);
 }
 
+TEST(ScriptModule, traceLayer) {
+    curvy::SketchDocument document;
+    document.newBlank("Trace", 100.0f, 100.0f);
+    auto result = runOn(document,
+                        "i = doc.add_trace_item(curvy.TraceItem(50, 60, 10, 20))\n"
+                        "doc.set_trace_item(i, curvy.TraceItem(0, 0, 30, 40))\n"
+                        "t = doc.trace_items[0]\n"
+                        "print(len(doc.trace_items), t.kind, t.x, t.width, t.height, doc.trace_visible)");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "1 rect 0.0 30.0 40.0 True\n");
+    ASSERT_EQ(document.trace().items().size(), 1u);
+
+    EXPECT_FALSE(runOn(document, "doc.add_trace_item(curvy.TraceItem(5, 5, 5, 9))").ok) << "no width is not a shape";
+    result = runOn(document,
+                   "doc.add_trace_item(curvy.TraceItem(50, 50, 60, 60))\n"
+                   "doc.move_trace_items([0, 1], 5, -5)\n"
+                   "print(doc.trace_items[0].x, doc.trace_items[1].y)\n"
+                   "doc.remove_trace_items([0, 1])\n"
+                   "print(len(doc.trace_items))");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "5.0 45.0\n0\n");
+    EXPECT_FALSE(runOn(document, "doc.move_trace_items([3], 1, 1)").ok) << "a bad index is refused";
+    result = runOn(document,
+                   "doc.add_trace_item(curvy.TraceItem(100, 100, 200, 180))\n"
+                   "print(doc.snap_point(103, 98))\n"
+                   "print(doc.snap_point(150, 104)[2], doc.snap_point(130, 104)[2], doc.snap_point(500, 500))\n"
+                   "print(doc.snap_point(106, 103, 8)[2])");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "(100.0, 100.0, 'corner')\nmidpoint edge (500.0, 500.0, 'none')\nnone\n");
+    EXPECT_TRUE(runOn(document, "doc.set_trace_item(0, curvy.TraceItem(0, 0, 30, 40))").ok);
+    result = runOn(document,
+                   "doc.add_trace_item(curvy.TraceItem.line(15, -20, 15, 60))\n"
+                   "l = doc.trace_items[1]\n"
+                   "print(l.kind, l.x, l.y, l.end_x, l.end_y, doc.snap_point(16, 1)[2])\n"
+                   "doc.remove_trace_item(1)");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "line 15.0 -20.0 15.0 60.0 intersection\n");
+    EXPECT_FALSE(runOn(document, "doc.add_trace_item(curvy.TraceItem.line(5, 5, 5, 5))").ok) << "a line needs a length";
+    result = runOn(document, "doc.trace_locked = True\ndoc.remove_trace_item(0)");
+    EXPECT_FALSE(result.ok) << "a locked layer refuses edits";
+    EXPECT_EQ(document.trace().items().size(), 1u);
+    result = runOn(document, "doc.trace_locked = False\nprint(doc.clear_trace(), doc.clear_trace())");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.output, "True False\n");
+    EXPECT_TRUE(document.trace().empty());
+}
+
 TEST(ScriptModule, selectionDimensionsAreReadAndSetInOneUndoStep) {
     curvy::SketchDocument document;
     document.newBlank("Dimensions", 612.0f, 792.0f);

@@ -7,6 +7,7 @@
 #include "curvy/shapegeometry.h"
 #include "curvy/shapetable.h"
 #include "curvy/sketchdocument.h"
+#include "curvy/snapper.h"
 #include "curvy/wranglecheck.h"
 
 #include <pyGuard.h>
@@ -302,6 +303,22 @@ namespace curvy {
                 .def_readonly("position", &Guide::position)
                 .def("__eq__", [](const Guide& a, const Guide& b) { return a == b; })
                 .def("__repr__", [](const Guide& g) { return std::string("Guide(") + (g.vertical ? "vertical" : "horizontal") + ", " + std::to_string(g.position) + ")"; });
+            py::class_<TraceItem>(module, "TraceItem", "A guide shape on the trace layer (a copy: edit through the document). Kinds 'rect' (x, y its top left corner, width and height its size) and 'line' (x, y its start, width and height the vector to its end; see end_x, end_y), in points from the page's top left.")
+                .def(py::init([](double x1, double y1, double x2, double y2) { return TraceItem::rect(x1, y1, x2, y2); }), py::arg("x1"), py::arg("y1"), py::arg("x2"), py::arg("y2"),
+                     "A rectangle between two opposite corners.")
+                .def_static("line", [](double x1, double y1, double x2, double y2) { return TraceItem::line(x1, y1, x2, y2); }, py::arg("x1"), py::arg("y1"), py::arg("x2"), py::arg("y2"),
+                            "A straight line from the first point to the second.")
+                .def_property_readonly("end_x", [](const TraceItem& t) { return t.endX(); })
+                .def_property_readonly("end_y", [](const TraceItem& t) { return t.endY(); })
+                .def_property_readonly("kind", [](const TraceItem& t) { return TraceItem::kindName(t.kind); })
+                .def_readonly("x", &TraceItem::x)
+                .def_readonly("y", &TraceItem::y)
+                .def_readonly("width", &TraceItem::width)
+                .def_readonly("height", &TraceItem::height)
+                .def("__eq__", [](const TraceItem& a, const TraceItem& b) { return a == b; })
+                .def("__repr__", [](const TraceItem& t) {
+                    return "TraceItem(" + TraceItem::kindName(t.kind) + ", " + std::to_string(t.x) + ", " + std::to_string(t.y) + ", " + std::to_string(t.width) + ", " + std::to_string(t.height) + ")";
+                });
 
             py::class_<Palette>(module, "Palette", "A named list of swatches (a copy: edit through the document).")
                 .def_readonly("name", &Palette::name)
@@ -1143,6 +1160,32 @@ namespace curvy {
                               [](const ScriptDocument& d, bool locked) { d.get().setGuidesLocked(locked); }, "A locked set cannot be moved or removed. Not undoable.")
                 .def_property("guides_visible", [](const ScriptDocument& d) { return d.get().guidesVisible(); },
                               [](const ScriptDocument& d, bool visible) { d.get().setGuidesVisible(visible); }, "Not undoable.")
+                .def_property_readonly("trace_items", [](const ScriptDocument& d) { return d.get().trace().items(); },
+                                       "Copies of the shapes on the trace layer (guide shapes for snapping; never rendered by the graph), in drawing order.")
+                .def("add_trace_item", [](const ScriptDocument& d, const TraceItem& item) { return d.get().addTraceItem(item); }, py::arg("item"),
+                     "Adds a shape to the trace layer and returns its index. One undo step. Raises when the shape has no size or the layer is locked.")
+                .def("set_trace_item", [](const ScriptDocument& d, std::size_t index, const TraceItem& item) { d.get().setTraceItem(index, item); },
+                     py::arg("index"), py::arg("item"), "Replaces a shape. One undo step. Raises when locked.")
+                .def("remove_trace_item", [](const ScriptDocument& d, std::size_t index) { d.get().removeTraceItem(index); }, "Raises when locked.")
+                .def("snap_point", [](const ScriptDocument& d, double x, double y, double zoom) {
+                         const SnapResult hit = Snapper(d.get()).snap(BLPoint(x, y), zoom);
+                         return py::make_tuple(hit.point.x, hit.point.y, std::string(SnapResult::kindName(hit.kind)));
+                     },
+                     py::arg("x"), py::arg("y"), py::arg("zoom") = 1.0,
+                     "Pulls a point (document points) onto the visible trace shapes and ruler guides within 8 screen pixels at `zoom`. Returns (x, y, kind); kind is 'none' "
+                     "(the point comes back as it was), 'corner', 'midpoint', 'center', 'edge' or 'guide'.")
+                .def("move_trace_items", [](const ScriptDocument& d, const std::vector<std::size_t>& indices, double dx, double dy) { d.get().moveTraceItems(indices, dx, dy); },
+                     py::arg("indices"), py::arg("dx"), py::arg("dy"), "Moves several trace shapes by (dx, dy) points in one undo step. Raises on a bad index, a non-finite distance or a locked layer.")
+                .def("remove_trace_items", [](const ScriptDocument& d, const std::vector<std::size_t>& indices) { d.get().removeTraceItems(indices); }, py::arg("indices"),
+                     "Removes several trace shapes in one undo step. Raises on a bad index or a locked layer.")
+                .def("clear_trace", [](const ScriptDocument& d) { return d.get().clearTrace(); }, "Removes every trace shape; False when there were none. Raises when locked.")
+                .def_property("trace_visible", [](const ScriptDocument& d) { return d.get().trace().visible(); },
+                              [](const ScriptDocument& d, bool visible) { d.get().setTraceVisible(visible); }, "Not undoable.")
+                .def_property("trace_opacity", [](const ScriptDocument& d) { return d.get().trace().opacity(); },
+                              [](const ScriptDocument& d, double opacity) { d.get().setTraceOpacity(opacity); },
+                              "How see-through the layer paints, 0.05 to 1 (default 0.6). Not undoable; raises for a non-finite number.")
+                .def_property("trace_locked", [](const ScriptDocument& d) { return d.get().trace().locked(); },
+                              [](const ScriptDocument& d, bool locked) { d.get().setTraceLocked(locked); }, "A locked layer refuses every edit. Not undoable.")
 
                 .def_property("ruler_origin", [](const ScriptDocument& d) { return std::make_pair(d.get().rulerOrigin().x, d.get().rulerOrigin().y); },
                               [](const ScriptDocument& d, const std::pair<double, double>& origin) { d.get().setRulerOrigin(RulerOrigin{origin.first, origin.second}); },

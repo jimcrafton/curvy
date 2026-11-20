@@ -649,3 +649,15 @@ clear raise (adding stays allowed); `doc.guides_visible` hides them. Lock and vi
 `doc.ruler_origin` is an `(x, y)` pair, the point the rulers read zero at (points from the page's top left, default `(0, 0)`; set it from a tuple; raises
 for a non-finite number; not undoable, saved as `document.rulerOrigin`). The C++ side is `SketchDocument::guides()` and friends (`include/curvy/guides.h`); the file keeps them in `document.guides`
 (`{ list: [["v", 120.5], ["h", 40]], locked, visible }`, lenient reader: bad entries are dropped). Tests: `ScriptModule.guides`, `tests/test_guides.cpp`.
+
+### Trace layer (2026-11-19)
+
+`doc.trace_items` is a list of `curvy.TraceItem` copies (`kind` is `'rect'` or `'line'`, `x`, `y`, `width`, `height` read-only, points from the page's top
+left; `curvy.TraceItem(x1, y1, x2, y2)` builds a rectangle from two opposite corners and `curvy.TraceItem.line(x1, y1, x2, y2)` a line; for a line
+`x`, `y` is the start, `width`, `height` the vector to the end, and `end_x`, `end_y` the end). `doc.add_trace_item(item)` (returns the index),
+`doc.set_trace_item(i, item)`, `doc.remove_trace_item(i)`, `doc.move_trace_items([i, ...], dx, dy)`, `doc.remove_trace_items([i, ...])` (several in one step; a bad
+index changes nothing) and `doc.clear_trace()` (False when empty) are one undo step each and raise on a bad
+index, a shape with no size or a locked layer. `doc.snap_point(x, y, zoom=1.0)` returns `(x, y, kind)`: the point pulled onto the visible trace shapes and ruler guides within 8 screen pixels at that zoom
+(`kind` is `'none'`, `'corner'`, `'midpoint'`, `'center'`, `'intersection'`, `'edge'` or `'guide'`; for `'none'` the point comes back as given).
+`doc.trace_visible`, `doc.trace_locked` and `doc.trace_opacity` (0.05 to 1, default 0.6) are view choices like the guides': not undoable. The layer
+is guide geometry for snapping and tracing, never a node: see `docs/trace-layer.md`. Tests: `ScriptModule.traceLayer`, `tests/test_trace.cpp`.

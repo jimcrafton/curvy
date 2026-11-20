@@ -493,6 +493,11 @@ namespace curvy {
             }
             paintPage(ctx, client);
             renderArtwork(ctx, client);
+            const TraceLayer& trace = document_->trace();
+            if (!trace.empty() || (traceSheetActive && traceSheetActive())) {
+                trace.paintSheet(ctx, BLRect(client.left(), client.top(), client.width(), client.height()));
+            }
+            trace.paint(ctx, toView(BLPoint(0.0, 0.0)), double(zoom_));
             paintGuides(ctx, client);
         }
         if (onPaintTop) {

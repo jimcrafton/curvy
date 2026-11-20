@@ -115,7 +115,8 @@ namespace curvy {
         RadialRing rulersRing() {
             return {"Rulers", "Back", "ring.view", {
                 {"Rulers", "R", "view.toggleRulers"}, {"Guides", "G", "view.toggleGuides"}, {"Lock guides", "L", "view.lockGuides"},
-                {"Clear guides", "C", "view.clearGuides"}, {"Reset origin", "O", "view.resetRulerOrigin"}}};
+                {"Clear guides", "C", "view.clearGuides"}, {"Reset origin", "O", "view.resetRulerOrigin"},
+                {"Trace rect", "T", "tool.traceRect"}, {"Trace line", "I", "tool.traceLine"}, {"Trace layer", "H", "view.toggleTrace"}, {"Trace select", "S", "tool.traceSelect"}}};
         }
         RadialRing objectRing() {
             return {"Object", "Properties...", "dialog.object", {
@@ -1567,6 +1568,11 @@ namespace curvy {
             canvas_->style().markDirty();
             return SyncReturn::Ignored;
         };
+        document_.onTraceChanged += [this](SketchDocument&) {
+            canvas_->style().markDirty();
+            return SyncReturn::Ignored;
+        };
+        canvas_->traceSheetActive = [this]() { return tools_.current() != nullptr && tools_.current()->id().compare(0, 5, "trace") == 0; };
         canvas_->onPressFilter = [this](const Point& pt, std::uint32_t buttons, std::uint32_t keys) { return filterPress(pt, buttons, keys); };
         canvas_->onDoubleClickFilter = [this](const Point& pt, std::uint32_t buttons, std::uint32_t keys) {
             const RootView* root = canvas_->rootView();
@@ -1891,7 +1897,7 @@ namespace curvy {
     bool WorkspaceController::commandWired(const std::string& command) {
         static const std::set<std::string> wired = {
             "file.open", "file.save", "dialog.new", "dialog.setup", "dialog.settings", "view.fitPage", "view.toolbar", "view.properties", "view.toggleRulers", "view.toggleGuides", "view.lockGuides", "view.clearGuides", "view.resetRulerOrigin",
-            "view.graph", "view.theme", "select.by", "select.similar", "tool.select", "options.select",
+            "view.graph", "view.theme", "select.by", "select.similar", "tool.select", "options.select", "tool.traceRect", "tool.traceLine", "tool.traceSelect", "view.toggleTrace",
             "graph.display", "graph.bypass", "graph.freeze", "graph.rename", "graph.group", "graph.ungroup", "graph.enter", "graph.exit", "graph.data"};
         if (wired.count(command) != 0) {
             return true;
@@ -1958,7 +1964,25 @@ namespace curvy {
             showSelectPanel();
         } else if (command == "tool.select") {
             tools_.setCurrent("select");
+            canvas_->style().markDirty();
             model_->say("Select");
+        } else if (command == "tool.traceRect") {
+            tools_.setCurrent("traceRect");
+            canvas_->style().markDirty();   // the trace sheet shows while this tool is current
+            model_->say("Trace rectangle: drag on the canvas (Shift square, Alt from the centre)");
+        } else if (command == "tool.traceLine") {
+            tools_.setCurrent("traceLine");
+            canvas_->style().markDirty();
+            model_->say("Trace line: drag on the canvas (Shift locks the angle to 45 degrees)");
+        } else if (command == "tool.traceSelect") {
+            tools_.setCurrent("traceSelect");
+            canvas_->style().markDirty();
+            model_->say("Trace select: click or drag a box to select, drag to move, Delete removes");
+        } else if (command == "view.toggleTrace") {
+            if (model_->documentOpen()) {
+                document_.setTraceVisible(!document_.trace().visible());
+                model_->say(document_.trace().visible() ? "Trace layer shown" : "Trace layer hidden");
+            }
         } else if (command.compare(0, 5, "tool.") == 0) {
             model_->say("The " + command.substr(5) + " tool is not built yet");
         } else if (command == "options.select") {
@@ -2098,6 +2122,9 @@ namespace curvy {
         context.graphShown = [this]() { return graphOverlay_->isVisible(); };
         context.menuOpen = [this]() { return menu_->isOpen(); };
         selectTool_ = static_cast<SelectTool*>(&tools_.add(std::make_unique<SelectTool>(context)));
+        tools_.add(std::make_unique<TraceRectTool>(context));
+        tools_.add(std::make_unique<TraceLineTool>(context));
+        tools_.add(std::make_unique<TraceSelectTool>(context));
         optionsCard_ = std::make_unique<ToolOptionsCard>(*canvas_);
         optionsCard_->onDismissed = [this]() { focusCanvas(); };
     }

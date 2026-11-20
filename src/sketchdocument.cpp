@@ -435,6 +435,129 @@ namespace curvy {
         }
     }
 
+    // ---- Trace layer ----
+
+    void SketchDocument::editTrace(const std::string& description, const std::function<void()>& edit) {
+        requireUnlocked();
+        if (trace_.locked()) {
+            throw std::runtime_error("the trace layer is locked");
+        }
+        const auto before = std::make_shared<const std::vector<TraceItem>>(trace_.items());
+        edit();
+        const auto after = std::make_shared<const std::vector<TraceItem>>(trace_.items());
+        if (*before == *after) {
+            return;
+        }
+        const auto restore = [this](const std::vector<TraceItem>& items) {
+            const bool visible = trace_.visible(), locked = trace_.locked();
+            trace_ = TraceLayer();
+            for (const TraceItem& item : items) {
+                trace_.add(item);
+            }
+            trace_.setVisible(visible);
+            trace_.setLocked(locked);
+            changed();
+            onTraceChanged(*this);
+        };
+        auto applied = std::make_shared<bool>(true);   // push() runs doIt at once, and the edit is already made
+        undoStack_.push({description,
+            [applied, after, restore]() {
+                if (*applied) {
+                    *applied = false;
+                } else {
+                    restore(*after);
+                }
+            },
+            [before, restore]() { restore(*before); }});
+        changed();
+        onTraceChanged(*this);
+    }
+
+    std::size_t SketchDocument::addTraceItem(const TraceItem& item) {
+        editTrace("Add Trace Shape", [&]() { trace_.add(item); });
+        return trace_.items().size() - 1;
+    }
+
+    void SketchDocument::setTraceItem(std::size_t index, const TraceItem& item) {
+        editTrace("Edit Trace Shape", [&]() { trace_.set(index, item); });
+    }
+
+    void SketchDocument::removeTraceItem(std::size_t index) {
+        editTrace("Delete Trace Shape", [&]() { trace_.remove(index); });
+    }
+
+    void SketchDocument::moveTraceItems(const std::vector<std::size_t>& indices, double dx, double dy) {
+        if (!std::isfinite(dx) || !std::isfinite(dy)) {
+            throw std::runtime_error("a trace shape can only move by a finite distance");
+        }
+        for (const std::size_t index : indices) {
+            if (index >= trace_.items().size()) {
+                throw std::runtime_error("no such trace shape");
+            }
+        }
+        if (indices.empty() || (dx == 0.0 && dy == 0.0)) {
+            return;
+        }
+        editTrace("Move Trace Shapes", [&]() {
+            const std::set<std::size_t> once(indices.begin(), indices.end());
+            for (const std::size_t index : once) {
+                trace_.set(index, trace_.items()[index].translated(dx, dy));
+            }
+        });
+    }
+
+    void SketchDocument::removeTraceItems(const std::vector<std::size_t>& indices) {
+        for (const std::size_t index : indices) {
+            if (index >= trace_.items().size()) {
+                throw std::runtime_error("no such trace shape");
+            }
+        }
+        if (indices.empty()) {
+            return;
+        }
+        editTrace("Delete Trace Shapes", [&]() {
+            const std::set<std::size_t, std::greater<std::size_t>> once(indices.begin(), indices.end());
+            for (const std::size_t index : once) {
+                trace_.remove(index);
+            }
+        });
+    }
+
+    bool SketchDocument::clearTrace() {
+        if (trace_.empty()) {
+            return false;
+        }
+        editTrace("Clear Trace Layer", [&]() { trace_.clear(); });
+        return true;
+    }
+
+    void SketchDocument::setTraceVisible(bool visible) {
+        requireUnlocked();
+        if (visible != trace_.visible()) {
+            trace_.setVisible(visible);
+            updateAllViews();
+            onTraceChanged(*this);
+        }
+    }
+
+    void SketchDocument::setTraceOpacity(double opacity) {
+        requireUnlocked();
+        const double before = trace_.opacity();
+        trace_.setOpacity(opacity);
+        if (trace_.opacity() != before) {
+            updateAllViews();
+            onTraceChanged(*this);
+        }
+    }
+
+    void SketchDocument::setTraceLocked(bool locked) {
+        requireUnlocked();
+        if (locked != trace_.locked()) {
+            trace_.setLocked(locked);
+            onTraceChanged(*this);
+        }
+    }
+
     // ---- Swatches and palettes ----
 
     void SketchDocument::clampActivePalette() {
@@ -906,6 +1029,7 @@ namespace curvy {
         guides_.clear();
         guidesLocked_ = false;
         guidesVisible_ = true;
+        trace_ = TraceLayer();
         rulerOrigin_ = RulerOrigin();
         viewState_ = ViewState();
         updateAllViews();
@@ -998,6 +1122,24 @@ namespace curvy {
                 b["locked"] = json5::value(guidesLocked_ ? 1.0 : 0.0);
                 b["visible"] = json5::value(guidesVisible_ ? 1.0 : 0.0);
                 b["guides"] = b.pop();
+            }
+            if (!trace_.empty() || trace_.locked() || !trace_.visible() || trace_.opacity() != TraceLayer::kDefaultOpacity) {
+                b.push_object();
+                b.push_array();
+                for (const TraceItem& item : trace_.items()) {
+                    b.push_array();
+                    b += b.new_string(TraceItem::kindName(item.kind));
+                    b += json5::value(item.x);
+                    b += json5::value(item.y);
+                    b += json5::value(item.width);
+                    b += json5::value(item.height);
+                    b += b.pop();
+                }
+                b["items"] = b.pop();
+                b["locked"] = json5::value(trace_.locked() ? 1.0 : 0.0);
+                b["visible"] = json5::value(trace_.visible() ? 1.0 : 0.0);
+                b["opacity"] = json5::value(trace_.opacity());
+                b["trace"] = b.pop();
             }
             if (rulerOrigin_ != RulerOrigin()) {
                 b.push_array();
@@ -1123,6 +1265,44 @@ namespace curvy {
                     guidesVisible = flag.get<double>() != 0.0;
                 }
             }
+            // The trace layer is optional and lenient like the guides: an entry that is not a known kind with a valid shape is dropped.
+            TraceLayer trace;
+            json5::value tracePart;
+            if (find(info, "trace", tracePart) && tracePart.is_object()) {
+                json5::value itemsPart;
+                if (find(tracePart, "items", itemsPart)) {
+                    const json5::array_view list(itemsPart);
+                    for (std::size_t t = 0; list.is_valid() && t < list.size(); ++t) {
+                        const json5::array_view entry(list[t]);
+                        if (!entry.is_valid() || entry.size() != 5 || !entry[0].is_string()) {
+                            continue;
+                        }
+                        bool known = false;
+                        TraceItem item;
+                        item.kind = TraceItem::kindFromName(entry[0].get_c_str(), &known);
+                        if (!known || !entry[1].is_number() || !entry[2].is_number() || !entry[3].is_number() || !entry[4].is_number()) {
+                            continue;
+                        }
+                        item.x = entry[1].get<double>();
+                        item.y = entry[2].get<double>();
+                        item.width = entry[3].get<double>();
+                        item.height = entry[4].get<double>();
+                        if (item.valid()) {
+                            trace.add(item);
+                        }
+                    }
+                }
+                json5::value flag;
+                if (find(tracePart, "locked", flag) && flag.is_number()) {
+                    trace.setLocked(flag.get<double>() != 0.0);
+                }
+                if (find(tracePart, "visible", flag) && flag.is_number()) {
+                    trace.setVisible(flag.get<double>() != 0.0);
+                }
+                if (find(tracePart, "opacity", flag) && flag.is_number() && std::isfinite(flag.get<double>())) {
+                    trace.setOpacity(flag.get<double>());
+                }
+            }
             RulerOrigin rulerOrigin;
             json5::value originPart;
             if (find(info, "rulerOrigin", originPart)) {
@@ -1190,6 +1370,7 @@ namespace curvy {
             palettes_ = std::move(palettes);
             activePalette_ = active;
             guides_ = std::move(guides);
+            trace_ = std::move(trace);
             rulerOrigin_ = rulerOrigin;
             guidesLocked_ = guidesLocked;
             guidesVisible_ = guidesVisible;

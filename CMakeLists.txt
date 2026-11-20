@@ -113,6 +113,11 @@ add_library(curvy_core STATIC
     src/marquee.cpp
     src/tool.cpp
     src/selecttool.cpp
+    src/tracelayer.cpp
+    src/snapper.cpp
+    src/tracelinetool.cpp
+    src/tracerecttool.cpp
+    src/traceselecttool.cpp
     src/dimensions.cpp
     src/dimensionoverlay.cpp
     src/tooloptionscard.cpp
